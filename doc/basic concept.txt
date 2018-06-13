@@ -1,0 +1,83 @@
+Basics
+------
+
+IDENT: identifier
+LIT: a literal value, e.g. 1
+INFIX: a builtin binary operator that requires expressions on both sides of it, e.g. +
+PREFIX: a builtin unary operator that requires an expression on the right, e.g. !
+SUFFIX: a builtin unary operator that requires an expression on the left, e.g. ++
+EXP: a single identifier or literal or a valid sequence of operators, literals and idents
+STATEMENT: a type-, variable- or function definition or an expression followed by a ;
+BLOCK: an opening curly brace, a sequence of statements that optionally ends on an expression, a closing curly brace
+
+Prefix Operators
+----------------
+
+!                       logical
++   -                   arithmetic
+++  --                  arithmetic+assignment
+
+Suffix Operators
+----------------
+
++   -                   arithmetic
+++  --                  arithmetic+assignment
+
+Infix Operators
+---------------
+
++   -   *   /   %       arithmetic
++=  -=  *=  /=  %=      arithmetic+assignment
+=                       assignment
+&&  ||                  logical
+&&= ||=                 logical+assignment
+==  !=  >   <   >=  <=  comparison
+.                       member access
+[RHS]                   dynamic member access, right side is moved into operator
+
+Types
+-----
+
+String: "A string"
+u64:    1       -5
+f64:    1.1     -1.3e-1
+bool:   true    false
+
+
+Structs
+-------
+
+struct IDENT {
+    FIELD: TYPE
+    [, ... ]
+}
+
+keywords:
+    struct: define new structure type
+
+    
+Variables
+---------
+
+let IDENT: TYPE = EXP;
+mut IDENT: TYPE = EXP;
+
+keywords:
+    let: define variable
+    mut: define mutable variable
+
+
+Functions
+---------
+
+fn IDENT([mut] VAR: TYPE[, ...]) [ -> TYPE ] { BLOCK }
+
+keywords:
+    fn: declare new function
+    mut: take argument as mutable (reference)
+
+
+Control Flow
+------------
+
+if VALUE { BLOCK } [ else { BLOCK } ]

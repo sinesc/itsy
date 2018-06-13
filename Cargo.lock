@@ -1,0 +1,14 @@
+[[package]]
+name = "itsy"
+version = "0.1.0"
+dependencies = [
+ "nom 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "nom"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[metadata]
+"checksum nom 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3d87d06599b957cdfde42fd0a271f3b60ef981016c4a47d6bc112365108b7e3e"
