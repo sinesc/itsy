@@ -3,9 +3,15 @@ use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
 use ast::*;
 
-// basics
+// identifier [a-z_][a-z0-9_]*
 
-named!(ident<Input, Input>, take_while!(|tw| is_alphanumeric(tw as u8))); // TODO: more like [_a-zA-Z][_a-zA-Z0-9]*
+named!(ident<Input, Input>, recognize!(tuple!(
+    take_while1!(|m| is_alphabetic(m as u8) || m == '_'),
+    take_while!(|m| is_alphanumeric(m as u8) || m == '_')
+)));
+
+// type name
+
 named!(ty<Input, Type>, map!(ident, |ident| Type::from_string(*ident)));
 
 // block
@@ -23,7 +29,11 @@ named!(parens<Input, Expression>, ws!(delimited!(tag!("("), expression, tag!(")"
 
 named!(ident_exp<Input, Expression>, map!(ident, |m| Expression::Ident(*m)));
 
-named!(operand<Input, Expression>, ws!(alt!(ident_exp | parens)));  // TODO: literals and stuff
+named!(float<Input, Expression>, map!(recognize!(recognize_float), |m| Expression::Float(*m)));
+
+named!(integer<Input, Expression>, map!(recognize!(tuple!(digit1, not!(char!('.')))), |m| Expression::Integer(*m)));
+
+named!(operand<Input, Expression>, ws!(alt!(ident_exp | parens | integer | float)));
 
 named!(term<Input, Expression>, ws!(do_parse!(
     init: operand >>

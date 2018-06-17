@@ -70,8 +70,9 @@ pub struct Function<'a> {
 
 #[derive(Debug)]
 pub enum Expression<'a> {
-    Ident(&'a str),                                      // TODO: would like these to be &str, caused lifetime issue in fold_many0 closure though
-    Literal(&'a str),
+    Ident(&'a str),
+    Integer(&'a str),
+    Float(&'a str),
     Operation(Operation<'a>),
     IfBlock(Box<IfBlock<'a>>),
 }
@@ -97,7 +98,7 @@ impl Operator {
 
 #[derive(Debug)]
 pub enum Operation<'a> {
-    Binary(Operator, Box<Expression<'a>>, Box<Expression<'a>>),   // TODO: would like these to be &str, caused lifetime issue in fold_many0 closure though
+    Binary(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
     Prefix(Operator, Box<Expression<'a>>),
     Suffix(Operator, Box<Expression<'a>>),
 }
