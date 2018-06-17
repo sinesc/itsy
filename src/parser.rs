@@ -1,4 +1,5 @@
 use nom::*;
+use std::collections::HashMap;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -37,16 +38,21 @@ impl<'a> Type<'a> {
 }
 
 #[derive(Debug)]
+pub struct Block<'a> {
+    statements: Vec<AST<'a>>,
+}
+
+#[derive(Debug)]
+pub struct Structure<'a> {
+    name    : &'a str,
+    items   : HashMap<&'a str, Type<'a>>,
+}
+
+#[derive(Debug)]
 pub struct Argument<'a> {
     name    : &'a str,
     mutable : bool,
     ty      : Type<'a>,
-}
-
-#[derive(Debug)]
-pub struct Function<'a> {
-    sig     : Signature<'a>,
-    block   : Block<'a>,
 }
 
 #[derive(Debug)]
@@ -57,8 +63,9 @@ pub struct Signature<'a> {
 }
 
 #[derive(Debug)]
-pub struct Block<'a> {
-    statements: Vec<AST<'a>>,
+pub struct Function<'a> {
+    sig     : Signature<'a>,
+    block   : Block<'a>,
 }
 
 #[derive(Debug)]
@@ -67,11 +74,34 @@ pub enum AST<'a> {
     Function(Function<'a>),
 }
 
+// basics
+
 named!(ident<&str, &str>, take_while!(|tw| is_alphanumeric(tw as u8))); // TODO: more like [_a-zA-Z][_a-zA-Z0-9]*
 named!(ty<&str, Type>, map!(ident, |ident| Type::from_string(ident)));
 named!(mutable<&str, &str>, tag!("mut"));
 named!(type_assign_op<&str, &str>, tag!(":"));
 named!(list_separator<&str, &str>, tag!(","));
+
+// block
+
+named!(block_items<&str, Block>, map!(ws!(opt!(tag!("placeholder"))), |items| Block { // TODO: implement
+    statements: Vec::new()
+}));
+
+named!(block<&str, Block>, ws!(delimited!(tag!("{"), block_items, tag!("}"))));
+
+// structure
+
+named!(structure_item<&str, (&str, Type)>, map!(ws!(tuple!(ident, type_assign_op, ty)), |tuple| (tuple.0, tuple.2)));
+
+named!(structure_items<&str, HashMap<&str, Type>>, map!(ws!(separated_list_complete!(list_separator, structure_item)), |list| list.into_iter().collect()));
+
+named!(pub structure<&str, Structure>, map!(ws!(tuple!(tag!("struct"), ident, tag!("{"), structure_items, tag!("}"))), |tuple| Structure {
+    name: tuple.1,
+    items: tuple.3,
+}));
+
+// function
 
 named!(argument<&str, Argument>, map!(ws!(tuple!(opt!(mutable), ident, type_assign_op, ty)), |tuple| Argument {
     name    : tuple.1,
@@ -88,12 +118,6 @@ named!(signature<&str, Signature>, map!(ws!(tuple!(tag!("fn"), ident, argument_l
     args    : sig.2,
     ret     : sig.3.unwrap_or(Type::void),
 }));
-
-named!(block_items<&str, Block>, map!(ws!(opt!(tag!("placeholder"))), |items| Block { // TODO: implement
-    statements: Vec::new()
-}));
-
-named!(block<&str, Block>, ws!(delimited!(tag!("{"), block_items, tag!("}"))));
 
 named!(pub function<&str, Function>, map!(ws!(tuple!(signature, block)), |func| Function {
     sig: func.0,
