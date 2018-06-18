@@ -69,11 +69,24 @@ pub struct Function<'a> {
 }
 
 #[derive(Debug)]
+pub struct IdentPath<'a> {
+    pub segs    : Vec<&'a str>,
+}
+
+#[derive(Debug)]
+pub struct Call<'a> {
+    pub path    : IdentPath<'a>,
+    pub args    : Vec<Expression<'a>>,
+}
+
+#[derive(Debug)]
 pub enum Expression<'a> {
-    Ident(&'a str),
     Integer(&'a str),
     Float(&'a str),
+    IdentPath(IdentPath<'a>),
+    Call(Call<'a>),
     Operation(Operation<'a>),
+    Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
 }
 

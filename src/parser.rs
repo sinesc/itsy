@@ -27,13 +27,22 @@ named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expres
 
 named!(parens<Input, Expression>, ws!(delimited!(tag!("("), expression, tag!(")"))));
 
-named!(ident_exp<Input, Expression>, map!(ident, |m| Expression::Ident(*m)));
+named!(ident_path<Input, Expression>, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| Expression::IdentPath(IdentPath {
+    segs: m.into_iter().map(|s| *s).collect()
+})));
+
+named!(call_argument_list<Input, Vec<Expression>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
+
+named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Expression::Call(Call {
+    path: if let Expression::IdentPath(p) = m.0 { p } else { unreachable!() },
+    args: m.1,
+})));
 
 named!(float<Input, Expression>, map!(recognize!(recognize_float), |m| Expression::Float(*m)));
 
 named!(integer<Input, Expression>, map!(recognize!(tuple!(digit1, not!(char!('.')))), |m| Expression::Integer(*m)));
 
-named!(operand<Input, Expression>, ws!(alt!(ident_exp | parens | integer | float)));
+named!(operand<Input, Expression>, ws!(alt!(call | ident_path | parens | integer | float)));
 
 named!(term<Input, Expression>, ws!(do_parse!(
     init: operand >>
@@ -67,44 +76,46 @@ named!(expression<Input, Expression>, ws!(alt!(
 
 // let
 
-named!(binding<Input, Binding>, map!(ws!(tuple!(tag!("let"), ident, char!('='), expression)), |m| Binding {
-    name: *m.1,
-    expr: m.3,
-}));
+named!(binding<Input, Statement>, map!(preceded!(ws!(tag!("let")), return_error!(ErrorKind::Custom(1), ws!(tuple!(ident, char!('='), expression, char!(';'))))), |m| Statement::Binding(Binding {
+    name: *m.0,
+    expr: m.2,
+})));
 
 // structure
 
 named!(structure_item<Input, (Input, Type)>, map!(ws!(tuple!(ident, char!(':'), ty)), |tuple| (tuple.0, tuple.2)));
 
-named!(structure_items<Input, HashMap<&str, Type>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| list.into_iter().map(|item| (*item.0, item.1)).collect()));
+named!(structure_items<Input, HashMap<&str, Type>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| {
+    list.into_iter().map(|item| (*item.0, item.1)).collect()
+}));
 
-named!(structure<Input, Structure>, map!(ws!(tuple!(tag!("struct"), ident, tag!("{"), structure_items, tag!("}"))), |tuple| Structure {
+named!(structure<Input, Statement>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), structure_items, char!('}'))), |tuple| Statement::Structure(Structure {
     name: *tuple.1,
     items: tuple.3,
-}));
+})));
 
 // function
 
-named!(argument<Input, Argument>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ty)), |tuple| Argument {
+named!(signature_argument<Input, Argument>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ty)), |tuple| Argument {
     name    : *tuple.1,
     mutable : tuple.0.is_some(),
     ty      : tuple.3,
 }));
 
-named!(argument_list<Input, Vec<Argument>>, ws!(delimited!(tag!("("), separated_list_complete!(char!(','), argument), tag!(")"))));
+named!(signature_argument_list<Input, Vec<Argument>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
-named!(return_part<Input, Type>, ws!(preceded!(tag!("->"), ty)));
+named!(signature_return_part<Input, Type>, ws!(preceded!(tag!("->"), ty)));
 
-named!(signature<Input, Signature>, map!(ws!(tuple!(tag!("fn"), ident, argument_list, opt!(return_part))), |sig| Signature {
+named!(signature<Input, Signature>, map!(ws!(tuple!(tag!("fn"), ident, signature_argument_list, opt!(signature_return_part))), |sig| Signature {
     name    : *sig.1,
     args    : sig.2,
     ret     : sig.3.unwrap_or(Type::void),
 }));
 
-named!(function<Input, Function>, map!(ws!(tuple!(signature, block)), |func| Function {
+named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
     sig: func.0,
     block: func.1,
-}));
+})));
 
 // if
 
@@ -120,10 +131,15 @@ named!(if_block<Input, IfBlock>, map!(ws!(tuple!(tag!("if"), expression, block, 
     else_block: m.3,
 }));
 
-// statement  TODO: avoid some of the *_statement mapper by directly returning a Statement from e.g. function. Won't do for expression.
+// for
 
-named!(function_statement<Input, Statement>, map!(function, |m| Statement::Function(m)));
-named!(structure_statement<Input, Statement>, map!(structure, |m| Statement::Structure(m)));
+//named!(for_loop<Input, ForLoop>, ws!(tuple!(tag!("for"), )))
+
+// statement
+
 named!(ifblock_statement<Input, Statement>, map!(if_block, |m| Statement::IfBlock(m)));
-named!(binding_statement<Input, Statement>, map!(terminated!(binding, char!(';')), |m| Statement::Binding(m)));
-named!(pub statement<Input, Statement>, alt!(binding_statement | ifblock_statement | function_statement | structure_statement));
+named!(statement<Input, Statement>, alt!(binding | ifblock_statement | function | structure));
+
+// root
+
+named!(pub parse<Input, Vec<Statement>>, ws!(many0!(statement)));
