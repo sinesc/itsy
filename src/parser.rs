@@ -25,7 +25,7 @@ named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expres
 
 // expression
 
-named!(parens<Input, Expression>, ws!(delimited!(tag!("("), expression, tag!(")"))));
+named!(parens<Input, Expression>, ws!(delimited!(char!('('), expression, char!(')'))));
 
 named!(ident_path<Input, Expression>, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| Expression::IdentPath(IdentPath {
     segs: m.into_iter().map(|s| *s).collect()
@@ -44,25 +44,37 @@ named!(integer<Input, Expression>, map!(recognize!(tuple!(digit1, not!(char!('.'
 
 named!(operand<Input, Expression>, ws!(alt!(call | ident_path | parens | integer | float)));
 
-named!(term<Input, Expression>, ws!(do_parse!(
+named!(prec2<Input, Expression>, ws!(do_parse!(
     init: operand >>
     res: fold_many0!(
-        pair!(alt!(char!('*') | char!('/') | char!('%')), operand),
+        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| Operator::from_string(*o)), operand),
         init,
         |acc, (op, val)| {
-            Expression::Operation(Operation::Binary(Operator::from_char(op).unwrap(), Box::new(acc), Box::new(val)))        //TODO:no unwrap
+            Expression::Operation(Box::new(Operation::Binary(op, acc, val)))
         }
     ) >>
     (res)
 )));
 
-named!(operation<Input, Expression>, ws!(do_parse!(
-    init: term >>
+named!(prec1<Input, Expression>, ws!(do_parse!(
+    init: prec2 >>
     res: fold_many0!(
-        pair!(alt!(char!('+') | char!('-')), term),
+        pair!(map!(alt!(tag!("+") | tag!("-")), |o| Operator::from_string(*o)), prec2),
         init,
         |acc, (op, val)| {
-            Expression::Operation(Operation::Binary(Operator::from_char(op).unwrap(), Box::new(acc), Box::new(val)))
+            Expression::Operation(Box::new(Operation::Binary(op, acc, val)))
+        }
+    ) >>
+    (res)
+)));
+
+named!(prec0<Input, Expression>, ws!(do_parse!(
+    init: prec1 >>
+    res: fold_many0!(
+        pair!(map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| Operator::from_string(*o)), prec1),
+        init,
+        |acc, (op, val)| {
+            Expression::Operation(Box::new(Operation::Binary(op, acc, val)))
         }
     ) >>
     (res)
@@ -71,7 +83,7 @@ named!(operation<Input, Expression>, ws!(do_parse!(
 named!(expression<Input, Expression>, ws!(alt!(
     map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     |
-    operation
+    prec0
 )));
 
 // let
@@ -138,7 +150,8 @@ named!(if_block<Input, IfBlock>, map!(ws!(tuple!(tag!("if"), expression, block, 
 // statement
 
 named!(ifblock_statement<Input, Statement>, map!(if_block, |m| Statement::IfBlock(m)));
-named!(statement<Input, Statement>, alt!(binding | ifblock_statement | function | structure));
+named!(expression_statement<Input, Statement>, map!(terminated!(expression, char!(';')), |m| Statement::Expression(m)));
+named!(statement<Input, Statement>, alt!(binding | ifblock_statement | function | structure | expression_statement));
 
 // root
 

@@ -85,35 +85,41 @@ pub enum Expression<'a> {
     Float(&'a str),
     IdentPath(IdentPath<'a>),
     Call(Call<'a>),
-    Operation(Operation<'a>),
+    Operation(Box<Operation<'a>>),
     Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum Operator {
-    Add, Sub,
-    Mul, Div, Rem
+    Add, Sub, Mul, Div, Rem,
+    Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
 }
 
 impl Operator {
-    pub fn from_char(op: char) -> Option<Self> {
+    pub fn from_string(op: &str) -> Self {
         match op {
-            '+' => Some(Operator::Add),
-            '-' => Some(Operator::Sub),
-            '*' => Some(Operator::Mul),
-            '/' => Some(Operator::Div),
-            '%' => Some(Operator::Rem),
-            _ => None,
+            "=" => Operator::Assign,
+            "+" => Operator::Add,
+            "-" => Operator::Sub,
+            "*" => Operator::Mul,
+            "/" => Operator::Div,
+            "%" => Operator::Rem,
+            "+=" => Operator::AddAssign,
+            "-=" => Operator::SubAssign,
+            "*=" => Operator::MulAssign,
+            "/=" => Operator::DivAssign,
+            "%=" => Operator::RemAssign,
+            _ => panic!(format!("parser yielded invalid operator \"{}\"", op)),
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Operation<'a> {
-    Binary(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
-    Prefix(Operator, Box<Expression<'a>>),
-    Suffix(Operator, Box<Expression<'a>>),
+    Binary(Operator, Expression<'a>, Expression<'a>),
+    Prefix(Operator, Expression<'a>),
+    Suffix(Operator, Expression<'a>),
 }
 
 #[derive(Debug)]
@@ -128,6 +134,7 @@ pub enum Statement<'a> {
     Structure(Structure<'a>),
     Binding(Binding<'a>),
     IfBlock(IfBlock<'a>),
+    Expression(Expression<'a>),
 }
 
 #[derive(Debug)]

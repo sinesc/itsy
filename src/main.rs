@@ -23,13 +23,14 @@ fn main() {
             result
         }
         let added = add(1, 1);",
+        "a += b + c;"
     ];
 
     println!("Errors:");
 
     for test in tests.iter() {
-        if parse(Input(test)).is_err() {
-            println!("{:?}", test);
+        if let Err(err) = parse(Input(test)) {
+            println!("{:?}", err);
         }
     }
 
