@@ -8,7 +8,6 @@ pub enum Type<'a> {
     u16, i16,
     u32, i32,
     u64, i64,
-    u128, i128,
     f32,
     f64,
     string,
@@ -26,8 +25,6 @@ impl<'a> Type<'a> {
             "i32"       => Type::i32,
             "u64"       => Type::u64,
             "i64"       => Type::i64,
-            "u128"      => Type::u128,
-            "i128"      => Type::i128,
             "f32"       => Type::f32,
             "f64"       => Type::f64,
             "string"    => Type::string,
@@ -80,20 +77,39 @@ pub struct Call<'a> {
 }
 
 #[derive(Debug)]
+pub enum Literal<'a> {
+    String(&'a str),
+    Integer(i128),
+    Float(f64),
+}
+
+#[derive(Debug)]
 pub enum Expression<'a> {
-    Integer(&'a str),
-    Float(&'a str),
+    Literal(Literal<'a>),
     IdentPath(IdentPath<'a>),
     Call(Call<'a>),
-    Operation(Box<Operation<'a>>),
+    Assignment(Operator, IdentPath<'a>, Box<Expression<'a>>),
+    BinaryOp(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
     Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
 }
-
+/*
+impl<'a> Expression<'a> {
+    pub fn into_ident_path(self: Self) -> IdentPath<'a> {
+        if let Expression::IdentPath(literal) = self {
+            literal
+        } else {
+            panic!("Attempted to convert non-ident-path expression to ident-path.")
+        }
+    }
+}
+*/
 #[derive(Debug, Copy, Clone)]
 pub enum Operator {
     Add, Sub, Mul, Div, Rem,
     Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
+    Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
+    And, Or,
 }
 
 impl Operator {
@@ -105,6 +121,17 @@ impl Operator {
             "*" => Operator::Mul,
             "/" => Operator::Div,
             "%" => Operator::Rem,
+
+            "&&" => Operator::And,
+            "||" => Operator::Or,
+
+            "<" => Operator::Less,
+            ">" => Operator::Greater,
+            "<=" => Operator::LessOrEq,
+            ">=" => Operator::GreaterOrEq,
+            "==" => Operator::Equal,
+            "!=" => Operator::NotEqual,
+
             "+=" => Operator::AddAssign,
             "-=" => Operator::SubAssign,
             "*=" => Operator::MulAssign,
@@ -113,13 +140,6 @@ impl Operator {
             _ => panic!(format!("parser yielded invalid operator \"{}\"", op)),
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Operation<'a> {
-    Binary(Operator, Expression<'a>, Expression<'a>),
-    Prefix(Operator, Expression<'a>),
-    Suffix(Operator, Expression<'a>),
 }
 
 #[derive(Debug)]
@@ -134,6 +154,7 @@ pub enum Statement<'a> {
     Structure(Structure<'a>),
     Binding(Binding<'a>),
     IfBlock(IfBlock<'a>),
+    Block(Block<'a>),
     Expression(Expression<'a>),
 }
 

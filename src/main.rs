@@ -3,9 +3,7 @@ extern crate nom;
 
 mod ast;
 mod parser;
-use parser::*;
-
-use nom::types::CompleteStr as Input;
+use parser::parse;
 
 fn main() {
     let tests = [
@@ -23,21 +21,50 @@ fn main() {
             result
         }
         let added = add(1, 1);",
-        "a += b + c;"
+        "a += b + c;",
+        "a += 2.14 - 3 * 723456745675678987489098765487654;",
+        "a += 2.14 - 3 * -727654;",
+        "a += 2 - alpha - 3 * -5;",
+        "let x = a < b * 3;",
+        "let x = a == b && c;",
+        "let x = 3 + { let x = 1 + 5; x };",
+        "{ let y = 5 + 8; y };",
+        "let x = 1; { let y = 5 + 8; y } let y = 3;",
     ];
 
-    println!("Errors:");
+    {
+        use nom::types::CompleteStr as Input;
 
-    for test in tests.iter() {
-        if let Err(err) = parse(Input(test)) {
-            println!("{:?}", err);
+        println!("Succeeded:\n----------");
+
+        for test in tests.iter() {
+            if let Ok(ret) = parse(Input(test)) {
+                if ret.0.len() == 0 {
+                    println!("{:?}", ret.1); // fully parsed, no unparsed code remaining
+                }
+            }
         }
-    }
 
-    let final_test = parse(Input(tests[tests.len() - 1]));
+        println!("\nErrors:\n-------");
 
-    if let Ok(final_test) = final_test {
-        println!("\nParsed: {:?}", final_test.1);
-        println!("Remaining: {:?}", final_test.0);
+        for test in tests.iter() {
+            let parsed = parse(Input(test));
+            if let Err(err) = parsed {
+                println!("{:?}", err); // flat out error
+            } else if let Ok(ret) = parsed {
+                if ret.0.len() != 0 {
+                    println!("{:?}", ret); // not parsed entirely
+                }
+            }
+        }
+
+        println!("\nLast Item in Detail:\n--------------------");
+
+        let final_test = parse(Input(tests[tests.len() - 1]));
+
+        if let Ok(final_test) = final_test {
+            println!("Parsed: {:?}", final_test.1);
+            println!("Remaining: {:?}", (final_test.0).0);
+        }
     }
 }
