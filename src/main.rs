@@ -3,9 +3,9 @@ extern crate nom;
 
 mod ast;
 mod parser;
-use parser::parse;
 
 fn main() {
+
     let tests = [
         "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; placeholder }",
         "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1 + 9; 7 +9 * 6- 8 }",
@@ -30,10 +30,12 @@ fn main() {
         "let x = 3 + { let x = 1 + 5; x };",
         "{ let y = 5 + 8; y };",
         "let x = 1; { let y = 5 + 8; y } let y = 3;",
+        "for i in 1..100 { print(i); }",
     ];
 
     {
         use nom::types::CompleteStr as Input;
+        use parser::parse;
 
         println!("Succeeded:\n----------");
 

@@ -40,7 +40,10 @@ named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list))
 
 // literal numerical (expression)
 
-named!(numerical<Input, Expression>, map!(recognize!(recognize_float), |m| {
+named!(opt_sign<Input, Option<Input>>, opt!(recognize!(one_of!("+-"))));
+named!(opt_fract<Input, Option<Input>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
+
+named!(numerical<Input, Expression>, map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), |m| {
     if let Ok(integer) = str::parse::<i128>(*m) {
         Expression::Literal(Literal::Integer(integer))
     } else if let Ok(float) = str::parse::<f64>(*m) {
@@ -194,7 +197,16 @@ named!(if_block<Input, IfBlock>, map!(ws!(tuple!(tag!("if"), expression, block, 
 
 // for
 
-//named!(for_loop<Input, ForLoop>, ws!(tuple!(tag!("for"), )))
+// TODO: simply accept "for ident in expression" and make .. an operator?
+
+named!(for_loop_range<Input, Expression>, map!(ws!(tuple!(expression, tag!(".."), expression)), |m| {
+    Expression::BinaryOp(Operator::Range, Box::new(m.0), Box::new(m.2))
+}));
+
+named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
+    iter: *m.1,
+    range: m.3,
+}));
 
 // statement
 
@@ -203,6 +215,7 @@ named!(statement<Input, Statement>, alt!(
     | map!(if_block, |m| Statement::IfBlock(m))
     | function
     | structure
+    | map!(for_loop, |m| Statement::ForLoop(m))
     | map!(terminated!(expression, char!(';')), |m| Statement::Expression(m))
     | map!(block, |m| Statement::Block(m))
 ));

@@ -83,33 +83,18 @@ pub enum Literal<'a> {
     Float(f64),
 }
 
-#[derive(Debug)]
-pub enum Expression<'a> {
-    Literal(Literal<'a>),
-    IdentPath(IdentPath<'a>),
-    Call(Call<'a>),
-    Assignment(Operator, IdentPath<'a>, Box<Expression<'a>>),
-    BinaryOp(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
-    Block(Box<Block<'a>>),
-    IfBlock(Box<IfBlock<'a>>),
-}
-/*
-impl<'a> Expression<'a> {
-    pub fn into_ident_path(self: Self) -> IdentPath<'a> {
-        if let Expression::IdentPath(literal) = self {
-            literal
-        } else {
-            panic!("Attempted to convert non-ident-path expression to ident-path.")
-        }
-    }
-}
-*/
 #[derive(Debug, Copy, Clone)]
 pub enum Operator {
+    // arithmetic
     Add, Sub, Mul, Div, Rem,
+    // assigments
     Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
+    // comparison
     Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
-    And, Or,
+    // boolean
+    And, Or, Not,
+    // special
+    Range,
 }
 
 impl Operator {
@@ -137,9 +122,22 @@ impl Operator {
             "*=" => Operator::MulAssign,
             "/=" => Operator::DivAssign,
             "%=" => Operator::RemAssign,
+
+            ".." => Operator::Range,
             _ => panic!(format!("parser yielded invalid operator \"{}\"", op)),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Expression<'a> {
+    Literal(Literal<'a>),
+    IdentPath(IdentPath<'a>),
+    Call(Call<'a>),
+    Assignment(Operator, IdentPath<'a>, Box<Expression<'a>>),
+    BinaryOp(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
+    Block(Box<Block<'a>>),
+    IfBlock(Box<IfBlock<'a>>),
 }
 
 #[derive(Debug)]
@@ -149,18 +147,25 @@ pub struct Binding<'a> {
 }
 
 #[derive(Debug)]
+pub struct IfBlock<'a> {
+    pub cond        : Expression<'a>,
+    pub if_block    : Block<'a>,
+    pub else_block  : Option<Block<'a>>,
+}
+
+#[derive(Debug)]
+pub struct ForLoop<'a> {
+    pub iter        : &'a str,
+    pub range       : Expression<'a>,
+}
+
+#[derive(Debug)]
 pub enum Statement<'a> {
     Function(Function<'a>),
     Structure(Structure<'a>),
     Binding(Binding<'a>),
     IfBlock(IfBlock<'a>),
+    ForLoop(ForLoop<'a>),
     Block(Block<'a>),
     Expression(Expression<'a>),
-}
-
-#[derive(Debug)]
-pub struct IfBlock<'a> {
-    pub cond        : Expression<'a>,
-    pub if_block    : Block<'a>,
-    pub else_block  : Option<Block<'a>>,
 }
