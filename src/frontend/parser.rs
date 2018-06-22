@@ -1,7 +1,14 @@
-use nom::*;
+use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
+use nom::{IResult, ErrorKind, is_alphabetic, is_alphanumeric, digit0, digit1};
 use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
-use ast::*;
+use frontend::ast::*;
+
+#[repr(u32)]
+pub enum ParseError {
+    SyntaxLet = 1,
+    InvalidNumerical = 2,
+}
 
 // identifier [a-z_][a-z0-9_]*
 
@@ -16,17 +23,14 @@ named!(ident_path<Input, IdentPath>, map!(ws!(separated_nonempty_list!(char!('.'
     segs: m.into_iter().map(|s| *s).collect()
 }));
 
-// type
-
-named!(ty<Input, Type>, map!(ident, |ident| Type::from_string(*ident)));
-
 // block
 
 named!(block_items<Input, Vec<Statement>>, ws!(many0!(statement)));
 
 named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |m| Block {
-    statements: m.1,
-    result: m.2,
+    statements  : m.1,
+    result      : m.2,
+    type_id     : unknown_type_id(),
 }));
 
 // function call (expression)
@@ -43,19 +47,34 @@ named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list))
 named!(opt_sign<Input, Option<Input>>, opt!(recognize!(one_of!("+-"))));
 named!(opt_fract<Input, Option<Input>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
 
-named!(numerical<Input, Expression>, map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), |m| {
-    if let Ok(integer) = str::parse::<i128>(*m) {
-        Expression::Literal(Literal::Integer(integer))
-    } else if let Ok(float) = str::parse::<f64>(*m) {
-        Expression::Literal(Literal::Float(float))
+fn parse_numerical(n: Input) -> IResult<Input, Expression> {
+
+    use nom::simple_errors::Context;
+
+    if n.contains(".") {
+        if let Ok(float) = str::parse::<f64>(*n) {
+            return Ok((n, Expression::Literal(Literal::Float(float))))
+        }
+    } else if n.starts_with("-") {
+        if let Ok(integer) = str::parse::<i64>(*n) {
+            return Ok((n, Expression::Literal(Literal::Signed(integer))))
+        }
     } else {
-        panic!(format!("invalid numerical literal \"{}\"", *m))
+        if let Ok(integer) = str::parse::<u64>(*n) {
+            return Ok((n, Expression::Literal(Literal::Unsigned(integer))))
+        }
     }
-}));
+
+    Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseError::InvalidNumerical as u32))))
+}
+
+named!(numerical<Input, Expression>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), parse_numerical));
 
 // assignment (expression)
 
-named!(assignment_operator<Input, Operator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| Operator::from_string(*o)));
+named!(assignment_operator<Input, Operator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
+    Operator::binary_from_string(*o)
+}));
 
 named!(assignment<Input, Expression>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| Expression::Assignment(
     m.1, m.0, Box::new(m.2)
@@ -65,10 +84,15 @@ named!(assignment<Input, Expression>, map!(ws!(tuple!(ident_path, assignment_ope
 
 named!(parens<Input, Expression>, ws!(delimited!(char!('('), expression, char!(')'))));
 
+named!(prefix<Input, Expression>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)),|m| {
+    Expression::UnaryOp(Operator::prefix_from_string(*m.0), Box::new(Expression::IdentPath(m.1)))
+}));
+
 named!(operand<Input, Expression>, ws!(alt!(
     map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
+    | prefix
     | numerical
     | call
     | map!(ident_path, |m| Expression::IdentPath(m))
@@ -77,7 +101,7 @@ named!(operand<Input, Expression>, ws!(alt!(
 named!(prec5<Input, Expression>, ws!(do_parse!(
     init: operand >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| Operator::from_string(*o)), operand),
+        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| Operator::binary_from_string(*o)), operand),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -87,7 +111,7 @@ named!(prec5<Input, Expression>, ws!(do_parse!(
 named!(prec4<Input, Expression>, ws!(do_parse!(
     init: prec5 >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("+") | tag!("-")), |o| Operator::from_string(*o)), prec5),
+        pair!(map!(alt!(tag!("+") | tag!("-")), |o| Operator::binary_from_string(*o)), prec5),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -97,7 +121,7 @@ named!(prec4<Input, Expression>, ws!(do_parse!(
 named!(prec3<Input, Expression>, ws!(do_parse!(
     init: prec4 >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| Operator::from_string(*o)), prec4),
+        pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| Operator::binary_from_string(*o)), prec4),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -107,7 +131,7 @@ named!(prec3<Input, Expression>, ws!(do_parse!(
 named!(prec2<Input, Expression>, ws!(do_parse!(
     init: prec3 >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("!=") | tag!("==")), |o| Operator::from_string(*o)), prec3),
+        pair!(map!(alt!(tag!("!=") | tag!("==")), |o| Operator::binary_from_string(*o)), prec3),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -117,7 +141,7 @@ named!(prec2<Input, Expression>, ws!(do_parse!(
 named!(prec1<Input, Expression>, ws!(do_parse!(
     init: prec2 >>
     res: fold_many0!(
-        pair!(map!(tag!("&&"), |o| Operator::from_string(*o)), prec2),
+        pair!(map!(tag!("&&"), |o| Operator::binary_from_string(*o)), prec2),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -127,7 +151,7 @@ named!(prec1<Input, Expression>, ws!(do_parse!(
 named!(prec0<Input, Expression>, ws!(do_parse!(
     init: prec1 >>
     res: fold_many0!(
-        pair!(map!(tag!("||"), |o| Operator::from_string(*o)), prec1),
+        pair!(map!(tag!("||"), |o| Operator::binary_from_string(*o)), prec1),
         init,
         |acc, (op, val)| Expression::BinaryOp(op, Box::new(acc), Box::new(val))
     ) >>
@@ -141,40 +165,50 @@ named!(expression<Input, Expression>, ws!(alt!(
 
 // let
 
-named!(binding<Input, Statement>, map!(preceded!(ws!(tag!("let")), return_error!(ErrorKind::Custom(1), ws!(tuple!(ident, char!('='), expression, char!(';'))))), |m| Statement::Binding(Binding {
-    name: *m.0,
-    expr: m.2,
-})));
+named!(binding<Input, Statement>, map!(
+    preceded!(ws!(tag!("let")), return_error!(
+        ErrorKind::Custom(ParseError::SyntaxLet as u32), ws!(tuple!(ident, char!('='), expression, char!(';')))
+    )),
+    |m| Statement::Binding(Binding {
+        name    : *m.0,
+        expr    : m.2,
+        type_id : unknown_type_id(),
+    })
+));
 
 // structure
 
-named!(structure_item<Input, (Input, Type)>, map!(ws!(tuple!(ident, char!(':'), ty)), |tuple| (tuple.0, tuple.2)));
+named!(structure_item<Input, (Input, Type)>, map!(
+    ws!(tuple!(ident, char!(':'), ident_path)),
+    |tuple| (tuple.0, Type::unknown(tuple.2))
+));
 
 named!(structure_items<Input, HashMap<&str, Type>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| {
     list.into_iter().map(|item| (*item.0, item.1)).collect()
 }));
 
 named!(structure<Input, Statement>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), structure_items, char!('}'))), |tuple| Statement::Structure(Structure {
-    name: *tuple.1,
-    items: tuple.3,
+    name    : *tuple.1,
+    items   : tuple.3,
+    type_id : unknown_type_id(),
 })));
 
 // function
 
-named!(signature_argument<Input, Argument>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ty)), |tuple| Argument {
+named!(signature_argument<Input, Argument>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Argument {
     name    : *tuple.1,
     mutable : tuple.0.is_some(),
-    ty      : tuple.3,
+    ty      : Type::unknown(tuple.3),
 }));
 
 named!(signature_argument_list<Input, Vec<Argument>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
-named!(signature_return_part<Input, Type>, ws!(preceded!(tag!("->"), ty)));
+named!(signature_return_part<Input, IdentPath>, ws!(preceded!(tag!("->"), ident_path)));
 
 named!(signature<Input, Signature>, map!(ws!(tuple!(tag!("fn"), ident, signature_argument_list, opt!(signature_return_part))), |sig| Signature {
     name    : *sig.1,
     args    : sig.2,
-    ret     : sig.3.unwrap_or(Type::void),
+    ret     : if let Some(sig_ty) = sig.3 { Some(Type::unknown(sig_ty)) } else { None }, // TODO: might want to have void for simplicity?
 }));
 
 named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
@@ -185,7 +219,7 @@ named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| St
 // if
 
 named!(block_or_if<Input, Block>, ws!(alt!(
-    map!(if_block, |m| Block { statements: Vec::new(), result: Some(Expression::IfBlock(Box::new(m))) })
+    map!(if_block, |m| Block { statements: Vec::new(), result: Some(Expression::IfBlock(Box::new(m))), type_id: unknown_type_id() })
     | block
 )));
 
@@ -222,4 +256,4 @@ named!(statement<Input, Statement>, alt!(
 
 // root
 
-named!(pub parse<Input, Vec<Statement>>, ws!(many0!(statement)));
+named!(pub parse<Input, Program>, ws!(many0!(statement)));

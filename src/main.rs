@@ -1,8 +1,8 @@
 #[macro_use]
 extern crate nom;
 
-mod ast;
-mod parser;
+mod util;
+mod frontend;
 
 fn main() {
 
@@ -22,7 +22,7 @@ fn main() {
         }
         let added = add(1, 1);",
         "a += b + c;",
-        "a += 2.14 - 3 * 723456745675678987489098765487654;",
+        "a += 2.14 - 3 * 723456745675678987489098765487654;", // should fail
         "a += 2.14 - 3 * -727654;",
         "a += 2 - alpha - 3 * -5;",
         "let x = a < b * 3;",
@@ -31,11 +31,14 @@ fn main() {
         "{ let y = 5 + 8; y };",
         "let x = 1; { let y = 5 + 8; y } let y = 3;",
         "for i in 1..100 { print(i); }",
+        "let x = a && b || !c && d;",
+        "let x = ++i + y;"
     ];
 
     {
         use nom::types::CompleteStr as Input;
-        use parser::parse;
+        use frontend::parser::parse;
+        use frontend::check::check;
 
         println!("Succeeded:\n----------");
 
@@ -52,10 +55,10 @@ fn main() {
         for test in tests.iter() {
             let parsed = parse(Input(test));
             if let Err(err) = parsed {
-                println!("{:?}", err); // flat out error
+                println!("ERR: {:?}", err); // flat out error
             } else if let Ok(ret) = parsed {
                 if ret.0.len() != 0 {
-                    println!("{:?}", ret); // not parsed entirely
+                    println!("INC: {:?}", ret); // not parsed entirely
                 }
             }
         }
@@ -67,6 +70,10 @@ fn main() {
         if let Ok(final_test) = final_test {
             println!("Parsed: {:?}", final_test.1);
             println!("Remaining: {:?}", (final_test.0).0);
+
+            let ready = check(final_test.1);
+
+            println!("{:?}", ready);
         }
     }
 }
