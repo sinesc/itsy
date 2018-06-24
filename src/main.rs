@@ -1,3 +1,6 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 #[macro_use]
 extern crate nom;
 
@@ -32,13 +35,14 @@ fn main() {
         "let x = 1; { let y = 5 + 8; y } let y = 3;",
         "for i in 1..100 { print(i); }",
         "let x = a && b || !c && d;",
-        "let x = ++i + y;"
+        "let x = ++i + y;",
+        "let x: u32 = 1;",
     ];
 
     {
         use nom::types::CompleteStr as Input;
         use frontend::parser::parse;
-        use frontend::check::check;
+        use frontend::resolver::resolve;
 
         println!("Succeeded:\n----------");
 
@@ -71,7 +75,7 @@ fn main() {
             println!("Parsed: {:?}", final_test.1);
             println!("Remaining: {:?}", (final_test.0).0);
 
-            let ready = check(final_test.1);
+            let ready = resolve(final_test.1);
 
             println!("{:?}", ready);
         }

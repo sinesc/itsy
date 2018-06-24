@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use frontend::{Unresolved, TypeId};
+use util::TypeId;
+use frontend::Unresolved;
 
 pub type Program<'a> = Vec<Statement<'a>>;
 
@@ -15,29 +16,10 @@ pub enum Statement<'a> {
 }
 
 #[derive(Debug)]
-pub struct Type<'a> {
-    pub name    : IdentPath<'a>,
-    pub type_id : Unresolved<TypeId>,
-}
-
-pub fn unknown_type_id() -> Unresolved<TypeId> {
-    Unresolved::Unknown
-}
-
-impl<'a> Type<'a> {
-    pub fn unknown(name: IdentPath<'a>) -> Self {
-        Type {
-            name    : name,
-            type_id : unknown_type_id(),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct Binding<'a> {
     pub name    : &'a str,
     pub expr    : Expression<'a>,
-    // TODO: also needs explicit type support ty: Option<Type<'a>>
+    pub ty      : Option<Type<'a>>,
     pub type_id : Unresolved<TypeId>,
 }
 
@@ -69,6 +51,12 @@ pub struct Structure<'a> {
 }
 
 #[derive(Debug)]
+pub struct Function<'a> {
+    pub sig     : Signature<'a>,
+    pub block   : Block<'a>,
+}
+
+#[derive(Debug)]
 pub struct Argument<'a> {
     pub name    : &'a str,
     pub mutable : bool,
@@ -83,40 +71,103 @@ pub struct Signature<'a> {
 }
 
 #[derive(Debug)]
-pub struct Function<'a> {
-    pub sig     : Signature<'a>,
-    pub block   : Block<'a>,
+pub struct Type<'a> {
+    pub name    : IdentPath<'a>, // TODO: ident_path is x.y.z, but should probably be something like x::y::z with namespacing supported or just an ident otherwise
+    pub type_id : Unresolved<TypeId>,
+}
+
+pub fn unknown_type_id() -> Unresolved<TypeId> {
+    Unresolved::Unknown
+}
+
+impl<'a> Type<'a> {
+    pub fn unknown(name: IdentPath<'a>) -> Self {
+        Type {
+            name    : name,
+            type_id : unknown_type_id(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum Expression<'a> {
     Literal(Literal<'a>),
-    IdentPath(IdentPath<'a>),
+    Variable(Variable<'a>),
     Call(Call<'a>),
-    Assignment(Operator, IdentPath<'a>, Box<Expression<'a>>),
-    BinaryOp(Operator, Box<Expression<'a>>, Box<Expression<'a>>),
-    UnaryOp(Operator, Box<Expression<'a>>),
+    Assignment(Box<Assignment<'a>>),
+    BinaryOp(Box<BinaryOp<'a>>),
+    UnaryOp(Box<UnaryOp<'a>>),
     Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
+}
+
+impl<'a> Expression<'a> {
+    pub fn get_type_id(self: &Self) -> Unresolved<TypeId> {
+        match self {
+            Expression::Literal(literal)        => literal.type_id,
+            Expression::Variable(variable)      => variable.type_id,
+            Expression::Call(call)              => call.type_id,
+            Expression::Assignment(assignment)  => assignment.left.type_id,
+            Expression::BinaryOp(binary_op)     => binary_op.type_id,
+            Expression::UnaryOp(unary_op)       => unary_op.type_id,
+            Expression::Block(block)            => block.result.as_ref().map_or(Unresolved::Resolved(TypeId::void()), |r| r.get_type_id()),
+            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(Unresolved::Resolved(TypeId::void()), |r| r.get_type_id()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Literal<'a> {
+    pub value   : LiteralValue<'a>,
+    pub type_id : Unresolved<TypeId>,
+}
+
+#[derive(Debug)]
+pub enum LiteralValue<'a> {
+    String(&'a str),  // TODO: string literals
+    Signed(i64),
+    Unsigned(u64),
+    Float(f64),
+}
+
+#[derive(Debug)]
+pub struct Variable<'a> {
+    pub path    : IdentPath<'a>,
+    pub type_id : Unresolved<TypeId>,
+}
+
+#[derive(Debug)]
+pub struct Call<'a> {
+    pub path    : IdentPath<'a>,
+    pub args    : Vec<Expression<'a>>,
+    pub type_id : Unresolved<TypeId>,
+}
+
+#[derive(Debug)]
+pub struct Assignment<'a> {
+    pub op      : Operator,
+    pub left    : Variable<'a>,
+    pub right   : Expression<'a>,
+}
+
+#[derive(Debug)]
+pub struct BinaryOp<'a> {
+    pub op      : Operator,
+    pub left    : Expression<'a>,
+    pub right   : Expression<'a>,
+    pub type_id : Unresolved<TypeId>,
+}
+
+#[derive(Debug)]
+pub struct UnaryOp<'a> {
+    pub op      : Operator,
+    pub exp     : Expression<'a>,
+    pub type_id : Unresolved<TypeId>,
 }
 
 #[derive(Debug)]
 pub struct IdentPath<'a> {
     pub segs: Vec<&'a str>,
-}
-
-#[derive(Debug)]
-pub struct Call<'a> {
-    pub path: IdentPath<'a>,
-    pub args: Vec<Expression<'a>>,
-}
-
-#[derive(Debug)]
-pub enum Literal<'a> {
-    String(&'a str),  // TODO: string literals
-    Signed(i64),
-    Unsigned(u64),
-    Float(f64),
 }
 
 #[derive(Debug, Copy, Clone)]

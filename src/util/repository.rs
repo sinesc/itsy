@@ -39,10 +39,22 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
     pub fn index(self: &Self, index: I) -> &V {
         &self.data[index.into()]
     }
+    /// Fetches an item by index.
+    pub fn index_mut(self: &mut Self, index: I) -> &mut V {
+        &mut self.data[index.into()]
+    }
     /// Fetches an item by name.
     pub fn name<Q: ?Sized>(self: &Self, name: &Q) -> Option<&V> where K: Borrow<Q>, Q: Hash + Eq {
         if let Some(&index) = self.map.get(name) {
             Some(&self.data[index.into()])
+        } else {
+            None
+        }
+    }
+    /// Fetches an item mutably by name.
+    pub fn name_mut<Q: ?Sized>(self: &mut Self, name: & Q) -> Option<& mut V> where K: Borrow<Q>, Q: Hash + Eq {
+        if let Some(&index) = self.map.get(name) {
+            Some(&mut self.data[Into::<usize>::into(index)])
         } else {
             None
         }
@@ -52,8 +64,14 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
         self.map.get(name).map(|i| *i)
     }
     /// Returns an iterator over the mutable items.
-    pub fn values_mut(&mut self) -> IterMut<V> {
+    pub fn values_mut(self: &mut Self) -> IterMut<V> {
         self.data.iter_mut()
+    }
+}
+
+impl<V, I, K> Into<Vec<V>> for Repository<V, I, K> {
+    fn into(self: Self) -> Vec<V> {
+        self.data
     }
 }
 
