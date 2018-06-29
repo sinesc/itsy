@@ -36,7 +36,7 @@ fn main() {
         "for i in 1..100 { print(i); }",
         "let x = a && b || !c && d;",
         "let x = ++i + y;",
-        "let x: u32 = 1;",
+        "let x: bool = b && c;",
     ];
 
     {

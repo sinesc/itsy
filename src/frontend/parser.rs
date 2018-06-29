@@ -181,7 +181,7 @@ named!(binding<Input, Statement>, map!(
     )),
     |m| Statement::Binding(Binding {
         name    : *m.0,
-        expr    : m.3,
+        expr    : Some(m.3),
         ty      : m.1.map(|t| Type::unknown(t)),
         type_id : unknown_type_id(),
     })

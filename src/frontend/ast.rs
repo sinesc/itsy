@@ -18,7 +18,7 @@ pub enum Statement<'a> {
 #[derive(Debug)]
 pub struct Binding<'a> {
     pub name    : &'a str,
-    pub expr    : Expression<'a>,
+    pub expr    : Option<Expression<'a>>,
     pub ty      : Option<Type<'a>>,
     pub type_id : Unresolved<TypeId>,
 }
@@ -80,6 +80,10 @@ pub fn unknown_type_id() -> Unresolved<TypeId> {
     Unresolved::Unknown
 }
 
+pub fn void_type_id() -> Unresolved<TypeId> {
+    Unresolved::Resolved((0).into())
+}
+
 impl<'a> Type<'a> {
     pub fn unknown(name: IdentPath<'a>) -> Self {
         Type {
@@ -110,8 +114,8 @@ impl<'a> Expression<'a> {
             Expression::Assignment(assignment)  => assignment.left.type_id,
             Expression::BinaryOp(binary_op)     => binary_op.type_id,
             Expression::UnaryOp(unary_op)       => unary_op.type_id,
-            Expression::Block(block)            => block.result.as_ref().map_or(Unresolved::Resolved(TypeId::void()), |r| r.get_type_id()),
-            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(Unresolved::Resolved(TypeId::void()), |r| r.get_type_id()),
+            Expression::Block(block)            => block.result.as_ref().map_or(void_type_id(), |r| r.get_type_id()),
+            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(void_type_id(), |r| r.get_type_id()),
         }
     }
 }

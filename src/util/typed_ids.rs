@@ -2,12 +2,6 @@
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct TypeId(usize);
 
-impl TypeId {
-    pub fn void() -> Self {
-        TypeId(0)
-    }
-}
-
 impl From<TypeId> for usize {
     fn from(input: TypeId) -> usize {
         input.0
@@ -20,8 +14,7 @@ impl From<usize> for TypeId {
     }
 }
 
-
-/// Unique numeric scope id.
+/// Unique numeric id of a scope.
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct ScopeId(usize);
 
@@ -34,5 +27,21 @@ impl From<ScopeId> for usize {
 impl From<usize> for ScopeId {
     fn from(input: usize) -> ScopeId {
         ScopeId(input)
+    }
+}
+
+/// Unique numeric id of a binding.
+#[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct BindingId(usize);
+
+impl From<BindingId> for usize {
+    fn from(input: BindingId) -> usize {
+        input.0
+    }
+}
+
+impl From<usize> for BindingId {
+    fn from(input: usize) -> BindingId {
+        BindingId(input)
     }
 }
