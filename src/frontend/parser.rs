@@ -81,7 +81,7 @@ named!(assignment_operator<Input, Operator>, map!(alt!(tag!("=") | tag!("+=") | 
 named!(assignment<Input, Expression>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| {
     Expression::Assignment(Box::new(Assignment {
         op      : m.1,
-        left    : Variable { path: m.0, type_id: unknown_type_id() },
+        left    : Variable { path: m.0, type_id: unknown_type_id(), binding_id: None },
         right   : m.2,
     }))
 }));
@@ -93,7 +93,7 @@ named!(parens<Input, Expression>, ws!(delimited!(char!('('), expression, char!('
 named!(prefix<Input, Expression>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)),|m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op      : Operator::prefix_from_string(*m.0),
-        exp     : Expression::Variable(Variable { path: m.1, type_id: unknown_type_id() }),
+        exp     : Expression::Variable(Variable { path: m.1, type_id: unknown_type_id(), binding_id: None }),
         type_id : unknown_type_id()
     }))
 }));
@@ -105,7 +105,7 @@ named!(operand<Input, Expression>, ws!(alt!(
     | prefix
     | numerical
     | call
-    | map!(ident_path, |m| Expression::Variable(Variable { path: m, type_id: unknown_type_id() }))
+    | map!(ident_path, |m| Expression::Variable(Variable { path: m, type_id: unknown_type_id(), binding_id: None }))
 )));
 
 named!(prec5<Input, Expression>, ws!(do_parse!(
@@ -180,10 +180,11 @@ named!(binding<Input, Statement>, map!(
         ErrorKind::Custom(ParseError::SyntaxLet as u32), ws!(tuple!(ident, opt!(preceded!(char!(':'), ident_path)), char!('='), expression, char!(';')))
     )),
     |m| Statement::Binding(Binding {
-        name    : *m.0,
-        expr    : Some(m.3),
-        ty      : m.1.map(|t| Type::unknown(t)),
-        type_id : unknown_type_id(),
+        name        : *m.0,
+        expr        : Some(m.3),
+        ty          : m.1.map(|t| Type::unknown(t)),
+        type_id     : unknown_type_id(),
+        binding_id  : None,
     })
 ));
 

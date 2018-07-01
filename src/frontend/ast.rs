@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use util::TypeId;
+use util::{BindingId, TypeId};
 use frontend::Unresolved;
 
 pub type Program<'a> = Vec<Statement<'a>>;
@@ -17,10 +17,11 @@ pub enum Statement<'a> {
 
 #[derive(Debug)]
 pub struct Binding<'a> {
-    pub name    : &'a str,
-    pub expr    : Option<Expression<'a>>,
-    pub ty      : Option<Type<'a>>,
-    pub type_id : Unresolved<TypeId>,
+    pub name        : &'a str,
+    pub expr        : Option<Expression<'a>>,
+    pub ty          : Option<Type<'a>>,
+    pub type_id     : Unresolved<TypeId>,
+    pub binding_id  : Option<BindingId>,
 }
 
 #[derive(Debug)]
@@ -136,8 +137,9 @@ pub enum LiteralValue<'a> {
 
 #[derive(Debug)]
 pub struct Variable<'a> {
-    pub path    : IdentPath<'a>,
-    pub type_id : Unresolved<TypeId>,
+    pub path        : IdentPath<'a>,
+    pub type_id     : Unresolved<TypeId>,
+    pub binding_id  : Option<BindingId>,
 }
 
 #[derive(Debug)]

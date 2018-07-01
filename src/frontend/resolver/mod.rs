@@ -1,5 +1,15 @@
-use util::{TypeId, ScopeId, BindingId, Repository};
-use super::{Unresolved, Type, ast};
+use util::{BindingId, ScopeId, TypeId};
+use frontend::{Unresolved, Type, ast};
+
+mod scopes;
+
+/// Internal state of the ResolvedProgram during type/binding resolution.
+/// Not a member of ResolvedProgram since this data is no longer useful after resolution.
+struct ResolverState<'a, 'b> where 'a: 'b {
+    counter : &'b mut u32,
+    scope_id: ScopeId,
+    scopes  : &'b mut scopes::Scopes<'a>,
+}
 
 #[derive(Debug)]
 pub struct ResolvedProgram<'a> {
@@ -7,105 +17,12 @@ pub struct ResolvedProgram<'a> {
     types   : Vec<Type<'a>>,
 }
 
-/// Flat lists of types and bindings and which scope the belong to.
-struct ScopeTree<'a> {
-    /// Flat type data, lookup via TypeId or ScopeId and name
-    types       : Repository<Type<'a>, TypeId, (ScopeId, &'a str)>,
-    /// Flat binding data, lookup via TypeId or ScopeId and name
-    bindings    : Repository<Unresolved<TypeId>, BindingId, (ScopeId, &'a str)>,
-    /// Current scope id, incremented when scopes are added
-    current     : ScopeId,
-    /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
-    parent_map  : Vec<ScopeId>, // ScopeId => ScopeId
-}
-
-/// Internal state of the ResolvedProgram during type/binding resolution.
-/// Not a member of ResolvedProgram since this data is no longer useful after resolution.
-struct ResolverState<'a, 'b> where 'a: 'b {
-    counter : &'b mut u32,
-    scope_id: ScopeId,
-    scopes  : &'b mut ScopeTree<'a>,
-}
-
-impl<'a> ScopeTree<'a> {
-
-    pub fn new() -> Self {
-        let root_id = (0).into();
-        ScopeTree {
-            types       : Repository::new(),
-            bindings    : Repository::new(),
-            current     : root_id,
-            parent_map  : vec![ root_id ],
-        }
-    }
-
-    pub fn root_id() -> ScopeId {
-        (0).into()
-    }
-
-    pub fn create_scope(self: &mut Self, parent: ScopeId) -> ScopeId {
-        let index = self.parent_map.len();
-        self.parent_map.push(parent);
-        index.into()
-    }
-
-    /// Insert a binding into the given scope, returning a binding id. Its type may not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: Unresolved<TypeId>) -> BindingId {
-        self.bindings.insert((scope_id, name), type_id)
-    }
-
-    /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn lookup_binding_id(self: &mut Self, scope_id: ScopeId, name: &'a str) -> Option<BindingId> {
-        if let Some(index) = self.bindings.index_of(&(scope_id, name)) {
-            Some(index)
-        } else {
-            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_binding_id(parent_scope_id, name)
-            } else {
-                None
-            }
-        }
-    }
-
-    /// Insert a type into the given scope, returning a type id.
-    pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type<'a>) -> TypeId {
-        self.types.insert((scope_id, name), ty)
-    }
-
-    /// Finds the id of the named type within the scope or its parent scopes.
-    pub fn lookup_type_id(self: &mut Self, scope_id: ScopeId, name: &'a str) -> Option<TypeId> {
-        if let Some(index) = self.types.index_of(&(scope_id, name)) {
-            Some(index)
-        } else {
-            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_type_id(parent_scope_id, name)
-            } else {
-                None
-            }
-        }
-    }
-
-    /* TODO: maybe rather add function to get Type from TypeId? do I even need this?
-    pub fn type_lookup(self: &mut Self, scope_id: ScopeId, name: &'a str) -> Option<&'a mut Type> {
-        if let Some(type_id) = self.lookup_type_id(scope_id, name) {
-            Some(self.types.index_mut(type_id))
-        } else {
-            None
-        }
-    }
-    */
-}
-
 impl<'a, 'b> ResolvedProgram<'a> {
 
     fn new(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
 
-        let mut scopes = ScopeTree::new();
-        let scope_id = ScopeTree::root_id();
+        let mut scopes = scopes::Scopes::new();
+        let scope_id = scopes::Scopes::root_id();
         Self::define_primitives(scope_id, &mut scopes);
 
         let mut num_resolved = 0;
@@ -128,8 +45,15 @@ impl<'a, 'b> ResolvedProgram<'a> {
 
         ResolvedProgram {
             ast     : program,
-            types   : scopes.types.into(),
+            types   : scopes.into(),
         }
+    }
+
+    /// Sets given type_id for the given binding. Increases resolution counter if a change was made.
+    fn binding_set_type_id(binding_id: BindingId, new_type_id: TypeId, state: &mut ResolverState<'a, 'b>) {
+        let mut type_id = state.scopes.binding_type(binding_id);
+        Self::set_type_id(&mut type_id, new_type_id, state); // todo: get borrowck to accept a binding_type_mut instead of the temp copy?
+        *state.scopes.binding_type_mut(binding_id) = type_id;
     }
 
     /// Sets given type_id for the given unresolved type. Increases resolution counter if a change was made.
@@ -137,20 +61,26 @@ impl<'a, 'b> ResolvedProgram<'a> {
         if type_id.is_maybe() || type_id.is_unknown() {
             *type_id = Unresolved::Resolved(new_type_id);
             *state.counter += 1
+        } else if let Unresolved::Resolved(type_id) = type_id {
+            if *type_id != new_type_id {
+                panic!("attempted to change already resolved type");
+            }
         }
     }
 
     /// Resolves and sets named type for the given unresolved type. Increases resolution counter if a change was made.
     fn set_type(type_id: &mut Unresolved<TypeId>, new_type: &[&'a str], state: &mut ResolverState<'a, 'b>) {
         if type_id.is_maybe() || type_id.is_unknown() {
-            if let Some(new_type_id) = state.scopes.lookup_type_id(state.scope_id, &new_type[0]) { // todo: handle path segments
+            if let Some(new_type_id) = state.scopes.lookup_type_id(state.scope_id, &new_type[0]) { // fixme: handle path segments
                 *type_id = Unresolved::Resolved(new_type_id);
                 *state.counter += 1
             }
         }
+        // todo: error if type already resolved and new type differs?
     }
 
-    fn define_primitives(scope_id: ScopeId, scopes: &mut ScopeTree<'a>) {
+    /// Sets up basic primitive types in the given scope.
+    fn define_primitives(scope_id: ScopeId, scopes: &mut scopes::Scopes<'a>) {
         scopes.insert_type(scope_id, "", Type::void);
         scopes.insert_type(scope_id, "u8", Type::u8);
         scopes.insert_type(scope_id, "u16", Type::u16);
@@ -180,6 +110,19 @@ impl<'a, 'b> ResolvedProgram<'a> {
 
     fn resolve_binding(item: &mut ast::Binding<'a>, state: &mut ResolverState<'a, 'b>) {
 
+        // create binding
+        let binding_id = if let Some(binding_id) = item.binding_id {
+            binding_id
+        } else {
+            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
+            if state.scopes.binding_id(state.scope_id, item.name).is_some() {
+                panic!("shadowing NYI"); // todo: support shadowing
+            }
+            let binding_id = state.scopes.insert_binding(state.scope_id, item.name, Unresolved::Unknown); // todo: a &mut would be nicer than the index
+            item.binding_id = Some(binding_id);
+            binding_id
+        };
+
         // has an explicit type, determine id
         let lhs = match item.ty {
             Some(ref mut ty) => {
@@ -201,18 +144,17 @@ impl<'a, 'b> ResolvedProgram<'a> {
         // have explicit type and a resolved type for right hand side, check that they match
         if let (Some(Unresolved::Resolved(lhs)), Some(Unresolved::Resolved(rhs))) = (lhs, rhs) {
             if lhs != rhs {
-                panic!("types don't match!"); // TODO: obviously
+                panic!("types don't match!"); // TODO: error handling
             }
         }
 
         // have explicit type and/or resolved expression
         if let Some(Unresolved::Resolved(lhs)) = lhs {
-            item.type_id = Unresolved::Resolved(lhs);
-            state.scopes.insert_binding(state.scope_id, item.name, item.type_id);
-            //rhs.is_none() || rhs.unwrap().is_resolved() // TODO: return value handling needs to be more obvious
+            Self::set_type_id(&mut item.type_id, lhs, state);
+            Self::binding_set_type_id(binding_id, lhs, state);
         } else if let Some(Unresolved::Resolved(rhs)) = rhs {
-            item.type_id = Unresolved::Resolved(rhs);
-            state.scopes.insert_binding(state.scope_id, item.name, item.type_id);
+            Self::set_type_id(&mut item.type_id, rhs, state);
+            Self::binding_set_type_id(binding_id, rhs, state);
         }
     }
 
@@ -241,41 +183,82 @@ impl<'a, 'b> ResolvedProgram<'a> {
 
         if let Some(ref mut result) = item.result {
             Self::resolve_expression(result, state);
-            item.type_id = result.get_type_id();
+            if let Unresolved::Resolved(type_id) = result.get_type_id() {
+                Self::set_type_id(&mut item.type_id, type_id, state);
+            }
         }
     }
 
-    fn resolve_expression(item: &mut ast::Expression<'a>, state: &mut ResolverState<'a, 'b>) {
+    fn resolve_variable(item: &mut ast::Variable<'a>, state: &mut ResolverState<'a, 'b>) {
+        println!("resolve_var");
+        // resolve binding
+        if item.binding_id.is_none() {
+            item.binding_id = state.scopes.lookup_binding_id(state.scope_id, item.path.segs[0]);      // fixme: need full path here
+            if item.binding_id.is_none() {
+                panic!("unknown binding"); // todo: error handling
+            }
+        }
+        // try to resolve type from binding
+        if let Some(binding_id) = item.binding_id {
+            if let Unresolved::Resolved(binding_type_id) = state.scopes.binding_type(binding_id) {
+                Self::set_type_id(&mut item.type_id, binding_type_id, state);
+            }
+        }
+    }
 
-        use self::ast::Expression as E;
+    fn resolve_assignment(item: &mut ast::Assignment<'a>, state: &mut ResolverState<'a, 'b>) {
+        Self::resolve_variable(&mut item.left, state);
+        Self::resolve_expression(&mut item.right, state);
+        // todo: implement
+    }
+
+    fn resolve_binary_op(item: &mut ast::BinaryOp<'a>, state: &mut ResolverState<'a, 'b>) {
+
         use self::ast::Operator as O;
 
+        Self::resolve_expression(&mut item.left, state);
+        Self::resolve_expression(&mut item.right, state);
+
+        match item.op {
+            O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual | O::And | O::Or => {
+                Self::set_type(&mut item.type_id, &[ "bool" ], state);
+            },
+            _ => { }
+        }
+        // todo: implement
+    }
+
+    fn resolve_unary_op(item: &mut ast::UnaryOp<'a>, state: &mut ResolverState<'a, 'b>) {
+
+        use self::ast::Operator as O;
+
+        Self::resolve_expression(&mut item.exp, state);
+
+        match item.op {
+            O::Not => {
+                Self::set_type(&mut item.type_id, &[ "bool" ], state);
+            },
+            _ => { }
+        }
+        // todo: implement
+    }
+
+    fn resolve_expression(item: &mut ast::Expression<'a>, state: &mut ResolverState<'a, 'b>) {
+        use self::ast::Expression as E;
         match item {
-            E::Literal(literal)        => { }
-            E::Variable(variable)      => { }
-            E::Call(call)              => { }
-            E::Assignment(assignment)  => { }
-            E::BinaryOp(binary_op)     => match binary_op.op {
-                O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual | O::And | O::Or => {
-                    binary_op.type_id = Unresolved::Resolved(state.scopes.lookup_type_id(state.scope_id, "bool").unwrap());
-                },
-                _ => { }
-            }
-            E::UnaryOp(unary_op) => match unary_op.op {
-                O::Not => {
-                    unary_op.type_id = Unresolved::Resolved(state.scopes.lookup_type_id(state.scope_id, "bool").unwrap());
-                },
-                _ => { }
-            }
-            E::Block(block)            => { }
-            E::IfBlock(if_block)       => { }
+            E::Literal(literal)         => { }
+            E::Variable(variable)       => Self::resolve_variable(variable, state),
+            E::Call(call)               => { }
+            E::Assignment(assignment)   => Self::resolve_assignment(assignment, state),
+            E::BinaryOp(binary_op)      => Self::resolve_binary_op(binary_op, state),
+            E::UnaryOp(unary_op)        => Self::resolve_unary_op(unary_op, state),
+            E::Block(block)             => { }
+            E::IfBlock(if_block)        => { }
         };
     }
 
     fn resolve_statement(item: &mut ast::Statement<'a>, state: &mut ResolverState<'a, 'b>) {
-
         use self::ast::Statement as S;
-
         match item {
             S::Function(function)       => Self::resolve_function(function, state),
             S::Structure(structure)     => Self::resolve_structure(structure, state),
