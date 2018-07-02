@@ -3,6 +3,8 @@ use util::{BindingId, TypeId};
 use frontend::Unresolved;
 
 pub type Program<'a> = Vec<Statement<'a>>;
+pub type Signed = i64;
+pub type Unsigned = u64;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -151,14 +153,14 @@ pub struct Call<'a> {
 
 #[derive(Debug)]
 pub struct Assignment<'a> {
-    pub op      : Operator,
+    pub op      : BinaryOperator,
     pub left    : Variable<'a>,
     pub right   : Expression<'a>,
 }
 
 #[derive(Debug)]
 pub struct BinaryOp<'a> {
-    pub op      : Operator,
+    pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
     pub type_id : Unresolved<TypeId>,
@@ -166,70 +168,29 @@ pub struct BinaryOp<'a> {
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
-    pub op      : Operator,
+    pub op      : UnaryOperator,
     pub exp     : Expression<'a>,
     pub type_id : Unresolved<TypeId>,
 }
 
 #[derive(Debug)]
-pub struct IdentPath<'a> {
-    pub segs: Vec<&'a str>,
-}
+pub struct IdentPath<'a>(pub Vec<&'a str>);
 
 #[derive(Debug, Copy, Clone)]
-pub enum Operator {
-    // arithmetic
-    Add, Sub, Mul, Div, Rem,
-    // assigments
-    Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
-    // comparison
-    Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
+pub enum UnaryOperator {
     // boolean
-    And, Or, Not,
-    // special
-    Range,
+    Not,
     // inc/dec
     IncBefore, DecBefore, // IncAfter, DecAfter, // TODO: postfix ops
 }
 
-impl Operator {
-    pub fn binary_from_string(op: &str) -> Self {
-        match op {
-
-            "=" => Operator::Assign,
-            "+" => Operator::Add,
-            "-" => Operator::Sub,
-            "*" => Operator::Mul,
-            "/" => Operator::Div,
-            "%" => Operator::Rem,
-
-            "&&" => Operator::And,
-            "||" => Operator::Or,
-
-            "<" => Operator::Less,
-            ">" => Operator::Greater,
-            "<=" => Operator::LessOrEq,
-            ">=" => Operator::GreaterOrEq,
-            "==" => Operator::Equal,
-            "!=" => Operator::NotEqual,
-
-            "+=" => Operator::AddAssign,
-            "-=" => Operator::SubAssign,
-            "*=" => Operator::MulAssign,
-            "/=" => Operator::DivAssign,
-            "%=" => Operator::RemAssign,
-
-            ".." => Operator::Range,
-
-            _ => panic!(format!("parser yielded invalid binary operator \"{}\"", op)),
-        }
-    }
+impl UnaryOperator {
     pub fn prefix_from_string(op: &str) -> Self {
         match op {
 
-            "!" => Operator::Not,
-            "++" => Operator::IncBefore,
-            "--" => Operator::DecBefore,
+            "!" => UnaryOperator::Not,
+            "++" => UnaryOperator::IncBefore,
+            "--" => UnaryOperator::DecBefore,
 
             _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
         }
@@ -243,4 +204,52 @@ impl Operator {
             _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
         }
     }*/
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BinaryOperator {
+    // arithmetic
+    Add, Sub, Mul, Div, Rem,
+    // assigments
+    Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
+    // comparison
+    Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
+    // boolean
+    And, Or,
+    // special
+    Range,
+}
+
+impl BinaryOperator {
+    pub fn from_string(op: &str) -> Self {
+        match op {
+
+            "=" => BinaryOperator::Assign,
+            "+" => BinaryOperator::Add,
+            "-" => BinaryOperator::Sub,
+            "*" => BinaryOperator::Mul,
+            "/" => BinaryOperator::Div,
+            "%" => BinaryOperator::Rem,
+
+            "&&" => BinaryOperator::And,
+            "||" => BinaryOperator::Or,
+
+            "<" => BinaryOperator::Less,
+            ">" => BinaryOperator::Greater,
+            "<=" => BinaryOperator::LessOrEq,
+            ">=" => BinaryOperator::GreaterOrEq,
+            "==" => BinaryOperator::Equal,
+            "!=" => BinaryOperator::NotEqual,
+
+            "+=" => BinaryOperator::AddAssign,
+            "-=" => BinaryOperator::SubAssign,
+            "*=" => BinaryOperator::MulAssign,
+            "/=" => BinaryOperator::DivAssign,
+            "%=" => BinaryOperator::RemAssign,
+
+            ".." => BinaryOperator::Range,
+
+            _ => panic!(format!("parser yielded invalid binary operator \"{}\"", op)),
+        }
+    }
 }

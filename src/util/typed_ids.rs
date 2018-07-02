@@ -1,5 +1,5 @@
 /// Unique numeric type id.
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub struct TypeId(usize);
 
 impl From<TypeId> for usize {

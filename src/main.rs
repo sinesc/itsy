@@ -37,8 +37,11 @@ fn main() {
         "let x = a && b || !c && d;",
         "let x = ++i + y;",
         "let a: u32 = 12;
-        let b: u32 = 17;
-        let x = a && b;",
+        let b: u8 = 255;
+        let x = a && b;
+        let e: f32 = 12.0;
+        let f: f64 = 14.0;
+        f = f + e;",
     ];
 
     {
