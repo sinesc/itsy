@@ -1,4 +1,4 @@
-use super::ast::{Signed, Unsigned};
+use frontend::ast::{Signed, Unsigned};
 
 pub const MIN_I8: Signed = ::std::i8::MIN as Signed;
 pub const MIN_I16: Signed = ::std::i16::MIN as Signed;
