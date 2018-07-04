@@ -11,10 +11,29 @@ pub enum Statement<'a> {
     Function(Function<'a>),
     Structure(Structure<'a>),
     Binding(Binding<'a>),
-    IfBlock(IfBlock<'a>),
     ForLoop(ForLoop<'a>),
+    IfBlock(IfBlock<'a>),
     Block(Block<'a>),
     Expression(Expression<'a>),
+}
+
+impl<'a> Statement<'a> {
+    /// Returns whether the statement can be converted into an expression.
+    pub fn is_expressable(self: &Self) -> bool {
+        match self {
+            Statement::IfBlock(_) | Statement::Block(_) | Statement::Expression(_) => true,
+            _ => false,
+        }
+    }
+    /// Converts the statement into an expression or panics if the conversion would be invalid.
+    pub fn into_expression(self: Self) -> Expression<'a> {
+        match self {
+            Statement::IfBlock(if_block)        => Expression::IfBlock(Box::new(if_block)),
+            Statement::Block(block)             => Expression::Block(Box::new(block)),
+            Statement::Expression(expression)   => expression,
+            _                                   => panic!("invalid statement to expression conversion"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -79,19 +98,12 @@ pub struct Type<'a> {
     pub type_id : Unresolved<TypeId>,
 }
 
-pub fn unknown_type_id() -> Unresolved<TypeId> {
-    Unresolved::Unknown
-}
-
-pub fn void_type_id() -> Unresolved<TypeId> {
-    Unresolved::Resolved((0).into())
-}
-
 impl<'a> Type<'a> {
+    /// Returns a type with the given name and an unresolved type-id.
     pub fn unknown(name: IdentPath<'a>) -> Self {
         Type {
             name    : name,
-            type_id : unknown_type_id(),
+            type_id : Unresolved::Unknown,
         }
     }
 }
@@ -109,16 +121,16 @@ pub enum Expression<'a> {
 }
 
 impl<'a> Expression<'a> {
-    pub fn get_type_id(self: &Self) -> Unresolved<TypeId> {
+    pub fn get_type_id(self: &Self) -> Option<Unresolved<TypeId>> {
         match self {
-            Expression::Literal(literal)        => literal.type_id,
-            Expression::Variable(variable)      => variable.type_id,
-            Expression::Call(call)              => call.type_id,
-            Expression::Assignment(assignment)  => assignment.left.type_id,
-            Expression::BinaryOp(binary_op)     => binary_op.type_id,
-            Expression::UnaryOp(unary_op)       => unary_op.type_id,
-            Expression::Block(block)            => block.result.as_ref().map_or(void_type_id(), |r| r.get_type_id()),
-            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(void_type_id(), |r| r.get_type_id()),
+            Expression::Literal(literal)        => Some(literal.type_id),
+            Expression::Variable(variable)      => Some(variable.type_id),
+            Expression::Call(call)              => Some(call.type_id),
+            Expression::Assignment(assignment)  => Some(assignment.left.type_id),
+            Expression::BinaryOp(binary_op)     => Some(binary_op.type_id),
+            Expression::UnaryOp(unary_op)       => Some(unary_op.type_id),
+            Expression::Block(block)            => block.result.as_ref().map_or(None, |r| r.get_type_id()),
+            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(None, |r| r.get_type_id()),
         }
     }
 }

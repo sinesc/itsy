@@ -55,23 +55,3 @@ pub enum Type<'a> {
     Enum(Enum<'a>),
     Struct(Struct<'a>),
 }
-
-impl<'a> Type<'a> {
-    pub fn primitive(ident: &'a str) -> Option<Self> {
-        match ident {
-            "u8"        => Some(Type::u8),
-            "u16"       => Some(Type::u16),
-            "u32"       => Some(Type::u32),
-            "u64"       => Some(Type::u64),
-            "i8"        => Some(Type::i8),
-            "i16"       => Some(Type::i16),
-            "i32"       => Some(Type::i32),
-            "i64"       => Some(Type::i64),
-            "f32"       => Some(Type::f32),
-            "f64"       => Some(Type::f64),
-            "bool"      => Some(Type::bool),
-            "String"    => Some(Type::String),
-            _           => None,
-        }
-    }
-}

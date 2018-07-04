@@ -18,7 +18,8 @@ pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
 
     // insert primitive types into root scope
 
-    scopes.insert_type(root_scope_id, "", Type::void);
+    let void = scopes.insert_type(root_scope_id, "", Type::void);
+
     scopes.insert_type(root_scope_id, "bool", Type::bool);
     scopes.insert_type(root_scope_id, "String", Type::String);
 
@@ -55,6 +56,7 @@ pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
                 counter : &mut num_resolved,
                 scope_id: root_scope_id,
                 scopes  : &mut scopes,
+                void    : void,
                 unsigned: &unsigned,
                 signed  : &signed,
                 float   : &float,

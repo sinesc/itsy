@@ -4,15 +4,27 @@ use frontend::resolver::{Unresolved, ast};
 
 /// Internal state of the ResolvedProgram during type/binding resolution.
 pub struct State<'a, 'b> where 'a: 'b {
+    /// Counts resolved items.
     pub counter : &'b mut u32,
+    /// Scope id this state operates in.
     pub scope_id: ScopeId,
+    /// Repository of all scopes.
     pub scopes  : &'b mut scopes::Scopes<'a>,
+    pub void    : TypeId,
+    /// Unsigned types ordered by bit count.
     pub unsigned: &'b [ TypeId; 4 ],
+    /// Signed types ordered by bit count.
     pub signed  : &'b [ TypeId; 4 ],
+    /// Floating point types ordered by bit count.
     pub float   : &'b [ TypeId; 2 ],
 }
 
 impl<'a, 'b> State<'a, 'b> {
+
+    /// Converts the None-case of an optional type id to void.
+    fn void_none(self: &Self, type_id: Option<Unresolved<TypeId>>) -> Unresolved<TypeId> {
+        type_id.unwrap_or(Unresolved::Resolved(self.void))
+    }
 
     fn is_unsigned(self: &Self, type_id: TypeId) -> bool {
         type_id >= *self.unsigned.first().unwrap() && type_id <= *self.unsigned.last().unwrap()
@@ -115,7 +127,7 @@ impl<'a, 'b> State<'a, 'b> {
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
             E::BinaryOp(binary_op)      => self.resolve_binary_op(binary_op),
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
-            E::Block(block)             => { }
+            E::Block(block)             => self.resolve_block(block),
             E::IfBlock(if_block)        => { }
         };
     }
@@ -160,7 +172,7 @@ impl<'a, 'b> State<'a, 'b> {
         let rhs = match item.expr {
             Some(ref mut expr) => {
                 self.resolve_expression(expr);
-                Some(expr.get_type_id())
+                Some(self.void_none(expr.get_type_id()))
             },
             None => None,
         };
@@ -207,9 +219,12 @@ impl<'a, 'b> State<'a, 'b> {
 
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result);
-            if let Unresolved::Resolved(type_id) = result.get_type_id() {
+            if let Unresolved::Resolved(type_id) = self.void_none(result.get_type_id()) {
                 self.set_type_id(&mut item.type_id, type_id);
             }
+        } else {
+            let selfvoid = self.void; // seriously? todo: this is fixed by NLL, remove once that hits stable.
+            self.set_type_id(&mut item.type_id, selfvoid);
         }
     }
 
@@ -247,7 +262,7 @@ impl<'a, 'b> State<'a, 'b> {
                 self.set_type(&mut item.type_id, &[ "bool" ]);
             },
             O::Add | O::Sub | O::Div | O::Mul => {
-                if let (Unresolved::Resolved(left_type_id), Unresolved::Resolved(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
+                if let (Some(Unresolved::Resolved(left_type_id)), Some(Unresolved::Resolved(right_type_id))) = (item.left.get_type_id(), item.right.get_type_id()) {
                     if let Some(type_id) = self.try_cast(left_type_id, right_type_id) {
                         self.set_type_id(&mut item.type_id, type_id);
                     } else {

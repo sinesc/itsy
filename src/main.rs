@@ -42,6 +42,7 @@ fn main() {
         let e: f32 = 12.0;
         let f: f64 = 14.0;
         f = f + e;",
+        "let y = { { let x = 1; } };",
     ];
 
     {
@@ -82,7 +83,7 @@ fn main() {
 
             let ready = resolve(final_test.1);
 
-            println!("{:?}", ready);
+            println!("{:#?}", ready);
         }
     }
 }
