@@ -47,7 +47,7 @@
             "group": "build",
             "problemMatcher": "$rustc"
         },
-        {
+        /*{
             "label": "cargo run example",
             "type": "shell",
             "command": "cargo",
@@ -81,7 +81,7 @@
             ],
             "group": "test",
             "problemMatcher": "$rustc"
-        },
+        },*/
         {
             "label": "cargo clean",
             "type": "shell",
@@ -106,7 +106,9 @@
             "command": "cargo",
             "args": [
                 "rustdoc",
-                "--open"
+                "--open",
+                "--",
+                "--document-private-items",
             ],
             "problemMatcher": []
         },

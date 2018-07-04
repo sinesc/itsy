@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        /* crashes {
+            "name": "lldb launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/itsy.exe",
+            "args": [],
+            //"stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            //"environment": [],
+            //"externalConsole": true
+        },*/
+        {
+            "name": "(Windows) Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/itsy.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true
+        }
+    ]
+}
