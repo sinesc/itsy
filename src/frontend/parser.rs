@@ -3,6 +3,7 @@ use nom::{IResult, ErrorKind, is_alphabetic, is_alphanumeric, digit0, digit1};
 use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
 use frontend::ast::*;
+use frontend::integer::Integer;
 use frontend::Unresolved;
 
 #[repr(u32)]
@@ -66,11 +67,11 @@ fn parse_numerical(n: Input) -> IResult<Input, Expression> {
         }
     } else if n.starts_with("-") {
         if let Ok(integer) = str::parse::<i64>(*n) {
-            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Signed(integer), type_id: Unresolved::Unknown })))
+            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Signed(integer)), type_id: Unresolved::Unknown })))
         }
     } else {
         if let Ok(integer) = str::parse::<u64>(*n) {
-            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Unsigned(integer), type_id: Unresolved::Unknown })))
+            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Unsigned(integer)), type_id: Unresolved::Unknown })))
         }
     }
 
@@ -257,7 +258,13 @@ named!(for_loop_range<Input, Expression>, map!(ws!(tuple!(expression, tag!("..")
 }));
 
 named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
-    iter: *m.1,
+    iter: Binding {
+        name        : *m.1,
+        expr        : None,
+        ty          : None,
+        type_id     : Unresolved::Unknown,
+        binding_id  : None,
+    },
     range: m.3,
 }));
 

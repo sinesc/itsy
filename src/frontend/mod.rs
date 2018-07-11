@@ -1,11 +1,12 @@
 pub mod ast;
 pub mod parser;
 pub mod resolver;
+pub mod integer;
 
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Unresolved<T> {
+pub enum Unresolved<T> { // TODO: probably could make do with an Option instead
     Unknown,
     Maybe(T),
     Resolved(T)

@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use util::{BindingId, TypeId};
+use frontend::integer::Integer;
 use frontend::Unresolved;
 
 pub type Program<'a> = Vec<Statement<'a>>;
-pub type Signed = i64;
-pub type Unsigned = u64;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -54,7 +53,7 @@ pub struct IfBlock<'a> {
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
-    pub iter    : &'a str,
+    pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
 }
 
@@ -94,7 +93,7 @@ pub struct Signature<'a> {
 
 #[derive(Debug)]
 pub struct Type<'a> {
-    pub name    : IdentPath<'a>, // TODO: ident_path is x.y.z, but should probably be something like x::y::z with namespacing supported or just an ident otherwise
+    pub name    : IdentPath<'a>,
     pub type_id : Unresolved<TypeId>,
 }
 
@@ -144,9 +143,29 @@ pub struct Literal<'a> {
 #[derive(Debug)]
 pub enum LiteralValue<'a> {
     String(&'a str),  // TODO: string literals
-    Signed(i64),
-    Unsigned(u64),
+    Integer(Integer),
     Float(f64),
+}
+
+impl<'a> LiteralValue<'a> {
+    pub fn as_string(self: &Self) -> Option<&'a str> {
+        match self {
+            LiteralValue::String(string) => Some(string),
+            _ => None,
+        }
+    }
+    pub fn as_float(self: &Self) -> Option<f64> {
+        match self {
+            LiteralValue::Float(float) => Some(*float),
+            _ => None,
+        }
+    }
+    pub fn as_integer(self: &Self) -> Option<Integer> {
+        match self {
+            LiteralValue::Integer(integer) => Some(*integer),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

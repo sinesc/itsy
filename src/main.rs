@@ -43,6 +43,13 @@ fn main() {
         let f: f64 = 14.0;
         f = f + e;",
         "let y = { { let x = 1; } };",
+        "let x: u32 = 16;
+        let y = x;",
+        "let a = 1;
+        let b = 256;
+        let c = 65537;
+        let d = a + b +c;",
+        "for i in -1..100 { print(i); }",
     ];
 
     {
