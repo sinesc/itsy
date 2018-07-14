@@ -6,11 +6,11 @@ extern crate nom;
 
 mod util;
 mod frontend;
+mod bytecode;
 
 fn main() {
 
     let tests = [
-        "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; placeholder }",
         "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1 + 9; 7 +9 * 6- 8 }",
         "struct mystruct { }",
         "struct mystruct { name: string }",
@@ -33,7 +33,6 @@ fn main() {
         "let x = 3 + { let x = 1 + 5; x };",
         "{ let y = 5 + 8; y };",
         "let x = 1; { let y = 5 + 8; y } let y = 3;",
-        "for i in 1..100 { print(i); }",
         "let x = a && b || !c && d;",
         "let x = ++i + y;",
         "let a: u32 = 12;
@@ -50,6 +49,7 @@ fn main() {
         let c = 65537;
         let d = a + b +c;",
         "for i in -1..100 { print(i); }",
+        "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; placeholder }",
     ];
 
     {

@@ -17,15 +17,15 @@ pub struct State<'a, 'b> where 'a: 'b {
 impl<'a, 'b> State<'a, 'b> {
 
     /// Sets given type_id for the given binding. Increases resolution counter if a change was made.
-    fn binding_set_type_id(self: &mut Self, binding_id: BindingId, new_type_id: TypeId) {
+    fn bindingtype_from_id(self: &mut Self, binding_id: BindingId, new_type_id: TypeId) {
         let mut type_id = self.scopes.binding_type(binding_id);
-        self.set_type_id(&mut type_id, new_type_id); // todo: get borrowck to accept a binding_type_mut instead of the temp copy?
+        self.type_from_id(&mut type_id, new_type_id); // todo: get borrowck to accept a binding_type_mut instead of the temp copy?
         *self.scopes.binding_type_mut(binding_id) = type_id;
     }
 
     /// Sets given type_id for the given unresolved type. Increases resolution counter if a change was made.
-    fn set_type_id(self: &mut Self, type_id: &mut Unresolved<TypeId>, new_type_id: TypeId) {
-        if type_id.is_maybe() || type_id.is_unknown() {
+    fn type_from_id(self: &mut Self, type_id: &mut Unresolved, new_type_id: TypeId) {
+        if type_id.is_unknown() {
             *type_id = Unresolved::Resolved(new_type_id);
             *self.counter += 1
         } else if let Unresolved::Resolved(type_id) = type_id {
@@ -35,9 +35,18 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    fn type_from_void(self: &mut Self, type_id: &mut Unresolved) {
+        if type_id.is_unknown() {
+            *type_id = Unresolved::Void;
+            *self.counter += 1
+        } else if !type_id.is_void() {
+            panic!("attempted to change already resolved type");
+        }
+    }
+
     /// Resolves and sets named type for the given unresolved type. Increases resolution counter if a change was made.
-    fn set_type(self: &mut Self, type_id: &mut Unresolved<TypeId>, new_type: &[&'a str]) {
-        if type_id.is_maybe() || type_id.is_unknown() {
+    fn type_from_name(self: &mut Self, type_id: &mut Unresolved, new_type: &[&'a str]) {
+        if type_id.is_unknown() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) { // fixme: handle path segments
                 *type_id = Unresolved::Resolved(new_type_id);
                 *self.counter += 1
@@ -76,7 +85,22 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
+        self.resolve_signature(&mut item.sig);
+    }
 
+    fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'a>) {
+        // resolve arguments // todo: create scope here
+        for arg in item.args.iter_mut() {
+            self.try_create_binding(arg);
+            self.resolve_type(arg.ty.as_mut().unwrap());
+            if let Unresolved::Resolved(type_id) = arg.ty.as_ref().unwrap().type_id {
+                self.type_from_id(&mut arg.type_id, type_id);
+    }
+        }
+        // resolve return type
+        if let Some(ret) = &mut item.ret {
+            self.resolve_type(ret);
+        }
     }
 
     fn resolve_structure(self: &mut Self, item: &mut ast::Structure<'a>) {
@@ -84,12 +108,11 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     fn resolve_type(self: &mut Self, item: &mut ast::Type<'a>) {
-        self.set_type(&mut item.type_id, &item.name.0);
+        self.type_from_name(&mut item.type_id, &item.name.0);
     }
 
     /// Return existing binding-id or create and return new binding-id.
     fn try_create_binding(self: &mut Self, item: &mut ast::Binding<'a>) -> BindingId {
-
         if let Some(binding_id) = item.binding_id {
             binding_id
         } else {
@@ -104,10 +127,8 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'a>) {
-
         // create binding
         let binding_id = self.try_create_binding(item);
-
         // has an explicit type, determine id
         let lhs = match item.ty {
             Some(ref mut ty) => {
@@ -116,40 +137,34 @@ impl<'a, 'b> State<'a, 'b> {
             },
             None => None,
         };
-
         // has an initial value
         let rhs = match item.expr {
             Some(ref mut expr) => {
                 self.resolve_expression(expr);
-                Some(self.primitives.void_none(expr.get_type_id())) // fixme: void should be invalid
+                Some(expr.get_type_id())
             },
             None => None,
         };
-
         // have explicit type and a resolved type for right hand side, check that they match
         if let (Some(Unresolved::Resolved(lhs)), Some(Unresolved::Resolved(rhs))) = (lhs, rhs) {
             if lhs != rhs && !self.primitives.is_valid_cast(rhs, lhs) {
                 panic!("invalid cast from {:?} to {:?}", lhs, rhs); // TODO: error handling
             }
         }
-
         // have explicit type and/or resolved expression
         if let Some(Unresolved::Resolved(lhs)) = lhs {
-            self.set_type_id(&mut item.type_id, lhs);
-            self.binding_set_type_id(binding_id, lhs);
+            self.type_from_id(&mut item.type_id, lhs);
+            self.bindingtype_from_id(binding_id, lhs);
         } else if let Some(Unresolved::Resolved(rhs)) = rhs {
-            self.set_type_id(&mut item.type_id, rhs);
-            self.binding_set_type_id(binding_id, rhs);
+            self.type_from_id(&mut item.type_id, rhs);
+            self.bindingtype_from_id(binding_id, rhs);
         }
     }
 
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
-
         self.resolve_block(&mut item.if_block);
-
         if let Some(ref mut else_block) = item.else_block {
             self.resolve_block(else_block);
-
             if item.if_block.type_id != else_block.type_id { // TODO: used complete here
                 panic!("if/else return type mismatch"); // TODO: error handling, attempt cast
             }
@@ -157,34 +172,30 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
-
         // create binding for iterator var
         let binding_id = self.try_create_binding(&mut item.iter);
-
         // resolve the range type
         self.resolve_expression(&mut item.range);
-
         // set binding type to range type
-        if let Some(Unresolved::Resolved(range)) = item.range.get_type_id() {
-            self.set_type_id(&mut item.iter.type_id, range);
-            self.binding_set_type_id(binding_id, range);
+        if let Unresolved::Resolved(range) = item.range.get_type_id() {
+            self.type_from_id(&mut item.iter.type_id, range);
+            self.bindingtype_from_id(binding_id, range);
         }
+        // handle block
+        self.resolve_block(&mut item.block);
     }
 
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>) {
-
         for mut statement in item.statements.iter_mut() {
             self.resolve_statement(&mut statement);
         }
-
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result);
-            if let Unresolved::Resolved(type_id) = self.primitives.void_none(result.get_type_id()) {
-                self.set_type_id(&mut item.type_id, type_id);
+            if let Unresolved::Resolved(type_id) = result.get_type_id() {
+                self.type_from_id(&mut item.type_id, type_id);
             }
         } else {
-            let selfvoid = self.primitives.void; // seriously? todo: this is fixed by NLL, remove once that hits stable.
-            self.set_type_id(&mut item.type_id, selfvoid);
+            self.type_from_void(&mut item.type_id);
         }
     }
 
@@ -199,7 +210,7 @@ impl<'a, 'b> State<'a, 'b> {
         // try to resolve type from binding
         if let Some(binding_id) = item.binding_id {
             if let Unresolved::Resolved(binding_type_id) = self.scopes.binding_type(binding_id) {
-                self.set_type_id(&mut item.type_id, binding_type_id);
+                self.type_from_id(&mut item.type_id, binding_type_id);
             }
         }
     }
@@ -225,20 +236,20 @@ impl<'a, 'b> State<'a, 'b> {
         match item.op {
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual | O::And | O::Or => {
                 let selfbool = self.primitives.bool; // todo: fixed with nll
-                self.set_type_id(&mut item.type_id, selfbool);
+                self.type_from_id(&mut item.type_id, selfbool);
             },
             O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
                 if let (E::Literal(literal_a), E::Literal(literal_b)) = (&item.left, &item.right) {
                     // both sides are literals, determine type that suits both
                     if let Some(type_id) = self.primitives.cast_literal(literal_a, literal_b) {
-                        self.set_type_id(&mut item.type_id, type_id);
+                        self.type_from_id(&mut item.type_id, type_id);
                     } else {
                         panic!("cannot cast between {:?} and {:?}", literal_a, literal_b);
                     }
-                } else if let (Some(Unresolved::Resolved(left_type_id)), Some(Unresolved::Resolved(right_type_id))) = (item.left.get_type_id(), item.right.get_type_id()) {
+                } else if let (Unresolved::Resolved(left_type_id), Unresolved::Resolved(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
                     // cast to common type or try to widen type
                     if let Some(type_id) = self.primitives.cast(left_type_id, right_type_id) {
-                        self.set_type_id(&mut item.type_id, type_id);
+                        self.type_from_id(&mut item.type_id, type_id);
                     } else {
                         panic!("cannot cast between {:?} and {:?}", left_type_id, right_type_id);
                     }
@@ -250,14 +261,12 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>) {
-
         use frontend::ast::UnaryOperator as O;
-
         self.resolve_expression(&mut item.exp);
-
         match item.op {
             O::Not => {
-                self.set_type(&mut item.type_id, &[ "bool" ]);
+                let type_id = self.primitives.bool; // todo: nll fixes this
+                self.type_from_id(&mut item.type_id, type_id);
             },
             _ => { } // fixme: remove and add missing
         }
@@ -269,7 +278,7 @@ impl<'a, 'b> State<'a, 'b> {
         match item.value {
             L::Integer(ref v) => {
                 let type_id = self.primitives.integer_type_id(*v).unwrap();
-                self.set_type_id(&mut item.type_id, type_id);
+                self.type_from_id(&mut item.type_id, type_id);
             },
             L::Float(ref float) => {
 

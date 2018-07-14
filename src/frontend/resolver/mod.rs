@@ -2,14 +2,15 @@ mod scopes;
 mod state;
 mod primitives;
 
-use frontend::{Type, ast};
+use frontend::ast;
 use frontend::integer::{Integer, Signed, Unsigned};
-use self::primitives::IntegerRange;
+use frontend::resolver::primitives::IntegerRange;
+use bytecode::Type;
 
 #[derive(Debug)]
 pub struct ResolvedProgram<'a> {
     ast     : ast::Program<'a>,
-    types   : Vec<Type<'a>>,
+    types   : Vec<Type>,
 }
 
 /// Resolves types within the given program
@@ -23,7 +24,6 @@ pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
     // insert primitive types into root scope
 
     let primitives = primitives::Primitives {
-        void: scopes.insert_type(root_scope_id, "", Type::void),
         bool: scopes.insert_type(root_scope_id, "bool", Type::bool),
         string: scopes.insert_type(root_scope_id, "String", Type::String),
         unsigned: [

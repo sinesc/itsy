@@ -1,7 +1,6 @@
 use util::TypeId;
 use frontend::ast;
 use frontend::integer::Integer;
-use frontend::Unresolved;
 
 pub struct IntegerRange {
     pub type_id: TypeId,
@@ -10,8 +9,6 @@ pub struct IntegerRange {
 }
 
 pub struct Primitives {
-    /// Pseudo type used for functions without return value.
-    pub void    : TypeId,
     /// Boolean type
     pub bool    : TypeId,
     /// String type
@@ -25,11 +22,6 @@ pub struct Primitives {
 }
 
 impl Primitives {
-
-    /// Converts the None-case of an optional type id to void.
-    pub fn void_none(self: &Self, type_id: Option<Unresolved<TypeId>>) -> Unresolved<TypeId> {
-        type_id.unwrap_or(Unresolved::Resolved(self.void))
-    }
 
     pub fn is_unsigned(self: &Self, type_id: TypeId) -> bool {
         type_id >= self.unsigned.first().unwrap().type_id && type_id <= self.unsigned.last().unwrap().type_id

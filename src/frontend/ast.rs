@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use util::{BindingId, TypeId};
+use util::BindingId;
 use frontend::integer::Integer;
 use frontend::Unresolved;
 
@@ -17,10 +17,10 @@ pub enum Statement<'a> {
 }
 
 impl<'a> Statement<'a> {
-    /// Returns whether the statement can be converted into an expression.
+    /// Returns whether the statement could also be an expression. Notably, an expression could not be since Statement::Expression is ; terminated
     pub fn is_expressable(self: &Self) -> bool {
         match self {
-            Statement::IfBlock(_) | Statement::Block(_) | Statement::Expression(_) => true,
+            Statement::IfBlock(_) | Statement::Block(_) => true,
             _ => false,
         }
     }
@@ -38,9 +38,10 @@ impl<'a> Statement<'a> {
 #[derive(Debug)]
 pub struct Binding<'a> {
     pub name        : &'a str,
+    pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
     pub ty          : Option<Type<'a>>,
-    pub type_id     : Unresolved<TypeId>,
+    pub type_id     : Unresolved,
     pub binding_id  : Option<BindingId>,
 }
 
@@ -55,20 +56,21 @@ pub struct IfBlock<'a> {
 pub struct ForLoop<'a> {
     pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
+    pub block   : Block<'a>,
 }
 
 #[derive(Debug)]
 pub struct Block<'a> {
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
-    pub type_id     : Unresolved<TypeId>,
+    pub type_id     : Unresolved,
 }
 
 #[derive(Debug)]
 pub struct Structure<'a> {
     pub name    : &'a str,
     pub items   : HashMap<&'a str, Type<'a>>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 #[derive(Debug)]
@@ -78,23 +80,16 @@ pub struct Function<'a> {
 }
 
 #[derive(Debug)]
-pub struct Argument<'a> {
-    pub name    : &'a str,
-    pub mutable : bool,
-    pub ty      : Type<'a>,
-}
-
-#[derive(Debug)]
 pub struct Signature<'a> {
     pub name    : &'a str,
-    pub args    : Vec<Argument<'a>>,
+    pub args    : Vec<Binding<'a>>,
     pub ret     : Option<Type<'a>>,
 }
 
 #[derive(Debug)]
 pub struct Type<'a> {
     pub name    : IdentPath<'a>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 impl<'a> Type<'a> {
@@ -120,16 +115,16 @@ pub enum Expression<'a> {
 }
 
 impl<'a> Expression<'a> {
-    pub fn get_type_id(self: &Self) -> Option<Unresolved<TypeId>> {
+    pub fn get_type_id(self: &Self) -> Unresolved {
         match self {
-            Expression::Literal(literal)        => Some(literal.type_id),
-            Expression::Variable(variable)      => Some(variable.type_id),
-            Expression::Call(call)              => Some(call.type_id),
-            Expression::Assignment(assignment)  => Some(assignment.left.type_id),
-            Expression::BinaryOp(binary_op)     => Some(binary_op.type_id),
-            Expression::UnaryOp(unary_op)       => Some(unary_op.type_id),
-            Expression::Block(block)            => block.result.as_ref().map_or(None, |r| r.get_type_id()),
-            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(None, |r| r.get_type_id()),
+            Expression::Literal(literal)        => literal.type_id,
+            Expression::Variable(variable)      => variable.type_id,
+            Expression::Call(call)              => call.type_id,
+            Expression::Assignment(assignment)  => assignment.left.type_id,
+            Expression::BinaryOp(binary_op)     => binary_op.type_id,
+            Expression::UnaryOp(unary_op)       => unary_op.type_id,
+            Expression::Block(block)            => block.result.as_ref().map_or(Unresolved::Void, |r| r.get_type_id()),
+            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(Unresolved::Void, |r| r.get_type_id()),
         }
     }
 }
@@ -137,7 +132,7 @@ impl<'a> Expression<'a> {
 #[derive(Debug)]
 pub struct Literal<'a> {
     pub value   : LiteralValue<'a>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 #[derive(Debug)]
@@ -171,7 +166,7 @@ impl<'a> LiteralValue<'a> {
 #[derive(Debug)]
 pub struct Variable<'a> {
     pub path        : IdentPath<'a>,
-    pub type_id     : Unresolved<TypeId>,
+    pub type_id     : Unresolved,
     pub binding_id  : Option<BindingId>,
 }
 
@@ -179,7 +174,7 @@ pub struct Variable<'a> {
 pub struct Call<'a> {
     pub path    : IdentPath<'a>,
     pub args    : Vec<Expression<'a>>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 #[derive(Debug)]
@@ -194,14 +189,14 @@ pub struct BinaryOp<'a> {
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
     pub op      : UnaryOperator,
     pub exp     : Expression<'a>,
-    pub type_id : Unresolved<TypeId>,
+    pub type_id : Unresolved,
 }
 
 #[derive(Debug)]

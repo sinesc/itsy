@@ -1,12 +1,13 @@
 use util::{TypeId, ScopeId, BindingId, Repository};
-use frontend::{Unresolved, Type};
+use frontend::Unresolved;
+use bytecode::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
     /// Flat type data, lookup via TypeId or ScopeId and name
-    types       : Repository<Type<'a>, TypeId, (ScopeId, &'a str)>,
+    types       : Repository<Type, TypeId, (ScopeId, &'a str)>,
     /// Flat binding data, lookup via TypeId or ScopeId and name
-    bindings    : Repository<Unresolved<TypeId>, BindingId, (ScopeId, &'a str)>,
+    bindings    : Repository<Unresolved, BindingId, (ScopeId, &'a str)>,
     /// Current scope id, incremented when scopes are added
     current     : ScopeId,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -36,7 +37,7 @@ impl<'a> Scopes<'a> {
     }
 
     /// Insert a binding into the given scope, returning a binding id. Its type may not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: Unresolved<TypeId>) -> BindingId {
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: Unresolved) -> BindingId {
         self.bindings.insert((scope_id, name), type_id)
     }
 
@@ -61,17 +62,17 @@ impl<'a> Scopes<'a> {
     }
 
     /// Returns a mutable reference to the type of the given binding id
-    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Unresolved<TypeId> {
+    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Unresolved {
         self.bindings.index_mut(binding_id)
     }
 
     /// Returns a mutable reference to the type of the given binding id
-    pub fn binding_type(self: &Self, binding_id: BindingId) -> Unresolved<TypeId> {
+    pub fn binding_type(self: &Self, binding_id: BindingId) -> Unresolved {
         *self.bindings.index(binding_id)
     }
 
     /// Insert a type into the given scope, returning a type id.
-    pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type<'a>) -> TypeId {
+    pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type) -> TypeId {
         self.types.insert((scope_id, name), ty)
     }
 
@@ -91,9 +92,9 @@ impl<'a> Scopes<'a> {
     }
 }
 
-impl<'a> Into<Vec<Type<'a>>> for Scopes<'a> {
+impl<'a> Into<Vec<Type>> for Scopes<'a> {
     /// convert scopes into type vector
-    fn into(self: Self) -> Vec<Type<'a>> {
+    fn into(self: Self) -> Vec<Type> {
         self.types.into()
     }
 }

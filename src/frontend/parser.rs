@@ -189,6 +189,7 @@ named!(binding<Input, Statement>, map!(
     )),
     |m| Statement::Binding(Binding {
         name        : *m.0,
+        mutable     : false, // todo: mutable bindings
         expr        : Some(m.3),
         ty          : m.1.map(|t| Type::unknown(t)),
         type_id     : Unresolved::Unknown,
@@ -215,13 +216,16 @@ named!(structure<Input, Statement>, map!(ws!(tuple!(tag!("struct"), ident, char!
 
 // function
 
-named!(signature_argument<Input, Argument>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Argument {
+named!(signature_argument<Input, Binding>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Binding {
     name    : *tuple.1,
+    expr        : None,
     mutable : tuple.0.is_some(),
-    ty      : Type::unknown(tuple.3),
+    ty          : Some(Type::unknown(tuple.3)),
+    type_id     : Unresolved::Unknown,
+    binding_id  : None,
 }));
 
-named!(signature_argument_list<Input, Vec<Argument>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
+named!(signature_argument_list<Input, Vec<Binding>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
 named!(signature_return_part<Input, IdentPath>, ws!(preceded!(tag!("->"), ident_path)));
 
@@ -260,12 +264,14 @@ named!(for_loop_range<Input, Expression>, map!(ws!(tuple!(expression, tag!("..")
 named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
     iter: Binding {
         name        : *m.1,
+        mutable     : true,
         expr        : None,
         ty          : None,
         type_id     : Unresolved::Unknown,
         binding_id  : None,
     },
     range: m.3,
+    block: m.4,
 }));
 
 // statement
