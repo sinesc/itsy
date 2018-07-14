@@ -35,6 +35,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Sets given unresolved type to void.
     fn type_from_void(self: &mut Self, type_id: &mut Unresolved) {
         if type_id.is_unknown() {
             *type_id = Unresolved::Void;
@@ -51,8 +52,13 @@ impl<'a, 'b> State<'a, 'b> {
                 *type_id = Unresolved::Resolved(new_type_id);
                 *self.counter += 1
             }
+        } else if let Unresolved::Resolved(type_id) = type_id {
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) {
+                if *type_id != new_type_id {
+                    panic!("type resolution result changed, aka 'this should never happen'"); // todo: remove this whole else branch
+                }
+            }
         }
-        // todo: error if type already resolved and new type differs?
     }
 
     /// Resolves types and bindings used in a statement.
@@ -60,7 +66,7 @@ impl<'a, 'b> State<'a, 'b> {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function),
-            S::Structure(structure)     => self.resolve_structure(structure),
+            S::Structure(structure)     => { }, // todo: handle structures
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block),
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
@@ -75,27 +81,26 @@ impl<'a, 'b> State<'a, 'b> {
         match item {
             E::Literal(literal)         => self.resolve_literal(literal),
             E::Variable(variable)       => self.resolve_variable(variable),
-            E::Call(call)               => { }
+            E::Call(call)               => self.resolve_call(call),
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
             E::BinaryOp(binary_op)      => self.resolve_binary_op(binary_op),
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
             E::Block(block)             => self.resolve_block(block),
-            E::IfBlock(if_block)        => { }
+            E::IfBlock(if_block)        => self.resolve_if_block(if_block),
         };
     }
 
+    /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
         self.resolve_signature(&mut item.sig);
+        self.resolve_block(&mut item.block);
     }
 
+    /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'a>) {
         // resolve arguments // todo: create scope here
         for arg in item.args.iter_mut() {
-            self.try_create_binding(arg);
-            self.resolve_type(arg.ty.as_mut().unwrap());
-            if let Unresolved::Resolved(type_id) = arg.ty.as_ref().unwrap().type_id {
-                self.type_from_id(&mut arg.type_id, type_id);
-    }
+            self.resolve_binding(arg);
         }
         // resolve return type
         if let Some(ret) = &mut item.ret {
@@ -103,10 +108,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
-    fn resolve_structure(self: &mut Self, item: &mut ast::Structure<'a>) {
-
-    }
-
+    /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &mut Self, item: &mut ast::Type<'a>) {
         self.type_from_name(&mut item.type_id, &item.name.0);
     }
@@ -126,6 +128,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Resolves a binding created by let, for or a signature
     fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'a>) {
         // create binding
         let binding_id = self.try_create_binding(item);
@@ -161,6 +164,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
         self.resolve_block(&mut item.if_block);
         if let Some(ref mut else_block) = item.else_block {
@@ -171,6 +175,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
         // create binding for iterator var
         let binding_id = self.try_create_binding(&mut item.iter);
@@ -185,6 +190,7 @@ impl<'a, 'b> State<'a, 'b> {
         self.resolve_block(&mut item.block);
     }
 
+    /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>) {
         for mut statement in item.statements.iter_mut() {
             self.resolve_statement(&mut statement);
@@ -199,6 +205,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Resolves an occurance of a variable.
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
         // resolve binding
         if item.binding_id.is_none() {
@@ -215,12 +222,19 @@ impl<'a, 'b> State<'a, 'b> {
         }
     }
 
+    /// Resolves an occurance of a function call.
+    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>) {
+
+    }
+
+    /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
         self.resolve_variable(&mut item.left);
         self.resolve_expression(&mut item.right);
         // todo: implement
     }
 
+    /// Resolves a binary operation.
     fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>) {
 
         use frontend::ast::BinaryOperator as O;
@@ -260,6 +274,7 @@ impl<'a, 'b> State<'a, 'b> {
         // todo: implement
     }
 
+    /// Resolves a unary operation.
     fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>) {
         use frontend::ast::UnaryOperator as O;
         self.resolve_expression(&mut item.exp);
@@ -273,6 +288,7 @@ impl<'a, 'b> State<'a, 'b> {
         // todo: implement
     }
 
+    /// Resolves a literal value.
     fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>) {
         use frontend::ast::LiteralValue as L;
         match item.value {

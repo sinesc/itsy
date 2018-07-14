@@ -61,12 +61,12 @@ impl<'a> Scopes<'a> {
         }
     }
 
-    /// Returns a mutable reference to the type of the given binding id
+    /// Returns a mutable reference to the type of the given binding id.
     pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Unresolved {
         self.bindings.index_mut(binding_id)
     }
 
-    /// Returns a mutable reference to the type of the given binding id
+    /// Returns a copy of the type of the given binding id.
     pub fn binding_type(self: &Self, binding_id: BindingId) -> Unresolved {
         *self.bindings.index(binding_id)
     }

@@ -49,14 +49,16 @@ fn main() {
         let c = 65537;
         let d = a + b +c;",
         "for i in -1..100 { print(i); }",
-        "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; placeholder }",
+        "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; greeting }",
+        "let x: u16; { x }",
+        "fn hello(greeting: u16) { greeting }",
     ];
 
     {
         use nom::types::CompleteStr as Input;
         use frontend::parser::parse;
         use frontend::resolver::resolve;
-
+        /*
         println!("Succeeded:\n----------");
 
         for test in tests.iter() {
@@ -66,7 +68,7 @@ fn main() {
                 }
             }
         }
-
+        */
         println!("\nErrors:\n-------");
 
         for test in tests.iter() {
