@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Debug};
 
 pub type Signed = i64;
 pub type Unsigned = u64;
 
 /// A type supporting signed and unsigned integral values.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum Integer {
     Signed(Signed),
     Unsigned(Unsigned),
@@ -75,5 +76,14 @@ impl PartialOrd for Integer {
 impl Ord for Integer {
     fn cmp(&self, other: &Integer) -> Ordering {
         self.partial_cmp(other).unwrap()
+    }
+}
+
+impl Debug for Integer {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Integer::Signed(signed) => write!(f, "Signed({})", signed),
+            Integer::Unsigned(unsigned) => write!(f, "Unsigned({})", unsigned),
+        }
     }
 }

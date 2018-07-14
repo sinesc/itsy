@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use util::BindingId;
 use frontend::integer::Integer;
 use frontend::Unresolved;
+use std::fmt::{self, Debug};
 
 pub type Program<'a> = Vec<Statement<'a>>;
 
@@ -135,7 +136,6 @@ pub struct Literal<'a> {
     pub type_id : Unresolved,
 }
 
-#[derive(Debug)]
 pub enum LiteralValue<'a> {
     String(&'a str),  // TODO: string literals
     Integer(Integer),
@@ -159,6 +159,16 @@ impl<'a> LiteralValue<'a> {
         match self {
             LiteralValue::Integer(integer) => Some(*integer),
             _ => None,
+        }
+    }
+}
+
+impl<'a> Debug for LiteralValue<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LiteralValue::String(string) => write!(f, "LiteralValue({:?})", string),
+            LiteralValue::Integer(integer) => write!(f, "LiteralValue({:?})", integer),
+            LiteralValue::Float(float) => write!(f, "LiteralValue(Float({:?}))", float),
         }
     }
 }
@@ -199,8 +209,13 @@ pub struct UnaryOp<'a> {
     pub type_id : Unresolved,
 }
 
-#[derive(Debug)]
 pub struct IdentPath<'a>(pub Vec<&'a str>);
+
+impl<'a> Debug for IdentPath<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "IdentPath({})", self.0.join("."))
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum UnaryOperator {

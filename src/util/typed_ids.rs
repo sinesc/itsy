@@ -1,5 +1,7 @@
+use std::fmt::{self, Debug};
+
 /// Unique numeric type id.
-#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Default, PartialEq, PartialOrd)]
 pub struct TypeId(usize);
 
 impl From<TypeId> for usize {
@@ -14,8 +16,14 @@ impl From<usize> for TypeId {
     }
 }
 
+impl Debug for TypeId {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TypeId({})", self.0)
+    }
+}
+
 /// Unique numeric id of a scope.
-#[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
 pub struct ScopeId(usize);
 
 impl From<ScopeId> for usize {
@@ -30,8 +38,14 @@ impl From<usize> for ScopeId {
     }
 }
 
+impl Debug for ScopeId {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ScopeId({})", self.0)
+    }
+}
+
 /// Unique numeric id of a binding.
-#[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
 pub struct BindingId(usize);
 
 impl From<BindingId> for usize {
@@ -43,5 +57,11 @@ impl From<BindingId> for usize {
 impl From<usize> for BindingId {
     fn from(input: usize) -> BindingId {
         BindingId(input)
+    }
+}
+
+impl Debug for BindingId {
+    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BindingId({})", self.0)
     }
 }
