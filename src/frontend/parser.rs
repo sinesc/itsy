@@ -185,12 +185,12 @@ named!(expression<Input, Expression>, ws!(alt!(
 
 named!(binding<Input, Statement>, map!(
     preceded!(ws!(tag!("let")), return_error!(
-        ErrorKind::Custom(ParseError::SyntaxLet as u32), ws!(tuple!(ident, opt!(preceded!(char!(':'), ident_path)), char!('='), expression, char!(';')))
+        ErrorKind::Custom(ParseError::SyntaxLet as u32), ws!(tuple!(ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
     )),
     |m| Statement::Binding(Binding {
         name        : *m.0,
         mutable     : false, // todo: mutable bindings
-        expr        : Some(m.3),
+        expr        : m.2,
         ty          : m.1.map(|t| Type::unknown(t)),
         type_id     : Unresolved::Unknown,
         binding_id  : None,
@@ -217,9 +217,9 @@ named!(structure<Input, Statement>, map!(ws!(tuple!(tag!("struct"), ident, char!
 // function
 
 named!(signature_argument<Input, Binding>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Binding {
-    name    : *tuple.1,
+    name        : *tuple.1,
     expr        : None,
-    mutable : tuple.0.is_some(),
+    mutable     : tuple.0.is_some(),
     ty          : Some(Type::unknown(tuple.3)),
     type_id     : Unresolved::Unknown,
     binding_id  : None,
