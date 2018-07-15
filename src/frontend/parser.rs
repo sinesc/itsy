@@ -4,7 +4,7 @@ use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
 use frontend::ast::*;
 use frontend::integer::Integer;
-use frontend::Unresolved;
+use frontend::TypeSlot;
 
 #[repr(u32)]
 pub enum ParseError {
@@ -38,7 +38,7 @@ named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expres
     Block {
         statements  : m.1,
         result      : m.2,
-        type_id     : Unresolved::Unknown,
+        type_id     : TypeSlot::Unresolved,
     }
 }));
 
@@ -49,7 +49,7 @@ named!(call_argument_list<Input, Vec<Expression>>, ws!(delimited!(char!('('), se
 named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Expression::Call(Call {
     path    : m.0,
     args    : m.1,
-    type_id : Unresolved::Unknown,
+    type_id : TypeSlot::Unresolved,
 })));
 
 // literal numerical (expression)
@@ -63,15 +63,15 @@ fn parse_numerical(n: Input) -> IResult<Input, Expression> {
 
     if n.contains(".") {
         if let Ok(float) = str::parse::<f64>(*n) {
-            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Float(float), type_id: Unresolved::Unknown })))
+            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Float(float), type_id: TypeSlot::Unresolved })))
         }
     } else if n.starts_with("-") {
         if let Ok(integer) = str::parse::<i64>(*n) {
-            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Signed(integer)), type_id: Unresolved::Unknown })))
+            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Signed(integer)), type_id: TypeSlot::Unresolved })))
         }
     } else {
         if let Ok(integer) = str::parse::<u64>(*n) {
-            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Unsigned(integer)), type_id: Unresolved::Unknown })))
+            return Ok((n, Expression::Literal(Literal { value : LiteralValue::Integer(Integer::Unsigned(integer)), type_id: TypeSlot::Unresolved })))
         }
     }
 
@@ -89,7 +89,7 @@ named!(assignment_operator<Input, BinaryOperator>, map!(alt!(tag!("=") | tag!("+
 named!(assignment<Input, Expression>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| {
     Expression::Assignment(Box::new(Assignment {
         op      : m.1,
-        left    : Variable { path: m.0, type_id: Unresolved::Unknown, binding_id: None },
+        left    : Variable { path: m.0, type_id: TypeSlot::Unresolved, binding_id: None },
         right   : m.2,
     }))
 }));
@@ -101,8 +101,8 @@ named!(parens<Input, Expression>, ws!(delimited!(char!('('), expression, char!('
 named!(prefix<Input, Expression>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)),|m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op      : UnaryOperator::prefix_from_string(*m.0),
-        exp     : Expression::Variable(Variable { path: m.1, type_id: Unresolved::Unknown, binding_id: None }),
-        type_id : Unresolved::Unknown
+        exp     : Expression::Variable(Variable { path: m.1, type_id: TypeSlot::Unresolved, binding_id: None }),
+        type_id : TypeSlot::Unresolved
     }))
 }));
 
@@ -113,7 +113,7 @@ named!(operand<Input, Expression>, ws!(alt!(
     | prefix
     | numerical
     | call
-    | map!(ident_path, |m| Expression::Variable(Variable { path: m, type_id: Unresolved::Unknown, binding_id: None }))
+    | map!(ident_path, |m| Expression::Variable(Variable { path: m, type_id: TypeSlot::Unresolved, binding_id: None }))
 )));
 
 named!(prec5<Input, Expression>, ws!(do_parse!(
@@ -121,7 +121,7 @@ named!(prec5<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), operand),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -131,7 +131,7 @@ named!(prec4<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("+") | tag!("-")), |o| BinaryOperator::from_string(*o)), prec5),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -141,7 +141,7 @@ named!(prec3<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| BinaryOperator::from_string(*o)), prec4),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -151,7 +151,7 @@ named!(prec2<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("!=") | tag!("==")), |o| BinaryOperator::from_string(*o)), prec3),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -161,7 +161,7 @@ named!(prec1<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(tag!("&&"), |o| BinaryOperator::from_string(*o)), prec2),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -171,7 +171,7 @@ named!(prec0<Input, Expression>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(tag!("||"), |o| BinaryOperator::from_string(*o)), prec1),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: Unresolved::Unknown }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: TypeSlot::Unresolved }))
     ) >>
     (res)
 )));
@@ -192,7 +192,7 @@ named!(binding<Input, Statement>, map!(
         mutable     : false, // todo: mutable bindings
         expr        : m.2,
         ty          : m.1.map(|t| Type::unknown(t)),
-        type_id     : Unresolved::Unknown,
+        type_id     : TypeSlot::Unresolved,
         binding_id  : None,
     })
 ));
@@ -211,7 +211,7 @@ named!(structure_items<Input, HashMap<&str, Type>>, map!(ws!(separated_list_comp
 named!(structure<Input, Statement>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), structure_items, char!('}'))), |tuple| Statement::Structure(Structure {
     name    : *tuple.1,
     items   : tuple.3,
-    type_id : Unresolved::Unknown,
+    type_id : TypeSlot::Unresolved,
 })));
 
 // function
@@ -221,7 +221,7 @@ named!(signature_argument<Input, Binding>, map!(ws!(tuple!(opt!(tag!("mut")), id
     expr        : None,
     mutable     : tuple.0.is_some(),
     ty          : Some(Type::unknown(tuple.3)),
-    type_id     : Unresolved::Unknown,
+    type_id     : TypeSlot::Unresolved,
     binding_id  : None,
 }));
 
@@ -243,7 +243,7 @@ named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| St
 // if
 
 named!(block_or_if<Input, Block>, ws!(alt!(
-    map!(if_block, |m| Block { statements: Vec::new(), result: Some(Expression::IfBlock(Box::new(m))), type_id: Unresolved::Unknown })
+    map!(if_block, |m| Block { statements: Vec::new(), result: Some(Expression::IfBlock(Box::new(m))), type_id: TypeSlot::Unresolved })
     | block
 )));
 
@@ -258,7 +258,7 @@ named!(if_block<Input, IfBlock>, map!(ws!(tuple!(tag!("if"), expression, block, 
 // TODO: simply accept "for ident in expression" and make .. an operator?
 
 named!(for_loop_range<Input, Expression>, map!(ws!(tuple!(expression, tag!(".."), expression)), |m| {
-    Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::Range, left: m.0, right: m.2, type_id: Unresolved::Unknown }))
+    Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::Range, left: m.0, right: m.2, type_id: TypeSlot::Unresolved }))
 }));
 
 named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
@@ -267,7 +267,7 @@ named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"),
         mutable     : true,
         expr        : None,
         ty          : None,
-        type_id     : Unresolved::Unknown,
+        type_id     : TypeSlot::Unresolved,
         binding_id  : None,
     },
     range: m.3,

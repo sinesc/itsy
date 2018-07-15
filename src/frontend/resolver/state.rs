@@ -1,5 +1,5 @@
 use util::{ScopeId, TypeId, BindingId};
-use frontend::Unresolved;
+use frontend::TypeSlot;
 use frontend::resolver::{scopes, primitives, ast};
 
 /// Internal state of the ResolvedProgram during type/binding resolution.
@@ -24,11 +24,11 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     /// Sets given type_id for the given unresolved type. Increases resolution counter if a change was made.
-    fn type_from_id(self: &mut Self, type_id: &mut Unresolved, new_type_id: TypeId) {
-        if type_id.is_unknown() {
-            *type_id = Unresolved::Resolved(new_type_id);
+    fn type_from_id(self: &mut Self, type_id: &mut TypeSlot, new_type_id: TypeId) {
+        if type_id.is_unresolved() {
+            *type_id = TypeSlot::TypeId(new_type_id);
             *self.counter += 1
-        } else if let Unresolved::Resolved(type_id) = type_id {
+        } else if let TypeSlot::TypeId(type_id) = type_id {
             if *type_id != new_type_id {
                 panic!("attempted to change already resolved type");
             }
@@ -36,9 +36,9 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     /// Sets given unresolved type to void.
-    fn type_from_void(self: &mut Self, type_id: &mut Unresolved) {
-        if type_id.is_unknown() {
-            *type_id = Unresolved::Void;
+    fn type_from_void(self: &mut Self, type_id: &mut TypeSlot) {
+        if type_id.is_unresolved() {
+            *type_id = TypeSlot::Void;
             *self.counter += 1
         } else if !type_id.is_void() {
             panic!("attempted to change already resolved type");
@@ -46,13 +46,13 @@ impl<'a, 'b> State<'a, 'b> {
     }
 
     /// Resolves and sets named type for the given unresolved type. Increases resolution counter if a change was made.
-    fn type_from_name(self: &mut Self, type_id: &mut Unresolved, new_type: &[&'a str]) {
-        if type_id.is_unknown() {
+    fn type_from_name(self: &mut Self, type_id: &mut TypeSlot, new_type: &[&'a str]) {
+        if type_id.is_unresolved() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) { // fixme: handle path segments
-                *type_id = Unresolved::Resolved(new_type_id);
+                *type_id = TypeSlot::TypeId(new_type_id);
                 *self.counter += 1
             }
-        } else if let Unresolved::Resolved(type_id) = type_id {
+        } else if let TypeSlot::TypeId(type_id) = type_id {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) {
                 if *type_id != new_type_id {
                     panic!("type resolution result changed, aka 'this should never happen'"); // todo: remove this whole else branch
@@ -122,7 +122,7 @@ impl<'a, 'b> State<'a, 'b> {
             if self.scopes.binding_id(self.scope_id, item.name).is_some() {
                 panic!("shadowing NYI"); // todo: support shadowing
             }
-            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, Unresolved::Unknown); // todo: a &mut would be nicer than the index
+            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, TypeSlot::Unresolved); // todo: a &mut would be nicer than the index
             item.binding_id = Some(binding_id);
             binding_id
         }
@@ -149,16 +149,16 @@ impl<'a, 'b> State<'a, 'b> {
             None => None,
         };
         // have explicit type and a resolved type for right hand side, check that they match
-        if let (Some(Unresolved::Resolved(lhs)), Some(Unresolved::Resolved(rhs))) = (lhs, rhs) {
+        if let (Some(TypeSlot::TypeId(lhs)), Some(TypeSlot::TypeId(rhs))) = (lhs, rhs) {
             if lhs != rhs && !self.primitives.is_valid_cast(rhs, lhs) {
                 panic!("invalid cast from {:?} to {:?}", lhs, rhs); // TODO: error handling
             }
         }
         // have explicit type and/or resolved expression
-        if let Some(Unresolved::Resolved(lhs)) = lhs {
+        if let Some(TypeSlot::TypeId(lhs)) = lhs {
             self.type_from_id(&mut item.type_id, lhs);
             self.bindingtype_from_id(binding_id, lhs);
-        } else if let Some(Unresolved::Resolved(rhs)) = rhs {
+        } else if let Some(TypeSlot::TypeId(rhs)) = rhs {
             self.type_from_id(&mut item.type_id, rhs);
             self.bindingtype_from_id(binding_id, rhs);
         }
@@ -182,7 +182,7 @@ impl<'a, 'b> State<'a, 'b> {
         // resolve the range type
         self.resolve_expression(&mut item.range);
         // set binding type to range type
-        if let Unresolved::Resolved(range) = item.range.get_type_id() {
+        if let TypeSlot::TypeId(range) = item.range.get_type_id() {
             self.type_from_id(&mut item.iter.type_id, range);
             self.bindingtype_from_id(binding_id, range);
         }
@@ -197,7 +197,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result);
-            if let Unresolved::Resolved(type_id) = result.get_type_id() {
+            if let TypeSlot::TypeId(type_id) = result.get_type_id() {
                 self.type_from_id(&mut item.type_id, type_id);
             }
         } else {
@@ -216,7 +216,7 @@ impl<'a, 'b> State<'a, 'b> {
         }
         // try to resolve type from binding
         if let Some(binding_id) = item.binding_id {
-            if let Unresolved::Resolved(binding_type_id) = self.scopes.binding_type(binding_id) {
+            if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
                 self.type_from_id(&mut item.type_id, binding_type_id);
             }
         }
@@ -260,7 +260,7 @@ impl<'a, 'b> State<'a, 'b> {
                     } else {
                         panic!("cannot cast between {:?} and {:?}", literal_a, literal_b);
                     }
-                } else if let (Unresolved::Resolved(left_type_id), Unresolved::Resolved(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
+                } else if let (TypeSlot::TypeId(left_type_id), TypeSlot::TypeId(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
                     // cast to common type or try to widen type
                     if let Some(type_id) = self.primitives.cast(left_type_id, right_type_id) {
                         self.type_from_id(&mut item.type_id, type_id);

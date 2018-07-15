@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use util::BindingId;
 use frontend::integer::Integer;
-use frontend::Unresolved;
+use frontend::TypeSlot;
 use std::fmt::{self, Debug};
 
 pub type Program<'a> = Vec<Statement<'a>>;
@@ -42,7 +42,7 @@ pub struct Binding<'a> {
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
     pub ty          : Option<Type<'a>>,
-    pub type_id     : Unresolved,
+    pub type_id     : TypeSlot,
     pub binding_id  : Option<BindingId>,
 }
 
@@ -64,14 +64,14 @@ pub struct ForLoop<'a> {
 pub struct Block<'a> {
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
-    pub type_id     : Unresolved,
+    pub type_id     : TypeSlot,
 }
 
 #[derive(Debug)]
 pub struct Structure<'a> {
     pub name    : &'a str,
     pub items   : HashMap<&'a str, Type<'a>>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 #[derive(Debug)]
@@ -90,7 +90,7 @@ pub struct Signature<'a> {
 #[derive(Debug)]
 pub struct Type<'a> {
     pub name    : IdentPath<'a>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 impl<'a> Type<'a> {
@@ -98,7 +98,7 @@ impl<'a> Type<'a> {
     pub fn unknown(name: IdentPath<'a>) -> Self {
         Type {
             name    : name,
-            type_id : Unresolved::Unknown,
+            type_id : TypeSlot::Unresolved,
         }
     }
 }
@@ -116,7 +116,7 @@ pub enum Expression<'a> {
 }
 
 impl<'a> Expression<'a> {
-    pub fn get_type_id(self: &Self) -> Unresolved {
+    pub fn get_type_id(self: &Self) -> TypeSlot {
         match self {
             Expression::Literal(literal)        => literal.type_id,
             Expression::Variable(variable)      => variable.type_id,
@@ -124,8 +124,8 @@ impl<'a> Expression<'a> {
             Expression::Assignment(assignment)  => assignment.left.type_id,
             Expression::BinaryOp(binary_op)     => binary_op.type_id,
             Expression::UnaryOp(unary_op)       => unary_op.type_id,
-            Expression::Block(block)            => block.result.as_ref().map_or(Unresolved::Void, |r| r.get_type_id()),
-            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(Unresolved::Void, |r| r.get_type_id()),
+            Expression::Block(block)            => block.result.as_ref().map_or(TypeSlot::Void, |r| r.get_type_id()),
+            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(TypeSlot::Void, |r| r.get_type_id()),
         }
     }
 }
@@ -133,7 +133,7 @@ impl<'a> Expression<'a> {
 #[derive(Debug)]
 pub struct Literal<'a> {
     pub value   : LiteralValue<'a>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 pub enum LiteralValue<'a> {
@@ -176,7 +176,7 @@ impl<'a> Debug for LiteralValue<'a> {
 #[derive(Debug)]
 pub struct Variable<'a> {
     pub path        : IdentPath<'a>,
-    pub type_id     : Unresolved,
+    pub type_id     : TypeSlot,
     pub binding_id  : Option<BindingId>,
 }
 
@@ -184,7 +184,7 @@ pub struct Variable<'a> {
 pub struct Call<'a> {
     pub path    : IdentPath<'a>,
     pub args    : Vec<Expression<'a>>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 #[derive(Debug)]
@@ -199,14 +199,14 @@ pub struct BinaryOp<'a> {
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
     pub op      : UnaryOperator,
     pub exp     : Expression<'a>,
-    pub type_id : Unresolved,
+    pub type_id : TypeSlot,
 }
 
 pub struct IdentPath<'a>(pub Vec<&'a str>);

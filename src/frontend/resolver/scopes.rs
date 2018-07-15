@@ -1,5 +1,5 @@
 use util::{TypeId, ScopeId, BindingId, Repository};
-use frontend::Unresolved;
+use frontend::TypeSlot;
 use bytecode::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
@@ -7,7 +7,7 @@ pub struct Scopes<'a> {
     /// Flat type data, lookup via TypeId or ScopeId and name
     types       : Repository<Type, TypeId, (ScopeId, &'a str)>,
     /// Flat binding data, lookup via TypeId or ScopeId and name
-    bindings    : Repository<Unresolved, BindingId, (ScopeId, &'a str)>,
+    bindings    : Repository<TypeSlot, BindingId, (ScopeId, &'a str)>,
     /// Current scope id, incremented when scopes are added
     current     : ScopeId,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -17,7 +17,7 @@ pub struct Scopes<'a> {
 impl<'a> Scopes<'a> {
 
     pub fn new() -> Self {
-        let root_id = (0).into();
+        let root_id = Self::root_id();
         Scopes {
             types       : Repository::new(),
             bindings    : Repository::new(),
@@ -37,7 +37,7 @@ impl<'a> Scopes<'a> {
     }
 
     /// Insert a binding into the given scope, returning a binding id. Its type may not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: Unresolved) -> BindingId {
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: TypeSlot) -> BindingId {
         self.bindings.insert((scope_id, name), type_id)
     }
 
@@ -62,12 +62,12 @@ impl<'a> Scopes<'a> {
     }
 
     /// Returns a mutable reference to the type of the given binding id.
-    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Unresolved {
+    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut TypeSlot {
         self.bindings.index_mut(binding_id)
     }
 
     /// Returns a copy of the type of the given binding id.
-    pub fn binding_type(self: &Self, binding_id: BindingId) -> Unresolved {
+    pub fn binding_type(self: &Self, binding_id: BindingId) -> TypeSlot {
         *self.bindings.index(binding_id)
     }
 

@@ -7,39 +7,39 @@ use util::TypeId;
 use std::fmt::{self, Debug};
 
 #[derive(Copy, Clone, PartialEq)]
-pub enum Unresolved {
-    Unknown,
+pub enum TypeSlot {
+    Unresolved,
     Void,
-    Resolved(TypeId)
+    TypeId(TypeId)
 }
 
-impl Unresolved {
-    pub fn is_unknown(self: &Self) -> bool {
+impl TypeSlot {
+    pub fn is_unresolved(self: &Self) -> bool {
         match self {
-            Unresolved::Unknown => true,
+            TypeSlot::Unresolved => true,
             _ => false,
         }
     }
     pub fn is_void(self: &Self) -> bool {
         match self {
-            Unresolved::Void => true,
+            TypeSlot::Void => true,
             _ => false,
         }
     }
-    pub fn is_resolved(self: &Self) -> bool {
+    pub fn is_type(self: &Self) -> bool {
         match self {
-            Unresolved::Resolved(_) => true,
+            TypeSlot::TypeId(_) => true,
             _ => false,
         }
     }
 }
 
-impl Debug for Unresolved {
+impl Debug for TypeSlot {
     fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Unresolved::Unknown => write!(f, "Unknown"),
-            Unresolved::Void => write!(f, "Void"),
-            Unresolved::Resolved(type_id) => write!(f, "Resolved({:?})", type_id),
+            TypeSlot::Unresolved => write!(f, "Unresolved"),
+            TypeSlot::Void => write!(f, "Void"),
+            TypeSlot::TypeId(type_id) => write!(f, "TypeId({:?})", type_id),
         }
     }
 }
