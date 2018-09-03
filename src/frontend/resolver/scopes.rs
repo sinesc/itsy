@@ -1,13 +1,14 @@
-use util::{TypeId, ScopeId, BindingId, Repository};
-use frontend::TypeSlot;
+use util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
 use bytecode::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
-    /// Flat type data, lookup via TypeId or ScopeId and name
+    /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types       : Repository<Type, TypeId, (ScopeId, &'a str)>,
-    /// Flat binding data, lookup via TypeId or ScopeId and name
+    /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings    : Repository<TypeSlot, BindingId, (ScopeId, &'a str)>,
+    /// Flat function data, lookup via FunctionId or ScopeId and name
+    functions   : Repository<(TypeSlot, Vec<TypeSlot>), FunctionId, (ScopeId, &'a str)>,
     /// Current scope id, incremented when scopes are added
     current     : ScopeId,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -21,6 +22,7 @@ impl<'a> Scopes<'a> {
         Scopes {
             types       : Repository::new(),
             bindings    : Repository::new(),
+            functions   : Repository::new(),
             current     : root_id,
             parent_map  : vec![ root_id ],
         }
@@ -35,8 +37,44 @@ impl<'a> Scopes<'a> {
         self.parent_map.push(parent);
         index.into()
     }
+}
 
-    /// Insert a binding into the given scope, returning a binding id. Its type may not be resolved yet.
+impl<'a> Scopes<'a> {
+
+    /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &'a str, result_type_id: TypeSlot, arg_type_ids: Vec<TypeSlot>) -> FunctionId {
+        self.functions.insert((scope_id, name), (result_type_id, arg_type_ids))
+    }
+
+    /// Returns the id of the named function originating in exactly this scope.
+    pub fn function_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<FunctionId> {
+        self.functions.index_of(&(scope_id, name))
+    }
+
+    /// Finds the id of the named function within the scope or its parent scopes.
+    pub fn lookup_function_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<FunctionId> {
+        if let Some(index) = self.functions.index_of(&(scope_id, name)) {
+            Some(index)
+        } else {
+            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
+            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
+            if parent_scope_id != scope_id {
+                self.lookup_function_id(parent_scope_id, name)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Returns the signature of the given function id.
+    pub fn function_type(self: &Self, function_id: FunctionId) -> &(TypeSlot, Vec<TypeSlot>) {
+        self.functions.index(function_id)
+    }
+}
+
+impl<'a> Scopes<'a> {
+
+    /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
     pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: TypeSlot) -> BindingId {
         self.bindings.insert((scope_id, name), type_id)
     }
@@ -70,6 +108,9 @@ impl<'a> Scopes<'a> {
     pub fn binding_type(self: &Self, binding_id: BindingId) -> TypeSlot {
         *self.bindings.index(binding_id)
     }
+}
+
+impl<'a> Scopes<'a> {
 
     /// Insert a type into the given scope, returning a type id.
     pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type) -> TypeId {

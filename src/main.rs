@@ -1,12 +1,14 @@
+//! Itsy, a tiny language for embedded use.
+
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
 #[macro_use]
 extern crate nom;
 
-mod util;
-mod frontend;
-mod bytecode;
+pub mod util;
+pub mod frontend;
+pub mod bytecode;
 
 fn main() {
 
@@ -52,12 +54,16 @@ fn main() {
         "fn hello(name: u8, mut greeting: u16) -> u8 { let x = 1; greeting }",
         "let x: u16; { x }",
         "fn hello(greeting: u16) { greeting }",
+        "fn print(value: u32) -> u32 { value }
+        let x = 3.14156;
+        let y: f64 = 2.1476;
+        print(x+y);"
     ];
 
     {
         use nom::types::CompleteStr as Input;
-        use frontend::parser::parse;
-        use frontend::resolver::resolve;
+        use frontend::parse;
+        use frontend::resolve;
         /*
         println!("Succeeded:\n----------");
 
@@ -91,8 +97,10 @@ fn main() {
             println!("Remaining: {:?}", (final_test.0).0);
 
             let ready = resolve(final_test.1);
+            println!("{:#?}", ready.ast);
 
-            println!("{:#?}", ready);
+            //let code = bytecode::gen::compile(ready);
+            //println!("{:#?}", code);
         }
     }
 }

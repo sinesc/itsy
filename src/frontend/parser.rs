@@ -1,11 +1,13 @@
+//! Nom parsers used to generate the Itsy AST.
+
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::{IResult, ErrorKind, is_alphabetic, is_alphanumeric, digit0, digit1};
 use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
+use util::{Integer, TypeSlot};
 use frontend::ast::*;
-use frontend::integer::Integer;
-use frontend::TypeSlot;
 
+/// Represents the various possible parser errors.
 #[repr(u32)]
 pub enum ParseError {
     SyntaxLet = 1,
@@ -47,9 +49,10 @@ named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expres
 named!(call_argument_list<Input, Vec<Expression>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
 
 named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Expression::Call(Call {
-    path    : m.0,
-    args    : m.1,
-    type_id : TypeSlot::Unresolved,
+    path        : m.0,
+    args        : m.1,
+    type_id     : TypeSlot::Unresolved,
+    function_id : None,
 })));
 
 // literal numerical (expression)
@@ -236,8 +239,9 @@ named!(signature<Input, Signature>, map!(ws!(tuple!(tag!("fn"), ident, signature
 }));
 
 named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
-    sig: func.0,
-    block: func.1,
+    sig         : func.0,
+    block       : func.1,
+    function_id : None,
 })));
 
 // if
@@ -248,9 +252,9 @@ named!(block_or_if<Input, Block>, ws!(alt!(
 )));
 
 named!(if_block<Input, IfBlock>, map!(ws!(tuple!(tag!("if"), expression, block, opt!(preceded!(tag!("else"), block_or_if)))), |m| IfBlock {
-    cond: m.1,
-    if_block: m.2,
-    else_block: m.3,
+    cond        : m.1,
+    if_block    : m.2,
+    else_block  : m.3,
 }));
 
 // for
@@ -288,4 +292,9 @@ named!(statement<Input, Statement>, alt!(
 
 // root
 
-named!(pub parse<Input, Program>, ws!(many0!(statement)));
+named!(program<Input, Program>, ws!(many0!(statement)));
+
+/// Parses an Itsy source file into a program AST structure.
+pub fn parse(i: Input) -> IResult<Input, Program, u32> {
+    program(i)
+}

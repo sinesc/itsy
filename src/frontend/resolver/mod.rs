@@ -1,19 +1,22 @@
+//! AST type checker and resolver.
+
 mod scopes;
 mod state;
 mod primitives;
 
+use util::{Integer, Signed, Unsigned};
 use frontend::ast;
-use frontend::integer::{Integer, Signed, Unsigned};
 use frontend::resolver::primitives::IntegerRange;
 use bytecode::Type;
 
+/// Wrapper containing an AST structure with all types resolved and a map of those types.
 #[derive(Debug)]
 pub struct ResolvedProgram<'a> {
-    ast     : ast::Program<'a>,
-    types   : Vec<Type>,
+    pub ast     : ast::Program<'a>,
+    pub types   : Vec<Type>,
 }
 
-/// Resolves types within the given program
+/// Resolves types within the given program AST structure.
 pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
 
     use std::{u8, u16, u32, u64, i8, i16, i32, i64};

@@ -1,5 +1,4 @@
-use util::{ScopeId, TypeId, BindingId};
-use frontend::TypeSlot;
+use util::{ScopeId, TypeId, BindingId, TypeSlot};
 use frontend::resolver::{scopes, primitives, ast};
 
 /// Internal state of the ResolvedProgram during type/binding resolution.
@@ -94,6 +93,11 @@ impl<'a, 'b> State<'a, 'b> {
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
         self.resolve_signature(&mut item.sig);
         self.resolve_block(&mut item.block);
+        if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
+            let result = item.sig.ret.as_ref().map_or(TypeSlot::Void, |ret| ret.type_id);
+            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id).collect();
+            item.function_id = Some(self.scopes.insert_function(self.scope_id, item.sig.name, result, args));
+        }
     }
 
     /// Resolves a function signature.
@@ -224,7 +228,21 @@ impl<'a, 'b> State<'a, 'b> {
 
     /// Resolves an occurance of a function call.
     fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>) {
+        // resolve function
+        if item.function_id.is_none() {
+            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
+        }
+        // resolve arguments
+        for arg in item.args.iter_mut() {
+            self.resolve_expression(arg);
+        }
+        if let Some(function_id) = item.function_id {
+            // compare given arguments with defined arguments
+            // todo: implement
 
+            // resolve return type
+            item.type_id = self.scopes.function_type(function_id).0;
+        }
     }
 
     /// Resolves an assignment expression.
@@ -297,9 +315,12 @@ impl<'a, 'b> State<'a, 'b> {
                 self.type_from_id(&mut item.type_id, type_id);
             },
             L::Float(ref float) => {
-
+                let type_id = self.primitives.float[0];
+                self.type_from_id(&mut item.type_id, type_id);
             },
-            L::String(ref string) => { },
+            L::String(ref string) => {
+                // todo: implement
+            },
         };
     }
 }

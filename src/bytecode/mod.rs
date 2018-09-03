@@ -23,3 +23,30 @@ pub enum Type {
     Enum(Enum),
     Struct(Struct),
 }
+
+/*
+#[allow(non_camel_case_types)]
+pub enum Signed {
+    u16(u16),
+    u32(u32),
+    u64(u64),
+}
+
+#[allow(non_camel_case_types)]
+pub enum Unsigned {
+    i8(i8),
+    i16(i16),
+    i32(i32),
+    i64(i64),
+}
+
+#[allow(non_camel_case_types)]
+pub enum Float {
+    f32(f32),
+    f64(f64),
+}
+*/
+
+pub enum ByteOp<'a> {
+    CreateFrame(&'a [u8])
+}

@@ -1,7 +1,12 @@
+//! A type that can represent a signed or unsigned integer value.
+
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
 
+/// Signed integer value.
 pub type Signed = i64;
+
+/// Unsigned integer value.
 pub type Unsigned = u64;
 
 /// A type supporting signed and unsigned integral values.

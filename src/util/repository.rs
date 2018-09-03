@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 use std::slice::IterMut;
 use std::iter::FromIterator;
 
-/// Stores items by name and index.
+/// A datastructure that stores items by name and index.
 pub struct Repository<V, I = usize, K = String> {
     map: HashMap<K, I>,
     data: Vec<V>,

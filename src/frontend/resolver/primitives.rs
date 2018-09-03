@@ -1,6 +1,5 @@
-use util::TypeId;
+use util::{TypeId, Integer};
 use frontend::ast;
-use frontend::integer::Integer;
 
 pub struct IntegerRange {
     pub type_id: TypeId,

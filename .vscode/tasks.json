@@ -107,8 +107,8 @@
             "args": [
                 "rustdoc",
                 "--open",
-                "--",
-                "--document-private-items",
+                //"--",
+                //"--document-private-items",
             ],
             "problemMatcher": []
         },
