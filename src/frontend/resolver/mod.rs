@@ -7,7 +7,32 @@ mod primitives;
 use util::{Integer, Signed, Unsigned};
 use frontend::ast;
 use frontend::resolver::primitives::IntegerRange;
-use bytecode::Type;
+
+use std::collections::HashMap;
+
+#[derive(Debug)]
+pub struct Enum {
+    //repr: u8,
+    keys: HashMap<usize, u64>
+}
+
+#[derive(Debug)]
+pub struct Struct {
+    fields: HashMap<usize, Type>
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum Type {
+    void,
+    u8, u16, u32, u64,
+    i8, i16, i32, i64,
+    f32, f64,
+    bool,
+    String,
+    Enum(Enum),
+    Struct(Struct),
+}
 
 /// Wrapper containing an AST structure with all types resolved and a map of those types.
 #[derive(Debug)]
@@ -25,6 +50,8 @@ pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
     let root_scope_id = scopes::Scopes::root_id();
 
     // insert primitive types into root scope
+    // todo: primitives should be statically defined. scopes should than be filled with looked up values of primitive ids, not
+    //  the other way around like here
 
     let primitives = primitives::Primitives {
         bool: scopes.insert_type(root_scope_id, "bool", Type::bool),

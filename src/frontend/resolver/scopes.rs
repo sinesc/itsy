@@ -1,5 +1,5 @@
 use util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
-use bytecode::Type;
+use super::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {

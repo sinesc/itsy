@@ -1,6 +1,8 @@
 use util::{TypeId, Integer};
 use frontend::ast;
 
+// todo: see fn resolve(), primitives should be statically defined here with functions to look up their ids.
+
 pub struct IntegerRange {
     pub type_id: TypeId,
     pub min: Integer,

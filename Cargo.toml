@@ -5,3 +5,4 @@ authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 
 [dependencies]
 nom = "4.0"
+byteorder = "1.2.6"

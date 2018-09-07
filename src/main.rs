@@ -5,6 +5,7 @@
 
 #[macro_use]
 extern crate nom;
+extern crate byteorder;
 
 pub mod util;
 pub mod frontend;
@@ -57,8 +58,17 @@ fn main() {
         "fn print(value: u32) -> u32 { value }
         let x = 3.14156;
         let y: f64 = 2.1476;
-        print(x+y);"
+        print(x+y);",
+        "let a = 5;
+        let b = -7;
+        let c = -357;
+        let d = a + b + c;",
     ];
+
+    let mut tmp = Vec::<u8>::new();
+    bytecode::op_const::write(&mut tmp, 6, 258, 1.23);
+    println!("{:?}", tmp);
+    return;
 
     {
         use nom::types::CompleteStr as Input;
