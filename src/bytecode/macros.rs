@@ -1,20 +1,7 @@
 
-macro_rules! opcode {
-    ($name:tt, $($op_name:ident : $op_type:tt),*) => (
-        #[allow(non_upper_case_globals, non_snake_case, unused_imports)]
-        pub mod $name {
-            use std::io::Cursor;
-            use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-            pub fn read(reader: &mut Cursor<Vec<u8>>) -> ( $($op_type),* ) {
-                (
-                    $( opcode!(read $op_type reader) ),*
-                )
-            }
-            pub fn write(writer: &mut Vec<u8>, $($op_name: $op_type),* ) {
-                $( opcode!(write $op_type $op_name writer) );*
-            }
-        }
-    );
+macro_rules! opcodes {
+
+    // wrappers for readers and writers
     (read u8  $from:ident) => ( $from.read_u8().unwrap() );
     (read u16 $from:ident) => ( $from.read_u16::<LittleEndian>().unwrap() );
     (read u32 $from:ident) => ( $from.read_u32::<LittleEndian>().unwrap() );
@@ -35,4 +22,58 @@ macro_rules! opcode {
     (write i64 $value:ident $to:ident) => ( $to.write_i64::<LittleEndian>($value).unwrap() );
     (write f32 $value:ident $to:ident) => ( $to.write_f32::<LittleEndian>($value).unwrap() );
     (write f64 $value:ident $to:ident) => ( $to.write_f64::<LittleEndian>($value).unwrap() );
+
+    ( $( $( #[ $attr:meta ] )* fn $name:tt = $id:tt ( $vm:ident : & mut VM $(, $op_name:ident : $op_type:tt)* ) $code:block )+ ) => {
+
+        // implement opcode argument reader and opcode writer
+        $(
+            #[allow(non_upper_case_globals, non_snake_case, unused_imports)]
+            mod $name {
+                #[inline(always)]
+                pub(in super) fn read_args(reader: &mut ::std::io::Cursor<Vec<u8>>) -> ( (), (), $($op_type),* ) {
+                    use byteorder::{LittleEndian, ReadBytesExt};
+                    (
+                        // leading () to avoid cases where we have 0 or 1 arguments which breaks the let (...) = read().
+                        (), (), $( opcodes!(read $op_type reader) ),*
+                    )
+                }
+            }
+        )+
+
+        /// Bytecode-write methods.
+        pub mod write {
+            $(
+                $( #[ $attr ] )*
+                #[allow(unused_imports)]
+                pub fn $name(writer: &mut Vec<u8>, $($op_name: $op_type),* ) {
+                    use byteorder::{LittleEndian, WriteBytesExt};
+                    writer.write_u8($id).unwrap();
+                    $( opcodes!(write $op_type $op_name writer) );*
+                }
+            )+
+        }
+
+        /// Wraps the method for executing the bytecode.
+        $(
+            $( #[ $attr ] )*
+            #[inline(always)]
+            fn $name ( $vm: &mut ::bytecode::VM ) {
+                let ( _, _, $($op_name),* ) = $name::read_args(&mut $vm.code);
+                $code
+            }
+        )+
+
+        /// Execute the next bytecode from the VMs code buffer.
+        pub fn exec(vm: &mut ::bytecode::VM) {
+            use byteorder::ReadBytesExt;
+            let instruction = vm.code.read_u8().unwrap();
+            match instruction {
+                $(
+                    $id => $name(vm)
+                ),+,
+                e => panic!("Encountered undefined instruction {:?}.", e)
+            }
+        }
+    }
 }
+

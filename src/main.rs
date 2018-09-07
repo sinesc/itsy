@@ -65,11 +65,17 @@ fn main() {
         let d = a + b + c;",
     ];
 
-    let mut tmp = Vec::<u8>::new();
-    bytecode::op_const::write(&mut tmp, 6, 258, 1.23);
-    println!("{:?}", tmp);
-    return;
 
+    let mut tmp = Vec::<u8>::new();
+    bytecode::write::load_const(&mut tmp, 6);
+    bytecode::write::load_const_long(&mut tmp, 79010);
+
+    let mut vm = bytecode::VM::new(tmp);
+    bytecode::exec(&mut vm);
+    bytecode::exec(&mut vm);
+
+
+    return;
     {
         use nom::types::CompleteStr as Input;
         use frontend::parse;
