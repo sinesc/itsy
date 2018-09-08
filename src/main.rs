@@ -66,22 +66,29 @@ fn main() {
     ];
 
     let mut writer = bytecode::Writer::new();
-    writer.load_const(6);
-    writer.load_const_long(79010);
+    writer.load_const(0);
+    writer.negate();
+    writer.print();
+    writer.load_const(1);
+    writer.add();
+    writer.print();
+    writer.exit();
+
 
     let mut vm = bytecode::VM::new(writer.code);
-
     println!("{:}", vm.disassemble());
 
-    vm.exec();
-    vm.exec();
+    vm.push_const(3);
+    vm.push_const(7);
+    vm.push_const(2);
+    vm.run();
 
-    return;
+    /*
     {
         use nom::types::CompleteStr as Input;
         use frontend::parse;
         use frontend::resolve;
-        /*
+
         println!("Succeeded:\n----------");
 
         for test in tests.iter() {
@@ -91,7 +98,7 @@ fn main() {
                 }
             }
         }
-        */
+
         println!("\nErrors:\n-------");
 
         for test in tests.iter() {
@@ -120,4 +127,5 @@ fn main() {
             //println!("{:#?}", code);
         }
     }
+    */
 }

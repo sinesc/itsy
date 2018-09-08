@@ -26,7 +26,7 @@ macro_rules! opcodes {
     // main definition block
     (
         $( $( #[ $attr:meta ] )*
-        fn $name:tt = $id:tt ( $vm:ident : & mut VM $(, $op_name:ident : $op_type:tt)* ) $code:block )+
+        fn $name:tt = $id:tt ( $vm:ident : & mut Self $(, $op_name:ident : $op_type:tt)* ) $code:block )+
     ) => {
 
         // implement opcode argument reader and opcode writer

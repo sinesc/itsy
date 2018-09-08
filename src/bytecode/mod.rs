@@ -12,19 +12,33 @@ pub use self::writer::Writer;
 
 opcodes!{
 
+    /// Load constant from constant pool onto stack.
+    fn load_const=1(vm: &mut Self, const_id: u8) {
+        let tmp = vm.consts[const_id as usize];
+        vm.stack.push(tmp);
+    }
+
+    /// Negate current value on stack.
+    fn negate=2(vm: &mut Self) {
+        let tmp = vm.stack.pop().unwrap();
+        vm.stack.push(-tmp);
+    }
+
+    fn add=3(vm: &mut Self) {
+        let a = vm.stack.pop().unwrap();
+        let b = vm.stack.pop().unwrap();
+        vm.stack.push(a + b);
+    }
+
+    /// Print current value on stack.
+    fn print=4(vm: &mut Self) {
+        let tmp = vm.stack.last().unwrap();
+        println!("print: {:?}", tmp);
+    }
+
     /// Terminate program execution.
-    fn exit=0(vm: &mut VM) {
-        println!("exit");
-    }
-
-    /// Load constant from constant pool.
-    fn load_const=1(vm: &mut VM, const_id: u8) {
-        println!("load_const {:?}", const_id);
-        println!("vm {:?}", vm);
-    }
-
-    /// Load constant from long constant pool.
-    fn load_const_long=2(vm: &mut VM, const_id: u32) {
-        println!("load_const_long{:?}", const_id);
+    fn exit=0(vm: &mut Self) {
+        vm.exit = true;
+        println!("exiting");
     }
 }
