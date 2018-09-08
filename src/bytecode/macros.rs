@@ -25,9 +25,20 @@ macro_rules! opcodes {
 
     // main definition block
     (
-        $( $( #[ $attr:meta ] )*
-        fn $name:tt = $id:tt ( $vm:ident : & mut Self $(, $op_name:ident : $op_type:tt)* ) $code:block )+
+        $(
+            $( #[ $attr:meta ] )*
+            fn $name:tt $( = $id:tt)* ( $vm:ident : & mut Self $(, $op_name:ident : $op_type:tt)* ) $code:block
+        )+
     ) => {
+
+        // internally used to get incrementing bytecode ids for each bytecode
+        #[allow(non_camel_case_types)]
+        #[repr(u8)]
+        enum bytecode {
+            $(
+                $name $(= $id)*
+            ),+
+        }
 
         // implement opcode argument reader and opcode writer
         $(
@@ -52,7 +63,7 @@ macro_rules! opcodes {
                 pub fn $name(self: &mut Self, $($op_name: $op_type),* ) {
                     use byteorder::{LittleEndian, WriteBytesExt};
                     let writer = &mut self.code;
-                    writer.write_u8($id).unwrap();
+                    writer.write_u8(unsafe { ::std::mem::transmute(bytecode::$name) }).unwrap();
                     $( opcodes!(write $op_type $op_name writer) );*
                 }
             )+
@@ -71,12 +82,14 @@ macro_rules! opcodes {
         impl ::bytecode::VM {
 
             /// Formats the given VMs bytecode data as human readable output.
+            #[allow(unused_imports)]
+            #[allow(unreachable_patterns)]
             fn fmt_instruction(code: &mut ::std::io::Cursor<&Vec<u8>>, f: &mut ::std::fmt::Formatter) -> Option<::std::fmt::Result> { // todo: no
                 use byteorder::{LittleEndian, ReadBytesExt};
                 if let Ok(instruction) = code.read_u8() {
-                    match instruction {
+                    match unsafe { ::std::mem::transmute(instruction) } {
                         $(
-                            $id => {
+                            bytecode::$name => {
                                 // todo: figure out sane error conversion
                                 let mut error_wrapper = || {
                                     write!(f, "{:?} ", code.position())?;
@@ -88,7 +101,7 @@ macro_rules! opcodes {
                                 Some(error_wrapper())
                             }
                         ),+,
-                        e => panic!("Encountered undefined instruction {:?}.", e)
+                        _ => panic!("Encountered undefined instruction {:?}.", instruction)
                     }
                 } else {
                     None
@@ -96,14 +109,15 @@ macro_rules! opcodes {
             }
 
             /// Execute the next bytecode from the VMs code buffer.
+            #[allow(unreachable_patterns)]
             pub fn exec(self: &mut Self) {
                 use byteorder::ReadBytesExt;
                 let instruction = self.code.read_u8().unwrap();
-                match instruction {
+                match unsafe { ::std::mem::transmute(instruction) } {
                     $(
-                        $id => $name(self)
+                        bytecode::$name => $name(self)
                     ),+,
-                    e => panic!("Encountered undefined instruction {:?}.", e)
+                    _ => panic!("Encountered undefined instruction {:?}.", instruction)
                 }
             }
         }
