@@ -71,9 +71,11 @@ fn main() {
     bytecode::write::load_const_long(&mut tmp, 79010);
 
     let mut vm = bytecode::VM::new(tmp);
-    bytecode::exec(&mut vm);
-    bytecode::exec(&mut vm);
 
+    println!("{:}", vm.disassemble());
+
+    vm.exec();
+    vm.exec();
 
     return;
     {

@@ -23,7 +23,11 @@ macro_rules! opcodes {
     (write f32 $value:ident $to:ident) => ( $to.write_f32::<LittleEndian>($value).unwrap() );
     (write f64 $value:ident $to:ident) => ( $to.write_f64::<LittleEndian>($value).unwrap() );
 
-    ( $( $( #[ $attr:meta ] )* fn $name:tt = $id:tt ( $vm:ident : & mut VM $(, $op_name:ident : $op_type:tt)* ) $code:block )+ ) => {
+    // main definition block
+    (
+        $( $( #[ $attr:meta ] )*
+        fn $name:tt = $id:tt ( $vm:ident : & mut VM $(, $op_name:ident : $op_type:tt)* ) $code:block )+
+    ) => {
 
         // implement opcode argument reader and opcode writer
         $(
@@ -63,15 +67,43 @@ macro_rules! opcodes {
             }
         )+
 
-        /// Execute the next bytecode from the VMs code buffer.
-        pub fn exec(vm: &mut ::bytecode::VM) {
-            use byteorder::ReadBytesExt;
-            let instruction = vm.code.read_u8().unwrap();
-            match instruction {
-                $(
-                    $id => $name(vm)
-                ),+,
-                e => panic!("Encountered undefined instruction {:?}.", e)
+        impl ::bytecode::VM {
+
+            /// Formats the given VMs bytecode data as human readable output.
+            fn fmt_instruction(code: &mut ::std::io::Cursor<&Vec<u8>>, f: &mut ::std::fmt::Formatter) -> Option<::std::fmt::Result> { // todo: no
+                use byteorder::{LittleEndian, ReadBytesExt};
+                if let Ok(instruction) = code.read_u8() {
+                    match instruction {
+                        $(
+                            $id => {
+                                // todo: figure out sane error conversion
+                                let mut error_wrapper = || {
+                                    write!(f, "{:?} ", code.position())?;
+                                    write!(f, stringify!($name))?;
+                                    write!(f, " ")?;
+                                    $( write!(f, "{:?} ", opcodes!(read $op_type code) )?; )*
+                                    write!(f, "\n")
+                                };
+                                Some(error_wrapper())
+                            }
+                        ),+,
+                        e => panic!("Encountered undefined instruction {:?}.", e)
+                    }
+                } else {
+                    None
+                }
+            }
+
+            /// Execute the next bytecode from the VMs code buffer.
+            pub fn exec(self: &mut Self) {
+                use byteorder::ReadBytesExt;
+                let instruction = self.code.read_u8().unwrap();
+                match instruction {
+                    $(
+                        $id => $name(self)
+                    ),+,
+                    e => panic!("Encountered undefined instruction {:?}.", e)
+                }
             }
         }
     }
