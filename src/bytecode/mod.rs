@@ -2,10 +2,13 @@
 
 pub mod gen;
 mod vm;
+mod writer;
+
 #[macro_use]
 mod macros;
 
 pub use self::vm::VM;
+pub use self::writer::Writer;
 
 opcodes!{
 

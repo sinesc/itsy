@@ -1,16 +1,14 @@
 use std::io::Cursor;
 use std::fmt;
 
-use bytecode;
-
 /// A virtual machine for running itsy bytecode.
 #[derive(Debug)]
 pub struct VM {
-    pub code: Cursor<Vec<u8>>,
+    pub(crate) code: Cursor<Vec<u8>>,
 }
 
 impl VM {
-    /// Create a new instance.
+    /// Create a new VM instance.
     pub fn new(data: Vec<u8>) -> VM {
         VM { code: Cursor::new(data) }
     }

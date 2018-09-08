@@ -65,12 +65,11 @@ fn main() {
         let d = a + b + c;",
     ];
 
+    let mut writer = bytecode::Writer::new();
+    writer.load_const(6);
+    writer.load_const_long(79010);
 
-    let mut tmp = Vec::<u8>::new();
-    bytecode::write::load_const(&mut tmp, 6);
-    bytecode::write::load_const_long(&mut tmp, 79010);
-
-    let mut vm = bytecode::VM::new(tmp);
+    let mut vm = bytecode::VM::new(writer.code);
 
     println!("{:}", vm.disassemble());
 

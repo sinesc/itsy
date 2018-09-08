@@ -45,12 +45,13 @@ macro_rules! opcodes {
         )+
 
         /// Bytecode-write methods.
-        pub mod write {
+        impl ::bytecode::Writer {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
-                pub fn $name(writer: &mut Vec<u8>, $($op_name: $op_type),* ) {
+                pub fn $name(self: &mut Self, $($op_name: $op_type),* ) {
                     use byteorder::{LittleEndian, WriteBytesExt};
+                    let writer = &mut self.code;
                     writer.write_u8($id).unwrap();
                     $( opcodes!(write $op_type $op_name writer) );*
                 }
