@@ -1,5 +1,4 @@
-use std::io::Cursor;
-
+/// Current state of the vm, checked after each instruction.
 #[derive(Debug, PartialEq)]
 pub enum VMState {
     Continue,
@@ -11,37 +10,40 @@ pub enum VMState {
 /// A virtual machine for running itsy bytecode.
 #[derive(Debug)]
 pub struct VM {
-    pub(crate) code     : Cursor<Vec<u8>>,
+    pub(crate) code     : Vec<u8>,
     pub(crate) consts   : Vec<i32>,
     pub(crate) stack    : Vec<i32>, // todo: i32 placeholder
     pub(crate) fp       : usize,
+    pub(crate) pc       : usize,
+    pub(crate) reg_cond : bool,
     pub(crate) mem      : Vec<i32>,
     pub(crate) state    : VMState,
-    start               : u32,
+    start               : usize,
 }
 
 impl VM {
     /// Create a new VM instance.
-    pub fn new(data: Vec<u8>, start: u32) -> VM {
-        let mut cursor = Cursor::new(data);
-        cursor.set_position(start as u64);
+    pub fn new(data: Vec<u8>, start: u32) -> Self {
         VM {
-            code    : cursor,
-            consts  : Vec::with_capacity(256),
-            stack   : Vec::with_capacity(256),
-            fp      : 0,
-            mem     : Vec::with_capacity(256),
-            state   : VMState::Continue,
-            start   : start,
+            code        : data,
+            consts      : Vec::with_capacity(256),
+            stack       : Vec::with_capacity(256),
+            fp          : 0,
+            pc          : start as usize,
+            reg_cond    : false,
+            mem         : Vec::with_capacity(256),
+            state       : VMState::Continue,
+            start       : start as usize,
         }
     }
 
     /// Resets the VM, keeping only code and constants.
     pub fn reset(self: &mut Self) {
-        self.code.set_position(self.start as u64);
         self.stack.truncate(0);
         self.mem.truncate(0);
         self.fp = 0;
+        self.pc = self.start;
+        self.reg_cond = false;
         self.state = VMState::Continue;
     }
 
@@ -53,22 +55,23 @@ impl VM {
     }
 
     // Disassembles the bytecode and returns it as a string.
-    pub fn dump_code(self: &Self) -> String {
+    pub fn dump_code(self: &mut Self) -> String { // todo: should not have to require mut
+        let pc = self.pc;
         let mut result = "".to_string();
-        let mut cursor = Cursor::new(self.code.get_ref());
-        while let Some(instruction) = Self::format_instruction(&mut cursor) {
+        while let Some(instruction) = self.format_instruction() {
             result.push_str(&instruction);
             result.push_str("\n");
         }
+        self.pc = pc;
         return result;
     }
 
     // Disassembles the current bytecode instruction and returns it as a string.
-    pub fn dump_instruction(self: &Self) -> Option<String> {
-        // todo: this is a pretty lame to way to keep cursor position
-        let mut code = ::std::io::Cursor::new(self.code.get_ref());
-        code.set_position(self.code.position());
-        Self::format_instruction(&mut code)
+    pub fn dump_instruction(self: &mut Self) -> Option<String> {
+        let pc = self.pc;
+        let result = self.format_instruction();
+        self.pc = pc;
+        result
     }
 
     // Returns the current stack as a string.
@@ -86,5 +89,22 @@ impl VM {
         while self.state == VMState::Continue {
             self.exec()
         }
+    }
+}
+
+use std::io;
+use std::io::Read;
+
+impl Read for VM {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = Read::read(&mut &self.code[self.pc..], buf)?;
+        self.pc += n;
+        Ok(n)
+    }
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        let n = buf.len();
+        Read::read_exact(&mut &self.code[self.pc..], buf)?;
+        self.pc += n;
+        Ok(())
     }
 }

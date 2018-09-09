@@ -65,7 +65,7 @@ impl<'a, 'b> State<'a, 'b> {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function),
-            S::Structure(structure)     => { }, // todo: handle structures
+            S::Structure(_structure)     => { }, // todo: handle structures
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block),
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
@@ -258,9 +258,11 @@ impl<'a, 'b> State<'a, 'b> {
         use frontend::ast::BinaryOperator as O;
         use frontend::ast::Expression as E;
 
+        /*
         if let (E::Literal(ast::Literal { value: value_a, .. }), E::Literal(ast::Literal { value: value_b, .. })) = (&item.left, &item.right) {
             // todo: both sides are const, could compute here
         }
+        */
 
         self.resolve_expression(&mut item.left);
         self.resolve_expression(&mut item.right);
@@ -314,11 +316,12 @@ impl<'a, 'b> State<'a, 'b> {
                 let type_id = self.primitives.integer_type_id(*v).unwrap();
                 self.type_from_id(&mut item.type_id, type_id);
             },
-            L::Float(ref float) => {
+            L::Float(_) => {
+                // todo: pick correct float type
                 let type_id = self.primitives.float[0];
                 self.type_from_id(&mut item.type_id, type_id);
             },
-            L::String(ref string) => {
+            L::String(_) => {
                 // todo: implement
             },
         };

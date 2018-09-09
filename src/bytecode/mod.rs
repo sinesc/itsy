@@ -51,13 +51,13 @@ opcodes!{
     /// Function call. Saves state and sets programm counter to given addr. Expects
     /// callee arguments on the stack and number of arguments as num_args.
     fn call(vm: &mut Self, addr: u32, num_args: u8) {
-        let next_pc = vm.code.position();
+        let next_pc = vm.pc;
         let fp = vm.fp;
         vm.stack.push(num_args as i32);     // save number of arguments
         vm.stack.push(fp as i32);           // save frame pointer
         vm.stack.push(next_pc as i32);      // save program counter as it would be after this instruction
         vm.fp = vm.stack.len();             // set new frame pointer
-        vm.code.set_position(addr as u64);  // set new program counter
+        vm.pc = addr as usize;              // set new program counter
     }
 
     /// Function return. Restores state, removes arguments left on stack by caller and
@@ -78,7 +78,7 @@ opcodes!{
 
         // restore previous program counter and frame pointer
         vm.fp = prev_fp as usize;
-        vm.code.set_position(prev_pc as u64);
+        vm.pc = prev_pc as usize;
 
         // push the return value back onto the stack
         vm.stack.push(retval);
@@ -100,28 +100,30 @@ opcodes!{
     /// Compares if the the current stack value is greater than the given value. Pushes 1 if it is, otherwise 0.
     fn cmp_gt(vm: &mut Self, other: i32) {
         let tmp = *vm.stack.last().unwrap();
-        vm.stack.push( if tmp > other { 1 } else { 0 } );
+        //vm.stack.push( if tmp > other { 1 } else { 0 } );
+        vm.reg_cond = tmp > other;
     }
 
     /// Compares if the the current stack value is less than the given value. Pushes 1 if it is, otherwise 0.
     fn cmp_lt(vm: &mut Self, other: i32) {
         let tmp = *vm.stack.last().unwrap();
-        vm.stack.push( if tmp < other { 1 } else { 0 } );
+        //vm.stack.push( if tmp < other { 1 } else { 0 } );
+        vm.reg_cond = tmp < other;
     }
 
     /// Pops a value from the stack and jumps to the given instruction if the stack value is not 0.
     fn jmp_nz(vm: &mut Self, target: u32) {
-        let tmp = vm.stack.pop().unwrap();
-        if tmp != 0 {
-            vm.code.set_position(target as u64);
+        //let tmp = vm.stack.pop().unwrap();
+        if vm.reg_cond {
+            vm.pc = target as usize;
         }
     }
 
     /// Pops a value from the stack and jumps to the given instruction if the stack value is 0.
     fn jmp_z(vm: &mut Self, target: u32) {
-        let tmp = vm.stack.pop().unwrap();
-        if tmp == 0 {
-            vm.code.set_position(target as u64);
+        //let tmp = vm.stack.pop().unwrap();
+        if vm.reg_cond == false {
+            vm.pc = target as usize;
         }
     }
 

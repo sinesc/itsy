@@ -1,3 +1,6 @@
+// todo: remove
+#![allow(dead_code)]
+
 use util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
 use super::Type;
 

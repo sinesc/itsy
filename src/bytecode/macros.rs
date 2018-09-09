@@ -42,10 +42,10 @@ macro_rules! opcodes {
 
         // implement opcode argument reader and opcode writer
         $(
-            #[allow(non_upper_case_globals, non_snake_case, unused_imports)]
+            #[allow(unused_imports, unused_variables)]
             mod $name {
                 #[cfg_attr(not(debug_assertions), inline(always))]
-                pub(in super) fn read_args(reader: &mut ::std::io::Cursor<Vec<u8>>) -> ( (), (), $($op_type),* ) {
+                pub(in super) fn read_args(reader: &mut ::bytecode::VM) -> ( (), (), $($op_type),* ) {
                     use byteorder::{LittleEndian, ReadBytesExt};
                     (
                         // leading () to avoid cases where we have 0 or 1 arguments which breaks the let (...) = read().
@@ -76,7 +76,7 @@ macro_rules! opcodes {
             $( #[ $attr ] )*
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn $name ( $vm: &mut ::bytecode::VM ) {
-                let ( _, _, $($op_name),* ) = $name::read_args(&mut $vm.code);
+                let ( _, _, $($op_name),* ) = $name::read_args($vm);
                 $code
             }
         )+
@@ -86,16 +86,16 @@ macro_rules! opcodes {
             /// Formats the given VMs bytecode data as human readable output.
             #[allow(unused_imports)]
             #[allow(unreachable_patterns)]
-            fn format_instruction(code: &mut ::std::io::Cursor<&Vec<u8>>) -> Option<String> {
+            fn format_instruction(self: &mut Self) -> Option<String> {
                 use byteorder::{LittleEndian, ReadBytesExt};
-                let position = code.position();
-                if let Ok(instruction) = code.read_u8() {
+                let position = self.pc;
+                if let Ok(instruction) = self.read_u8() {
                     match unsafe { ::std::mem::transmute(instruction) } {
                         $(
                             bytecode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
                                 $(
-                                    result.push_str(&format!("{:?} ", opcodes!(read $op_type code) ));
+                                    result.push_str(&format!("{:?} ", opcodes!(read $op_type self) ));
                                 )*
                                 Some(result)
                             }
@@ -111,7 +111,7 @@ macro_rules! opcodes {
             #[allow(unreachable_patterns)]
             pub fn exec(self: &mut Self) {
                 use byteorder::ReadBytesExt;
-                let instruction = self.code.read_u8().unwrap();
+                let instruction = self.read_u8().unwrap();
                 match unsafe { ::std::mem::transmute(instruction) } {
                     $(
                         bytecode::$name => $name(self)

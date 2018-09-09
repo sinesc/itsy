@@ -1,3 +1,6 @@
+// todo: remove
+#![allow(unused_variables)]
+
 use frontend::ResolvedProgram;
 
 pub fn compile(program: ResolvedProgram) {
