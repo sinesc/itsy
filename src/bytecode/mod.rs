@@ -63,17 +63,25 @@ opcodes!{
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
     fn ret(vm: &mut Self) {
-        let retval = vm.stack.pop().unwrap();   // get return value   todo: probably not useful
 
-        vm.stack.truncate(vm.fp);           // restore stack to state of call
-        vm.code.set_position(vm.stack.pop().unwrap() as u64);   // get previous program counter
-        vm.fp = vm.stack.pop().unwrap() as usize;   // get previous frame pointer
-        let argc = vm.stack.pop().unwrap(); // get number of arguments that were pushed prior to call and have to be removed
+        // save return value
+        let retval = *vm.stack.last().unwrap();
 
-        let slen = vm.stack.len();
-        vm.stack.truncate((slen as i32 - argc) as usize);      // remove the arguments todo: optimize to one truncate
+        // get previous state
+        let prev_pc = vm.stack[vm.fp - 1];          // load program counter from before the call
+        let prev_fp = vm.stack[vm.fp - 2];          // load old frame pointer
+        let prev_num_args = vm.stack[vm.fp - 3];    // load number of arguments that were on the stack prior to call
 
-        vm.stack.push(retval);              // push the return value back onto the stack
+        // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
+        // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
+        vm.stack.truncate((vm.fp as i32 - 3 - prev_num_args) as usize);
+
+        // restore previous program counter and frame pointer
+        vm.fp = prev_fp as usize;
+        vm.code.set_position(prev_pc as u64);
+
+        // push the return value back onto the stack
+        vm.stack.push(retval);
     }
 
     /// Negate current value on stack.
