@@ -1,0 +1,18 @@
+Argument order:
+---------------
+
+Arguments get pushed in reverse order, so first argument is pushed last and popped first by the instruction reading it.
+
+push_const 2
+push_const 1
+cmp_igt         // 2 > 1 ?
+print           // 0
+
+
+fn jmp_igt(vm: &mut Self, addr: u32) {
+    let a = vm.stack.pop().unwrap();
+    let b = vm.stack.pop().unwrap();
+    if a < b {
+        vm.pc = addr as usize;
+    }
+}

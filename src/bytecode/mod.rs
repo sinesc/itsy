@@ -18,6 +18,11 @@ opcodes!{
         vm.stack.push(tmp);
     }
 
+    /// Load constant from constant pool onto stack.
+    fn push_const(vm: &mut Self, value: i32) {
+        vm.stack.push(value);
+    }
+
     /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
     fn load(vm: &mut Self, offset: i32) {
         let local = vm.stack[(vm.fp as i32 + offset) as usize];  // todo: i32/u32 overflow
@@ -97,31 +102,71 @@ opcodes!{
         vm.stack.push(a + b);
     }
 
-    /// Compares if the the current stack value is greater than the given value. Pushes 1 if it is, otherwise 0.
+    /// Pops 2 values from the stack and pushes their difference.
+    fn sub(vm: &mut Self) {
+        let b = vm.stack.pop().unwrap();
+        let a = vm.stack.pop().unwrap();
+        vm.stack.push(a - b);
+    }
+
+    /// Increments the value at the top of the stack.
+    fn iinc(vm: &mut Self) {
+        let a = vm.stack.pop().unwrap();
+        vm.stack.push(a + 1);
+    }
+
+    fn jmp_ieq(vm: &mut Self, addr: u32) {
+        let a = vm.stack.pop().unwrap();
+        let b = vm.stack.pop().unwrap();
+        if a == b {
+            vm.pc = addr as usize;
+        }
+    }
+
+    fn jmp_igt(vm: &mut Self, addr: u32) {
+        let a = vm.stack.pop().unwrap();
+        let b = vm.stack.pop().unwrap();
+        if a > b {
+            vm.pc = addr as usize;
+        }
+    }
+
+    fn jmp_igte(vm: &mut Self, addr: u32) {
+        let a = vm.stack.pop().unwrap();
+        let b = vm.stack.pop().unwrap();
+        if a >= b {
+            vm.pc = addr as usize;
+        }
+    }
+
+
+    /// Compares if the the current stack value is greater than the given value. Sets reg_cond accordingly.
     fn cmp_gt(vm: &mut Self, other: i32) {
         let tmp = *vm.stack.last().unwrap();
-        //vm.stack.push( if tmp > other { 1 } else { 0 } );
         vm.reg_cond = tmp > other;
     }
 
-    /// Compares if the the current stack value is less than the given value. Pushes 1 if it is, otherwise 0.
+    /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
     fn cmp_lt(vm: &mut Self, other: i32) {
         let tmp = *vm.stack.last().unwrap();
-        //vm.stack.push( if tmp < other { 1 } else { 0 } );
         vm.reg_cond = tmp < other;
     }
 
-    /// Pops a value from the stack and jumps to the given instruction if the stack value is not 0.
-    fn jmp_nz(vm: &mut Self, target: u32) {
-        //let tmp = vm.stack.pop().unwrap();
+    /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
+    fn cmp_eq(vm: &mut Self, other: i32) {
+        let tmp = *vm.stack.last().unwrap();
+        vm.reg_cond = tmp == other;
+    }
+
+    /// Jumps to the given instruction if reg_cond is true.
+    fn jmp_true(vm: &mut Self, target: u32) {
         if vm.reg_cond {
             vm.pc = target as usize;
         }
     }
 
-    /// Pops a value from the stack and jumps to the given instruction if the stack value is 0.
-    fn jmp_z(vm: &mut Self, target: u32) {
-        //let tmp = vm.stack.pop().unwrap();
+    /// Jumps to the given instruction if reg_cond is false.
+    fn jmp_false(vm: &mut Self, target: u32) {
         if vm.reg_cond == false {
             vm.pc = target as usize;
         }
@@ -136,6 +181,5 @@ opcodes!{
     /// Terminate program execution.
     fn exit(vm: &mut Self) {
         vm.state = VMState::Terminate;
-        println!("exiting");
     }
 }

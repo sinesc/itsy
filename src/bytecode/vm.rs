@@ -48,7 +48,7 @@ impl VM {
     }
 
     /// Pushes a constant value into the VMs constant pool and returns the index.
-    pub fn push_const(self: &mut Self, value: i32) -> usize {
+    pub fn add_const(self: &mut Self, value: i32) -> usize {
         let pos = self.consts.len();
         self.consts.push(value);
         pos
@@ -57,6 +57,7 @@ impl VM {
     // Disassembles the bytecode and returns it as a string.
     pub fn dump_code(self: &mut Self) -> String { // todo: should not have to require mut
         let pc = self.pc;
+        self.pc = 0;
         let mut result = "".to_string();
         while let Some(instruction) = self.format_instruction() {
             result.push_str(&instruction);
