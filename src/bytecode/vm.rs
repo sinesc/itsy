@@ -93,7 +93,7 @@ impl VM {
     /// Executes bytecode until it terminates.
     pub fn run(self: &mut Self) {
         while self.state == VMState::Continue {
-            self.exec()
+            self.exec();
         }
     }
 }

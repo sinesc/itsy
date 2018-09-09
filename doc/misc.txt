@@ -269,3 +269,40 @@ fn fib(n: i32) -> i32 {
         w.call(fn_fib, 1);
         w.print();
         w.exit();
+
+reader
+------
+
+    (read u32 $from:ident) => ( {
+        unsafe {
+            let mut dest: u32 = ::std::mem::uninitialized();
+            let pc = $from.pc as usize;
+            $from.pc += 4;
+            ::std::ptr::copy_nonoverlapping(&$from.code[pc], &mut dest as *mut u32 as *mut u8, 4);
+            dest
+         }
+    } );
+
+    (read u32 $from:ident) => ( {
+        let pc = $from.pc as usize;
+        $from.pc += 4;
+        let mut cpy: [ u8; 4 ] = unsafe { ::std::mem::uninitialized() };
+        cpy.copy_from_slice(&$from.code[pc..pc+4]);
+        unsafe { ::std::mem::transmute::<_, u32>(cpy) }
+    } );
+
+    (read u32 $from:ident) => ( {
+        //let pc = $from.pc as usize;
+        //$from.pc += 4;
+        //($from.code[pc as usize] as u32) | (($from.code[pc + 1] as u32) << 8) | (($from.code[pc + 2] as u32) << 16) | (($from.code[pc + 3] as u32) << 24)
+
+        let mut result = $from.code[$from.pc as usize] as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 8) as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 16) as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 24) as u32;
+        $from.pc += 1;
+        result
+    } );
