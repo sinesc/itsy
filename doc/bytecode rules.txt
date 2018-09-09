@@ -1,5 +1,21 @@
-Argument order:
----------------
+Naming
+------
+
+<op><suffix1>_<suffix2>
+
+    suffix1: refers to inputs
+    suffix2: refers to arguments
+
+    f/s/u/i     float/signed/unsigned/any integer, default: unsigned for arguments, any integer for input,
+    8/16/32/64  size, default: 8 for arguments, 32 for input
+
+add         add two 32 bit integer (signedness is irrelevant for add/sub/mul)
+addf64      add two 64 bit floats
+cmpi64      compare to 32 bit integer
+
+
+Argument order
+--------------
 
 Arguments get pushed in reverse order, so first argument is pushed last and popped first by the instruction reading it.
 
