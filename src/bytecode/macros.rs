@@ -60,11 +60,13 @@ macro_rules! opcodes {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
-                pub fn $name(self: &mut Self, $($op_name: $op_type),* ) {
+                pub fn $name(self: &mut Self, $($op_name: $op_type),* ) -> u32 {
                     use byteorder::{LittleEndian, WriteBytesExt};
                     let writer = &mut self.code;
+                    let insert_pos = writer.len();
                     writer.write_u8(unsafe { ::std::mem::transmute(bytecode::$name) }).unwrap();
-                    $( opcodes!(write $op_type $op_name writer) );*
+                    $( opcodes!(write $op_type $op_name writer); )*
+                    insert_pos as u32
                 }
             )+
         }

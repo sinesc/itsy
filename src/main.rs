@@ -67,44 +67,49 @@ fn main() {
 
     // write some bytecodes
 
-    let mut writer = bytecode::Writer::new();
-
-    // call add
-    writer.load_const(0);   // arg1
-    writer.load_const(1);   // arg2
-    writer.call(22, 2);     // call add, leave result on stack
-    writer.cmp_lt(10_000_000);
-    writer.jmp_nz(2);
-
-    // end
-    writer.print();
-    writer.exit();
+    let mut w = bytecode::Writer::new();
 
     // fn add
-    writer.load_arg1();
-    writer.load_arg2();
-    writer.add();
-    writer.ret();
+    let fn_add =
+        w.load_arg1();          // load first argument
+        w.load_arg2();          // load second argument
+        w.add();                // add arguments
+        w.ret();                // return to caller
 
-    // initialize vm, dump bytecode
+    // entry point
+    let start =
+        w.load_const(0);        // arg1 for call to fn_add (replaced with call result after call)
+    let loop1 =
+        w.load_const(1);        // arg2
+        w.call(fn_add, 2);      // call add, leave result on stack
+        w.cmp_lt(1_000_000);    // repeat if smaller than...
+        w.jmp_nz(loop1);
 
-    let mut vm = bytecode::VM::new(writer.code);
+    // end
+        w.print();
+        w.exit();
+
+    // initialize vm
+
+    let mut vm = bytecode::VM::new(w.code, start);
+    vm.push_const(0);
+    vm.push_const(1);
+
+    // dump bytecode, run some instructions and dump them as we go
+
     println!("{:}", vm.dump_code());
 
-    vm.push_const(1);
-    vm.push_const(1);
-/*
-    for _ in 0..500 {
+    for _ in 0..25 {
         println!("{}", vm.dump_instruction().unwrap());
         vm.exec();
-        println!("fp: {}, stack: {}\n", vm.fp, vm.dump_stack());
+        println!("frame@{}: {}\n", vm.fp, vm.dump_frame());
         if vm.state != bytecode::VMState::Continue {
             break;
         }
     }
 
     vm.reset();
-*/
+
     // time and run vm
 
     let start = ::std::time::Instant::now();

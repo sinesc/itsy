@@ -17,24 +17,28 @@ pub struct VM {
     pub(crate) fp       : usize,
     pub(crate) mem      : Vec<i32>,
     pub(crate) state    : VMState,
+    start               : u32,
 }
 
 impl VM {
     /// Create a new VM instance.
-    pub fn new(data: Vec<u8>) -> VM {
+    pub fn new(data: Vec<u8>, start: u32) -> VM {
+        let mut cursor = Cursor::new(data);
+        cursor.set_position(start as u64);
         VM {
-            code    : Cursor::new(data) ,
+            code    : cursor,
             consts  : Vec::with_capacity(256),
             stack   : Vec::with_capacity(256),
             fp      : 0,
             mem     : Vec::with_capacity(256),
             state   : VMState::Continue,
+            start   : start,
         }
     }
 
     /// Resets the VM, keeping only code and constants.
     pub fn reset(self: &mut Self) {
-        self.code.set_position(0);
+        self.code.set_position(self.start as u64);
         self.stack.truncate(0);
         self.mem.truncate(0);
         self.fp = 0;
@@ -70,6 +74,11 @@ impl VM {
     // Returns the current stack as a string.
     pub fn dump_stack(self: &Self) -> String {
         format!("{:?}", self.stack)
+    }
+
+    // Returns the current stack as a string.
+    pub fn dump_frame(self: &Self) -> String {
+        format!("{:?}", &self.stack[self.fp..])
     }
 
     /// Executes bytecode until it terminates.
