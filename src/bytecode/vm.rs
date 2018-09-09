@@ -1,13 +1,22 @@
 use std::io::Cursor;
-use std::fmt;
+
+#[derive(Debug, PartialEq)]
+pub enum VMState {
+    Continue,
+    Yield,
+    Terminate,
+    RuntimeError,
+}
 
 /// A virtual machine for running itsy bytecode.
 #[derive(Debug)]
 pub struct VM {
     pub(crate) code     : Cursor<Vec<u8>>,
-    pub(crate) stack    : Vec<i32>, // todo: i32 placeholder
     pub(crate) consts   : Vec<i32>,
-    pub(crate) exit     : bool,
+    pub(crate) stack    : Vec<i32>, // todo: i32 placeholder
+    pub(crate) fp       : usize,
+    pub(crate) mem      : Vec<i32>,
+    pub(crate) state    : VMState,
 }
 
 impl VM {
@@ -15,10 +24,21 @@ impl VM {
     pub fn new(data: Vec<u8>) -> VM {
         VM {
             code    : Cursor::new(data) ,
-            stack   : Vec::with_capacity(256),
             consts  : Vec::with_capacity(256),
-            exit    : false,
+            stack   : Vec::with_capacity(256),
+            fp      : 0,
+            mem     : Vec::with_capacity(256),
+            state   : VMState::Continue,
         }
+    }
+
+    /// Resets the VM, keeping only code and constants.
+    pub fn reset(self: &mut Self) {
+        self.code.set_position(0);
+        self.stack.truncate(0);
+        self.mem.truncate(0);
+        self.fp = 0;
+        self.state = VMState::Continue;
     }
 
     /// Pushes a constant value into the VMs constant pool and returns the index.
@@ -28,28 +48,34 @@ impl VM {
         pos
     }
 
-    /// Return bytecode in somewhat human readable form.
-    pub fn disassemble(self: &Self) -> String {
-        format!("{:?}", VMDump(self))
+    // Disassembles the bytecode and returns it as a string.
+    pub fn dump_code(self: &Self) -> String {
+        let mut result = "".to_string();
+        let mut cursor = Cursor::new(self.code.get_ref());
+        while let Some(instruction) = Self::format_instruction(&mut cursor) {
+            result.push_str(&instruction);
+            result.push_str("\n");
+        }
+        return result;
+    }
+
+    // Disassembles the current bytecode instruction and returns it as a string.
+    pub fn dump_instruction(self: &Self) -> Option<String> {
+        // todo: this is a pretty lame to way to keep cursor position
+        let mut code = ::std::io::Cursor::new(self.code.get_ref());
+        code.set_position(self.code.position());
+        Self::format_instruction(&mut code)
+    }
+
+    // Returns the current stack as a string.
+    pub fn dump_stack(self: &Self) -> String {
+        format!("{:?}", self.stack)
     }
 
     /// Executes bytecode until it terminates.
     pub fn run(self: &mut Self) {
-        while !self.exit {
+        while self.state == VMState::Continue {
             self.exec()
         }
-    }
-}
-
-/// Helper struct to be able to use formatters without being able to construct them.
-struct VMDump<'a>(&'a VM);
-
-impl<'a> fmt::Debug for VMDump<'a> {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut code = ::std::io::Cursor::new(self.0.code.get_ref());
-        while let Some(result) = VM::fmt_instruction(&mut code, f) {
-            if result.is_err() { return result; }
-        }
-        Ok(())
     }
 }

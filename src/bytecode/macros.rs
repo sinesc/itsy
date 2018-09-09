@@ -44,7 +44,7 @@ macro_rules! opcodes {
         $(
             #[allow(non_upper_case_globals, non_snake_case, unused_imports)]
             mod $name {
-                #[inline(always)]
+                #[cfg_attr(not(debug_assertions), inline(always))]
                 pub(in super) fn read_args(reader: &mut ::std::io::Cursor<Vec<u8>>) -> ( (), (), $($op_type),* ) {
                     use byteorder::{LittleEndian, ReadBytesExt};
                     (
@@ -72,7 +72,7 @@ macro_rules! opcodes {
         /// Wraps the method for executing the bytecode.
         $(
             $( #[ $attr ] )*
-            #[inline(always)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
             fn $name ( $vm: &mut ::bytecode::VM ) {
                 let ( _, _, $($op_name),* ) = $name::read_args(&mut $vm.code);
                 $code
@@ -84,21 +84,18 @@ macro_rules! opcodes {
             /// Formats the given VMs bytecode data as human readable output.
             #[allow(unused_imports)]
             #[allow(unreachable_patterns)]
-            fn fmt_instruction(code: &mut ::std::io::Cursor<&Vec<u8>>, f: &mut ::std::fmt::Formatter) -> Option<::std::fmt::Result> { // todo: no
+            fn format_instruction(code: &mut ::std::io::Cursor<&Vec<u8>>) -> Option<String> {
                 use byteorder::{LittleEndian, ReadBytesExt};
+                let position = code.position();
                 if let Ok(instruction) = code.read_u8() {
                     match unsafe { ::std::mem::transmute(instruction) } {
                         $(
                             bytecode::$name => {
-                                // todo: figure out sane error conversion
-                                let mut error_wrapper = || {
-                                    write!(f, "{:?} ", code.position())?;
-                                    write!(f, stringify!($name))?;
-                                    write!(f, " ")?;
-                                    $( write!(f, "{:?} ", opcodes!(read $op_type code) )?; )*
-                                    write!(f, "\n")
-                                };
-                                Some(error_wrapper())
+                                let mut result = format!("{:?} {} ", position, stringify!($name));
+                                $(
+                                    result.push_str(&format!("{:?} ", opcodes!(read $op_type code) ));
+                                )*
+                                Some(result)
                             }
                         ),+,
                         _ => panic!("Encountered undefined instruction {:?}.", instruction)

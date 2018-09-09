@@ -65,23 +65,54 @@ fn main() {
         let d = a + b + c;",
     ];
 
+    // write some bytecodes
+
     let mut writer = bytecode::Writer::new();
-    writer.load_const(0);
-    writer.negate();
-    writer.print();
-    writer.load_const(1);
-    writer.add();
+
+    // call add
+    writer.load_const(0);   // arg1
+    writer.load_const(1);   // arg2
+    writer.call(22, 2);     // call add, leave result on stack
+    writer.cmp_lt(10_000_000);
+    writer.jmp_nz(2);
+
+    // end
     writer.print();
     writer.exit();
 
+    // fn add
+    writer.load_arg1();
+    writer.load_arg2();
+    writer.add();
+    writer.ret();
+
+    // initialize vm, dump bytecode
 
     let mut vm = bytecode::VM::new(writer.code);
-    println!("{:}", vm.disassemble());
+    println!("{:}", vm.dump_code());
 
-    vm.push_const(3);
-    vm.push_const(7);
-    vm.push_const(2);
+    vm.push_const(1);
+    vm.push_const(1);
+/*
+    for _ in 0..500 {
+        println!("{}", vm.dump_instruction().unwrap());
+        vm.exec();
+        println!("fp: {}, stack: {}\n", vm.fp, vm.dump_stack());
+        if vm.state != bytecode::VMState::Continue {
+            break;
+        }
+    }
+
+    vm.reset();
+*/
+    // time and run vm
+
+    let start = ::std::time::Instant::now();
+
     vm.run();
+
+    let runtime = ::std::time::Instant::now() - start;
+    println!("runtime: {:.4}s", runtime.as_secs() as f64 + runtime.subsec_nanos() as f64 * 1e-9);
 
     /*
     {
