@@ -10,6 +10,12 @@ pub(crate) fn i8val(value: i8) -> Value {
     value as Value
 }
 
+/// Converts a Value to i32.
+#[cfg_attr(not(debug_assertions), inline(always))]
+pub(crate) fn valu8(value: Value) -> u8 {
+    value as u8
+}
+
 /// Converts a u8 to a Value.
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn u8val(value: u8) -> Value {

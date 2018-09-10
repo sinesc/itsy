@@ -28,6 +28,7 @@ pub struct VM {
     start               : u32,
 }
 
+/// Public VM methods.
 impl VM {
     /// Create a new VM instance.
     pub fn new(data: Vec<u8>, start: u32) -> Self {
@@ -98,6 +99,7 @@ impl VM {
     }
 }
 
+/// Bytecode support methods.
 impl VM {
     #[cfg_attr(not(debug_assertions), inline(always))]
     /// Current stack pointer.
@@ -132,25 +134,30 @@ impl VM {
     }
 
     #[cfg_attr(not(debug_assertions), inline(always))]
-    /// Peek stack value relative to frame pointer.
-    pub(crate) fn store(self: &mut Self, position: i32, value: i32) {
+    /// Store given value at given position relative to frame pointer.
+    pub(crate) fn storei(self: &mut Self, position: i32, value: i32) {
         self.stack[ ( (self.fp as isize) + (position as isize) ) as usize ] = i32val(value);
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
-    /// Peek stack value relative to frame pointer.
+    /// Store given value at given position relative to frame pointer.
     pub(crate) fn storeu(self: &mut Self, position: i32, value: u32) {
         self.stack[ ( (self.fp as isize) + (position as isize) ) as usize ] = u32val(value);
     }
 
     #[cfg_attr(not(debug_assertions), inline(always))]
-    /// Peek stack value relative to frame pointer.
+    /// Pops a value from the stack.
     pub(crate) fn pop(self: &mut Self) -> i32 {
         vali32(self.stack.pop().expect("Stack underflow."))
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
-    /// Peek stack value relative to frame pointer.
+    /// Pops a value from the stack.
     pub(crate) fn popu(self: &mut Self) -> u32 {
         valu32(self.stack.pop().expect("Stack underflow."))
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    /// Pops a value from the stack.
+    pub(crate) fn popu8(self: &mut Self) -> u8 {
+        valu8(self.stack.pop().expect("Stack underflow."))
     }
 
     /// Pushes given i8 onto the stack.

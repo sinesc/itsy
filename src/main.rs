@@ -19,25 +19,27 @@ fn main() {
         w.ret();                // return arg
 
     let fn_fib =
-        w.load_arg1();          // arg
+        w.load_arg1() as u8;    // arg
         w.val2();               // 2
         w.jgts(ret);            // arg < 2
 
         w.load_arg1();          // arg
         w.deci();               // arg--
-        w.call(fn_fib, 1);
+        //w.val_u8(fn_fib);
+        //w.callp1();
+        w.call_u8(fn_fib, 1);
 
         w.val2();               // 2
         w.load_arg1();          // arg
         w.sub();                // arg - 2
-        w.call(fn_fib, 1);
+        w.call_u8(fn_fib, 1);
 
         w.add();                // fib(...) + fib(...)
         w.ret();
 
     let main =
         w.const32(0);
-        w.call(fn_fib, 1);
+        w.call_u8(fn_fib, 1);
         w.print();
         w.exit();
 

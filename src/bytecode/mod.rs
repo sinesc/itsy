@@ -15,221 +15,231 @@ type Value = i32;
 opcodes!{
 
     /// Load constant from constant pool onto stack.
-    fn const32(vm: &mut Self, const_id: u8) {
-        let tmp = vm.consts[const_id as usize];
-        vm.push(tmp);
+    fn const32(self: &mut Self, const_id: u8) {
+        let tmp = self.consts[const_id as usize];
+        self.push(tmp);
     }
     /// Load constant from constant pool onto stack.
-    fn const32_16(vm: &mut Self, const_id: u16) {
-        let tmp = vm.consts[const_id as usize];
-        vm.push(tmp);
+    fn const32_16(self: &mut Self, const_id: u16) {
+        let tmp = self.consts[const_id as usize];
+        self.push(tmp);
     }
     /// Load constant from constant pool onto stack.
-    fn const64(vm: &mut Self, const_id: u8) {
-        let l = vm.consts[const_id as usize];
-        let h = vm.consts[(const_id + 1) as usize];
-        vm.push(l);
-        vm.push(h);
+    fn const64(self: &mut Self, const_id: u8) {
+        let l = self.consts[const_id as usize];
+        let h = self.consts[(const_id + 1) as usize];
+        self.push(l);
+        self.push(h);
     }
     /// Load constant from constant pool onto stack.
-    fn const64_16(vm: &mut Self, const_id: u16) {
-        let l = vm.consts[const_id as usize];
-        let h = vm.consts[(const_id + 1) as usize];
-        vm.push(l);
-        vm.push(h);
+    fn const64_16(self: &mut Self, const_id: u16) {
+        let l = self.consts[const_id as usize];
+        let h = self.consts[(const_id + 1) as usize];
+        self.push(l);
+        self.push(h);
     }
 
+    fn val_u8(self: &mut Self, val: u8) {
+        self.pushu8(val);
+    }
     /// Push 0 onto stack.
-    fn val0(vm: &mut Self) {
-        vm.push(0);
+    fn val0(self: &mut Self) {
+        self.push(0);
     }
     /// Push 1 onto stack.
-    fn val1(vm: &mut Self) {
-        vm.push(1);
+    fn val1(self: &mut Self) {
+        self.push(1);
     }
     /// Push 2 onto stack.
-    fn val2(vm: &mut Self) {
-        vm.push(2);
+    fn val2(self: &mut Self) {
+        self.push(2);
     }
     /// Push -1 onto stack.
-    fn valm1(vm: &mut Self) {
-        vm.push(-1);
+    fn valm1(self: &mut Self) {
+        self.push(-1);
     }
 
     /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
-    fn load(vm: &mut Self, offset: i32) {
-        let local = vm.peek(offset);
-        vm.push(local);
+    fn load(self: &mut Self, offset: i32) {
+        let local = self.peek(offset);
+        self.push(local);
     }
 
     /// Pop stackvalue and store it at the given offset (relative to the stackframe).
-    fn store(vm: &mut Self, offset: i32) {
-        let local = vm.pop();
-        vm.store(offset, local);
+    fn store(self: &mut Self, offset: i32) {
+        let local = self.pop();
+        self.storei(offset, local);
     }
 
     /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
-    fn load_arg1(vm: &mut Self) {
-        let local = vm.peek(-4);
-        vm.push(local);
+    fn load_arg1(self: &mut Self) {
+        let local = self.peek(-4);
+        self.push(local);
     }
 
     /// Load function argument 2 and push it onto the stack. Equivalent to load -5.
-    fn load_arg2(vm: &mut Self) {
-        let local = vm.peek(-5);
-        vm.push(local);
+    fn load_arg2(self: &mut Self) {
+        let local = self.peek(-5);
+        self.push(local);
     }
 
     /// Load function argument 3 and push it onto the stack. Equivalent to load -6.
-    fn load_arg3(vm: &mut Self) {
-        let local = vm.peek(-6);
-        vm.push(local);
+    fn load_arg3(self: &mut Self) {
+        let local = self.peek(-6);
+        self.push(local);
     }
 
     /// Function call. Saves state and sets programm counter to given addr. Expects
     /// callee arguments on the stack and number of arguments as num_args.
-    fn call(vm: &mut Self, addr: u32, num_args: u8) {
-        let next_pc = vm.pc;
-        let fp = vm.fp;
-        vm.pushu8(num_args);    // save number of arguments
-        vm.pushu(fp);           // save frame pointer
-        vm.pushu(next_pc);      // save program counter as it would be after this instruction
-        vm.fp = vm.sp();        // set new frame pointer
-        vm.pc = addr;           // set new program counter
+    fn call(self: &mut Self, addr: u32, num_args: u8) {
+        let next_pc = self.pc;
+        let fp = self.fp;
+        self.pushu8(num_args);    // save number of arguments
+        self.pushu(fp);           // save frame pointer
+        self.pushu(next_pc);      // save program counter as it would be after this instruction
+        self.fp = self.sp();        // set new frame pointer
+        self.pc = addr;           // set new program counter
+    }
+    fn call_u8(self: &mut Self, addr: u8, num_args: u8) {
+        self.call(addr as u32, num_args);
+    }
+    fn callp1(self: &mut Self) {
+        let addr = self.popu();
+        self.call(addr, 1);
     }
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
-    fn ret(vm: &mut Self) {
+    fn ret(self: &mut Self) {
 
         // save return value
-        let retval = vm.top();
+        let retval = self.top();
 
         // get previous state
-        let prev_pc = vm.peeku(-1);          // load program counter from before the call
-        let prev_fp = vm.peeku(-2);          // load old frame pointer
-        let prev_num_args = vm.peeku(-3);    // load number of arguments that were on the stack prior to call
+        let prev_pc = self.peeku(-1);          // load program counter from before the call
+        let prev_fp = self.peeku(-2);          // load old frame pointer
+        let prev_num_args = self.peeku(-3);    // load number of arguments that were on the stack prior to call
 
         // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
         // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
-        let new_size = vm.fp - 3 - prev_num_args;
-        vm.truncate(new_size);
+        let new_size = self.fp - 3 - prev_num_args;
+        self.truncate(new_size);
 
         // restore previous program counter and frame pointer
-        vm.fp = prev_fp;
-        vm.pc = prev_pc;
+        self.fp = prev_fp;
+        self.pc = prev_pc;
 
         // push the return value back onto the stack
-        vm.push(retval);
+        self.push(retval);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
-    fn add(vm: &mut Self) {
-        let a = vm.pop();
-        let b = vm.pop();
-        vm.push(a + b);
+    fn add(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their difference.
-    fn sub(vm: &mut Self) {
-        let a = vm.pop();
-        let b = vm.pop();
-        vm.push(a - b);
+    fn sub(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
-    fn mul(vm: &mut Self) {
-        let a = vm.pop();
-        let b = vm.pop();
-        vm.push(a * b);
+    fn mul(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push(a * b);
     }
 
     /// Pops two values and jumps to given address it they equal.
-    fn jeq(vm: &mut Self, addr: u32) {
-        let a = vm.pop();
-        let b = vm.pop();
+    fn jeq(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        let b = self.pop();
         if a == b {
-            vm.pc = addr;
+            self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is greater than the second.
-    fn jgts(vm: &mut Self, addr: u32) {
-        let a = vm.pop();
-        let b = vm.pop();
+    fn jgts(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        let b = self.pop();
         if a > b {
-            vm.pc = addr;
+            self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is greater/equal the second.
-    fn jgtes(vm: &mut Self, addr: u32) {
-        let a = vm.pop();
-        let b = vm.pop();
+    fn jgtes(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        let b = self.pop();
         if a >= b {
-            vm.pc = addr;
+            self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
-    fn jlts(vm: &mut Self, addr: u32) {
-        let a = vm.pop();
-        let b = vm.pop();
+    fn jlts(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        let b = self.pop();
         if a < b {
-            vm.pc = addr;
+            self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
-    fn jltes(vm: &mut Self, addr: u32) {
-        let a = vm.pop();
-        let b = vm.pop();
+    fn jltes(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        let b = self.pop();
         if a <= b {
-            vm.pc = addr;
+            self.pc = addr;
         }
     }
 
     /// Negate current value on stack.
-    fn negs(vm: &mut Self) {
-        let tmp = vm.pop();
-        vm.push(-tmp);
+    fn negs(self: &mut Self) {
+        let tmp = self.pop();
+        self.push(-tmp);
     }
     /// Negate current value on stack.
-    fn negf(vm: &mut Self) {
-        let tmp = vm.pop();
-        vm.push(-tmp);
+    fn negf(self: &mut Self) {
+        let tmp = self.pop();
+        self.push(-tmp);
     }
 
     /// Increments the value at the top of the stack.
-    fn inci(vm: &mut Self) {
-        let a = vm.pop();
-        vm.push(a + 1);
+    fn inci(self: &mut Self) {
+        let a = self.pop();
+        self.push(a + 1);
     }
     /// Decrements the value at the top of the stack.
-    fn deci(vm: &mut Self) {
-        let a = vm.pop();
-        vm.push(a - 1);
+    fn deci(self: &mut Self) {
+        let a = self.pop();
+        self.push(a - 1);
     }
 
 /*
     /// Compares if the the current stack value is greater than the given value. Sets reg_cond accordingly.
-    fn cmp_gt(vm: &mut Self, other: i32) {
-        let tmp = *vm.stack.last().unwrap();
-        vm.reg_cond = tmp > other;
+    fn cmp_gt(self: &mut Self, other: i32) {
+        let tmp = *self.stack.last().unwrap();
+        self.reg_cond = tmp > other;
     }
 
     /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
-    fn cmp_lt(vm: &mut Self, other: i32) {
-        let tmp = *vm.stack.last().unwrap();
-        vm.reg_cond = tmp < other;
+    fn cmp_lt(self: &mut Self, other: i32) {
+        let tmp = *self.stack.last().unwrap();
+        self.reg_cond = tmp < other;
     }
 
     /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
-    fn cmp_eq(vm: &mut Self, other: i32) {
-        let tmp = *vm.stack.last().unwrap();
-        vm.reg_cond = tmp == other;
+    fn cmp_eq(self: &mut Self, other: i32) {
+        let tmp = *self.stack.last().unwrap();
+        self.reg_cond = tmp == other;
     }
 */
     /// Print current value on stack.
-    fn print(vm: &mut Self) {
-        println!("print: {:?}", vm.top());
+    fn print(self: &mut Self) {
+        println!("print: {:?}", self.top());
     }
 
     /// Terminate program execution.
-    fn exit(vm: &mut Self) {
-        vm.state = VMState::Terminate;
+    fn exit(self: &mut Self) {
+        self.state = VMState::Terminate;
     }
 }
