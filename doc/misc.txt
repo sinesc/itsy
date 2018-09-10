@@ -306,3 +306,35 @@ reader
         $from.pc += 1;
         result
     } );
+
+recursive fib, new bytecodes
+----------------------------
+
+    let mut w = bytecode::Writer::new();
+
+    let ret =
+        w.load_arg1();          // arg
+        w.ret();                // return arg
+
+    let fn_fib =
+        w.load_arg1() as u8;    // arg
+        w.lit2();               // 2
+        w.jgts(ret);            // arg < 2
+
+        w.load_arg1();          // arg
+        w.deci();               // arg--
+        w.call1_u8(fn_fib);
+
+        w.lit2();               // 2
+        w.load_arg1();          // arg
+        w.sub();                // arg - 2
+        w.call1_u8(fn_fib);
+
+        w.add();                // fib(...) + fib(...)
+        w.ret();
+
+    let main =
+        w.const32(0);
+        w.call_u8(fn_fib, 1);
+        w.print();
+        w.exit();

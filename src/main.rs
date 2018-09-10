@@ -20,19 +20,17 @@ fn main() {
 
     let fn_fib =
         w.load_arg1() as u8;    // arg
-        w.val2();               // 2
+        w.lit2();               // 2
         w.jgts(ret);            // arg < 2
 
         w.load_arg1();          // arg
         w.deci();               // arg--
-        //w.val_u8(fn_fib);
-        //w.callp1();
-        w.call_u8(fn_fib, 1);
+        w.call1_u8(fn_fib);
 
-        w.val2();               // 2
+        w.lit2();               // 2
         w.load_arg1();          // arg
         w.sub();                // arg - 2
-        w.call_u8(fn_fib, 1);
+        w.call1_u8(fn_fib);
 
         w.add();                // fib(...) + fib(...)
         w.ret();
@@ -45,12 +43,11 @@ fn main() {
 
     // initialize vm
 
-    let mut vm = bytecode::VM::new(w.code, main);
-    vm.add_const(37);
+    let mut vm = bytecode::VM::new(w.into_program(), vec![ 37 ], main);
 
     // dump bytecode, run some instructions and dump them as we go
 
-    println!("{:}", vm.dump_code());
+    println!("{:}", vm.dump_program());
 
     for _ in 0..15 {
         println!("{}", vm.dump_instruction().unwrap());

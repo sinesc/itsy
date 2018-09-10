@@ -1,19 +1,22 @@
+//! Bytecode buffer and writer.
+
+use bytecode::Program;
 
 /// Bytecode buffer and writer.
 #[derive(Debug)]
 pub struct Writer {
-    pub(crate) code: Vec<u8>,
+    pub(crate) program: Program,
 }
 
 impl Writer {
     /// Creates a new writer instance.
     pub fn new() -> Self {
         Writer {
-            code: Vec::new(),
+            program: Vec::new(),
         }
     }
     /// Converts the writer into the underlying buffer.
-    pub fn into(self: Self) -> Vec<u8> {
-        self.code
+    pub fn into_program(self: Self) -> Program {
+        self.program
     }
 }

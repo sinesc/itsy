@@ -1,24 +1,29 @@
+//! A virtual machine for running Itsy bytecode.
+
 // todo: remove
 #![allow(dead_code)]
 
 use std::io;
 use std::io::Read;
-use bytecode::utils::*;
-use bytecode::Value;
+use bytecode::*;
 
 /// Current state of the vm, checked after each instruction.
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum VMState {
+    /// The VM will continue to execute white it is in this state.
     Continue,
+    /// Yield after current instruction. The program can be resumed after a yield.
     Yield,
+    /// Terminate after current instruction.
     Terminate,
+    /// A runtime error was encountered.
     RuntimeError,
 }
 
-/// A virtual machine for running itsy bytecode.
+/// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
 pub struct VM {
-    pub(crate) code     : Vec<u8>,
+    pub(crate) program  : Vec<u8>,
     pub(crate) consts   : Vec<Value>,
     stack               : Vec<Value>,
     pub(crate) fp       : u32,
@@ -31,10 +36,10 @@ pub struct VM {
 /// Public VM methods.
 impl VM {
     /// Create a new VM instance.
-    pub fn new(data: Vec<u8>, start: u32) -> Self {
+    pub fn new(program: Program, data: Vec<Value>, start: u32) -> Self {
         VM {
-            code        : data,
-            consts      : Vec::with_capacity(256),
+            program     : program,
+            consts      : data,
             stack       : Vec::with_capacity(256),
             fp          : 0,
             pc          : start,
@@ -53,15 +58,8 @@ impl VM {
         self.state = VMState::Continue;
     }
 
-    /// Pushes a constant value into the VMs constant pool and returns the index.
-    pub fn add_const(self: &mut Self, value: i32) -> usize {
-        let pos = self.consts.len();
-        self.consts.push(value);
-        pos
-    }
-
-    // Disassembles the bytecode and returns it as a string.
-    pub fn dump_code(self: &mut Self) -> String { // todo: should not have to require mut
+    /// Disassembles the bytecode and returns it as a string.
+    pub fn dump_program(self: &mut Self) -> String { // todo: should not have to require mut
         let pc = self.pc;
         self.pc = 0;
         let mut result = "".to_string();
@@ -73,7 +71,7 @@ impl VM {
         return result;
     }
 
-    // Disassembles the current bytecode instruction and returns it as a string.
+    /// Disassembles the current bytecode instruction and returns it as a string.
     pub fn dump_instruction(self: &mut Self) -> Option<String> {
         let pc = self.pc;
         let result = self.format_instruction();
@@ -81,12 +79,12 @@ impl VM {
         result
     }
 
-    // Returns the current stack as a string.
+    /// Returns the current stack as a string.
     pub fn dump_stack(self: &Self) -> String {
         format!("{:?}", self.stack)
     }
 
-    // Returns the current stack as a string.
+    /// Returns the current stack-frame as a string.
     pub fn dump_frame(self: &Self) -> String {
         format!("{:?}", &self.stack[self.fp as usize..])
     }
@@ -97,9 +95,14 @@ impl VM {
             self.exec();
         }
     }
+
+    /// Returns the current VM state.
+    pub fn state(self: &Self) -> VMState {
+        self.state
+    }
 }
 
-/// Bytecode support methods.
+/// Support methods used by bytecode instructions. These are not bytecode instructions themselves.
 impl VM {
     #[cfg_attr(not(debug_assertions), inline(always))]
     /// Current stack pointer.
@@ -220,13 +223,13 @@ impl VM {
 
 impl Read for VM {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = Read::read(&mut &self.code[self.pc as usize..], buf)?;
+        let n = Read::read(&mut &self.program[self.pc as usize..], buf)?;
         self.pc += n as u32;
         Ok(n)
     }
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let n = buf.len();
-        Read::read_exact(&mut &self.code[self.pc as usize..], buf)?;
+        Read::read_exact(&mut &self.program[self.pc as usize..], buf)?;
         self.pc += n as u32;
         Ok(())
     }

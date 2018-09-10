@@ -112,5 +112,17 @@
             ],
             "problemMatcher": []
         },
+        {
+            "label": "cargo rustdoc (private)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "rustdoc",
+                "--open",
+                "--",
+                "--document-private-items",
+            ],
+            "problemMatcher": []
+        },
     ]
 }
