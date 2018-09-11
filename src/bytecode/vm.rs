@@ -3,8 +3,7 @@
 // todo: remove
 #![allow(dead_code)]
 
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
 use bytecode::*;
 
 /// Current state of the vm, checked after each instruction.

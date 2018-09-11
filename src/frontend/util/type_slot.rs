@@ -1,4 +1,4 @@
-use util::TypeId;
+use frontend::util::TypeId;
 use std::fmt::{self, Debug};
 
 /// Used in the AST to represent an unresolved or resolved Type or the lack of a type (void).
@@ -40,9 +40,9 @@ impl TypeSlot {
 impl Debug for TypeSlot {
     fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TypeSlot::Unresolved => write!(f, "Unresolved"),
-            TypeSlot::Void => write!(f, "Void"),
-            TypeSlot::TypeId(type_id) => write!(f, "TypeId({:?})", type_id),
+            TypeSlot::Unresolved => write!(f, "TypeSlot::Unresolved"),
+            TypeSlot::Void => write!(f, "TypeSlot::Void"),
+            TypeSlot::TypeId(type_id) => write!(f, "TypeSlot({:?})", type_id),
         }
     }
 }

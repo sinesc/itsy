@@ -1,41 +1,103 @@
-use util::{TypeId, Integer};
+use frontend::util::{TypeId, ScopeId, Integer, Signed, Unsigned};
 use frontend::ast;
+use frontend::resolver::scopes::Scopes;
+use bytecode::Type;
 
-// todo: see fn resolve(), primitives should be statically defined here with functions to look up their ids.
-
-pub struct IntegerRange {
+struct IntegerRange {
     pub type_id: TypeId,
     pub min: Integer,
     pub max: Integer,
 }
 
+/// Utility structure to handle primitive type information and casting.
 pub struct Primitives {
     /// Boolean type
-    pub bool    : TypeId,
+    pub bool    : TypeId,           // todo: temp pub
     /// String type
-    pub string  : TypeId,
+    string      : TypeId,
     /// Unsigned types ordered by bit count.
-    pub unsigned: [ IntegerRange; 4 ],
+    unsigned    : [ IntegerRange; 4 ],
     /// Signed types ordered by bit count.
-    pub signed  : [ IntegerRange; 4 ],
+    signed      : [ IntegerRange; 4 ],
     /// Floating point types ordered by bit count.
-    pub float   : [ TypeId; 2 ],
+    pub float   : [ TypeId; 2 ],        // todo: temp pub
 }
 
 impl Primitives {
 
+    /// Create new instance.
+    pub fn new(scopes: &mut Scopes, root_scope_id: ScopeId) -> Self {
+        use std::{u8, u16, u32, u64, i8, i16, i32, i64};
+        Primitives {
+            bool: scopes.insert_type(root_scope_id, "bool", Type::bool),
+            string: scopes.insert_type(root_scope_id, "String", Type::String),
+            unsigned: [
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "u8", Type::u8),
+                    min: Integer::Unsigned(u8::MIN as Unsigned),
+                    max: Integer::Unsigned(u8::MAX as Unsigned),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "u16", Type::u16),
+                    min: Integer::Unsigned(u16::MIN as Unsigned),
+                    max: Integer::Unsigned(u16::MAX as Unsigned),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "u32", Type::u32),
+                    min: Integer::Unsigned(u32::MIN as Unsigned),
+                    max: Integer::Unsigned(u32::MAX as Unsigned),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "u64", Type::u64),
+                    min: Integer::Unsigned(u64::MIN as Unsigned),
+                    max: Integer::Unsigned(u64::MAX as Unsigned),
+                },
+            ],
+            signed: [
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "i8", Type::i8),
+                    min: Integer::Signed(i8::MIN as Signed),
+                    max: Integer::Signed(i8::MAX as Signed),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "i16", Type::i16),
+                    min: Integer::Signed(i16::MIN as Signed),
+                    max: Integer::Signed(i16::MAX as Signed),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "i32", Type::i32),
+                    min: Integer::Signed(i32::MIN as Signed),
+                    max: Integer::Signed(i32::MAX as Signed),
+                },
+                IntegerRange {
+                    type_id: scopes.insert_type(root_scope_id, "i64", Type::i64),
+                    min: Integer::Signed(i64::MIN as Signed),
+                    max: Integer::Signed(i64::MAX as Signed),
+                },
+            ],
+            float: [
+                scopes.insert_type(root_scope_id, "f32", Type::f32),
+                scopes.insert_type(root_scope_id, "f64", Type::f64),
+            ],
+        }
+    }
+
+    /// Check if the given type is unsigned.
     pub fn is_unsigned(self: &Self, type_id: TypeId) -> bool {
         type_id >= self.unsigned.first().unwrap().type_id && type_id <= self.unsigned.last().unwrap().type_id
     }
 
+    /// Check if the given type is signed.
     pub fn is_signed(self: &Self, type_id: TypeId) -> bool {
         type_id >= self.signed.first().unwrap().type_id && type_id <= self.signed.last().unwrap().type_id
     }
 
+    /// Check if the given type is a float.
     pub fn is_float(self: &Self, type_id: TypeId) -> bool {
         type_id >= *self.float.first().unwrap() && type_id <= *self.float.last().unwrap()
     }
 
+    /// Check if it is possible to cast from->to given types.
     pub fn is_valid_cast(self: &Self, from_type_id: TypeId, to_type_id: TypeId) -> bool {
         if self.is_unsigned(from_type_id) {
             if self.is_unsigned(to_type_id) && from_type_id <= to_type_id {

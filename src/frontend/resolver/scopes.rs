@@ -1,8 +1,8 @@
 // todo: remove
 #![allow(dead_code)]
 
-use util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
-use super::Type;
+use frontend::util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
+use bytecode::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
@@ -42,6 +42,7 @@ impl<'a> Scopes<'a> {
     }
 }
 
+/// Function handling
 impl<'a> Scopes<'a> {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
@@ -75,6 +76,7 @@ impl<'a> Scopes<'a> {
     }
 }
 
+/// Binding handling
 impl<'a> Scopes<'a> {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
@@ -113,6 +115,7 @@ impl<'a> Scopes<'a> {
     }
 }
 
+/// Type handling
 impl<'a> Scopes<'a> {
 
     /// Insert a type into the given scope, returning a type id.

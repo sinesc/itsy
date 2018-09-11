@@ -4,7 +4,7 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::{IResult, ErrorKind, is_alphabetic, is_alphanumeric, digit0, digit1};
 use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
-use util::{Integer, TypeSlot};
+use frontend::util::{Integer, TypeSlot};
 use frontend::ast::*;
 
 /// Represents the various possible parser errors.
