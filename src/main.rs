@@ -10,22 +10,34 @@ pub mod bytecode;
 fn main() {
 
     let source = "
-        fn fib(n: i32) -> i32 {
-            if n < 2 {
-                n
-            } else {
-                fib(n - 1) + fib(n - 2)
-            }
-        }
-    ";
-    // print(fib(37));
+fn fib(n: i32) -> i32 {
 
-    use nom::types::CompleteStr as Input;
+    let mut i = 0;
+    let mut j = 1;
+    let mut k = 1;
+    let mut t;
+
+    if n == 0 {
+       return 0;
+    }
+
+    while k < n {
+        t = i + j;
+        i = j;
+        j = t;
+        k += 1;
+    }
+
+    return j;
+}
+    ";
+
     use frontend::{parse, resolve};
     use bytecode::compile;
 
-    if let Ok(parsed) = parse(Input(source)) {
-        let resolved = resolve(parsed.1);
+    if let Ok(parsed) = parse(source) {
+        //println!("{:#?}", parsed); return;
+        let resolved = resolve(parsed);
         //println!("{:#?}", resolved.ast);
         //println!("{:#?}", resolved.types);
         let mut writer = compile(resolved);

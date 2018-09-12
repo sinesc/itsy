@@ -7,19 +7,36 @@ use std::collections::HashMap;
 use frontend::{ast, ResolvedProgram, util::{Integer, BindingId}};
 use bytecode::{Type, Writer, Program};
 
-struct StackFrameMap {
+struct StackFrame {
     map: HashMap<BindingId, i32>,
     next_arg: i32,
     next_var: i32,
 }
 
-impl StackFrameMap {
-    fn new() -> Self {
-        StackFrameMap {
+impl StackFrame {
+    pub fn new() -> Self {
+        StackFrame {
             map: HashMap::new(),
             next_arg: -4,
             next_var: 0,
         }
+    }
+}
+
+struct StackFrames(Vec<StackFrame>);
+
+impl StackFrames {
+    fn new() -> Self {
+        StackFrames(Vec::new())
+    }
+    fn push(self: &mut Self, frame: StackFrame) {
+        self.0.push(frame);
+    }
+    fn pop(self: &mut Self) -> StackFrame {
+        self.0.pop().expect("Attempted to pop empty stackframe")
+    }
+    fn lookup(self: &Self, binding: &BindingId) -> Option<i32> {
+        self.0.last().expect("Attempted to lookup stack item without stackframe").map.get(binding).map(|b| *b)
     }
 }
 
@@ -30,7 +47,7 @@ pub struct Compiler {
     writer  : Writer,
     types   : Vec<Type>,
     /// Stack of stackframe layouts. Contains a map from binding id to load-argument for each frame.
-    locals  : Vec<StackFrameMap>,
+    locals  : StackFrames,
 }
 
 impl<'a> Compiler {
@@ -40,7 +57,7 @@ impl<'a> Compiler {
         Compiler {
             writer  : Writer::new(),
             types   : Vec::new(),
-            locals  : Vec::new(),
+            locals  : StackFrames::new(),
         }
     }
 
@@ -49,7 +66,7 @@ impl<'a> Compiler {
         Compiler {
             writer,
             types   : Vec::new(),
-            locals  : Vec::new(),
+            locals  : StackFrames::new(),
         }
     }
 
@@ -81,10 +98,12 @@ impl<'a> Compiler {
         match item {
             S::Function(function)       => self.compile_function(function),
             S::Structure(structure)     => { }, // todo: handle
-            S::Binding(binding)         => { }, // todo: handle
+            S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => self.compile_if_block(if_block),
             S::ForLoop(for_loop)        => { }, // todo: handle
+            S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
             S::Block(block)             => self.compile_block(block),
+            S::Return(ret)              => self.compile_return(ret),
             S::Expression(expression)   => self.compile_expression(expression),
         }
     }
@@ -96,11 +115,37 @@ impl<'a> Compiler {
             E::Literal(literal)         => self.compile_literal(literal),
             E::Variable(variable)       => self.compile_variable(variable),
             E::Call(call)               => self.compile_call(call),
-            E::Assignment(assignment)   => { }, // todo: handle,
+            E::Assignment(assignment)   => self.compile_assignment(assignment),
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
             E::UnaryOp(unary_op)        => { }, // todo: handle,
             E::Block(block)             => { }, // todo: handle,
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
+        };
+    }
+
+    /// Compiles the assignment operation.
+    pub fn compile_assignment(self: &mut Self, item: &ast::Assignment<'a>) {
+        use frontend::ast::BinaryOperator as BO;
+        let binding_id = item.left.binding_id.unwrap();
+        let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
+        match item.op {
+            BO::Assign => {
+                self.compile_expression(&item.right);
+                self.writer.store(index);
+            },
+            compound_assign @ _ => {
+                self.writer.load(index);
+                self.compile_expression(&item.right);
+                match compound_assign {
+                    BO::AddAssign => self.writer.add(),
+                    BO::SubAssign => self.writer.sub(),
+                    BO::MulAssign => self.writer.mul(),
+                    BO::DivAssign => unimplemented!("divassign"),
+                    BO::RemAssign => unimplemented!("remassign"),
+                    _ => panic!("Unsupported assignment operator encountered"),
+                };
+                self.writer.store(index);
+            },
         };
     }
 
@@ -109,7 +154,7 @@ impl<'a> Compiler {
 
         // create local environment
 
-        let mut frame = StackFrameMap::new();
+        let mut frame = StackFrame::new();
 
         for arg in item.sig.args.iter() {
             let next_arg = frame.next_arg;
@@ -117,10 +162,27 @@ impl<'a> Compiler {
             frame.next_arg -= 1;
         }
 
+        for statement in item.block.statements.iter() {
+            if let ast::Statement::Binding(binding) = statement {
+                let next_var = frame.next_var;
+                frame.map.insert(binding.binding_id.unwrap(), next_var);
+                frame.next_var += 1;
+                self.writer.lit0(); // todo: just set stack position
+            }
+        }
+
         self.locals.push(frame);
         self.compile_block(&item.block);
         self.writer.ret();
         self.locals.pop();
+    }
+
+    pub fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
+        if let Some(expr) = &item.expr {
+            self.compile_expression(expr);
+            let binding_id = item.binding_id.unwrap();
+            self.writer.store(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
+        }
     }
 
     /// Compiles the given if block.
@@ -155,6 +217,26 @@ impl<'a> Compiler {
         }
     }
 
+    pub fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
+        let start_target = self.writer.position;
+        self.compile_expression(&item.expr);
+        let exit_jump = self.writer.j0(123);
+        self.compile_block(&item.block);
+        self.writer.jmp(start_target);
+        let exit_target = self.writer.position;
+        self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+    }
+
+    /// Compiles a return statement
+    pub fn compile_return(self: &mut Self, item: &ast::Return<'a>) {
+        if let Some(expr) = &item.expr {
+            self.compile_expression(expr);
+        } else {
+            self.writer.lit0(); // todo: need to return something for now
+        }
+        self.writer.ret();
+    }
+
     /// Compiles the given block.
     pub fn compile_block(self: &mut Self, item: &ast::Block<'a>) {
 
@@ -183,8 +265,7 @@ impl<'a> Compiler {
     pub fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            let locals = &self.locals.last().expect("Frame stack was empty").map;
-            *locals.get(&binding_id).expect("Failed to look up local variable index")
+            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
         };
         self.write_load(load_index);
     }
@@ -214,28 +295,28 @@ impl<'a> Compiler {
             // arithmetic
             BO::Add => self.writer.add(),
             BO::Sub => self.writer.sub(),
-            BO::Mul => unimplemented!(),
-            BO::Div => unimplemented!(),
-            BO::Rem => unimplemented!(),
+            BO::Mul => unimplemented!("mul"),
+            BO::Div => unimplemented!("div"),
+            BO::Rem => unimplemented!("rem"),
             // assigments
-            BO::Assign => unimplemented!(),
-            BO::AddAssign => unimplemented!(),
-            BO::SubAssign => unimplemented!(),
-            BO::MulAssign => unimplemented!(),
-            BO::DivAssign => unimplemented!(),
-            BO::RemAssign => unimplemented!(),
+            BO::Assign => unimplemented!("assign"),
+            BO::AddAssign => unimplemented!("addassign"),
+            BO::SubAssign => unimplemented!("subassign"),
+            BO::MulAssign => unimplemented!("mulassign"),
+            BO::DivAssign => unimplemented!("divassgi"),
+            BO::RemAssign => unimplemented!("remassign"),
             // comparison
             BO::Less => self.writer.clts(),
-            BO::Greater => unimplemented!(),
-            BO::LessOrEq => unimplemented!(),
-            BO::GreaterOrEq => unimplemented!(),
-            BO::Equal => unimplemented!(),
-            BO::NotEqual => unimplemented!(),
+            BO::Greater => unimplemented!("greater"),
+            BO::LessOrEq => unimplemented!("lessoreq"),
+            BO::GreaterOrEq => unimplemented!("greateroreq"),
+            BO::Equal => self.writer.ceq(),
+            BO::NotEqual => unimplemented!("notequal"),
             // boolean
-            BO::And => unimplemented!(),
-            BO::Or => unimplemented!(),
+            BO::And => unimplemented!("and"),
+            BO::Or => unimplemented!("or"),
             // special
-            BO::Range => unimplemented!(),
+            BO::Range => unimplemented!("range"),
         };
     }
 }

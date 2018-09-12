@@ -2,6 +2,10 @@
 
 impl_vm!{
 
+    /// Does nothing.
+    /// #[allow(unused_variables)]
+    fn debug(self: &mut Self, hint: u32) { }
+
     /// Load constant from constant pool onto stack.
     fn const32(self: &mut Self, const_id: u8) {
         let tmp = self.consts[const_id as usize];
@@ -199,6 +203,12 @@ impl_vm!{
         let a = self.pop();
         let b = self.pop();
         self.push((a < b) as i32);
+    }
+    /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
+    fn ceq(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push((a == b) as i32);
     }
 
 

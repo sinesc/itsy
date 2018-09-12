@@ -188,13 +188,14 @@ named!(expression<Input, Expression>, ws!(alt!(
 
 named!(binding<Input, Statement>, map!(
     preceded!(ws!(tag!("let")), return_error!(
-        ErrorKind::Custom(ParseError::SyntaxLet as u32), ws!(tuple!(ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
+        ErrorKind::Custom(ParseError::SyntaxLet as u32),
+        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
     )),
     |m| Statement::Binding(Binding {
-        name        : *m.0,
-        mutable     : false, // todo: mutable bindings
-        expr        : m.2,
-        ty          : m.1.map(|t| Type::unknown(t)),
+        name        : *m.1,
+        mutable     : m.0.is_some(),
+        expr        : m.3,
+        ty          : m.2.map(|t| Type::unknown(t)),
         type_id     : TypeSlot::Unresolved,
         binding_id  : None,
     })
@@ -278,6 +279,21 @@ named!(for_loop<Input, ForLoop>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"),
     block: m.4,
 }));
 
+// while loop
+
+named!(while_loop<Input, WhileLoop>, map!(ws!(preceded!(tag!("while"), tuple!(expression, block))), |m| WhileLoop {
+    expr: m.0,
+    block: m.1,
+}));
+
+// return
+
+named!(return_statement<Input, Statement>, map!(ws!(preceded!(tag!("return"), terminated!(opt!(expression), char!(';')))),
+    |m| Statement::Return(Return {
+        expr        : m,
+    })
+));
+
 // statement
 
 named!(statement<Input, Statement>, alt!(
@@ -286,8 +302,10 @@ named!(statement<Input, Statement>, alt!(
     | function
     | structure
     | map!(for_loop, |m| Statement::ForLoop(m))
+    | map!(while_loop, |m| Statement::WhileLoop(m))
     | map!(terminated!(expression, char!(';')), |m| Statement::Expression(m))
     | map!(block, |m| Statement::Block(m))
+    | return_statement
 ));
 
 // root
@@ -295,6 +313,23 @@ named!(statement<Input, Statement>, alt!(
 named!(program<Input, Program>, ws!(many0!(statement)));
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(i: Input) -> IResult<Input, Program, u32> {
-    program(i)
+pub fn parse(input: &str) -> Result<Program, u32> {
+    // todo: error handling!
+    let result = program(Input(input));
+    match result {
+        Ok(result) => {
+            if result.0.len() > 0 {
+                Err(4) // todo: not sure what this case it. just getting the entire input back, no error
+            } else {
+                Ok(result.1)
+            }
+        },
+        Err(error) => {
+            Err(match error {
+                Error::Incomplete(_) => 1,
+                Error::Error(_) => 2,
+                Error::Failure(_) => 3,
+            })
+        }
+    }
 }

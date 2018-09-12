@@ -130,7 +130,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block),
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
+            S::WhileLoop(while_loop)    => self.resolve_while_loop(while_loop),
             S::Block(block)             => self.resolve_block(block),
+            S::Return(ret)              => self.resolve_return(ret),
             S::Expression(expression)   => self.resolve_expression(expression),
         }
     }
@@ -226,6 +228,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else if let Some(TypeSlot::TypeId(rhs)) = rhs {
             self.set_type_from_id(&mut item.type_id, rhs);
             self.set_bindingtype_from_id(binding_id, rhs);
+        } else if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
+            // someone else set the binding type, accept it
+            self.set_type_from_id(&mut item.type_id, binding_type_id);
         }
     }
 
@@ -259,6 +264,12 @@ impl<'a, 'b> Resolver<'a, 'b> {
         self.resolve_block(&mut item.block);
     }
 
+    /// Resolves a while loop.
+    fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'a>) {
+        self.resolve_expression(&mut item.expr);
+        self.resolve_block(&mut item.block);
+    }
+
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>) {
         for mut statement in item.statements.iter_mut() {
@@ -271,6 +282,13 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
         } else {
             self.set_type_from_void(&mut item.type_id);
+        }
+    }
+
+    /// Resolves a return statement.
+    fn resolve_return(self: &mut Self, item: &mut ast::Return<'a>) {
+        if let Some(expr) = &mut item.expr {
+            self.resolve_expression(expr);
         }
     }
 
@@ -314,7 +332,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
         self.resolve_variable(&mut item.left);
         self.resolve_expression(&mut item.right);
-        // todo: implement
+        if item.left.binding_id.is_some() && item.left.type_id.is_unresolved() && item.right.get_type_id().is_type() {
+            //self.set_type_from_id(&mut item.left.type_id, item.right.get_type_id().unwrap());
+            self.set_bindingtype_from_id(item.left.binding_id.unwrap(), item.right.get_type_id().unwrap());
+        }
     }
 
     /// Resolves a binary operation.

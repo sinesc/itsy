@@ -12,8 +12,10 @@ pub enum Statement<'a> {
     Function(Function<'a>),
     Structure(Structure<'a>),
     ForLoop(ForLoop<'a>),
+    WhileLoop(WhileLoop<'a>),
     IfBlock(IfBlock<'a>),
     Block(Block<'a>),
+    Return(Return<'a>),
     Expression(Expression<'a>),
 }
 
@@ -97,6 +99,17 @@ pub struct ForLoop<'a> {
     pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
     pub block   : Block<'a>,
+}
+
+#[derive(Debug)]
+pub struct WhileLoop<'a> {
+    pub expr    : Expression<'a>,
+    pub block   : Block<'a>,
+}
+
+#[derive(Debug)]
+pub struct Return<'a> {
+    pub expr    : Option<Expression<'a>>,
 }
 
 #[derive(Debug)]
