@@ -9,6 +9,8 @@ struct IntegerRange {
     pub max: Integer,
 }
 
+// todo: remove
+#[allow(dead_code)]
 /// Utility structure to handle primitive type information and casting.
 pub struct Primitives {
     /// Boolean type

@@ -37,7 +37,7 @@ macro_rules! impl_vm {
     (
         $(
             $( #[ $attr:meta ] )*
-            fn $name:tt $( = $id:tt)* ( $vm:ident : & mut Self $(, $op_name:ident : $op_type:tt)* ) $code:block
+            fn $name:tt $( = $id:tt)* ( $self:ident : & mut Self $(, $op_name:ident : $op_type:tt)* ) $code:block
         )+
     ) => {
 
@@ -69,12 +69,11 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
-                pub fn $name($vm: &mut Self, $($op_name: $op_type),* ) -> u32 {
+                pub fn $name(self: &mut Self, $($op_name: $op_type),* ) -> u32 {
                     use byteorder::{LittleEndian, WriteBytesExt};
-                    let writer = &mut $vm.program;
-                    let insert_pos = writer.len();
-                    writer.write_u8(ByteCode::$name.into_u8()).unwrap();
-                    $( impl_vm!(write $op_type $op_name writer); )*
+                    let insert_pos = self.position;
+                    self.write_u8(ByteCode::$name.into_u8()).unwrap();
+                    $( impl_vm!(write $op_type $op_name self); )*
                     insert_pos as u32
                 }
             )+
@@ -87,14 +86,13 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[cfg_attr(not(debug_assertions), inline(always))]
-                pub(crate) fn $name ( $vm: &mut Self, $($op_name: $op_type),* ) {
+                pub(crate) fn $name ( $self: &mut Self, $($op_name: $op_type),* ) {
                     $code
                 }
             )+
 
             /// Formats the given VMs bytecode data as human readable output.
             #[allow(unused_imports)]
-            #[allow(unreachable_patterns)]
             pub(crate) fn format_instruction(self: &mut Self) -> Option<String> {
                 use byteorder::{LittleEndian, ReadBytesExt};
                 let position = self.pc;
@@ -109,7 +107,6 @@ macro_rules! impl_vm {
                                 Some(result)
                             }
                         ),+,
-                        _ => panic!("Encountered undefined instruction {:?}.", instruction)
                     }
                 } else {
                     None
@@ -118,7 +115,6 @@ macro_rules! impl_vm {
 
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
-            //#[allow(unreachable_patterns)]
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec(self: &mut Self) {
                 use byteorder::{LittleEndian, ReadBytesExt};
@@ -130,7 +126,6 @@ macro_rules! impl_vm {
                             self.$name( $( $op_name ),* );
                         }
                     ),+,
-                    //_ => panic!("Encountered undefined instruction {:?}.", instruction)
                 }
             }
         }

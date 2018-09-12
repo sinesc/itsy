@@ -53,7 +53,6 @@ impl_vm!{
         let local = self.peek(offset);
         self.push(local);
     }
-
     /// Pop stackvalue and store it at the given offset (relative to the stackframe).
     fn store(self: &mut Self, offset: i32) {
         let local = self.pop();
@@ -65,13 +64,11 @@ impl_vm!{
         let local = self.peek(-4);
         self.push(local);
     }
-
     /// Load function argument 2 and push it onto the stack. Equivalent to load -5.
     fn load_arg2(self: &mut Self) {
         let local = self.peek(-5);
         self.push(local);
     }
-
     /// Load function argument 3 and push it onto the stack. Equivalent to load -6.
     fn load_arg3(self: &mut Self) {
         let local = self.peek(-6);
@@ -143,6 +140,19 @@ impl_vm!{
         self.push(a * b);
     }
 
+    /// Jumps unconditionally to the given address.
+    fn jmp(self: &mut Self, addr: u32) {
+        self.pc = addr;
+    }
+
+    /// Pops one values and jumps to given address if it is 0.
+    fn j0(self: &mut Self, addr: u32) {
+        let a = self.pop();
+        if a == 0 {
+            self.pc = addr;
+        }
+    }
+
     /// Pops two values and jumps to given address it they equal.
     fn jeq(self: &mut Self, addr: u32) {
         let a = self.pop();
@@ -184,6 +194,20 @@ impl_vm!{
         }
     }
 
+    /// Pops two values and pushes a 1 if the first value is greater than the second, otherwise a 0.
+    fn clts(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push((a < b) as i32);
+    }
+
+
+
+
+
+
+
+
     /// Negate current value on stack.
     fn negs(self: &mut Self) {
         let tmp = self.pop();
@@ -206,25 +230,6 @@ impl_vm!{
         self.push(a - 1);
     }
 
-/*
-    /// Compares if the the current stack value is greater than the given value. Sets reg_cond accordingly.
-    fn cmp_gt(self: &mut Self, other: i32) {
-        let tmp = *self.stack.last().unwrap();
-        self.reg_cond = tmp > other;
-    }
-
-    /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
-    fn cmp_lt(self: &mut Self, other: i32) {
-        let tmp = *self.stack.last().unwrap();
-        self.reg_cond = tmp < other;
-    }
-
-    /// Compares if the the current stack value is less than the given value. Sets reg_cond accordingly.
-    fn cmp_eq(self: &mut Self, other: i32) {
-        let tmp = *self.stack.last().unwrap();
-        self.reg_cond = tmp == other;
-    }
-*/
     /// Print current value on stack.
     fn print(self: &mut Self) {
         println!("print: {:?}", self.top());

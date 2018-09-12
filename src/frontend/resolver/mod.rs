@@ -231,6 +231,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
+        self.resolve_expression(&mut item.cond);
         self.resolve_block(&mut item.if_block);
         if let Some(ref mut else_block) = item.else_block {
             self.resolve_block(else_block);
