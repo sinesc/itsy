@@ -2,8 +2,8 @@
 
 impl_vm!{
 
-    /// Does nothing.
-    /// #[allow(unused_variables)]
+    /// Does nothing. Uses as label when debugging.
+    #[allow(unused_variables)]
     fn debug(self: &mut Self, hint: u32) { }
 
     /// Load constant from constant pool onto stack.
@@ -31,9 +31,24 @@ impl_vm!{
         self.push(h);
     }
 
+    /// Moves the stack pointer by given number of items (32bit words) to make room for local variables.
+    fn reserve(self: &mut Self, num_items: u8) {
+        for _ in 0..num_items {
+            self.push(0);
+        }
+    }
+
     // Push given u8 onto stack.
     fn lit_u8(self: &mut Self, val: u8) {
         self.pushu8(val);
+    }
+    // Push given u16 onto stack.
+    fn lit_u16(self: &mut Self, val: u16) {
+        self.pushu16(val);
+    }
+    // Push given u32 onto stack.
+    fn lit_u32(self: &mut Self, val: u32) {
+        self.pushu(val);
     }
     /// Push 0 onto stack.
     fn lit0(self: &mut Self) {
@@ -87,15 +102,15 @@ impl_vm!{
         self.pushu8(num_args);    // save number of arguments
         self.pushu(fp);           // save frame pointer
         self.pushu(next_pc);      // save program counter as it would be after this instruction
-        self.fp = self.sp();        // set new frame pointer
+        self.fp = self.sp();      // set new frame pointer
         self.pc = addr;           // set new program counter
     }
-    fn call1_u8(self: &mut Self, addr: u8) {
+    /*fn call1_u8(self: &mut Self, addr: u8) {
         self.call(addr as u32, 1);
     }
     fn call_u8(self: &mut Self, addr: u8, num_args: u8) {
         self.call(addr as u32, num_args);
-    }
+    }*/
     fn callp1(self: &mut Self) {
         let addr = self.popu();
         self.call(addr, 1);
@@ -198,17 +213,23 @@ impl_vm!{
         }
     }
 
-    /// Pops two values and pushes a 1 if the first value is greater than the second, otherwise a 0.
-    fn clts(self: &mut Self) {
-        let a = self.pop();
-        let b = self.pop();
-        self.push((a < b) as i32);
-    }
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn ceq(self: &mut Self) {
         let a = self.pop();
         let b = self.pop();
         self.push((a == b) as i32);
+    }
+    /// Pops two values and pushes a 1 if the first value is greater the second., otherwise a 0.
+    fn cgts(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push((a > b) as i32);
+    }
+    /// Pops two values and pushes a 1 if the first value is greater than the second, otherwise a 0.
+    fn clts(self: &mut Self) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push((a < b) as i32);
     }
 
 

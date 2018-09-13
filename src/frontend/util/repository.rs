@@ -4,11 +4,11 @@ use std::hash::Hash;
 use std::fmt::{Debug, Formatter, Result};
 use std::ops::Index;
 use std::borrow::Borrow;
-use std::slice::IterMut;
+//use std::slice::IterMut;
 use std::iter::FromIterator;
 
 /// A datastructure that stores items by name and index.
-pub struct Repository<V, I = usize, K = String> {
+pub(crate) struct Repository<V, I = usize, K = String> {
     map: HashMap<K, I>,
     data: Vec<V>,
 }
@@ -21,13 +21,13 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
             data: Vec::new(),
         }
     }
-    /// Creates a new repository with given capacity.
+    /* /// Creates a new repository with given capacity.
     pub fn with_capacity(cap: usize) -> Self {
         Repository {
             map: HashMap::with_capacity(cap),
             data: Vec::with_capacity(cap),
         }
-    }
+    }*/
     /// Inserts an item into the repository and returns its index.
     pub fn insert(self: &mut Self, name: K, element: V) -> I {
         let index = I::from(self.data.len());
@@ -51,22 +51,22 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
             None
         }
     }
-    /// Fetches an item mutably by name.
+    /* /// Fetches an item mutably by name.
     pub fn name_mut<Q: ?Sized>(self: &mut Self, name: & Q) -> Option<& mut V> where K: Borrow<Q>, Q: Hash + Eq {
         if let Some(&index) = self.map.get(name) {
             Some(&mut self.data[Into::<usize>::into(index)])
         } else {
             None
         }
-    }
+    }*/
     /// Returns the index of the named item.
     pub fn index_of<Q: ?Sized>(self: &Self, name: &Q) -> Option<I> where K: Borrow<Q>, Q: Hash + Eq {
         self.map.get(name).map(|i| *i)
     }
-    /// Returns an iterator over the mutable items.
+    /* /// Returns an iterator over the mutable items.
     pub fn values_mut(self: &mut Self) -> IterMut<V> {
         self.data.iter_mut()
-    }
+    }*/
 }
 
 impl<V, I, K> Into<Vec<V>> for Repository<V, I, K> {

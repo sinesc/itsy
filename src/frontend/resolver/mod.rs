@@ -5,16 +5,19 @@ mod primitives;
 
 use frontend::ast;
 use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot};
-use bytecode::Type;
+use frontend::util::Type;
 
 /// Wrapper containing an AST structure with all types resolved and a map of those types.
 #[derive(Debug)]
 pub struct ResolvedProgram<'a> {
-    pub ast     : ast::Program<'a>,
-    pub types   : Vec<Type>,
+    /// Program AST with types and bindings resolved.
+    pub ast         : ast::Program<'a>,
+    /// Mapping from TypeId (vector index) to primitive type.
+    pub(crate)types : Vec<Type>,
 }
 
 impl<'a> ResolvedProgram<'a> {
+    /// Returns the primitive type for the given type id.
     pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
         &self.types[Into::<usize>::into(type_id)]
     }

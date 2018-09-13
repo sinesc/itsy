@@ -4,60 +4,67 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use frontend::{ast, ResolvedProgram, util::{Integer, BindingId}};
-use bytecode::{Type, Writer, Program};
+use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type}};
+use bytecode::{Writer, Program};
 
-struct StackFrame {
-    map: HashMap<BindingId, i32>,
+/// Maps bindings and arguments to indices relative to the stackframe.
+struct Locals {
+    map     : HashMap<BindingId, i32>,
     next_arg: i32,
     next_var: i32,
 }
 
-impl StackFrame {
+impl Locals {
     pub fn new() -> Self {
-        StackFrame {
-            map: HashMap::new(),
+        Locals {
+            map     : HashMap::new(),
             next_arg: -4,
             next_var: 0,
         }
     }
 }
 
-struct StackFrames(Vec<StackFrame>);
+/// A stack Locals mappings for nested structures.
+struct LocalsStack(Vec<Locals>);
 
-impl StackFrames {
+impl LocalsStack {
     fn new() -> Self {
-        StackFrames(Vec::new())
+        LocalsStack(Vec::new())
     }
-    fn push(self: &mut Self, frame: StackFrame) {
+    fn push(self: &mut Self, frame: Locals) {
         self.0.push(frame);
     }
-    fn pop(self: &mut Self) -> StackFrame {
-        self.0.pop().expect("Attempted to pop empty stackframe")
+    fn pop(self: &mut Self) -> Locals {
+        self.0.pop().expect("Attempted to pop empty LocalsStack")
     }
     fn lookup(self: &Self, binding: &BindingId) -> Option<i32> {
-        self.0.last().expect("Attempted to lookup stack item without stackframe").map.get(binding).map(|b| *b)
+        self.0.last().expect("Attempted to lookup stack item without LocalsStack").map.get(binding).map(|b| *b)
     }
 }
-
-
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler {
-    writer  : Writer,
-    types   : Vec<Type>,
-    /// Stack of stackframe layouts. Contains a map from binding id to load-argument for each frame.
-    locals  : StackFrames,
+    writer          : Writer,
+    types           : Vec<Type>,
+    /// Maps from binding id to load-argument for each frame.
+    locals          : LocalsStack,
+    // Maps functions to their call index
+    functions       : HashMap<FunctionId, u32>,
+    /// List of unresolved calls for each function.
+    unresolved      : HashMap<FunctionId, Vec<u32>>,
 }
 
+/// Basic compiler functionality.
 impl<'a> Compiler {
 
     /// Creates a new compiler.
     pub fn new() -> Self {
         Compiler {
-            writer  : Writer::new(),
-            types   : Vec::new(),
-            locals  : StackFrames::new(),
+            writer      : Writer::new(),
+            types       : Vec::new(),
+            locals      : LocalsStack::new(),
+            functions   : HashMap::new(),
+            unresolved  : HashMap::new(),
         }
     }
 
@@ -65,19 +72,11 @@ impl<'a> Compiler {
     pub fn with_writer(writer: Writer) -> Self {
         Compiler {
             writer,
-            types   : Vec::new(),
-            locals  : StackFrames::new(),
+            types       : Vec::new(),
+            locals      : LocalsStack::new(),
+            functions   : HashMap::new(),
+            unresolved  : HashMap::new(),
         }
-    }
-
-    /// Returns compiled bytecode program.
-    pub fn into_program(self: Self) -> Program {
-        self.writer.into_program()
-    }
-
-    /// Returns writer containing compiled bytecode program.
-    pub fn into_writer(self: Self) -> Writer {
-        self.writer
     }
 
     /// Compiles the current program.
@@ -91,6 +90,20 @@ impl<'a> Compiler {
             self.compile_statement(statement);
         }
     }
+
+    /// Returns compiled bytecode program.
+    pub fn into_program(self: Self) -> Program {
+        self.writer.into_program()
+    }
+
+    /// Returns writer containing compiled bytecode program.
+    pub fn into_writer(self: Self) -> Writer {
+        self.writer
+    }
+}
+
+/// Methods for compiling individual code structures.
+impl<'a> Compiler {
 
     /// Compiles the given statement.
     pub fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
@@ -134,8 +147,8 @@ impl<'a> Compiler {
                 self.writer.store(index);
             },
             compound_assign @ _ => {
-                self.writer.load(index);
                 self.compile_expression(&item.right);
+                self.writer.load(index);
                 match compound_assign {
                     BO::AddAssign => self.writer.add(),
                     BO::SubAssign => self.writer.sub(),
@@ -152,9 +165,15 @@ impl<'a> Compiler {
     /// Compiles the given function.
     pub fn compile_function(self: &mut Self, item: &ast::Function<'a>) {
 
-        // create local environment
+        // register function bytecode index, check if any bytecode needs fixing
+        let position = self.writer.position();
+        let function_id = item.function_id.unwrap();
+        let num_args = item.sig.args.len() as u8;
+        self.functions.insert(function_id, position);
+        self.fix_targets(function_id, position, num_args);
 
-        let mut frame = StackFrame::new();
+        // create local environment
+        let mut frame = Locals::new();
 
         for arg in item.sig.args.iter() {
             let next_arg = frame.next_arg;
@@ -167,22 +186,63 @@ impl<'a> Compiler {
                 let next_var = frame.next_var;
                 frame.map.insert(binding.binding_id.unwrap(), next_var);
                 frame.next_var += 1;
-                self.writer.lit0(); // todo: just set stack position
             }
+        }
+
+        if frame.next_var > 0 {
+            self.writer.reserve(frame.next_var as u8);
         }
 
         self.locals.push(frame);
         self.compile_block(&item.block);
-        self.writer.ret();
+        self.writer.ret(); // todo: skip if last statement was "return"
         self.locals.pop();
     }
 
+    /// Compiles the given call.
+    pub fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
+
+        // print hack
+        if item.path.0[0] == "print" {
+            self.writer.print();
+            return;
+        }
+
+        // put args on stack
+        for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
+            self.compile_expression(arg);
+        }
+
+        // identify call target or write dummy
+        let function_id = item.function_id.expect("Unresolved function encountered");
+        let call_position = self.writer.position();
+
+        let target = if let Some(&target) = self.functions.get(&function_id) {
+            target
+        } else {
+            self.unresolved.entry(function_id).or_insert(Vec::new()).push(call_position);
+            123
+        };
+
+        self.writer.call(target, item.args.len() as u8);       // todo: args in sig, not call
+    }
+
+    /// Compiles a variable binding and optional assignment.
     pub fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
             let binding_id = item.binding_id.unwrap();
             self.writer.store(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
         }
+    }
+
+    /// Compiles the given variable.
+    pub fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
+        let load_index = {
+            let binding_id = item.binding_id.expect("Unresolved binding encountered");
+            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+        };
+        self.write_load(load_index);
     }
 
     /// Compiles the given if block.
@@ -217,6 +277,7 @@ impl<'a> Compiler {
         }
     }
 
+    /// Compiles a while loop.
     pub fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
         let start_target = self.writer.position;
         self.compile_expression(&item.expr);
@@ -261,31 +322,6 @@ impl<'a> Compiler {
         };
     }
 
-    /// Compiles the given variable.
-    pub fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
-        let load_index = {
-            let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
-        };
-        self.write_load(load_index);
-    }
-
-    /// Compiles the given call.
-    pub fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
-        // print hack
-        if item.path.0[0] == "print" {
-            self.writer.print();
-            return;
-        }
-
-        // put args on stack
-        for arg in item.args.iter() {
-            self.compile_expression(arg);
-        }
-
-        self.writer.call(0, item.args.len() as u8);       // todo: 0
-    }
-
     /// Compiles the given binary operation.
     pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
         use frontend::ast::BinaryOperator as BO;
@@ -307,7 +343,7 @@ impl<'a> Compiler {
             BO::RemAssign => unimplemented!("remassign"),
             // comparison
             BO::Less => self.writer.clts(),
-            BO::Greater => unimplemented!("greater"),
+            BO::Greater => self.writer.cgts(),
             BO::LessOrEq => unimplemented!("lessoreq"),
             BO::GreaterOrEq => unimplemented!("greateroreq"),
             BO::Equal => self.writer.ceq(),
@@ -322,6 +358,18 @@ impl<'a> Compiler {
 }
 
 impl<'a> Compiler {
+    /// Fixes function call targets for previously not generated functions.
+    fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
+        if let Some(targets) = self.unresolved.remove(&function_id) {
+            let backup_position = self.writer.position();
+            for &target in targets.iter() {
+                self.writer.set_position(target);
+                self.writer.call(position, num_args); // todo: may have to handle multiple call types
+            }
+            self.writer.set_position(backup_position);
+        }
+    }
+    /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &mut Self, index: i32) {
         match index {
             -4 => self.writer.load_arg1(),
@@ -330,13 +378,14 @@ impl<'a> Compiler {
             _ => self.writer.load(index),
         };
     }
+    /// Writes an appropriate variant of the lit instruction.
     fn write_lit(self: &mut Self, value: i64) {
         match value {
             0 => self.writer.lit0(),
             1 => self.writer.lit1(),
             2 => self.writer.lit2(),
             -1 => self.writer.litm1(),
-            _ => self.writer.lit_u8(value as u8), // todo: other lit types
+            _ => self.writer.lit_u32(value as u32), // todo: other lit types
         };
     }
 }

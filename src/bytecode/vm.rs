@@ -103,61 +103,62 @@ impl VM {
 
 /// Support methods used by bytecode instructions. These are not bytecode instructions themselves.
 impl VM {
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Current stack pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn sp(self: &mut Self) -> u32 {
         self.stack.len() as u32
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Truncate stack at given length.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn truncate(self: &mut Self, new_len: u32) {
         self.stack.truncate(new_len as usize);
     }
 
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Peek stack top value.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn top(self: &mut Self) -> i32 {
         vali32(*self.stack.last().expect("Stack is empty."))
     }
     /// Peek stack top value.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn topu(self: &mut Self) -> u32 {
         valu32(*self.stack.last().expect("Stack is empty."))
     }
 
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Peek stack value relative to frame pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn peek(self: &mut Self, position: i32) -> i32 {
         self.stack[ ( (self.fp as isize) + (position as isize) ) as usize ]
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Peek stack value relative to frame pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn peeku(self: &mut Self, position: i32) -> u32 {
         valu32(self.peek(position))
     }
 
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Store given value at given position relative to frame pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn storei(self: &mut Self, position: i32, value: i32) {
         self.stack[ ( (self.fp as isize) + (position as isize) ) as usize ] = i32val(value);
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Store given value at given position relative to frame pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn storeu(self: &mut Self, position: i32, value: u32) {
         self.stack[ ( (self.fp as isize) + (position as isize) ) as usize ] = u32val(value);
     }
 
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Pops a value from the stack.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn pop(self: &mut Self) -> i32 {
         vali32(self.stack.pop().expect("Stack underflow."))
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Pops a value from the stack.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn popu(self: &mut Self) -> u32 {
         valu32(self.stack.pop().expect("Stack underflow."))
     }
-    #[cfg_attr(not(debug_assertions), inline(always))]
     /// Pops a value from the stack.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn popu8(self: &mut Self) -> u8 {
         valu8(self.stack.pop().expect("Stack underflow."))
     }
@@ -221,11 +222,13 @@ impl VM {
 }
 
 impl Read for VM {
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = Read::read(&mut &self.program[self.pc as usize..], buf)?;
         self.pc += n as u32;
         Ok(n)
     }
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let n = buf.len();
         Read::read_exact(&mut &self.program[self.pc as usize..], buf)?;

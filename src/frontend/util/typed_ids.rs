@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Debug};
 
-/// Unique numeric type id.
+/// Unique numeric id of a type.
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd)]
 pub struct TypeId(usize);
 
@@ -46,7 +46,7 @@ impl Debug for ScopeId {
     }
 }
 
-/// Unique numeric id of a binding.
+/// Unique numeric id of a variable binding.
 #[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
 pub struct BindingId(usize);
 

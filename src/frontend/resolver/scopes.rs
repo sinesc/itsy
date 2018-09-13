@@ -1,8 +1,7 @@
 // todo: remove
 #![allow(dead_code)]
 
-use frontend::util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot};
-use bytecode::Type;
+use frontend::util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot, Type};
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {

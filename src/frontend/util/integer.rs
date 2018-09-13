@@ -9,7 +9,7 @@ pub type Signed = i64;
 /// Unsigned integer value.
 pub type Unsigned = u64;
 
-/// A type supporting signed and unsigned integral values.
+/// A type supporting signed and unsigned integral values. Used in the AST to store literal values.
 #[derive(Clone, Copy)]
 pub enum Integer {
     Signed(Signed),

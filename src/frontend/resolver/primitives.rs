@@ -1,7 +1,7 @@
 use frontend::util::{TypeId, ScopeId, Integer, Signed, Unsigned};
 use frontend::ast;
 use frontend::resolver::scopes::Scopes;
-use bytecode::Type;
+use frontend::util::Type;
 
 struct IntegerRange {
     pub type_id: TypeId,
@@ -12,7 +12,7 @@ struct IntegerRange {
 // todo: remove
 #[allow(dead_code)]
 /// Utility structure to handle primitive type information and casting.
-pub struct Primitives {
+pub(crate) struct Primitives {
     /// Boolean type
     pub bool    : TypeId,           // todo: temp pub
     /// String type
