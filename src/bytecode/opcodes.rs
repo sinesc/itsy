@@ -232,12 +232,8 @@ impl_vm!{
         self.push((a < b) as i32);
     }
 
-    fn rustcallx(self: &mut Self, func: u16) {
-        println!("{:?}", func);
-    }
-
     fn rustcall(self: &mut Self, func: RustFn) {
-        println!("{:?}", func);
+        //println!("{:?}", func.exec());
     }
 
 

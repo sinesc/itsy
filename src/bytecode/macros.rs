@@ -32,13 +32,16 @@ macro_rules! fn_map {
         }
 
         impl $enum_name {
-            fn map() -> Option<$crate::frontend::RustFnMap> {
+            fn map() -> Option<$crate::frontend::RustFnMap<$enum_name>> {
                 use $crate::frontend::RustFn;
                 let mut map = ::std::collections::HashMap::new();
                 $(
                     map.insert(stringify!($name), RustFn::new($enum_name::$name, Vec::new()));
                 )+
                 Some(map)
+            }
+            fn exec(self: &Self) {
+                println!("called {:?}", self);
             }
         }
     }

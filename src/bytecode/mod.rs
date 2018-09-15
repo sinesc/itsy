@@ -22,7 +22,7 @@ pub(crate) type Value = i32;
 pub type Program = Vec<u8>;
 
 #[doc(hidden)]
-pub trait RustFnId {
+pub trait RustFnId: Clone {
     fn from_rustfn(self: Self) -> u16;
 }
 

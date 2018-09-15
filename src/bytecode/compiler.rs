@@ -4,8 +4,8 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type}};
-use bytecode::{Writer, Program};
+use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type, RustFn, RustFnMap}};
+use bytecode::{Writer, Program, RustFnId};
 
 /// Maps bindings and arguments to indices relative to the stackframe.
 struct Locals {
@@ -43,7 +43,7 @@ impl LocalsStack {
 }
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler {
+pub struct Compiler<T> where T: RustFnId {
     writer          : Writer,
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
@@ -52,10 +52,12 @@ pub struct Compiler {
     functions       : HashMap<FunctionId, u32>,
     /// List of unresolved calls for each function.
     unresolved      : HashMap<FunctionId, Vec<u32>>,
+    rust_fns        : Option<RustFnMap<T>>,             // todo: use enum to represent both, either one or the other exist, never both
+    rust_fn_indices : Option<HashMap<u16, T>>,
 }
 
 /// Basic compiler functionality.
-impl<'a> Compiler {
+impl<'a, T> Compiler<T> where T: RustFnId {
 
     /// Creates a new compiler.
     pub fn new() -> Self {
@@ -65,6 +67,8 @@ impl<'a> Compiler {
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
             unresolved  : HashMap::new(),
+            rust_fns    : None,
+            rust_fn_indices : None,
         }
     }
 
@@ -76,19 +80,25 @@ impl<'a> Compiler {
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
             unresolved  : HashMap::new(),
+            rust_fns    : None,
+            rust_fn_indices : None,
         }
     }
 
     /// Compiles the current program.
-    pub fn compile(self: &mut Self, program: ResolvedProgram<'a>) {
+    pub fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
 
-        let ResolvedProgram { ast: statements, types } = program;
+        let ResolvedProgram { ast: statements, types, rust_fns } = program;
 
         self.types = types;
+        self.rust_fns = rust_fns;
 
         for statement in statements.iter() {
             self.compile_statement(statement);
         }
+
+        let rust_fns = ::std::mem::replace(&mut self.rust_fns, None);
+        self.rust_fn_indices = rust_fns.map(|some| some.into_iter().map(|(k, v)| { (v.index.clone().from_rustfn(), v.index) }).collect() );
     }
 
     /// Returns compiled bytecode program.
@@ -103,7 +113,7 @@ impl<'a> Compiler {
 }
 
 /// Methods for compiling individual code structures.
-impl<'a> Compiler {
+impl<'a, T> Compiler<T> where T: RustFnId {
 
     /// Compiles the given statement.
     pub fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
@@ -207,15 +217,20 @@ impl<'a> Compiler {
             self.compile_expression(arg);
         }
 
-        if let Some(rust_fn_id) = item.rust_fn_id {
+        if let (Some(rust_fns), Some(rust_fn_name)) = (&self.rust_fns, item.rust_fn_name) {
 
             // rust function
-            self.writer.rustcallx(rust_fn_id);
+            self.writer.rustcall(
+                rust_fns
+                    .get(rust_fn_name)
+                    .expect("Unresolved external function encountered. This is a bug unless the RustFnMap was unsafely modified.")
+                    .index.clone()
+            );
 
         } else {
 
             // normal function: identify call target or write dummy
-            let function_id = item.function_id.expect("Unresolved function encountered");
+            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.path.0[0]));
             let call_position = self.writer.position();
 
             let target = if let Some(&target) = self.functions.get(&function_id) {
@@ -359,7 +374,7 @@ impl<'a> Compiler {
     }
 }
 
-impl<'a> Compiler {
+impl<'a, T> Compiler<T> where T: RustFnId {
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
         if let Some(targets) = self.unresolved.remove(&function_id) {
@@ -393,7 +408,7 @@ impl<'a> Compiler {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a>(program: ResolvedProgram<'a>) -> Writer {
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer where T: RustFnId {
     let mut compiler = Compiler::new();
     compiler.compile(program);
     compiler.into_writer()

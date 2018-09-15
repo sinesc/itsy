@@ -8,10 +8,19 @@ pub mod frontend;
 #[macro_use]
 pub mod bytecode;
 
+fn_map!(ItsyFn, {
+    fn print(vm: &mut VM, value: u32) {
+        println!("print:", value);
+    }
+    fn hello_world(vm: &mut VM) {
+        println!("hello world!");
+    }
+});
+
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
-pub fn exec(program: &str, rust_fns: Option<frontend::RustFnMap>) -> bytecode::VM {
+pub fn exec<T>(program: &str, rust_fns: Option<frontend::RustFnMap<T>>) -> bytecode::VM where T: bytecode::RustFnId {
     use frontend::{parse, resolve};
     use bytecode::{compile, VM};
 
@@ -27,20 +36,11 @@ pub fn exec(program: &str, rust_fns: Option<frontend::RustFnMap>) -> bytecode::V
     VM::new(writer.into_program(), vec![ ], start)
 }
 
-fn_map!(ItsyFn, {
-    fn print(vm: &mut VM, value: u32) {
-        println!("print:", value);
-    }
-    fn hello_world(vm: &mut VM) {
-        println!("hello world!");
-    }
-});
-
 fn main() {
 
     let source = "
 fn wrapper() -> i32 {
-    print(fib(37))
+    print(fib(22))
 }
 fn fib(n: i32) -> i32 {
     if n < 2 {
@@ -55,7 +55,7 @@ fn fib(n: i32) -> i32 {
     use bytecode::compile;
 
     let parsed = parse(source).unwrap();
-    //println!("{:#?}", parsed); return;
+    //println!("{:#?}", parsed);
     let resolved = resolve(parsed, ItsyFn::map());
     //println!("{:#?}", resolved.ast);
     //println!("{:#?}", resolved.types);
@@ -64,7 +64,6 @@ fn fib(n: i32) -> i32 {
     // create entry point, call fib
     let start = writer.len();
     writer.call(0, 0); // call first method
-    writer.rustcall(ItsyFn::print);
     writer.exit();
 
     {

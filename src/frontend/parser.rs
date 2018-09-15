@@ -53,7 +53,7 @@ named!(call<Input, Expression>, map!(ws!(tuple!(ident_path, call_argument_list))
     args        : m.1,
     type_id     : TypeSlot::Unresolved,
     function_id : None,
-    rust_fn_id  : None,
+    rust_fn_name: None,
 })));
 
 // literal numerical (expression)
