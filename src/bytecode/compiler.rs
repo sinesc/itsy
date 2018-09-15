@@ -202,29 +202,31 @@ impl<'a> Compiler {
     /// Compiles the given call.
     pub fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
 
-        // print hack
-        if item.path.0[0] == "print" {
-            self.writer.print();
-            return;
-        }
-
         // put args on stack
         for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
             self.compile_expression(arg);
         }
 
-        // identify call target or write dummy
-        let function_id = item.function_id.expect("Unresolved function encountered");
-        let call_position = self.writer.position();
+        if let Some(rust_fn_id) = item.rust_fn_id {
 
-        let target = if let Some(&target) = self.functions.get(&function_id) {
-            target
+            // rust function
+            self.writer.rustcallx(rust_fn_id);
+
         } else {
-            self.unresolved.entry(function_id).or_insert(Vec::new()).push(call_position);
-            123
-        };
 
-        self.writer.call(target, item.args.len() as u8);       // todo: args in sig, not call
+            // normal function: identify call target or write dummy
+            let function_id = item.function_id.expect("Unresolved function encountered");
+            let call_position = self.writer.position();
+
+            let target = if let Some(&target) = self.functions.get(&function_id) {
+                target
+            } else {
+                self.unresolved.entry(function_id).or_insert(Vec::new()).push(call_position);
+                123
+            };
+
+            self.writer.call(target, item.args.len() as u8);       // todo: get args from sig, not call (maybe?) should match once resolve does the checking
+        }
     }
 
     /// Compiles a variable binding and optional assignment.

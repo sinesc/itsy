@@ -21,6 +21,11 @@ pub(crate) type Value = i32;
 /// An Itsy bytecode program.
 pub type Program = Vec<u8>;
 
+#[doc(hidden)]
+pub trait RustFnId {
+    fn from_rustfn(self: Self) -> u16;
+}
+
 /// Converts an i8 to a Value.
 #[inline(always)]
 pub(crate) fn i8val(value: i8) -> Value {

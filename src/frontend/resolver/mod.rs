@@ -4,7 +4,7 @@ mod scopes;
 mod primitives;
 
 use frontend::ast;
-use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot};
+use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, RustFnMap};
 use frontend::util::Type;
 
 /// Wrapper containing an AST structure with all types resolved and a map of those types.
@@ -33,10 +33,12 @@ struct Resolver<'a, 'b> where 'a: 'b {
     pub scopes      : &'b mut scopes::Scopes<'a>,
     /// Grouped primitive types
     pub primitives  : &'b primitives::Primitives,
+    /// External Rust function map
+    pub rust_fns    : &'b Option<RustFnMap>,
 }
 
 /// Resolves types within the given program AST structure.
-pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
+pub fn resolve<'a>(mut program: ast::Program<'a>, rust_fns: Option<RustFnMap>) -> ResolvedProgram<'a> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -58,6 +60,7 @@ pub fn resolve<'a>(mut program: ast::Program<'a>) -> ResolvedProgram<'a> {
                 scope_id    : root_scope_id,
                 scopes      : &mut scopes,
                 primitives  : &primitives,
+                rust_fns    : &rust_fns,
             };
             resolver.resolve_statement(&mut statement);
         }
@@ -80,6 +83,21 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let mut type_id = self.scopes.binding_type(binding_id);
         self.set_type_from_id(&mut type_id, new_type_id); // todo: get borrowck to accept a binding_type_mut instead of the temp copy?
         *self.scopes.binding_type_mut(binding_id) = type_id;
+    }
+
+    /// Return existing binding-id or create and return new binding-id.
+    fn try_create_binding(self: &mut Self, item: &mut ast::Binding<'a>) -> BindingId {
+        if let Some(binding_id) = item.binding_id {
+            binding_id
+        } else {
+            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
+            if self.scopes.binding_id(self.scope_id, item.name).is_some() {
+                panic!("shadowing NYI"); // todo: support shadowing
+            }
+            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, TypeSlot::Unresolved); // todo: a &mut would be nicer than the index
+            item.binding_id = Some(binding_id);
+            binding_id
+        }
     }
 
     /// Sets given type_id for the given unresolved type. Increases resolution counter if a change was made.
@@ -155,17 +173,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
     }
 
-    /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
-        self.resolve_signature(&mut item.sig);
-        self.resolve_block(&mut item.block);
-        if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
-            let result = item.sig.ret.as_ref().map_or(TypeSlot::Void, |ret| ret.type_id);
-            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id).collect();
-            item.function_id = Some(self.scopes.insert_function(self.scope_id, item.sig.name, result, args));
-        }
-    }
-
     /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'a>) {
         // resolve arguments // todo: create scope here
@@ -178,24 +185,50 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
     }
 
+    /// Resolves a function defintion.
+    fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
+        self.resolve_signature(&mut item.sig);
+        self.resolve_block(&mut item.block);
+        if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
+            let result = item.sig.ret.as_ref().map_or(TypeSlot::Void, |ret| ret.type_id);
+            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id).collect();
+            item.function_id = Some(self.scopes.insert_function(self.scope_id, item.sig.name, result, args));
+        }
+    }
+
+    /// Resolves an occurance of a function call.
+    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>) {
+
+        // resolve arguments
+        for arg in item.args.iter_mut() {
+            self.resolve_expression(arg);
+        }
+
+        if item.function_id.is_none() {
+
+            if let Some(Some(rust_fn)) = self.rust_fns.as_ref().map(|rust_fns| rust_fns.get(&item.path.0[0])) {
+
+                // external function
+                item.rust_fn_id = Some(rust_fn.index);
+
+            } else {
+
+                // function
+                item.function_id = self.scopes.lookup_function_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
+
+                if let Some(function_id) = item.function_id {
+                    item.type_id = self.scopes.function_type(function_id).0;
+
+                    // compare given arguments with defined arguments
+                    // todo: implement
+                }
+            }
+        }
+    }
+
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &mut Self, item: &mut ast::Type<'a>) {
         self.set_type_from_name(&mut item.type_id, &item.name.0);
-    }
-
-    /// Return existing binding-id or create and return new binding-id.
-    fn try_create_binding(self: &mut Self, item: &mut ast::Binding<'a>) -> BindingId {
-        if let Some(binding_id) = item.binding_id {
-            binding_id
-        } else {
-            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
-            if self.scopes.binding_id(self.scope_id, item.name).is_some() {
-                panic!("shadowing NYI"); // todo: support shadowing
-            }
-            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, TypeSlot::Unresolved); // todo: a &mut would be nicer than the index
-            item.binding_id = Some(binding_id);
-            binding_id
-        }
     }
 
     /// Resolves a binding created by let, for or a signature
@@ -234,6 +267,23 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
             // someone else set the binding type, accept it
             self.set_type_from_id(&mut item.type_id, binding_type_id);
+        }
+    }
+
+    /// Resolves an occurance of a variable.
+    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
+        // resolve binding
+        if item.binding_id.is_none() {
+            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
+            if item.binding_id.is_none() {
+                panic!("unknown binding"); // todo: error handling
+            }
+        }
+        // try to resolve type from binding
+        if let Some(binding_id) = item.binding_id {
+            if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
+                self.set_type_from_id(&mut item.type_id, binding_type_id);
+            }
         }
     }
 
@@ -292,42 +342,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_return(self: &mut Self, item: &mut ast::Return<'a>) {
         if let Some(expr) = &mut item.expr {
             self.resolve_expression(expr);
-        }
-    }
-
-    /// Resolves an occurance of a variable.
-    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
-        // resolve binding
-        if item.binding_id.is_none() {
-            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
-            if item.binding_id.is_none() {
-                panic!("unknown binding"); // todo: error handling
-            }
-        }
-        // try to resolve type from binding
-        if let Some(binding_id) = item.binding_id {
-            if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
-                self.set_type_from_id(&mut item.type_id, binding_type_id);
-            }
-        }
-    }
-
-    /// Resolves an occurance of a function call.
-    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>) {
-        // resolve function
-        if item.function_id.is_none() {
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
-        }
-        // resolve arguments
-        for arg in item.args.iter_mut() {
-            self.resolve_expression(arg);
-        }
-        if let Some(function_id) = item.function_id {
-            // compare given arguments with defined arguments
-            // todo: implement
-
-            // resolve return type
-            item.type_id = self.scopes.function_type(function_id).0;
         }
     }
 

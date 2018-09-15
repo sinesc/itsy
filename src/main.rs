@@ -5,43 +5,42 @@ extern crate nom;
 extern crate byteorder;
 
 pub mod frontend;
+#[macro_use]
 pub mod bytecode;
 
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
-pub fn exec(program: &str) -> bytecode::VM {
+pub fn exec(program: &str, rust_fns: Option<frontend::RustFnMap>) -> bytecode::VM {
     use frontend::{parse, resolve};
     use bytecode::{compile, VM};
 
     let parsed = parse(program).unwrap();
-    let resolved = resolve(parsed);
+    let resolved = resolve(parsed, rust_fns);
     let mut writer = compile(resolved);
 
     let start = writer.len();
     writer.call(0, 0); // call first method todo: lookup given function
-    writer.print();
+    writer.rustcall(ItsyFn::print);
     writer.exit();
 
     VM::new(writer.into_program(), vec![ ], start)
 }
 
-fn wrapper() -> i32 {
-    fib(37)
-}
-fn fib(n: i32) -> i32 {
-    if n < 2 {
-        n
-    } else {
-        fib(n - 1) + fib(n - 2)
+fn_map!(ItsyFn, {
+    fn print(vm: &mut VM, value: u32) {
+        println!("print:", value);
     }
-}
+    fn hello_world(vm: &mut VM) {
+        println!("hello world!");
+    }
+});
 
 fn main() {
 
     let source = "
 fn wrapper() -> i32 {
-    fib(37)
+    print(fib(37))
 }
 fn fib(n: i32) -> i32 {
     if n < 2 {
@@ -57,7 +56,7 @@ fn fib(n: i32) -> i32 {
 
     let parsed = parse(source).unwrap();
     //println!("{:#?}", parsed); return;
-    let resolved = resolve(parsed);
+    let resolved = resolve(parsed, ItsyFn::map());
     //println!("{:#?}", resolved.ast);
     //println!("{:#?}", resolved.types);
     let mut writer = compile(resolved);
@@ -65,7 +64,7 @@ fn fib(n: i32) -> i32 {
     // create entry point, call fib
     let start = writer.len();
     writer.call(0, 0); // call first method
-    writer.print();
+    writer.rustcall(ItsyFn::print);
     writer.exit();
 
     {
@@ -113,14 +112,14 @@ fn fib(n: i32) -> i32 {
         let vm_runtime = ::std::time::Instant::now() - vm_start;
         let vm_runtime = vm_runtime.as_secs() as f64 + vm_runtime.subsec_nanos() as f64 * 1e-9;
         println!("vm time: {:.4}s", vm_runtime);
-
+/*
         let rust_start = ::std::time::Instant::now();
         println!("\nprint: {}", wrapper());
         let rust_runtime = ::std::time::Instant::now() - rust_start;
         let rust_runtime = rust_runtime.as_secs() as f64 + rust_runtime.subsec_nanos() as f64 * 1e-9;
         println!("rust time: {:.4}s", rust_runtime);
         println!("\nfactor: {:.4}s", vm_runtime / rust_runtime);
-
+*/
     }
 
 }

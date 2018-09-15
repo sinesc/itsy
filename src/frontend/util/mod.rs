@@ -14,23 +14,41 @@ pub use self::type_slot::TypeSlot;
 
 use std::collections::HashMap;
 
+/// Maps external Rust functions for use from Itsy code.
+pub type RustFnMap = ::std::collections::HashMap<&'static str, RustFn>;
+
+/// Information about an external rust function.
+#[derive(Clone, Debug)]
+pub struct RustFn {
+    pub(crate) index: u16,
+    pub(crate) args: Vec<Type>,
+}
+
+impl RustFn {
+    pub fn new(func: impl ::bytecode::RustFnId, args: Vec<Type>) -> Self {
+        RustFn {
+            index: func.from_rustfn(),
+            args: args,
+        }
+    }
+}
 
 /// Information about an enum in a resolved program.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Enum {
     //repr: u8,
     keys: HashMap<usize, u64>
 }
 
 /// Information about a struct in a resolved program.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Struct {
     fields: HashMap<usize, Type>
 }
 
 /// Information about a primitive type in a resolved program.
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type {
     u8, u16, u32, u64,
     i8, i16, i32, i64,

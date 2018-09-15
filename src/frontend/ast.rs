@@ -209,6 +209,7 @@ pub struct Call<'a> {
     pub args        : Vec<Expression<'a>>,
     pub type_id     : TypeSlot, // todo: just get from function?
     pub function_id : Option<FunctionId>,
+    pub rust_fn_id  : Option<u16>,  // todo: use enum fn/rustfn, use newtype for external id
 }
 
 impl<'a> Call<'a> {

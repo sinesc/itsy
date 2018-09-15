@@ -55,12 +55,12 @@ struct IDENT {
 keywords:
     struct: define new structure type
 
-    
+
 Variables
 ---------
 
 let IDENT: TYPE = EXP;
-mut IDENT: TYPE = EXP;
+let mut IDENT: TYPE = EXP;
 
 keywords:
     let: define variable
@@ -81,3 +81,12 @@ Control Flow
 ------------
 
 if VALUE { BLOCK } [ else { BLOCK } ]
+
+for VAR in EXP .. EXP {
+
+}
+
+let IDENT = for VAR in EXP .. EXP {
+    EXP
+};
+

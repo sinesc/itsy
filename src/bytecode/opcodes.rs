@@ -232,8 +232,13 @@ impl_vm!{
         self.push((a < b) as i32);
     }
 
+    fn rustcallx(self: &mut Self, func: u16) {
+        println!("{:?}", func);
+    }
 
-
+    fn rustcall(self: &mut Self, func: RustFn) {
+        println!("{:?}", func);
+    }
 
 
 
@@ -259,11 +264,6 @@ impl_vm!{
     fn deci(self: &mut Self) {
         let a = self.pop();
         self.push(a - 1);
-    }
-
-    /// Print current value on stack.
-    fn print(self: &mut Self) {
-        println!("print: {:?}", self.top());
     }
 
     /// Terminate program execution.

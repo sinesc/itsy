@@ -1,0 +1,80 @@
+ret approaches. perf not conclusive, check back when relevant.
+-----------------
+
+    fn ret(vm: &mut Self) {
+
+        // save return value
+        let retval = *vm.stack.last().unwrap();
+
+        // get previous state
+        let prev_pc = vm.stack[vm.fp - 1];          // load program counter from before the call
+        let prev_fp = vm.stack[vm.fp - 2];          // load old frame pointer
+        let prev_num_args = vm.stack[vm.fp - 3];    // load number of arguments that were on the stack prior to call
+
+        // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
+        // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
+        vm.stack.truncate((vm.fp as i32 - 3 - prev_num_args) as usize);
+
+        // restore previous program counter and frame pointer
+        vm.fp = prev_fp as usize;
+        vm.code.set_position(prev_pc as u64);
+
+        // push the return value back onto the stack
+        vm.stack.push(retval);
+    }
+
+    fn ret(vm: &mut Self) {
+
+        // save return value
+        let retval = vm.stack.pop().unwrap();
+
+        // restore previous state
+        vm.stack.truncate(vm.fp);                               // restore stack to state of call
+        vm.code.set_position(vm.stack.pop().unwrap() as u64);   // restore previous program counter
+        vm.fp = vm.stack.pop().unwrap() as usize;               // restore previous frame pointer
+
+        // number of args pushed by caller, remove those from the stack as well so caller doesn't have to.
+        let num_args = vm.stack.pop().unwrap();
+        let slen = vm.stack.len();
+        vm.stack.truncate((slen as i32 - num_args) as usize);
+
+        // push the return value back onto the stack
+        vm.stack.push(retval);
+    }
+
+reader, seemed to be +/- 0 for anything but u8
+-----------------
+
+    (read u32 $from:ident) => ( {
+        unsafe {
+            let mut dest: u32 = ::std::mem::uninitialized();
+            let pc = $from.pc as usize;
+            $from.pc += 4;
+            ::std::ptr::copy_nonoverlapping(&$from.code[pc], &mut dest as *mut u32 as *mut u8, 4);
+            dest
+         }
+    } );
+
+    (read u32 $from:ident) => ( {
+        let pc = $from.pc as usize;
+        $from.pc += 4;
+        let mut cpy: [ u8; 4 ] = unsafe { ::std::mem::uninitialized() };
+        cpy.copy_from_slice(&$from.code[pc..pc+4]);
+        unsafe { ::std::mem::transmute::<_, u32>(cpy) }
+    } );
+
+    (read u32 $from:ident) => ( {
+        //let pc = $from.pc as usize;
+        //$from.pc += 4;
+        //($from.code[pc as usize] as u32) | (($from.code[pc + 1] as u32) << 8) | (($from.code[pc + 2] as u32) << 16) | (($from.code[pc + 3] as u32) << 24)
+
+        let mut result = $from.code[$from.pc as usize] as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 8) as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 16) as u32;
+        $from.pc += 1;
+        result |= (($from.code[$from.pc as usize] as u32) << 24) as u32;
+        $from.pc += 1;
+        result
+    } );
