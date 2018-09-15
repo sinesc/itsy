@@ -10,7 +10,10 @@ mod macros;
 mod opcodes;
 mod compiler;
 
+use std::marker::PhantomData;
 use std::mem::transmute;
+use std::fmt::Debug;
+use std::collections::HashMap;
 pub use self::vm::{VM, VMState};
 pub use self::writer::Writer;
 pub use self::compiler::{compile, Compiler};
@@ -19,11 +22,43 @@ pub use self::compiler::{compile, Compiler};
 pub(crate) type Value = i32;
 
 /// An Itsy bytecode program.
-pub type Program = Vec<u8>;
+#[derive(Debug)]
+pub struct Program<T> where T: RustFnId {
+    rust_fn: PhantomData<T>,
+    pub(crate) instructions: Vec<u8>,
+    pub(crate) consts      : Vec<Value>,
+}
 
-#[doc(hidden)]
-pub trait RustFnId: Clone {
-    fn from_rustfn(self: Self) -> u16;
+impl<T> Program<T> where T: RustFnId {
+    pub fn new() -> Self {
+        Program {
+            rust_fn     : PhantomData,
+            instructions: Vec::new(),
+            consts      : Vec::new(),
+        }
+    }
+}
+
+/// Default generic marker for resolver, compiler and VM.
+#[allow(non_camel_case_types)]
+#[repr(u16)]
+#[derive(Copy, Clone, Debug)]
+pub enum Standalone {
+    #[doc(hidden)]
+    _dummy
+}
+fn_map!(@trait Standalone);
+
+/// An internal trait used to make resolver, compiler and VM generic over a set of external rust functions.
+pub trait RustFnId: Clone + Debug + 'static {
+    #[doc(hidden)]
+    fn from_u16(index: u16) -> Self;
+    #[doc(hidden)]
+    fn to_u16(self: Self) -> u16;
+    #[doc(hidden)]
+    fn map_name() -> HashMap<&'static str, u16>;
+    #[doc(hidden)]
+    fn exec(self: Self /*, vm: &mut VM*/);
 }
 
 /// Converts an i8 to a Value.

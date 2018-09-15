@@ -21,9 +21,8 @@ pub enum VMState {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM {
-    pub(crate) program  : Vec<u8>,
-    pub(crate) consts   : Vec<Value>,
+pub struct VM<T> where T: RustFnId {
+    pub(crate) program  : Program<T>,
     stack               : Vec<Value>,
     pub(crate) fp       : u32,
     pub(crate) pc       : u32,
@@ -33,12 +32,11 @@ pub struct VM {
 }
 
 /// Public VM methods.
-impl VM {
+impl<T> VM<T> where T: RustFnId {
     /// Create a new VM instance.
-    pub fn new(program: Program, data: Vec<Value>, start: u32) -> Self {
+    pub fn new(program: Program<T>, start: u32) -> Self {
         VM {
             program     : program,
-            consts      : data,
             stack       : Vec::with_capacity(256),
             fp          : 0,
             pc          : start,
@@ -102,7 +100,7 @@ impl VM {
 }
 
 /// Support methods used by bytecode instructions. These are not bytecode instructions themselves.
-impl VM {
+impl<T> VM<T> where T: RustFnId {
     /// Current stack pointer.
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn sp(self: &mut Self) -> u32 {
@@ -221,17 +219,17 @@ impl VM {
     }
 }
 
-impl Read for VM {
+impl<T> Read for VM<T> where T: RustFnId {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = Read::read(&mut &self.program[self.pc as usize..], buf)?;
+        let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;
         self.pc += n as u32;
         Ok(n)
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let n = buf.len();
-        Read::read_exact(&mut &self.program[self.pc as usize..], buf)?;
+        Read::read_exact(&mut &self.program.instructions[self.pc as usize..], buf)?;
         self.pc += n as u32;
         Ok(())
     }

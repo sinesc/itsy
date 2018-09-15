@@ -19,5 +19,3 @@ pub mod resolved {
     //! Resolved information to be used by the bytecode generator.
     pub use super::util::{Type, Struct, Enum};
 }
-
-pub use self::util::{RustFn, RustFnMap};

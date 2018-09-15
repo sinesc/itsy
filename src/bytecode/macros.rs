@@ -8,43 +8,61 @@ macro_rules! count {
 /// Generates an enum implementing `RustFnMap`, which maps external Rust functions for use from Itsy code.
 #[macro_export]
 macro_rules! fn_map {
-    (
-        $enum_name:ident, { $(
-            $( #[ $attr:meta ] )*
-            fn $name:tt ( $self:ident : & mut VM $(, $op_name:ident : $op_type:tt)* ) $code:block
-        )+ }
-    ) => {
-        /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
+    (@enum $enum_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[repr(u16)]
         #[derive(Copy, Clone, Debug)]
-        enum $enum_name {
+        pub enum $enum_name {
             $(
                 $( #[ $attr ] )*
-                $name
-            ),+
+                $name,
+            )*
+            #[doc(hidden)]
+            _dummy
         }
-
+    };
+    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $arg_type:tt ),* ] $code:block )* ) => {
         impl $crate::bytecode::RustFnId for $enum_name {
-            fn from_rustfn(self: Self) -> u16 {
+            fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
             }
-        }
-
-        impl $enum_name {
-            fn map() -> Option<$crate::frontend::RustFnMap<$enum_name>> {
-                use $crate::frontend::RustFn;
+            fn from_u16(index: u16) -> Self {
+                unsafe { ::std::mem::transmute(index) }
+            }
+            #[allow(unused_mut)]
+            fn map_name() -> ::std::collections::HashMap<&'static str, u16> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), RustFn::new($enum_name::$name, Vec::new()));
-                )+
-                Some(map)
+                    map.insert(stringify!($name), $enum_name::$name.to_u16());
+                )*
+                map
             }
-            fn exec(self: &Self) {
-                println!("called {:?}", self);
+            #[inline(always)]
+            fn exec(self: Self) {
+                match self {
+                    $(
+                        $enum_name::$name => {
+                            $(
+                                let $arg_name: $arg_type = 0; // todo need vm here
+                            )*
+                            $code
+                        },
+                    )*
+                    $enum_name::_dummy => panic!("Attempted to execute dummy function")
+                }
             }
         }
-    }
+    };
+    (
+        $enum_name:ident, { $(
+            $( #[ $attr:meta ] )*
+            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $arg_type:tt)* ) $code:block
+        )* }
+    ) => {
+        /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
+        fn_map!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
+        fn_map!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] $code )* );
+    };
 }
 
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
@@ -53,7 +71,7 @@ macro_rules! impl_vm {
     // slightly faster reader
     (fastread $ty:tt $size:tt $from:ident) => ( {
         let mut dest: $ty = 0;
-        unsafe { ::std::ptr::copy_nonoverlapping(&$from.program[$from.pc as usize], &mut dest as *mut $ty as *mut u8, $size) };
+        unsafe { ::std::ptr::copy_nonoverlapping(&$from.program.instructions[$from.pc as usize], &mut dest as *mut $ty as *mut u8, $size) };
         $from.pc += $size;
         dest
     });
@@ -81,7 +99,7 @@ macro_rules! impl_vm {
     (write i64, $value:expr, $to:ident) => ( $to.write_i64::<LittleEndian>($value).unwrap() );
     (write f32, $value:expr, $to:ident) => ( $to.write_f32::<LittleEndian>($value).unwrap() );
     (write f64, $value:expr, $to:ident) => ( $to.write_f64::<LittleEndian>($value).unwrap() );
-    (write RustFn, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value.from_rustfn()).unwrap() );
+    (write RustFn, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value.to_u16()).unwrap() );
 
     (map_writer_type RustFn) => ( impl ::bytecode::RustFnId );
     (map_writer_type $ty:tt) => ( $ty );
@@ -120,7 +138,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
-        impl ::bytecode::Writer {
+        impl<T> ::bytecode::Writer<T> where T: ::bytecode::RustFnId {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -135,7 +153,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl ::bytecode::VM {
+        impl<T> ::bytecode::VM<T> where T: ::bytecode::RustFnId {
 
             // Generate methods for executing each bytecode on VM struct.
             $(

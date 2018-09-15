@@ -10,7 +10,7 @@ pub mod bytecode;
 
 fn_map!(ItsyFn, {
     fn print(vm: &mut VM, value: u32) {
-        println!("print:", value);
+        println!("print:{}", value);
     }
     fn hello_world(vm: &mut VM) {
         println!("hello world!");
@@ -20,12 +20,12 @@ fn_map!(ItsyFn, {
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
-pub fn exec<T>(program: &str, rust_fns: Option<frontend::RustFnMap<T>>) -> bytecode::VM where T: bytecode::RustFnId {
+pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: bytecode::RustFnId {
     use frontend::{parse, resolve};
     use bytecode::{compile, VM};
 
     let parsed = parse(program).unwrap();
-    let resolved = resolve(parsed, rust_fns);
+    let resolved = resolve::<T>(parsed);
     let mut writer = compile(resolved);
 
     let start = writer.len();
@@ -33,14 +33,15 @@ pub fn exec<T>(program: &str, rust_fns: Option<frontend::RustFnMap<T>>) -> bytec
     writer.rustcall(ItsyFn::print);
     writer.exit();
 
-    VM::new(writer.into_program(), vec![ ], start)
+    VM::new(writer.into_program(), start)
 }
 
 fn main() {
 
     let source = "
 fn wrapper() -> i32 {
-    print(fib(22))
+    print(fib(22));
+    hello_world();
 }
 fn fib(n: i32) -> i32 {
     if n < 2 {
@@ -52,11 +53,11 @@ fn fib(n: i32) -> i32 {
     ";
 
     use frontend::{parse, resolve};
-    use bytecode::compile;
+    use bytecode::{compile, Standalone};
 
     let parsed = parse(source).unwrap();
     //println!("{:#?}", parsed);
-    let resolved = resolve(parsed, ItsyFn::map());
+    let resolved = resolve::<ItsyFn>(parsed);
     //println!("{:#?}", resolved.ast);
     //println!("{:#?}", resolved.types);
     let mut writer = compile(resolved);
@@ -69,7 +70,7 @@ fn fib(n: i32) -> i32 {
     {
         // initialize vm
 
-        let mut vm = bytecode::VM::new(writer.into_program(), vec![ ], start);
+        let mut vm = bytecode::VM::new(writer.into_program(), start);
 
         // dump bytecode, run some instructions and dump them as we go
 

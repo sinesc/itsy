@@ -3,19 +3,20 @@
 mod scopes;
 mod primitives;
 
+use std::marker::PhantomData;
+use std::collections::HashMap;
 use frontend::ast;
-use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type, RustFnMap};
-use bytecode::RustFnId;
+use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type};
+use bytecode::{RustFnId, Standalone};
 
 /// Wrapper containing an AST structure with all types resolved and a map of those types.
 #[derive(Debug)]
 pub struct ResolvedProgram<'a, T> where T: RustFnId {
+    ty: PhantomData<T>,
     /// Program AST with types and bindings resolved.
     pub ast         : ast::Program<'a>,
     /// Mapping from TypeId (vector index) to primitive type.
     pub(crate)types : Vec<Type>,
-    /// Mapping index to external function
-    pub(crate)rust_fns: Option<RustFnMap<T>>
 }
 
 impl<'a, T> ResolvedProgram<'a, T> where T: RustFnId {
@@ -26,7 +27,7 @@ impl<'a, T> ResolvedProgram<'a, T> where T: RustFnId {
 }
 
 /// Internal state during program type/binding resolution.
-struct Resolver<'a, 'b, T> where 'a: 'b, T: 'b + RustFnId {
+struct Resolver<'a, 'b> where 'a: 'b {
     /// Counts resolved items.
     pub counter     : &'b mut u32,
     /// Scope id this state operates in.
@@ -36,11 +37,12 @@ struct Resolver<'a, 'b, T> where 'a: 'b, T: 'b + RustFnId {
     /// Grouped primitive types
     pub primitives  : &'b primitives::Primitives,
     /// External Rust function map
-    pub rust_fns    : &'b Option<RustFnMap<T>>,
+    pub rust_fns    : &'b HashMap<&'static str, u16>,
 }
 
 /// Resolves types within the given program AST structure.
-pub fn resolve<'a, T>(mut program: ast::Program<'a>, rust_fns: Option<RustFnMap<T>>) -> ResolvedProgram<'a, T> where T: RustFnId {
+#[allow(invalid_type_param_default)]
+pub fn resolve<'a, T=Standalone>(mut program: ast::Program<'a>) -> ResolvedProgram<'a, T> where T: RustFnId {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -53,6 +55,8 @@ pub fn resolve<'a, T>(mut program: ast::Program<'a>, rust_fns: Option<RustFnMap<
 
     let mut num_resolved = 0;
     let mut num_resolved_before;
+
+    let rust_fns = T::map_name();
 
     loop {
         num_resolved_before = num_resolved;
@@ -72,14 +76,14 @@ pub fn resolve<'a, T>(mut program: ast::Program<'a>, rust_fns: Option<RustFnMap<
     }
 
     ResolvedProgram {
+        ty      : PhantomData,
         ast     : program,
         types   : scopes.into(),
-        rust_fns: rust_fns,
     }
 }
 
 /// Utility methods to update a typeslot with a resolved type and increase the resolution counter.
-impl<'a, 'b, T> Resolver<'a, 'b, T> where T: RustFnId {
+impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Sets given type_id for the given binding. Increases resolution counter if a change was made.
     fn set_bindingtype_from_id(self: &mut Self, binding_id: BindingId, new_type_id: TypeId) {
@@ -143,7 +147,7 @@ impl<'a, 'b, T> Resolver<'a, 'b, T> where T: RustFnId {
 }
 
 /// Methods to resolve individual AST structures.
-impl<'a, 'b, T> Resolver<'a, 'b, T> where T: RustFnId {
+impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves types and bindings used in a statement.
     fn resolve_statement(self: &mut Self, item: &mut ast::Statement<'a>) {
@@ -209,10 +213,10 @@ impl<'a, 'b, T> Resolver<'a, 'b, T> where T: RustFnId {
 
         if item.function_id.is_none() {
 
-            if self.rust_fns.is_some() && self.rust_fns.as_ref().unwrap().contains_key(&item.path.0[0]) {
+            if let Some(&rust_fn_index) = self.rust_fns.get(&item.path.0[0]) {
 
                 // external function
-                item.rust_fn_name = Some(item.path.0[0]);
+                item.rust_fn_index = Some(rust_fn_index);
 
             } else {
 

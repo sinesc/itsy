@@ -2,8 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use frontend::util::{BindingId, FunctionId, Integer, TypeSlot, RustFn};
-use bytecode::RustFnId;
+use frontend::util::{BindingId, FunctionId, Integer, TypeSlot};
 
 pub type Program<'a> = Vec<Statement<'a>>;
 
@@ -210,7 +209,7 @@ pub struct Call<'a> {
     pub args        : Vec<Expression<'a>>,
     pub type_id     : TypeSlot, // todo: just get from function?
     pub function_id : Option<FunctionId>,
-    pub rust_fn_name: Option<&'a str>,  // todo: use enum fn/rustfn
+    pub rust_fn_index: Option<u16>,  // todo: use enum fn/rustfn
 }
 
 impl<'a> Call<'a> {

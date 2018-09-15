@@ -13,26 +13,6 @@ mod type_slot;
 pub use self::type_slot::TypeSlot;
 
 use std::collections::HashMap;
-use bytecode::RustFnId;
-
-/// Maps external Rust functions for use from Itsy code.
-pub type RustFnMap<T> = ::std::collections::HashMap<&'static str, RustFn<T>>;
-
-/// Information about an external rust function.
-#[derive(Clone, Debug)]
-pub struct RustFn<T> where T: RustFnId {
-    pub(crate) index: T,
-    pub(crate) args: Vec<Type>,
-}
-
-impl<T> RustFn<T> where T: RustFnId {
-    pub fn new(rust_fn: T, args: Vec<Type>) -> Self {
-        RustFn {
-            index: rust_fn,
-            args: args,
-        }
-    }
-}
 
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug)]

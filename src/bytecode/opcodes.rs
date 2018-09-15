@@ -8,25 +8,25 @@ impl_vm!{
 
     /// Load constant from constant pool onto stack.
     fn const32(self: &mut Self, const_id: u8) {
-        let tmp = self.consts[const_id as usize];
+        let tmp = self.program.consts[const_id as usize];
         self.push(tmp);
     }
     /// Load constant from constant pool onto stack.
     fn const32_16(self: &mut Self, const_id: u16) {
-        let tmp = self.consts[const_id as usize];
+        let tmp = self.program.consts[const_id as usize];
         self.push(tmp);
     }
     /// Load constant from constant pool onto stack.
     fn const64(self: &mut Self, const_id: u8) {
-        let l = self.consts[const_id as usize];
-        let h = self.consts[(const_id + 1) as usize];
+        let l = self.program.consts[const_id as usize];
+        let h = self.program.consts[(const_id + 1) as usize];
         self.push(l);
         self.push(h);
     }
     /// Load constant from constant pool onto stack.
     fn const64_16(self: &mut Self, const_id: u16) {
-        let l = self.consts[const_id as usize];
-        let h = self.consts[(const_id + 1) as usize];
+        let l = self.program.consts[const_id as usize];
+        let h = self.program.consts[(const_id + 1) as usize];
         self.push(l);
         self.push(h);
     }
@@ -233,7 +233,7 @@ impl_vm!{
     }
 
     fn rustcall(self: &mut Self, func: RustFn) {
-        //println!("{:?}", func.exec());
+        T::from_u16(func).exec(/*self*/);
     }
 
 

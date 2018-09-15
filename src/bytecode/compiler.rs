@@ -4,8 +4,9 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type, RustFn, RustFnMap}};
+use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type}};
 use bytecode::{Writer, Program, RustFnId};
+use std::fmt::Debug;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
 struct Locals {
@@ -44,7 +45,7 @@ impl LocalsStack {
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: RustFnId {
-    writer          : Writer,
+    writer          : Writer<T>,
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
@@ -52,8 +53,6 @@ pub struct Compiler<T> where T: RustFnId {
     functions       : HashMap<FunctionId, u32>,
     /// List of unresolved calls for each function.
     unresolved      : HashMap<FunctionId, Vec<u32>>,
-    rust_fns        : Option<RustFnMap<T>>,             // todo: use enum to represent both, either one or the other exist, never both
-    rust_fn_indices : Option<HashMap<u16, T>>,
 }
 
 /// Basic compiler functionality.
@@ -67,47 +66,39 @@ impl<'a, T> Compiler<T> where T: RustFnId {
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
             unresolved  : HashMap::new(),
-            rust_fns    : None,
-            rust_fn_indices : None,
         }
     }
 
     /// Creates a new compiler using given writer.
-    pub fn with_writer(writer: Writer) -> Self {
+    pub fn with_writer(writer: Writer<T>) -> Self {
         Compiler {
             writer,
             types       : Vec::new(),
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
             unresolved  : HashMap::new(),
-            rust_fns    : None,
-            rust_fn_indices : None,
         }
     }
 
     /// Compiles the current program.
     pub fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
 
-        let ResolvedProgram { ast: statements, types, rust_fns } = program;
+        let ResolvedProgram { ast: statements, types, .. } = program;
 
         self.types = types;
-        self.rust_fns = rust_fns;
 
         for statement in statements.iter() {
             self.compile_statement(statement);
         }
-
-        let rust_fns = ::std::mem::replace(&mut self.rust_fns, None);
-        self.rust_fn_indices = rust_fns.map(|some| some.into_iter().map(|(k, v)| { (v.index.clone().from_rustfn(), v.index) }).collect() );
     }
 
     /// Returns compiled bytecode program.
-    pub fn into_program(self: Self) -> Program {
+    pub fn into_program(self: Self) -> Program<T> {
         self.writer.into_program()
     }
 
     /// Returns writer containing compiled bytecode program.
-    pub fn into_writer(self: Self) -> Writer {
+    pub fn into_writer(self: Self) -> Writer<T> {
         self.writer
     }
 }
@@ -217,15 +208,10 @@ impl<'a, T> Compiler<T> where T: RustFnId {
             self.compile_expression(arg);
         }
 
-        if let (Some(rust_fns), Some(rust_fn_name)) = (&self.rust_fns, item.rust_fn_name) {
+        if let Some(rust_fn_index) = item.rust_fn_index {
 
             // rust function
-            self.writer.rustcall(
-                rust_fns
-                    .get(rust_fn_name)
-                    .expect("Unresolved external function encountered. This is a bug unless the RustFnMap was unsafely modified.")
-                    .index.clone()
-            );
+            self.writer.rustcall(T::from_u16(rust_fn_index));
 
         } else {
 
@@ -408,7 +394,7 @@ impl<'a, T> Compiler<T> where T: RustFnId {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer where T: RustFnId {
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer<T> where T: RustFnId+Debug {
     let mut compiler = Compiler::new();
     compiler.compile(program);
     compiler.into_writer()
