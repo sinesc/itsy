@@ -35,6 +35,7 @@ pub trait ExternRust<T>: Clone + Debug + 'static where T: ExternRust<T> {
 }
 
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
+/// Program execution starts from the "main" function.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
 pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: ExternRust<T> {
@@ -42,13 +43,7 @@ pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: ExternRust<T> {
     use bytecode::{compile, VM};
 
     let parsed = parse(program).unwrap();
-    let resolved = resolve::<T>(parsed);
-    let mut writer = compile(resolved);
-
-    let start = writer.len();
-    writer.call(0, 0); // call first method todo: lookup given function
-    //writer.rustcall(MyFns::print);
-    writer.exit();
-
-    VM::new(writer.into_program(), start)
+    let resolved = resolve::<T>(parsed, "main");
+    let writer = compile(resolved);
+    VM::new(writer.into_program())
 }

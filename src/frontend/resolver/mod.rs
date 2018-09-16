@@ -6,7 +6,7 @@ mod primitives;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use frontend::ast;
-use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type};
+use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type, FunctionId};
 use ::{ExternRust, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -16,7 +16,9 @@ pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
     /// Program AST with types and bindings resolved.
     pub ast         : super::Program<'a>,
     /// Mapping from TypeId (vector index) to primitive type.
-    pub(crate)types : Vec<Type>,
+    pub(crate) types: Vec<Type>,
+    /// Function id of the entry/main function.
+    pub(crate) entry_fn: FunctionId,
 }
 
 impl<'a, T> ResolvedProgram<'a, T> where T: ExternRust<T> {
@@ -34,15 +36,17 @@ struct Resolver<'a, 'b> where 'a: 'b {
     pub scope_id    : ScopeId,
     /// Repository of all scopes.
     pub scopes      : &'b mut scopes::Scopes<'a>,
-    /// Grouped primitive types
+    /// Grouped primitive types.
     pub primitives  : &'b primitives::Primitives,
-    /// External Rust function map
+    /// External Rust function map.
     pub rust_fns    : &'b HashMap<&'static str, u16>,
+    /// Name of the entry/main function.
+    pub entry_fn    : &'b str,
 }
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>) -> ResolvedProgram<'a, T> where T: ExternRust<T> {
+pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: ExternRust<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -67,6 +71,7 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>) -> ResolvedPro
                 scopes      : &mut scopes,
                 primitives  : &primitives,
                 rust_fns    : &rust_fns,
+                entry_fn    : entry,
             };
             resolver.resolve_statement(&mut statement);
         }
@@ -78,6 +83,7 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>) -> ResolvedPro
     ResolvedProgram {
         ty      : PhantomData,
         ast     : program,
+        entry_fn: scopes.lookup_function_id(root_scope_id, entry).expect("Failed to resolve entry function"),
         types   : scopes.into(),
     }
 }

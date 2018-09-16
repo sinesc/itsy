@@ -49,14 +49,14 @@ macro_rules! extern_rust {
                 map
             }
             #[inline(always)]
-            #[allow(unused_variables)]
-            #[allow(unused_assignments)]
+            #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name>) {
+                use $crate::bytecode::StackOp;
                 match self {
                     $(
                         $enum_name::$name => {
                             $(
-                                let $arg_name: $arg_type = vm.pop() as $arg_type;
+                                let $arg_name: $arg_type = vm.stack.pop();
                             )*
                             $code
                         },

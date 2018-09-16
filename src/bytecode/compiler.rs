@@ -84,13 +84,22 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles the current program.
     pub fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
 
-        let ResolvedProgram { ast: statements, types, .. } = program;
+        let ResolvedProgram { ast: statements, types, entry_fn, .. } = program;
 
+        // write placeholder jump to program entry
+        let initial_pos = self.writer.position();
+        self.writer.call(123, 0);
+        self.writer.exit();
+
+        // compile program
         self.types = types;
-
         for statement in statements.iter() {
             self.compile_statement(statement);
         }
+
+        // overwrite placeholder with actual entry position
+        let &entry_fn_pos = self.functions.get(&entry_fn).expect("Failed to locate entry function in generated code.");
+        self.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos, 0));
     }
 
     /// Returns compiled bytecode program.
