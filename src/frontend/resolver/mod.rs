@@ -7,19 +7,19 @@ use std::marker::PhantomData;
 use std::collections::HashMap;
 use frontend::ast;
 use frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type};
-use bytecode::{RustFnId, Standalone};
+use ::{ExternRust, Standalone};
 
-/// Wrapper containing an AST structure with all types resolved and a map of those types.
+/// Parsed program AST with all types, bindings and other language structures resolved.
 #[derive(Debug)]
-pub struct ResolvedProgram<'a, T> where T: RustFnId {
+pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
     ty: PhantomData<T>,
     /// Program AST with types and bindings resolved.
-    pub ast         : ast::Program<'a>,
+    pub ast         : super::Program<'a>,
     /// Mapping from TypeId (vector index) to primitive type.
     pub(crate)types : Vec<Type>,
 }
 
-impl<'a, T> ResolvedProgram<'a, T> where T: RustFnId {
+impl<'a, T> ResolvedProgram<'a, T> where T: ExternRust<T> {
     /// Returns the primitive type for the given type id.
     pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
         &self.types[Into::<usize>::into(type_id)]
@@ -42,7 +42,7 @@ struct Resolver<'a, 'b> where 'a: 'b {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'a, T=Standalone>(mut program: ast::Program<'a>) -> ResolvedProgram<'a, T> where T: RustFnId {
+pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>) -> ResolvedProgram<'a, T> where T: ExternRust<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();

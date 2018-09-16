@@ -1,15 +1,11 @@
-//! Itsy, a tiny language for embedded use.
-
 #[macro_use]
-extern crate nom;
-extern crate byteorder;
+extern crate itsy;
+use itsy::frontend::{parse, resolve};
+use itsy::bytecode::{compile, VM};
 
-pub mod frontend;
-#[macro_use]
-pub mod bytecode;
-
-fn_map!(ItsyFn, {
-    fn print(vm: &mut VM, value: u32) {
+extern_rust!(MyFns, {
+    /// prints given i32 value
+    fn print(vm: &mut VM, value: i32) {
         println!("print:{}", value);
     }
     fn hello_world(vm: &mut VM) {
@@ -17,31 +13,11 @@ fn_map!(ItsyFn, {
     }
 });
 
-/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
-///
-/// Call `run` on the returned `VM` struct to execute the program.
-pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: bytecode::RustFnId {
-    use frontend::{parse, resolve};
-    use bytecode::{compile, VM};
-
-    let parsed = parse(program).unwrap();
-    let resolved = resolve::<T>(parsed);
-    let mut writer = compile(resolved);
-
-    let start = writer.len();
-    writer.call(0, 0); // call first method todo: lookup given function
-    writer.rustcall(ItsyFn::print);
-    writer.exit();
-
-    VM::new(writer.into_program(), start)
-}
-
 fn main() {
 
     let source = "
 fn wrapper() -> i32 {
-    print(fib(22));
-    hello_world();
+    print(fib(37));
 }
 fn fib(n: i32) -> i32 {
     if n < 2 {
@@ -52,12 +28,9 @@ fn fib(n: i32) -> i32 {
 }
     ";
 
-    use frontend::{parse, resolve};
-    use bytecode::{compile, Standalone};
-
     let parsed = parse(source).unwrap();
     //println!("{:#?}", parsed);
-    let resolved = resolve::<ItsyFn>(parsed);
+    let resolved = resolve::<MyFns>(parsed);
     //println!("{:#?}", resolved.ast);
     //println!("{:#?}", resolved.types);
     let mut writer = compile(resolved);
@@ -70,7 +43,7 @@ fn fib(n: i32) -> i32 {
     {
         // initialize vm
 
-        let mut vm = bytecode::VM::new(writer.into_program(), start);
+        let mut vm = VM::new(writer.into_program(), start);
 
         // dump bytecode, run some instructions and dump them as we go
 

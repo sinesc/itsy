@@ -1,16 +1,17 @@
 //! Bytecode buffer and writer.
 
 use std::io::{self, Write, Seek, SeekFrom};
-use bytecode::{Program, RustFnId};
+use bytecode::Program;
+use ::ExternRust;
 
 /// Bytecode buffer and writer.
 #[derive(Debug)]
-pub struct Writer<T> where T: RustFnId {
+pub struct Writer<T> where T: ExternRust<T> {
     pub(crate) program: Program<T>,
     pub(crate) position: u32,
 }
 
-impl<T> Writer<T> where T: RustFnId {
+impl<T> Writer<T> where T: ExternRust<T> {
     /// Creates a new writer instance.
     pub fn new() -> Self {
         Writer {
@@ -46,7 +47,7 @@ impl<T> Writer<T> where T: RustFnId {
     }
 }
 
-impl<T> Write for Writer<T> where T: RustFnId {
+impl<T> Write for Writer<T> where T: ExternRust<T> {
     fn write(self: &mut Self, buf: &[u8]) -> io::Result<usize> {
         let buf_len = buf.len() as u32;
         if self.position == self.len() {
@@ -69,7 +70,7 @@ impl<T> Write for Writer<T> where T: RustFnId {
     }
 }
 
-impl<T> Seek for Writer<T> where T: RustFnId {
+impl<T> Seek for Writer<T> where T: ExternRust<T> {
     fn seek(self: &mut Self, pos: SeekFrom) -> io::Result<u64> {
         self.position = match pos {
             SeekFrom::Start(pos) => pos as u32,

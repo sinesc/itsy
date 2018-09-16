@@ -21,7 +21,7 @@ pub enum VMState {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T> where T: RustFnId {
+pub struct VM<T> where T: ::ExternRust<T> {
     pub(crate) program  : Program<T>,
     stack               : Vec<Value>,
     pub(crate) fp       : u32,
@@ -32,7 +32,7 @@ pub struct VM<T> where T: RustFnId {
 }
 
 /// Public VM methods.
-impl<T> VM<T> where T: RustFnId {
+impl<T> VM<T> where T: ::ExternRust<T> {
     /// Create a new VM instance.
     pub fn new(program: Program<T>, start: u32) -> Self {
         VM {
@@ -100,7 +100,7 @@ impl<T> VM<T> where T: RustFnId {
 }
 
 /// Support methods used by bytecode instructions. These are not bytecode instructions themselves.
-impl<T> VM<T> where T: RustFnId {
+impl<T> VM<T> where T: ::ExternRust<T> {
     /// Current stack pointer.
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn sp(self: &mut Self) -> u32 {
@@ -147,7 +147,7 @@ impl<T> VM<T> where T: RustFnId {
 
     /// Pops a value from the stack.
     #[cfg_attr(not(debug_assertions), inline(always))]
-    pub(crate) fn pop(self: &mut Self) -> i32 {
+    pub fn pop(self: &mut Self) -> i32 {
         vali32(self.stack.pop().expect("Stack underflow."))
     }
     /// Pops a value from the stack.
@@ -219,7 +219,7 @@ impl<T> VM<T> where T: RustFnId {
     }
 }
 
-impl<T> Read for VM<T> where T: RustFnId {
+impl<T> Read for VM<T> where T: ::ExternRust<T> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;

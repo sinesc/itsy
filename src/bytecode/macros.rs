@@ -1,13 +1,24 @@
-/*
-macro_rules! count {
-    ($head:ident $(, $tail:ident)*) => {  1 + count!($($tail),*) };
-    () => { 0 };
-}
-*/
+/// Generates a type implementing [`ExternRust`](trait.ExternRust.html).
+///
+/// ### Example:
+///
+/// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `exec::<MyFns>(...)`.
+///
+/// ```
+/// extern_rust!(MyFns, {
+///     /// prints given i32 value
+///     fn print(vm: &mut VM, value: i32) {
+///         println!("print:{}", value);
+///     }
+///     /// prints hello world!
+///     fn hello_world(vm: &mut VM) {
+///         println!("hello world!");
+///     }
+/// });
+/// ```
 
-/// Generates an enum implementing `RustFnMap`, which maps external Rust functions for use from Itsy code.
 #[macro_export]
-macro_rules! fn_map {
+macro_rules! extern_rust {
     (@enum $enum_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[repr(u16)]
@@ -22,7 +33,7 @@ macro_rules! fn_map {
         }
     };
     (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $arg_type:tt ),* ] $code:block )* ) => {
-        impl $crate::bytecode::RustFnId for $enum_name {
+        impl $crate::ExternRust<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
             }
@@ -38,12 +49,14 @@ macro_rules! fn_map {
                 map
             }
             #[inline(always)]
-            fn exec(self: Self) {
+            #[allow(unused_variables)]
+            #[allow(unused_assignments)]
+            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name>) {
                 match self {
                     $(
                         $enum_name::$name => {
                             $(
-                                let $arg_name: $arg_type = 0; // todo need vm here
+                                let $arg_name: $arg_type = vm.pop() as $arg_type;
                             )*
                             $code
                         },
@@ -60,8 +73,8 @@ macro_rules! fn_map {
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
-        fn_map!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        fn_map!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] $code )* );
+        extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
+        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] $code )* );
     };
 }
 
@@ -101,7 +114,7 @@ macro_rules! impl_vm {
     (write f64, $value:expr, $to:ident) => ( $to.write_f64::<LittleEndian>($value).unwrap() );
     (write RustFn, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value.to_u16()).unwrap() );
 
-    (map_writer_type RustFn) => ( impl ::bytecode::RustFnId );
+    (map_writer_type RustFn) => ( T );
     (map_writer_type $ty:tt) => ( $ty );
     (map_reader_type RustFn) => ( u16 );
     (map_reader_type $ty:tt) => ( $ty );
@@ -138,7 +151,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
-        impl<T> ::bytecode::Writer<T> where T: ::bytecode::RustFnId {
+        impl<T> ::bytecode::Writer<T> where T: ::ExternRust<T> {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -153,7 +166,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl<T> ::bytecode::VM<T> where T: ::bytecode::RustFnId {
+        impl<T> ::bytecode::VM<T> where T: ::ExternRust<T> {
 
             // Generate methods for executing each bytecode on VM struct.
             $(

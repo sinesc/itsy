@@ -2,6 +2,9 @@
 
 pub mod ast;
 
+/// Parsed program AST.
+pub type Program<'a> = Vec<ast::Statement<'a>>;
+
 mod parser;
 pub use frontend::parser::{parse, ParseError};
 

@@ -233,7 +233,7 @@ impl_vm!{
     }
 
     fn rustcall(self: &mut Self, func: RustFn) {
-        T::from_u16(func).exec(/*self*/);
+        T::from_u16(func).exec(self);
     }
 
 

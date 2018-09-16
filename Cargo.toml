@@ -6,3 +6,12 @@ authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 [dependencies]
 nom = "4.0"
 byteorder = "1.2.6"
+
+[lib]
+name = "itsy"
+path = "src/lib.rs"
+
+[[bin]]
+doc = false
+name = "playground"
+path = "src/playground.rs"

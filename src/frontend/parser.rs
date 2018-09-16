@@ -6,6 +6,7 @@ use nom::types::CompleteStr as Input;
 use std::collections::HashMap;
 use frontend::util::{Integer, TypeSlot};
 use frontend::ast::*;
+use frontend::Program;
 
 /// Represents the various possible parser errors.
 #[repr(u32)]

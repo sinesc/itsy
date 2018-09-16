@@ -5,7 +5,8 @@
 
 use std::collections::HashMap;
 use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type}};
-use bytecode::{Writer, Program, RustFnId};
+use bytecode::{Writer, Program};
+use ::ExternRust;
 use std::fmt::Debug;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
@@ -44,7 +45,7 @@ impl LocalsStack {
 }
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler<T> where T: RustFnId {
+pub struct Compiler<T> where T: ExternRust<T> {
     writer          : Writer<T>,
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
@@ -56,7 +57,7 @@ pub struct Compiler<T> where T: RustFnId {
 }
 
 /// Basic compiler functionality.
-impl<'a, T> Compiler<T> where T: RustFnId {
+impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Creates a new compiler.
     pub fn new() -> Self {
@@ -104,7 +105,7 @@ impl<'a, T> Compiler<T> where T: RustFnId {
 }
 
 /// Methods for compiling individual code structures.
-impl<'a, T> Compiler<T> where T: RustFnId {
+impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Compiles the given statement.
     pub fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
@@ -360,7 +361,7 @@ impl<'a, T> Compiler<T> where T: RustFnId {
     }
 }
 
-impl<'a, T> Compiler<T> where T: RustFnId {
+impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
         if let Some(targets) = self.unresolved.remove(&function_id) {
@@ -394,7 +395,7 @@ impl<'a, T> Compiler<T> where T: RustFnId {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer<T> where T: RustFnId+Debug {
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer<T> where T: ExternRust<T>+Debug {
     let mut compiler = Compiler::new();
     compiler.compile(program);
     compiler.into_writer()

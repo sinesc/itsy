@@ -4,8 +4,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use frontend::util::{BindingId, FunctionId, Integer, TypeSlot};
 
-pub type Program<'a> = Vec<Statement<'a>>;
-
 #[derive(Debug)]
 pub enum Statement<'a> {
     Binding(Binding<'a>),
