@@ -3,6 +3,7 @@
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::{IResult, ErrorKind, is_alphabetic, is_alphanumeric, digit0, digit1};
 use nom::types::CompleteStr as Input;
+use nom::verbose_errors::Context;
 use std::collections::HashMap;
 use frontend::util::{Integer, TypeSlot};
 use frontend::ast::*;
@@ -11,29 +12,31 @@ use frontend::Program;
 /// Represents the various possible parser errors.
 #[repr(u32)]
 pub enum ParseError {
-    SyntaxLet = 1,
-    InvalidNumerical = 2,
+    SyntaxError = 1,
+    SyntaxLet = 2,
+    SyntaxFn = 3,
+    InvalidNumerical = 4,
     // TODO: figure out nom error handling
 }
 
 // identifier [a-z_][a-z0-9_]*
 
-named!(ident<Input, Input>, recognize!(tuple!(
+named!(ident(Input) -> Input, recognize!(tuple!(
     take_while1!(|m| is_alphabetic(m as u8) || m == '_'),
     take_while!(|m| is_alphanumeric(m as u8) || m == '_')
 )));
 
 // identifier path
 
-named!(ident_path<Input, IdentPath>, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| IdentPath(
+named!(ident_path(Input) -> IdentPath, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| IdentPath(
     m.into_iter().map(|s| *s).collect()
 )));
 
 // block
 
-named!(block_items<Input, Vec<Statement>>, ws!(many0!(statement)));
+named!(block_items(Input) -> Vec<Statement>, ws!(many0!(statement)));
 
-named!(block<Input, Block>, map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |mut m| {
+named!(block(Input) -> Block, map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |mut m| {
     // move last block item into result if it could be an expression and no result was matched
     if m.2.is_none() && m.1.last().map_or(false, |l| l.is_expressable()) {
         m.2 = m.1.pop().map(|s| s.into_expression());
@@ -63,9 +66,6 @@ named!(opt_sign<Input, Option<Input>>, opt!(recognize!(one_of!("+-"))));
 named!(opt_fract<Input, Option<Input>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
 
 fn parse_numerical(n: Input) -> IResult<Input, Expression> {
-
-    use nom::simple_errors::Context;
-
     if n.contains(".") {
         if let Ok(float) = str::parse::<f64>(*n) {
             return Ok((n, Expression::Literal(Literal { value : LiteralValue::Float(float), type_id: TypeSlot::Unresolved })))
@@ -235,10 +235,14 @@ named!(signature_argument_list<Input, Vec<Binding>>, ws!(delimited!(char!('('), 
 
 named!(signature_return_part<Input, IdentPath>, ws!(preceded!(tag!("->"), ident_path)));
 
-named!(signature<Input, Signature>, map!(ws!(tuple!(tag!("fn"), ident, signature_argument_list, opt!(signature_return_part))), |sig| Signature {
-    name    : *sig.1,
-    args    : sig.2,
-    ret     : if let Some(sig_ty) = sig.3 { Some(Type::unknown(sig_ty)) } else { None }, // TODO: might want to have void for simplicity?
+named!(signature<Input, Signature>, map!(
+    preceded!(ws!(tag!("fn")), return_error!(
+        ErrorKind::Custom(ParseError::SyntaxFn as u32),
+        ws!(tuple!(ident, signature_argument_list, opt!(signature_return_part)))
+    )), |sig| Signature {
+    name    : *sig.0,
+    args    : sig.1,
+    ret     : if let Some(sig_ty) = sig.2 { Some(Type::unknown(sig_ty)) } else { None }, // TODO: might want to have void for simplicity?
 }));
 
 named!(function<Input, Statement>, map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
@@ -312,7 +316,12 @@ named!(statement<Input, Statement>, alt!(
 
 // root
 
-named!(program<Input, Program>, ws!(many0!(statement)));
+named!(program(Input) -> Program, return_error!(
+    ErrorKind::Custom(ParseError::SyntaxError as u32),
+    ws!(many0!(statement))
+));
+
+//fn
 
 /// Parses an Itsy source file into a program AST structure.
 pub fn parse(input: &str) -> Result<Program, u32> {
@@ -321,12 +330,14 @@ pub fn parse(input: &str) -> Result<Program, u32> {
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
+                println!("result: {:#?}", result);
                 Err(4) // todo: not sure what this case it. just getting the entire input back, no error
             } else {
                 Ok(result.1)
             }
         },
         Err(error) => {
+            println!("error: {:#?}", error);
             Err(match error {
                 Error::Incomplete(_) => 1,
                 Error::Error(_) => 2,
