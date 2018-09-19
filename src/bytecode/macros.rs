@@ -83,8 +83,11 @@ macro_rules! impl_vm {
 
     // slightly faster reader
     (fastread $ty:tt $size:tt $from:ident) => ( {
-        let mut dest: $ty = 0;
-        unsafe { ::std::ptr::copy_nonoverlapping(&$from.program.instructions[$from.pc as usize], &mut dest as *mut $ty as *mut u8, $size) };
+        let mut dest: $ty;
+        unsafe {
+            dest = ::std::mem::uninitialized();
+            ::std::ptr::copy_nonoverlapping(&$from.program.instructions[$from.pc as usize], &mut dest as *mut $ty as *mut u8, $size)
+        };
         $from.pc += $size;
         dest
     });
@@ -93,16 +96,16 @@ macro_rules! impl_vm {
     (read u8, $from:ident) => ( impl_vm!(fastread u8 1 $from) ); // todo: no fixed endianness on these, writer needs to do the same or stuff will break
     (read u16, $from:ident) => ( impl_vm!(fastread u16 2 $from) );
     (read u32, $from:ident) => ( impl_vm!(fastread u32 4 $from) );
-    (read u64, $from:ident) => ( $from.read_u64::<LittleEndian>().unwrap() );
-    (read i8,  $from:ident) => ( $from.read_i8().unwrap() );
-    (read i16, $from:ident) => ( $from.read_i16::<LittleEndian>().unwrap() );
+    (read u64, $from:ident) => ( impl_vm!(fastread u64 8 $from) );
+    (read i8,  $from:ident) => ( impl_vm!(fastread i8 1 $from) );
+    (read i16, $from:ident) => ( impl_vm!(fastread i16 2 $from) );
     (read i32, $from:ident) => ( impl_vm!(fastread i32 4 $from) );
-    (read i64, $from:ident) => ( $from.read_i64::<LittleEndian>().unwrap() );
-    (read f32, $from:ident) => ( $from.read_f32::<LittleEndian>().unwrap() );
-    (read f64, $from:ident) => ( $from.read_f64::<LittleEndian>().unwrap() );
-    (read RustFn, $from:ident) => ( $from.read_u16::<LittleEndian>().unwrap() );
+    (read i64, $from:ident) => ( impl_vm!(fastread i64 8 $from) );
+    (read f32, $from:ident) => ( impl_vm!(fastread f32 4 $from) );
+    (read f64, $from:ident) => ( impl_vm!(fastread f64 8 $from) );
+    (read RustFn, $from:ident) => ( impl_vm!(fastread u16 2 $from) );
 
-    (write u8,  $value:expr, $to:ident) => ( $to.write_u8($value).unwrap() );
+    (write u8,  $value:expr, $to:ident) => ( $to.write_u8($value).unwrap() );   // todo: see above
     (write u16, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value).unwrap() );
     (write u32, $value:expr, $to:ident) => ( $to.write_u32::<LittleEndian>($value).unwrap() );
     (write u64, $value:expr, $to:ident) => ( $to.write_u64::<LittleEndian>($value).unwrap() );
