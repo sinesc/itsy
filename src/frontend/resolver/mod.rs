@@ -21,13 +21,6 @@ pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
     pub(crate) entry_fn: FunctionId,
 }
 
-impl<'a, T> ResolvedProgram<'a, T> where T: ExternRust<T> {
-    /// Returns the primitive type for the given type id.
-    pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
-        &self.types[Into::<usize>::into(type_id)]
-    }
-}
-
 /// Internal state during program type/binding resolution.
 struct Resolver<'a, 'b> where 'a: 'b {
     /// Counts resolved items.
@@ -200,12 +193,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
+        let parent_scope_id = self.scope_id;
+        self.scope_id = self.scopes.create_scope(parent_scope_id);
         self.resolve_signature(&mut item.sig);
         self.resolve_block(&mut item.block);
         if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
             let result = item.sig.ret.as_ref().map_or(TypeSlot::Void, |ret| ret.type_id);
             let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id).collect();
-            item.function_id = Some(self.scopes.insert_function(self.scope_id, item.sig.name, result, args));
+            item.function_id = Some(self.scopes.insert_function(parent_scope_id, item.sig.name, result, args));
         }
     }
 
@@ -230,10 +225,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 item.function_id = self.scopes.lookup_function_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
 
                 if let Some(function_id) = item.function_id {
-                    item.type_id = self.scopes.function_type(function_id).0;
+                    let function_type = self.scopes.function_type(function_id);
+                    item.type_id = function_type.0;
 
-                    // compare given arguments with defined arguments
-                    // todo: implement
+                    for (index, &arg) in function_type.1.iter().enumerate() {
+                        if arg != item.args[index].get_type_id() {
+                            panic!("type mismatch");
+                        }
+                    }
                 }
             }
         }

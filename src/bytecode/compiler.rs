@@ -4,7 +4,7 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, Type}};
+use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type}};
 use bytecode::{Writer, Program};
 use ::ExternRust;
 use std::fmt::Debug;
@@ -85,6 +85,7 @@ impl CompareOp {
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: ExternRust<T> {
     writer          : Writer<T>,
+    /// List of registered types, effectively mapped via vector index = TypeId
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
@@ -148,6 +149,11 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Returns writer containing compiled bytecode program.
     pub fn into_writer(self: Self) -> Writer<T> {
         self.writer
+    }
+
+    /// Returns type for given AST type slot.
+    pub fn get_type(self: &Self, type_id: TypeSlot) -> Type {
+        self.types[Into::<usize>::into(type_id.unwrap())].clone()
     }
 }
 
@@ -374,11 +380,44 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles the given literal
     pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
         use frontend::ast::LiteralValue;
+        let lit_type = self.get_type(item.type_id);
         match item.value {
-            LiteralValue::Integer(int) => match int {
-                Integer::Signed(v) => self.write_lit(v),
-                Integer::Unsigned(v) => self.write_lit(v as i64), // todo: u64>i64
+            LiteralValue::Integer(int) => {
+                match lit_type {
+                    Type::i8 | Type::i16 | Type::i32 => {
+                        match int {
+                            Integer::Signed(v) => match v {
+                                0 => self.writer.lit0(),
+                                1 => self.writer.lit1(),
+                                2 => self.writer.lit2(),
+                                -1 => self.writer.litm1(),
+                                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
+                            },
+                            _ => panic!("Encountered unsigned integer literal with a signed integer type-id")
+                        };
+                    },
+                    Type::u8 | Type::u16 | Type::u32 => {
+                        match int {
+                            Integer::Unsigned(v) => match v {
+                                0 => self.writer.lit0(),
+                                1 => self.writer.lit1(),
+                                2 => self.writer.lit2(),
+                                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
+                            },
+                            _ => panic!("Encountered signed integer literal with an unsigned integer type-id")
+                        };
+                    }
+                    _ => panic!("Encountered non-integer literal with an integer type-id")
+                };
             }
+            LiteralValue::Float(float) => {
+                match lit_type {
+                    Type::f32 => self.writer.lit_f32(float as f32),
+                    Type::f64 => self.writer.lit_f64(float),
+                    _ => panic!("Encountered non-float literal with a float type-id")
+                };
+
+            },
             _ => unimplemented!(),
         };
     }
@@ -388,10 +427,19 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         use frontend::ast::BinaryOperator as BO;
         self.compile_expression(&item.right, &mut CompareOp::DontCare);
         self.compile_expression(&item.left, &mut CompareOp::DontCare);
+        let result_type = self.get_type(item.type_id);
         match item.op {
             // arithmetic
-            BO::Add => { self.writer.add(); },
-            BO::Sub => { self.writer.sub(); },
+            BO::Add => { match result_type {
+                Type::f64 => self.writer.add_f64(),
+                Type::f32 => self.writer.add_f32(),
+                _ => self.writer.add(),
+            }; },
+            BO::Sub => { match result_type {
+                Type::f64 => self.writer.sub_f64(),
+                Type::f32 => self.writer.sub_f32(),
+                _ => self.writer.sub(),
+            }; },
             BO::Mul => unimplemented!("mul"),
             BO::Div => unimplemented!("div"),
             BO::Rem => unimplemented!("rem"),
@@ -440,14 +488,22 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         };
     }
     /// Writes an appropriate variant of the lit instruction.
-    fn write_lit(self: &mut Self, value: i64) {
-        match value {
-            0 => self.writer.lit0(),
-            1 => self.writer.lit1(),
-            2 => self.writer.lit2(),
-            -1 => self.writer.litm1(),
-            _ => self.writer.lit_u32(value as u32), // todo: other lit types
-        };
+    fn write_int(self: &mut Self, int: Integer) -> u32 {
+        match int {
+            Integer::Signed(v) => match v {
+                0 => self.writer.lit0(),
+                1 => self.writer.lit1(),
+                2 => self.writer.lit2(),
+                -1 => self.writer.litm1(),
+                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
+            },
+            Integer::Unsigned(v) => match v {
+                0 => self.writer.lit0(),
+                1 => self.writer.lit1(),
+                2 => self.writer.lit2(),
+                _ => self.writer.lit_u32(v as u32), // todo:use const mem for anything else
+            },
+        }
     }
 }
 

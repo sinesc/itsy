@@ -211,9 +211,11 @@ pub struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
+    /// Returns whether the return type has been resolved.
     pub fn ret_resolved(self: &Self) -> bool {
         self.type_id.is_unresolved()
     }
+    /// Returns whether the argument list has been resolved.
     pub fn args_resolved(self: &Self) -> bool {
         self.args.iter().fold(true, |acc, arg| acc && !arg.get_type_id().is_unresolved())
     }

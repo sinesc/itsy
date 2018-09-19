@@ -2,18 +2,24 @@
 extern crate itsy;
 
 extern_rust!(MyFns, {
-    /// prints given i32 value
-    fn print(vm: &mut VM, value: i32) {
+    fn printi(vm: &mut VM, value: i32) {
         println!("print:{}", value);
     }
-    fn hello_world(vm: &mut VM) {
-        println!("hello world!");
+    fn printf(vm: &mut VM, value: f32) {
+        println!("print:{}", value);
     }
 });
 
 fn main() {
 
     let source = "
+        fn fibf(n: f32) -> f32 {
+            if n < 2.0 {
+                n
+            } else {
+                fibf(n - 1.0) + fibf(n - 2.0)
+            }
+        }
         fn fib(n: i32) -> i32 {
             if n < 2 {
                 n
@@ -21,8 +27,8 @@ fn main() {
                 fib(n - 1) + fib(n - 2)
             }
         }
-        fn main() -> i32 {
-            print(fib(37));
+        fn main() {
+            printf(fibf(7.0));
         }
     ";
 

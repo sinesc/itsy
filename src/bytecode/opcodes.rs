@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use bytecode::{Value, StackOp};
+use bytecode::{Value, StackOp, StackOpFp};
 
 impl_vm!{
 
@@ -50,6 +50,14 @@ impl_vm!{
     }
     // Push given u32 onto stack.
     fn lit_u32(self: &mut Self, val: u32) {
+        self.stack.push(val);
+    }
+    // Push given f32 onto stack.
+    fn lit_f32(self: &mut Self, val: f32) {
+        self.stack.push(val);
+    }
+    // Push given f32 onto stack.
+    fn lit_f64(self: &mut Self, val: f64) {
         self.stack.push(val);
     }
 
@@ -160,6 +168,32 @@ impl_vm!{
         let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
         self.stack.push(a * b);
+    }
+
+    /// Pops 2 values from the stack and pushes their sum.
+    fn add_f32(self: &mut Self) {
+        let a: f32 = self.stack.pop();
+        let b: f32 = self.stack.pop();
+        self.stack.push(a + b);
+    }
+    /// Pops 2 values from the stack and pushes their sum.
+    fn sub_f32(self: &mut Self) {
+        let a: f32 = self.stack.pop();
+        let b: f32 = self.stack.pop();
+        self.stack.push(a - b);
+    }
+
+    /// Pops 2 values from the stack and pushes their sum.
+    fn add_f64(self: &mut Self) {
+        let a: f64 = self.stack.pop();
+        let b: f64 = self.stack.pop();
+        self.stack.push(a + b);
+    }
+    /// Pops 2 values from the stack and pushes their sum.
+    fn sub_f64(self: &mut Self) {
+        let a: f64 = self.stack.pop();
+        let b: f64 = self.stack.pop();
+        self.stack.push(a - b);
     }
 
     /// Jumps unconditionally to the given address.
