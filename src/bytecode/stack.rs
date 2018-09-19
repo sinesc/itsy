@@ -32,6 +32,10 @@ impl Stack {
     pub fn truncate(self: &mut Self, size: u32) {
         self.data.truncate(size as usize);
     }
+    /// Returns the current frame as slice
+    pub fn frame(self: &Self) -> &[i32] {
+        &self.data[self.fp as usize..]
+    }
 }
 
 impl Index<u32> for Stack {
@@ -50,6 +54,11 @@ impl IndexMut<u32> for Stack {
     }
 }
 
+pub trait StackFp<T> {
+    /// Offset given value by the current frame pointer
+    fn offset_fp(self: &Self, offset: i32) -> u32;
+}
+
 /// Trait for generic stack operations.
 pub trait StackOp<T> {
     /// Push given value onto the stack.
@@ -62,8 +71,9 @@ pub trait StackOp<T> {
     fn load(self: &Self, pos: u32) -> T;
     /// Load the top stack value.
     fn top(self: &Self) -> T;
-    /// Offset given value by the current frame pointer
-    fn offset_fp(self: &Self, offset: i32) -> u32;
+}
+
+pub trait StackOpFp<T>: StackFp<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
     fn store_fp(self: &mut Self, offset: i32, value: T) {
         let pos = self.offset_fp(offset);
@@ -75,6 +85,15 @@ pub trait StackOp<T> {
         self.load(pos)
     }
 }
+
+impl<T> StackFp<T> for Stack {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn offset_fp(self: &Self, offset: i32) -> u32 {
+        (self.fp as i64 + offset as i64) as u32
+    }
+}
+
+impl<T> StackOpFp<T> for Stack where Stack: StackOp<T> + StackFp<T> { }
 
 #[allow(unused_macros)]
 macro_rules! impl_op {
@@ -140,10 +159,6 @@ macro_rules! impl_op {
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn top(self: &Self) -> $type {
                 self.load(self.sp() - 1)
-            }
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            fn offset_fp(self: &Self, offset: i32) -> u32 {
-                (self.fp as i64 + offset as i64) as u32
             }
         }
     };

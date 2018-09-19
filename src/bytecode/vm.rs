@@ -78,9 +78,7 @@ impl<T> VM<T> where T: ::ExternRust<T> {
 
     /// Returns the current stack-frame as a string.
     pub fn dump_frame(self: &Self) -> String {
-        // todo: implement again
-        //format!("{:?}", &self.stack[self.fp as usize..])
-        "todo!".to_string()
+        format!("{:?}", &self.stack.frame())
     }
 
     /// Executes bytecode until it terminates.
