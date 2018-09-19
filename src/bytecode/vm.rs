@@ -44,7 +44,7 @@ impl<T> VM<T> where T: ::ExternRust<T> {
 
     /// Resets the VM, keeping only code and constants.
     pub fn reset(self: &mut Self) {
-        self.stack.truncate(0);
+        self.stack.reset();
         self.mem.truncate(0);
         self.pc = 0;
         self.state = VMState::Continue;

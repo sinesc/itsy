@@ -44,6 +44,44 @@ impl LocalsStack {
     }
 }
 
+#[derive(PartialEq)]
+pub enum CompareOp {
+    DontCare,
+    Request,
+    Eq(u32),
+    Neq(u32),
+    Lt(u32),
+    Lte(u32),
+    Gte(u32),
+    Gt(u32),
+}
+
+impl CompareOp {
+    fn write<T>(self: &Self, writer: &mut Writer<T>, jump_pos: u32, invert: bool) -> u32 where T: ExternRust<T> {
+        if invert {
+            match self {
+                CompareOp::Eq(_) => writer.jneq(jump_pos),
+                CompareOp::Neq(_) => writer.jeq(jump_pos),
+                CompareOp::Lt(_) => writer.jgtes(jump_pos),
+                CompareOp::Lte(_) => writer.jgts(jump_pos),
+                CompareOp::Gte(_) => writer.jlts(jump_pos),
+                CompareOp::Gt(_) => writer.jltes(jump_pos),
+                _ => writer.j0(jump_pos) // todo: jn0?
+            }
+        } else {
+            match self {
+                CompareOp::Eq(_) => writer.jeq(jump_pos),
+                CompareOp::Neq(_) => writer.jneq(jump_pos),
+                CompareOp::Lt(_) => writer.jlts(jump_pos),
+                CompareOp::Lte(_) => writer.jltes(jump_pos),
+                CompareOp::Gte(_) => writer.jgts(jump_pos),
+                CompareOp::Gt(_) => writer.jgts(jump_pos),
+                _ => writer.j0(jump_pos)
+            }
+        }
+    }
+}
+
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: ExternRust<T> {
     writer          : Writer<T>,
@@ -128,19 +166,19 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
             S::Block(block)             => self.compile_block(block),
             S::Return(ret)              => self.compile_return(ret),
-            S::Expression(expression)   => self.compile_expression(expression),
+            S::Expression(expression)   => self.compile_expression(expression, &mut CompareOp::DontCare),
         }
     }
 
     /// Compiles the given expression.
-    pub fn compile_expression(self: &mut Self, item: &ast::Expression<'a>) {
+    pub fn compile_expression(self: &mut Self, item: &ast::Expression<'a>, cond: &mut CompareOp) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
             E::Variable(variable)       => self.compile_variable(variable),
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
-            E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
+            E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op, cond),
             E::UnaryOp(unary_op)        => { }, // todo: handle,
             E::Block(block)             => { }, // todo: handle,
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
@@ -154,11 +192,11 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right, &mut CompareOp::DontCare);
                 self.writer.store(index);
             },
             compound_assign @ _ => {
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right, &mut CompareOp::DontCare);
                 self.writer.load(index);
                 match compound_assign {
                     BO::AddAssign => self.writer.add(),
@@ -215,7 +253,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         // put args on stack
         for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
-            self.compile_expression(arg);
+            self.compile_expression(arg, &mut CompareOp::DontCare);
         }
 
         if let Some(rust_fn_index) = item.rust_fn_index {
@@ -243,7 +281,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles a variable binding and optional assignment.
     pub fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr);
+            self.compile_expression(expr, &mut CompareOp::DontCare);
             let binding_id = item.binding_id.unwrap();
             self.writer.store(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
         }
@@ -258,42 +296,52 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         self.write_load(load_index);
     }
 
+    fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock<'a>, cond: &mut CompareOp) {
+
+        let exit_jump = cond.write(&mut self.writer, 123, true);
+        self.compile_block(&item.if_block);
+        let exit_target = self.writer.position();
+        self.writer.overwrite(exit_jump, |w| cond.write(w, exit_target, true));
+    }
+
+    fn compile_if_else_block(self: &mut Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>, cond: &mut CompareOp, invert_cond: bool) {
+
+        let else_jump = cond.write(&mut self.writer, 123, invert_cond);
+        self.compile_block(if_block);
+        let exit_jump = self.writer.jmp(123);
+
+        let else_target = self.writer.position();
+        self.compile_block(else_block);
+
+        let exit_target = self.writer.position();
+
+        // go back and fix jump targets
+        self.writer.overwrite(else_jump, |w| cond.write(w, else_target, invert_cond));
+        self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
+    }
+
     /// Compiles the given if block.
     pub fn compile_if_block(self: &mut Self, item: &ast::IfBlock<'a>) {
 
         // compile condition and jump placeholder
-        self.compile_expression(&item.cond);
-        let else_jump = self.writer.j0(123);
+        let mut cmp_op = CompareOp::Request;
+        self.compile_expression(&item.cond, &mut cmp_op);
 
-        // compile if-case and remember position just after it (else/remaining code will go there)
-        self.compile_block(&item.if_block);
+        let priorize_else = true;
 
-        let done_jump = if item.else_block.is_some() {
-            Some(self.writer.jmp(123))
+        if item.else_block.is_none() {
+            self.compile_if_only_block(item, &mut cmp_op);
+        } else if priorize_else {
+            self.compile_if_else_block(item.else_block.as_ref().unwrap(), &item.if_block, &mut cmp_op, false);
         } else {
-            None
-        };
-
-        // go back and overwrite placeholder with else/remaining code position
-        let else_code = self.writer.position;
-        self.writer.overwrite(else_jump, |w| w.j0(else_code));
-
-        // compile else-case if we have one
-        if let Some(else_block) = &item.else_block {
-            self.compile_block(else_block);
-        }
-
-        // go back and fix else-skip jump for the if-case
-        if let Some(done_jump) = done_jump {
-            let done_code = self.writer.position;
-            self.writer.overwrite(done_jump, |w| w.jmp(done_code));
+            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap(), &mut cmp_op, true);
         }
     }
 
     /// Compiles a while loop.
     pub fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
         let start_target = self.writer.position;
-        self.compile_expression(&item.expr);
+        self.compile_expression(&item.expr, &mut CompareOp::DontCare);
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.block);
         self.writer.jmp(start_target);
@@ -304,7 +352,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles a return statement
     pub fn compile_return(self: &mut Self, item: &ast::Return<'a>) {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr);
+            self.compile_expression(expr, &mut CompareOp::DontCare);
         } else {
             self.writer.lit0(); // todo: need to return something for now
         }
@@ -319,7 +367,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         }
 
         if let Some(result) = &item.result {
-            self.compile_expression(result);
+            self.compile_expression(result, &mut CompareOp::DontCare);
         }
     }
 
@@ -336,14 +384,14 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
 
     /// Compiles the given binary operation.
-    pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
+    pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>, cond: &mut CompareOp) {
         use frontend::ast::BinaryOperator as BO;
-        self.compile_expression(&item.right);
-        self.compile_expression(&item.left);
+        self.compile_expression(&item.right, &mut CompareOp::DontCare);
+        self.compile_expression(&item.left, &mut CompareOp::DontCare);
         match item.op {
             // arithmetic
-            BO::Add => self.writer.add(),
-            BO::Sub => self.writer.sub(),
+            BO::Add => { self.writer.add(); },
+            BO::Sub => { self.writer.sub(); },
             BO::Mul => unimplemented!("mul"),
             BO::Div => unimplemented!("div"),
             BO::Rem => unimplemented!("rem"),
@@ -355,18 +403,18 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             BO::DivAssign => unimplemented!("divassgi"),
             BO::RemAssign => unimplemented!("remassign"),
             // comparison
-            BO::Less => self.writer.clts(),
-            BO::Greater => self.writer.cgts(),
+            BO::Less => if *cond == CompareOp::Request { *cond = CompareOp::Lt(self.writer.position); } else { self.writer.clts(); },
+            BO::Greater => if *cond == CompareOp::Request { *cond = CompareOp::Gt(self.writer.position); } else { self.writer.cgts(); },
             BO::LessOrEq => unimplemented!("lessoreq"),
             BO::GreaterOrEq => unimplemented!("greateroreq"),
-            BO::Equal => self.writer.ceq(),
+            BO::Equal => if *cond == CompareOp::Request { *cond = CompareOp::Eq(self.writer.position); } else { self.writer.ceq(); },
             BO::NotEqual => unimplemented!("notequal"),
             // boolean
             BO::And => unimplemented!("and"),
             BO::Or => unimplemented!("or"),
             // special
             BO::Range => unimplemented!("range"),
-        };
+        }
     }
 }
 

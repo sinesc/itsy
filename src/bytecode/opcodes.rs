@@ -20,14 +20,14 @@ impl_vm!{
     }
     /// Load constant from constant pool onto stack.
     fn const64(self: &mut Self, const_id: u8) {
-        let l = self.program.consts[const_id as usize];
+        let l = self.program.consts[const_id as usize];         // todo: reuse stackops here
         let h = self.program.consts[(const_id + 1) as usize];
         self.stack.push(l);
         self.stack.push(h);
     }
     /// Load constant from constant pool onto stack.
     fn const64_16(self: &mut Self, const_id: u16) {
-        let l = self.program.consts[const_id as usize];
+        let l = self.program.consts[const_id as usize];         // todo: reuse stackops here
         let h = self.program.consts[(const_id + 1) as usize];
         self.stack.push(l);
         self.stack.push(h);
@@ -102,11 +102,11 @@ impl_vm!{
     fn call(self: &mut Self, addr: u32, num_args: u8) {
         let next_pc = self.pc;
         let fp = self.stack.fp;
-        self.stack.push(num_args);    // save number of arguments
-        self.stack.push(fp);           // save frame pointer
-        self.stack.push(next_pc);      // save program counter as it would be after this instruction
-        self.stack.fp = self.stack.sp();      // set new frame pointer
-        self.pc = addr;           // set new program counter
+        self.stack.push(num_args);          // save number of arguments
+        self.stack.push(fp);                // save frame pointer
+        self.stack.push(next_pc);           // save program counter as it would be after this instruction
+        self.stack.fp = self.stack.sp();    // set new frame pointer
+        self.pc = addr;                     // set new program counter
     }
     /*fn call1_u8(self: &mut Self, addr: u8) {
         self.call(addr as u32, 1);
@@ -126,9 +126,9 @@ impl_vm!{
         let retval: Value = self.stack.top();
 
         // get previous state
-        let prev_pc = self.stack.load_fp(-1);          // load program counter from before the call
-        let prev_fp = self.stack.load_fp(-2);          // load old frame pointer
-        let prev_num_args: u8 = self.stack.load_fp(-3);    // load number of arguments that were on the stack prior to call
+        let prev_pc = self.stack.load_fp(-1);           // load program counter from before the call
+        let prev_fp = self.stack.load_fp(-2);           // load old frame pointer
+        let prev_num_args: u8 = self.stack.load_fp(-3); // load number of arguments that were on the stack prior to call
 
         // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
         // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
@@ -167,19 +167,19 @@ impl_vm!{
         self.pc = addr;
     }
 
-    /// Pops one values and jumps to given address if it is 0.
-    fn j0(self: &mut Self, addr: u32) {
-        let a: Value = self.stack.pop();
-        if a == 0 {
-            self.pc = addr;
-        }
-    }
-
     /// Pops two values and jumps to given address it they equal.
     fn jeq(self: &mut Self, addr: u32) {
         let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
         if a == b {
+            self.pc = addr;
+        }
+    }
+    /// Pops two values and jumps to given address it they are not equal.
+    fn jneq(self: &mut Self, addr: u32) {
+        let a: Value = self.stack.pop();
+        let b: Value = self.stack.pop();
+        if a != b {
             self.pc = addr;
         }
     }
@@ -216,6 +216,15 @@ impl_vm!{
         }
     }
 
+    /// Pops one values and jumps to given address if it is 0.
+    fn j0(self: &mut Self, addr: u32) {
+        let a: Value = self.stack.pop();
+        if a == 0 {
+            self.pc = addr;
+        }
+    }
+
+
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn ceq(self: &mut Self) {
         let a: Value = self.stack.pop();
@@ -234,7 +243,7 @@ impl_vm!{
         let b: Value = self.stack.pop();
         self.stack.push((a < b) as i32);
     }
-
+    /// Calls the given Rust function.
     fn rustcall(self: &mut Self, func: RustFn) {
         T::from_u16(func).exec(self);
     }
@@ -265,6 +274,10 @@ impl_vm!{
         self.stack.push(a - 1);
     }
 
+    /// Yield program execution.
+    fn yld(self: &mut Self) {
+        self.state = ::bytecode::VMState::Yield;
+    }
     /// Terminate program execution.
     fn exit(self: &mut Self) {
         self.state = ::bytecode::VMState::Terminate;

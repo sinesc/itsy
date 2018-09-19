@@ -26,6 +26,19 @@ fn main() {
         }
     ";
 
+    let source2 = "
+        fn fib(n: i32){
+            if n > 2 {
+                print(2);
+            } else {
+                print(0)
+            }
+        }
+        fn main() {
+            fib(2);
+        }
+    ";
+
     let mut vm = itsy::exec::<MyFns>(source);
     println!("{:}", vm.dump_program());
     let vm_start = ::std::time::Instant::now();
