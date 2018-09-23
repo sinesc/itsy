@@ -19,7 +19,7 @@ impl From<usize> for TypeId {
 }
 
 impl Debug for TypeId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TypeId({})", self.0)
     }
 }
@@ -41,7 +41,7 @@ impl From<usize> for ScopeId {
 }
 
 impl Debug for ScopeId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ScopeId({})", self.0)
     }
 }
@@ -63,7 +63,7 @@ impl From<usize> for BindingId {
 }
 
 impl Debug for BindingId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "BindingId({})", self.0)
     }
 }
@@ -85,7 +85,7 @@ impl From<usize> for FunctionId {
 }
 
 impl Debug for FunctionId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FunctionId({})", self.0)
     }
 }

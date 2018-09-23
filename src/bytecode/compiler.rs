@@ -4,9 +4,9 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type}};
-use bytecode::{Writer, Program};
-use ::ExternRust;
+use crate::frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type}};
+use crate::bytecode::{Writer, WriteConst, Program};
+use crate::ExternRust;
 use std::fmt::Debug;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
@@ -85,11 +85,11 @@ impl CompareOp {
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: ExternRust<T> {
     writer          : Writer<T>,
-    /// List of registered types, effectively mapped via vector index = TypeId
+    /// List of registered types, effectively mapped via vector index = TypeId.
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
-    // Maps functions to their call index
+    // Maps functions to their call index.
     functions       : HashMap<FunctionId, u32>,
     /// List of unresolved calls for each function.
     unresolved      : HashMap<FunctionId, Vec<u32>>,
@@ -102,17 +102,6 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     pub fn new() -> Self {
         Compiler {
             writer      : Writer::new(),
-            types       : Vec::new(),
-            locals      : LocalsStack::new(),
-            functions   : HashMap::new(),
-            unresolved  : HashMap::new(),
-        }
-    }
-
-    /// Creates a new compiler using given writer.
-    pub fn with_writer(writer: Writer<T>) -> Self {
-        Compiler {
-            writer,
             types       : Vec::new(),
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
@@ -144,11 +133,6 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Returns compiled bytecode program.
     pub fn into_program(self: Self) -> Program<T> {
         self.writer.into_program()
-    }
-
-    /// Returns writer containing compiled bytecode program.
-    pub fn into_writer(self: Self) -> Writer<T> {
-        self.writer
     }
 
     /// Returns type for given AST type slot.
@@ -193,7 +177,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Compiles the assignment operation.
     pub fn compile_assignment(self: &mut Self, item: &ast::Assignment<'a>) {
-        use frontend::ast::BinaryOperator as BO;
+        use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id.unwrap();
         let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
         match item.op {
@@ -333,12 +317,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let mut cmp_op = CompareOp::Request;
         self.compile_expression(&item.cond, &mut cmp_op);
 
-        let priorize_else = true;
-
         if item.else_block.is_none() {
             self.compile_if_only_block(item, &mut cmp_op);
-        } else if priorize_else {
-            self.compile_if_else_block(item.else_block.as_ref().unwrap(), &item.if_block, &mut cmp_op, false);
         } else {
             self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap(), &mut cmp_op, true);
         }
@@ -379,41 +359,37 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Compiles the given literal
     pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
-        use frontend::ast::LiteralValue;
+        use crate::frontend::ast::LiteralValue;
         let lit_type = self.get_type(item.type_id);
         match item.value {
             LiteralValue::Integer(int) => {
-                match lit_type {
-                    Type::i8 | Type::i16 | Type::i32 => {
-                        match int {
-                            Integer::Signed(v) => match v {
-                                0 => self.writer.lit0(),
-                                1 => self.writer.lit1(),
-                                2 => self.writer.lit2(),
-                                -1 => self.writer.litm1(),
-                                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
-                            },
-                            _ => panic!("Encountered unsigned integer literal with a signed integer type-id")
-                        };
-                    },
-                    Type::u8 | Type::u16 | Type::u32 => {
-                        match int {
-                            Integer::Unsigned(v) => match v {
-                                0 => self.writer.lit0(),
-                                1 => self.writer.lit1(),
-                                2 => self.writer.lit2(),
-                                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
-                            },
-                            _ => panic!("Encountered signed integer literal with an unsigned integer type-id")
-                        };
+                match int {
+                    Integer::Signed(0) | Integer::Unsigned(0) => { self.writer.lit0(); }
+                    Integer::Signed(1) | Integer::Unsigned(1) => { self.writer.lit1(); }
+                    Integer::Signed(2) | Integer::Unsigned(2) => { self.writer.lit2(); }
+                    Integer::Signed(-1) => { self.writer.litm1(); }
+                    Integer::Signed(v) => {
+                        match lit_type {
+                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.const32(pos as u8); }
+                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.const32(pos as u8); }
+                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.const32(pos as u8); }
+                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.const64(pos as u8); }
+                            _ => panic!("Unexpected signed integer literal type")
+                        }
                     }
-                    _ => panic!("Encountered non-integer literal with an integer type-id")
-                };
+                    Integer::Unsigned(v) => {
+                        match lit_type {
+                            Type::u8 | Type::u16 | Type::u32 => { let pos = self.writer.write_const(v as u32); self.writer.const32(pos as u8); }
+                            Type::u64 => { let pos = self.writer.write_const(v as u64); self.writer.const64(pos as u8); }
+                            _ => panic!("Unexpected signed integer literal type")
+                        }
+                    }
+                }
             }
-            LiteralValue::Float(float) => {
+            LiteralValue::Float(v) => {
                 match lit_type {
-                    Type::f32 => self.writer.lit_f32(float as f32),
-                    Type::f64 => self.writer.lit_f64(float),
+                    Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.const32(pos as u8); },
+                    Type::f64 => { let pos = self.writer.write_const(v); self.writer.const64(pos as u8); },
                     _ => panic!("Encountered non-float literal with a float type-id")
                 };
 
@@ -424,7 +400,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Compiles the given binary operation.
     pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>, cond: &mut CompareOp) {
-        use frontend::ast::BinaryOperator as BO;
+        use crate::frontend::ast::BinaryOperator as BO;
         self.compile_expression(&item.right, &mut CompareOp::DontCare);
         self.compile_expression(&item.left, &mut CompareOp::DontCare);
         let result_type = self.get_type(item.type_id);
@@ -487,29 +463,11 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             _ => self.writer.load(index),
         };
     }
-    /// Writes an appropriate variant of the lit instruction.
-    fn write_int(self: &mut Self, int: Integer) -> u32 {
-        match int {
-            Integer::Signed(v) => match v {
-                0 => self.writer.lit0(),
-                1 => self.writer.lit1(),
-                2 => self.writer.lit2(),
-                -1 => self.writer.litm1(),
-                _ => self.writer.lit_u32(v as u32), // todo: use const mem for anything else
-            },
-            Integer::Unsigned(v) => match v {
-                0 => self.writer.lit0(),
-                1 => self.writer.lit1(),
-                2 => self.writer.lit2(),
-                _ => self.writer.lit_u32(v as u32), // todo:use const mem for anything else
-            },
-        }
-    }
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Writer<T> where T: ExternRust<T>+Debug {
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: ExternRust<T>+Debug {
     let mut compiler = Compiler::new();
     compiler.compile(program);
-    compiler.into_writer()
+    compiler.into_program()
 }

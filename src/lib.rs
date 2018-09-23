@@ -1,8 +1,6 @@
+//#![feature(rust_2018_preview)]
+//#![feature(nll)]
 //! Itsy, a tiny language for embedded use.
-
-#[macro_use]
-extern crate nom;
-extern crate byteorder;
 
 pub mod frontend;
 #[macro_use]
@@ -29,7 +27,7 @@ pub trait ExternRust<T>: Clone + Debug + 'static where T: ExternRust<T> {
     #[doc(hidden)]
     fn to_u16(self: Self) -> u16;
     #[doc(hidden)]
-    fn map_name() -> HashMap<&'static str, u16>;
+    fn call_info() -> HashMap<&'static str, (u16, &'static str, Vec<&'static str>)>;
     #[doc(hidden)]
     fn exec(self: Self, vm: &mut bytecode::VM<T>);
 }
@@ -39,11 +37,11 @@ pub trait ExternRust<T>: Clone + Debug + 'static where T: ExternRust<T> {
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
 pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: ExternRust<T> {
-    use frontend::{parse, resolve};
-    use bytecode::{compile, VM};
+    use crate::frontend::{parse, resolve};
+    use crate::bytecode::{compile, VM};
 
     let parsed = parse(program).unwrap();
     let resolved = resolve::<T>(parsed, "main");
-    let writer = compile(resolved);
-    VM::new(writer.into_program())
+    let program = compile(resolved);
+    VM::new(program)
 }

@@ -6,10 +6,10 @@ pub mod ast;
 pub type Program<'a> = Vec<ast::Statement<'a>>;
 
 mod parser;
-pub use frontend::parser::{parse, ParseError};
+pub use crate::frontend::parser::{parse, ParseError};
 
 mod resolver;
-pub use frontend::resolver::{resolve, ResolvedProgram};
+pub use crate::frontend::resolver::{resolve, ResolvedProgram};
 
 pub(crate)mod util;
 

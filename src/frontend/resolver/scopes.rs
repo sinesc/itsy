@@ -1,7 +1,7 @@
 // todo: remove
 #![allow(dead_code)]
 
-use frontend::util::{Repository, TypeId, ScopeId, BindingId, FunctionId, TypeSlot, Type};
+use crate::frontend::util::{Repository, TypeId, TypeSlot, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
@@ -10,9 +10,7 @@ pub struct Scopes<'a> {
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings    : Repository<TypeSlot, BindingId, (ScopeId, &'a str)>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions   : Repository<(TypeSlot, Vec<TypeSlot>), FunctionId, (ScopeId, &'a str)>,
-    /// Current scope id, incremented when scopes are added
-    current     : ScopeId,
+    functions   : Repository<FnSig, FunctionId, (ScopeId, &'a str)>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
     parent_map  : Vec<ScopeId>, // ScopeId => ScopeId
 }
@@ -25,7 +23,6 @@ impl<'a> Scopes<'a> {
             types       : Repository::new(),
             bindings    : Repository::new(),
             functions   : Repository::new(),
-            current     : root_id,
             parent_map  : vec![ root_id ],
         }
     }
@@ -39,6 +36,20 @@ impl<'a> Scopes<'a> {
         self.parent_map.push(parent);
         index.into()
     }
+
+    pub fn dump_parents(self: &Self, start_scope_id: ScopeId) {
+        print!("self({:?})", start_scope_id);
+        let mut scope_id = start_scope_id;
+        loop {
+            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
+            if parent_scope_id == scope_id {
+                break;
+            }
+            print!(" <- {:?}", parent_scope_id);
+            scope_id = parent_scope_id;
+        }
+        println!("");
+    }
 }
 
 /// Function handling
@@ -46,7 +57,12 @@ impl<'a> Scopes<'a> {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
     pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &'a str, result_type_id: TypeSlot, arg_type_ids: Vec<TypeSlot>) -> FunctionId {
-        self.functions.insert((scope_id, name), (result_type_id, arg_type_ids))
+        self.functions.insert((scope_id, name), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Internal })
+    }
+
+    /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
+    pub fn insert_rustfn(self: &mut Self, scope_id: ScopeId, name: &'a str, fn_index: u16, result_type_id: TypeSlot, arg_type_ids: Vec<TypeSlot>) -> FunctionId {
+        self.functions.insert((scope_id, name), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
     }
 
     /// Returns the id of the named function originating in exactly this scope.
@@ -70,7 +86,7 @@ impl<'a> Scopes<'a> {
     }
 
     /// Returns the signature of the given function id.
-    pub fn function_type(self: &Self, function_id: FunctionId) -> &(TypeSlot, Vec<TypeSlot>) {
+    pub fn function_type(self: &Self, function_id: FunctionId) -> &FnSig {
         self.functions.index(function_id)
     }
 }
@@ -120,6 +136,11 @@ impl<'a> Scopes<'a> {
     /// Insert a type into the given scope, returning a type id.
     pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type) -> TypeId {
         self.types.insert((scope_id, name), ty)
+    }
+
+    /// Returns the id of the named type originating in exactly this scope.
+    pub fn type_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<TypeId> {
+        self.types.index_of(&(scope_id, name))
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.

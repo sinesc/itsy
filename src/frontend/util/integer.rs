@@ -85,7 +85,7 @@ impl Ord for Integer {
 }
 
 impl Debug for Integer {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Integer::Signed(signed) => write!(f, "Signed({})", signed),
             Integer::Unsigned(unsigned) => write!(f, "Unsigned({})", unsigned),

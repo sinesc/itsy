@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use frontend::util::{BindingId, FunctionId, Integer, TypeSlot};
+use crate::frontend::util::{BindingId, FunctionId, ScopeId, Integer, TypeSlot};
 
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -51,6 +51,7 @@ pub struct Function<'a> {
     pub sig         : Signature<'a>,
     pub block       : Block<'a>,
     pub function_id : Option<FunctionId>,
+    pub scope_id    : Option<ScopeId>,
 }
 
 #[derive(Debug)]
@@ -97,12 +98,14 @@ pub struct ForLoop<'a> {
     pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
     pub block   : Block<'a>,
+    pub scope_id: Option<ScopeId>,
 }
 
 #[derive(Debug)]
 pub struct WhileLoop<'a> {
     pub expr    : Expression<'a>,
     pub block   : Block<'a>,
+    pub scope_id: Option<ScopeId>,
 }
 
 #[derive(Debug)]
@@ -115,6 +118,7 @@ pub struct IfBlock<'a> {
     pub cond        : Expression<'a>,
     pub if_block    : Block<'a>,
     pub else_block  : Option<Block<'a>>,
+    pub scope_id    : Option<ScopeId>,
 }
 
 #[derive(Debug)]
@@ -122,9 +126,9 @@ pub struct Block<'a> {
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
     pub type_id     : TypeSlot,
+    pub scope_id    : Option<ScopeId>,
 }
 
-#[derive(Debug)]
 pub enum Expression<'a> {
     Literal(Literal<'a>),
     Variable(Variable<'a>),
@@ -151,9 +155,25 @@ impl<'a> Expression<'a> {
     }
 }
 
+impl<'a> Debug for Expression<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Literal(literal)        => write!(f, "{:#?}", literal),
+            Expression::Variable(variable)      => write!(f, "{:#?}", variable),
+            Expression::Call(call)              => write!(f, "{:#?}", call),
+            Expression::Assignment(assignment)  => write!(f, "{:#?}", assignment),
+            Expression::BinaryOp(binary_op)     => write!(f, "{:#?}", binary_op),
+            Expression::UnaryOp(unary_op)       => write!(f, "{:#?}", unary_op),
+            Expression::Block(block)            => write!(f, "{:#?}", block),
+            Expression::IfBlock(if_block)       => write!(f, "{:#?}", if_block),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Literal<'a> {
     pub value   : LiteralValue<'a>,
+    pub ty      : Option<Type<'a>>,
     pub type_id : TypeSlot,
 }
 
@@ -185,7 +205,7 @@ impl<'a> LiteralValue<'a> {
 }
 
 impl<'a> Debug for LiteralValue<'a> {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LiteralValue::String(string) => write!(f, "LiteralValue({:?})", string),
             LiteralValue::Integer(integer) => write!(f, "LiteralValue({:?})", integer),
@@ -207,7 +227,7 @@ pub struct Call<'a> {
     pub args        : Vec<Expression<'a>>,
     pub type_id     : TypeSlot, // todo: just get from function?
     pub function_id : Option<FunctionId>,
-    pub rust_fn_index: Option<u16>,  // todo: use enum fn/rustfn
+    pub rust_fn_index: Option<u16>,
 }
 
 impl<'a> Call<'a> {
@@ -246,7 +266,7 @@ pub struct UnaryOp<'a> {
 pub struct IdentPath<'a>(pub Vec<&'a str>);
 
 impl<'a> Debug for IdentPath<'a> {
-    fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "IdentPath({})", self.0.join("."))
     }
 }

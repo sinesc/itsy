@@ -12,6 +12,9 @@ pub use self::typed_ids::*;
 mod type_slot;
 pub use self::type_slot::TypeSlot;
 
+mod fn_sig;
+pub use self::fn_sig::{FnSig, FnKind};
+
 use std::collections::HashMap;
 
 /// Information about an enum in a resolved program.

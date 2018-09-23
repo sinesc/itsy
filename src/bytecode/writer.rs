@@ -1,8 +1,9 @@
 //! Bytecode buffer and writer.
 
 use std::io::{self, Write, Seek, SeekFrom};
-use bytecode::Program;
-use ::ExternRust;
+use crate::bytecode::{Value, Program};
+use std::mem::transmute;
+use crate::ExternRust;
 
 /// Bytecode buffer and writer.
 #[derive(Debug)]
@@ -46,6 +47,46 @@ impl<T> Writer<T> where T: ExternRust<T> {
         result
     }
 }
+
+/// Implements const pool write traits
+#[allow(unused_macros)]
+macro_rules! impl_write_const {
+    // push operations
+    (@push large, $type:tt, $writer: ident, $var:ident) => { {
+        let (low, high): (u32, u32) = unsafe { transmute($var) };
+        impl_write_const!(@push normal, u32, $writer, low);
+        impl_write_const!(@push normal, u32, $writer, high);
+    } };
+    (@push $size:tt, $type:tt, $writer: ident, $var:ident) => { $writer.program.consts.push( impl_convert!($size, Value, $var) ); };
+
+    // implement const write operations for Writer
+    ($size:tt, $type:tt) => {
+        impl<P> WriteConst<$type> for Writer<P> where P: ExternRust<P> {
+            fn write_const(self: &mut Self, value: $type) -> u32 {
+                let position = self.program.consts.len();
+                impl_write_const!(@push $size, $type, self, value);
+                position as u32
+            }
+        }
+    };
+}
+
+/// Trait for generic const writer operations.
+pub trait WriteConst<T> {
+    /// Write a constant to the constant pool
+    fn write_const(self: &mut Self, value: T) -> u32;
+}
+
+impl_write_const!(small, u8);
+impl_write_const!(small, i8);
+impl_write_const!(small, u16);
+impl_write_const!(small, i16);
+impl_write_const!(normal, u32);
+impl_write_const!(normal, i32);
+impl_write_const!(normal, f32);
+impl_write_const!(large, u64);
+impl_write_const!(large, i64);
+impl_write_const!(large, f64);
 
 impl<T> Write for Writer<T> where T: ExternRust<T> {
     fn write(self: &mut Self, buf: &[u8]) -> io::Result<usize> {

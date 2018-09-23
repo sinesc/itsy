@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use bytecode::{Value, StackOp, StackOpFp};
+use crate::bytecode::{Value, StackOp, StackOpFp};
 
 impl_vm!{
 
@@ -310,10 +310,10 @@ impl_vm!{
 
     /// Yield program execution.
     fn yld(self: &mut Self) {
-        self.state = ::bytecode::VMState::Yield;
+        self.state = crate::bytecode::VMState::Yield;
     }
     /// Terminate program execution.
     fn exit(self: &mut Self) {
-        self.state = ::bytecode::VMState::Terminate;
+        self.state = crate::bytecode::VMState::Terminate;
     }
 }

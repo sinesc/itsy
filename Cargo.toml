@@ -2,6 +2,7 @@
 name = "itsy"
 version = "0.1.0"
 authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 nom = { version = "4.0", features = [ "verbose-errors" ] }

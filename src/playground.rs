@@ -1,11 +1,14 @@
-#[macro_use]
-extern crate itsy;
+use itsy::extern_rust;
+use itsy::ExternRust;
 
 extern_rust!(MyFns, {
     fn printi(vm: &mut VM, value: i32) {
         println!("print:{}", value);
     }
-    fn printf(vm: &mut VM, value: f32) {
+    fn printf32(vm: &mut VM, value: f32) {
+        println!("print:{}", value);
+    }
+    fn printf64(vm: &mut VM, value: f64) {
         println!("print:{}", value);
     }
 });
@@ -20,30 +23,18 @@ fn main() {
                 fibf(n - 1.0) + fibf(n - 2.0)
             }
         }
-        fn fib(n: i32) -> i32 {
-            if n < 2 {
-                n
-            } else {
-                fib(n - 1) + fib(n - 2)
-            }
-        }
         fn main() {
-            printf(fibf(7.0));
+            printf32(fibf(7.0));
         }
     ";
 
-    let source2 = "
-        fn fib(n: i32){
-            if n > 2 {
-                print(2);
-            } else {
-                print(0)
-            }
-        }
+    /*let source = "
+        fn test(y: f64) { }
         fn main() {
-            fib(2);
+            let x: f64 = 2.0;
+            test(x);
         }
-    ";
+    ";*/
 
     let mut vm = itsy::exec::<MyFns>(source);
     println!("{:}", vm.dump_program());

@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 use std::mem::transmute;
-use bytecode::Value;
+use crate::bytecode::Value;
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]
@@ -11,7 +11,7 @@ pub struct Stack {
 
 impl Stack {
     /// Creates a new VM value stack.
-    pub fn new() -> Stack {
+    pub fn new() -> Self {
         Stack {
             data: Vec::with_capacity(256),
             fp  : 0,
@@ -54,11 +54,6 @@ impl IndexMut<u32> for Stack {
     }
 }
 
-pub trait StackFp<T> {
-    /// Offset given value by the current frame pointer
-    fn offset_fp(self: &Self, offset: i32) -> u32;
-}
-
 /// Trait for generic stack operations.
 pub trait StackOp<T> {
     /// Push given value onto the stack.
@@ -71,6 +66,11 @@ pub trait StackOp<T> {
     fn load(self: &Self, pos: u32) -> T;
     /// Load the top stack value.
     fn top(self: &Self) -> T;
+}
+
+pub trait StackFp<T> {
+    /// Offset given value by the current frame pointer
+    fn offset_fp(self: &Self, offset: i32) -> u32;
 }
 
 pub trait StackOpFp<T>: StackFp<T> + StackOp<T> {
@@ -95,66 +95,64 @@ impl<T> StackFp<T> for Stack {
 
 impl<T> StackOpFp<T> for Stack where Stack: StackOp<T> + StackFp<T> { }
 
+/// Implements Stack operations.
 #[allow(unused_macros)]
-macro_rules! impl_op {
-    // cast smaller than 32 bit to 32 bit, transmute 32 bit types
-    (@convert small, $type:tt, $input:expr) => { $input as $type };
-    (@convert normal, $type:tt, $input:expr) => { unsafe { transmute($input) } };
-    (@convert large, $type:tt, $input:expr) => { unsafe { transmute($input) } };
+macro_rules! impl_stack {
 
     // push operations
     (@push large, $type:tt, $stack: ident, $var:ident) => { {
         let (low, high): (u32, u32) = unsafe { transmute($var) };
-        impl_op!(@push normal, u32, $stack, low);
-        impl_op!(@push normal, u32, $stack, high);
+        impl_stack!(@push normal, u32, $stack, low);
+        impl_stack!(@push normal, u32, $stack, high);
     } };
-    (@push $size:tt, $type:tt, $stack: ident, $var:ident) => { $stack.data.push( impl_op!(@convert $size, Value, $var) ); };
+    (@push $size:tt, $type:tt, $stack: ident, $var:ident) => { $stack.data.push( impl_convert!($size, Value, $var) ); };
 
     // store operations
     (@store large, $type:tt, $stack: ident, $pos:expr, $var:ident) => { {
         let (low, high): (u32, u32) = unsafe { transmute($var) };
-        impl_op!(@store normal, u32, $stack, $pos, low);
-        impl_op!(@store normal, u32, $stack, $pos + 1, high);
+        impl_stack!(@store normal, u32, $stack, $pos, low);
+        impl_stack!(@store normal, u32, $stack, $pos + 1, high);
     } };
     (@store $size:tt, $type:tt, $stack: ident, $pos:expr, $var:ident) => {
-        *$stack.data.get_mut($pos as usize).expect("Stack bounds exceeded") = impl_op!(@convert $size, Value, $var);
+        *$stack.data.get_mut($pos as usize).expect("Stack bounds exceeded") = impl_convert!($size, Value, $var);
     };
 
     // pop operations
     (@pop large, $type:tt, $stack: ident) => { {
-        let high: u32 = impl_op!(@pop normal, u32, $stack);
-        let low: u32 = impl_op!(@pop normal, u32, $stack);
+        let high: u32 = impl_stack!(@pop normal, u32, $stack);
+        let low: u32 = impl_stack!(@pop normal, u32, $stack);
         unsafe { transmute((low, high)) }
     } };
-    (@pop $size:tt, $type:tt, $stack: ident) => { impl_op!(@convert $size, $type, $stack.data.pop().expect("Stack underflow")) };
+    (@pop $size:tt, $type:tt, $stack: ident) => { impl_convert!($size, $type, $stack.data.pop().expect("Stack underflow")) };
 
     // load operations
     (@load large, $type:tt, $stack: ident, $pos:expr) => { {
-        let low: u32 = impl_op!(@load normal, u32, $stack, $pos);
-        let high: u32 = impl_op!(@load normal, u32, $stack, $pos + 1);
+        let low: u32 = impl_stack!(@load normal, u32, $stack, $pos);
+        let high: u32 = impl_stack!(@load normal, u32, $stack, $pos + 1);
         unsafe { transmute((low, high)) }
     } };
     (@load $size:tt, $type:tt, $stack: ident, $pos:expr) => {
-        impl_op!(@convert $size, $type, *$stack.data.get($pos as usize).expect("Stack bounds exceeded"))
+        impl_convert!($size, $type, *$stack.data.get($pos as usize).expect("Stack bounds exceeded"))
     };
 
-    ($size:tt, $type:tt) => {
-        impl StackOp<$type> for Stack {
+    // implement stack operations for Stack
+    (stack $target:ident, $size:tt, $type:tt) => {
+        impl StackOp<$type> for $target {
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn push(self: &mut Self, value: $type) {
-                impl_op!(@push $size, $type, self, value);
+                impl_stack!(@push $size, $type, self, value);
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn pop(self: &mut Self) -> $type {
-                impl_op!(@pop $size, $type, self)
+                impl_stack!(@pop $size, $type, self)
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn store(self: &mut Self, pos: u32, value: $type) {
-                impl_op!(@store $size, $type, self, pos, value);
+                impl_stack!(@store $size, $type, self, pos, value);
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn load(self: &Self, pos: u32) -> $type {
-                impl_op!(@load $size, $type, self, pos)
+                impl_stack!(@load $size, $type, self, pos)
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn top(self: &Self) -> $type {
@@ -164,13 +162,13 @@ macro_rules! impl_op {
     };
 }
 
-impl_op!(small, u8);
-impl_op!(small, i8);
-impl_op!(small, u16);
-impl_op!(small, i16);
-impl_op!(normal, u32);
-impl_op!(normal, i32);
-impl_op!(normal, f32);
-impl_op!(large, u64);
-impl_op!(large, i64);
-impl_op!(large, f64);
+impl_stack!(stack Stack, small, u8);
+impl_stack!(stack Stack, small, i8);
+impl_stack!(stack Stack, small, u16);
+impl_stack!(stack Stack, small, i16);
+impl_stack!(stack Stack, normal, u32);
+impl_stack!(stack Stack, normal, i32);
+impl_stack!(stack Stack, normal, f32);
+impl_stack!(stack Stack, large, u64);
+impl_stack!(stack Stack, large, i64);
+impl_stack!(stack Stack, large, f64);

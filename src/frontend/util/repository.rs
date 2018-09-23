@@ -94,7 +94,7 @@ where
     V: Debug,
     I: Debug + Copy + Into<usize> + From<usize>
 {
-    fn fmt(&self, f: &mut Formatter) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f
             .debug_map()
             .entries(self.map.iter().map(|(k, &v)| {

@@ -1,7 +1,7 @@
-use frontend::util::{TypeId, ScopeId, Integer, Signed, Unsigned};
-use frontend::ast;
-use frontend::resolver::scopes::Scopes;
-use frontend::util::Type;
+use crate::frontend::util::{TypeId, ScopeId, Integer, Signed, Unsigned};
+use crate::frontend::ast;
+use crate::frontend::resolver::scopes::Scopes;
+use crate::frontend::util::Type;
 
 struct IntegerRange {
     pub type_id: TypeId,
@@ -28,7 +28,7 @@ pub(crate) struct Primitives {
 impl Primitives {
 
     /// Create new instance.
-    pub fn new(scopes: &mut Scopes, root_scope_id: ScopeId) -> Self {
+    pub fn new(scopes: &mut Scopes<'_>, root_scope_id: ScopeId) -> Self {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
         Primitives {
             bool: scopes.insert_type(root_scope_id, "bool", Type::bool),
@@ -137,31 +137,27 @@ impl Primitives {
     }
 
     /// Tries to find a type capable of holding both given literals.
-    pub fn cast_literal(self: &Self, literal_a: &ast::Literal, literal_b: &ast::Literal) -> Option<TypeId> {
+    pub fn cast_literal(self: &Self, literal_a: &ast::Literal<'_>, literal_b: &ast::Literal<'_>) -> Option<TypeId> {
 
-        if let (Some(integer_a), Some(integer_b)) = (literal_a.value.as_integer(), literal_b.value.as_integer()) {
-            self.common_integer_type_id(integer_a, integer_b)
+        if let (Some(value_a), Some(value_b)) = (literal_a.value.as_integer(), literal_b.value.as_integer()) {
+            if value_a.is_signed() || value_b.is_signed() {
+                // at least one is signed: need common signed type
+                self.signed.iter().find(|s| {
+                    value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max
+                }).map(|t| t.type_id)
+            } else {
+                // both unsigned
+                self.unsigned.iter().find(|s| {
+                    value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max // todo: could just check max(value_a, value_b) < s.max
+                }).map(|t| t.type_id)
+            }
+        } else if let (Some(_float_a), Some(_float_b)) = (literal_a.value.as_float(), literal_b.value.as_float()) {
+            Some(self.float[1]) // todo: somehow compute actually required precision for given float. quick google => nothing
         } else {
             None // todo: implement more
         }
     }
-
-    /// Tries to find a type capable of holding both given integer.
-    pub fn common_integer_type_id(self: &Self, value_a: Integer, value_b: Integer) -> Option<TypeId> {
-
-        if value_a.is_signed() || value_b.is_signed() {
-            // at least one is signed: need common signed type
-            self.signed.iter().find(|s| {
-                value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max
-            }).map(|t| t.type_id)
-        } else {
-            // both unsigned
-            self.unsigned.iter().find(|s| {
-                value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max // todo: could just check max(value_a, value_b) < s.max
-            }).map(|t| t.type_id)
-        }
-    }
-
+    /*
     /// Tries to find a type capable of holding the given integer.
     pub fn integer_type_id(self: &Self, item: Integer) -> Option<TypeId> {
         if item.is_signed() {
@@ -170,7 +166,7 @@ impl Primitives {
             self.unsigned.iter().find(|s| item >= s.min && item <= s.max).map(|t| t.type_id)
         }
     }
-
+    */
     /// Tries to find a type suitable to represent both given types.
     fn promote(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> Option<TypeId> {
 

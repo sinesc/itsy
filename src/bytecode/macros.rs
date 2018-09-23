@@ -32,7 +32,7 @@ macro_rules! extern_rust {
             _dummy
         }
     };
-    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $arg_type:tt ),* ] $code:block )* ) => {
+    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $arg_type:tt ),* ] [ $($ret_type:tt)* ] $code:block )* ) => {
         impl $crate::ExternRust<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
@@ -41,10 +41,10 @@ macro_rules! extern_rust {
                 unsafe { ::std::mem::transmute(index) }
             }
             #[allow(unused_mut)]
-            fn map_name() -> ::std::collections::HashMap<&'static str, u16> {
+            fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), $enum_name::$name.to_u16());
+                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)*), vec![ $(stringify!($arg_type)),* ]));
                 )*
                 map
             }
@@ -69,13 +69,22 @@ macro_rules! extern_rust {
     (
         $enum_name:ident, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $arg_type:tt)* ) $code:block
+            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $arg_type:tt)* ) $( -> $ret_type:tt )* $code:block
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
         extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] $code )* );
+        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] [ $($ret_type)* ] $code )* );
     };
+}
+
+/// Stack/Const conversions
+#[allow(unused_macros)]
+macro_rules! impl_convert {
+    // cast smaller than 32 bit to 32 bit, transmute 32 bit types
+    (small, $type:tt, $input:expr) => { $input as $type };
+    (normal, $type:tt, $input:expr) => { unsafe { transmute($input) } };
+    (large, $type:tt, $input:expr) => { unsafe { transmute($input) } };
 }
 
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
@@ -154,7 +163,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
-        impl<T> ::bytecode::Writer<T> where T: ::ExternRust<T> {
+        impl<T> crate::bytecode::Writer<T> where T: crate::ExternRust<T> {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -169,7 +178,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl<T> ::bytecode::VM<T> where T: ::ExternRust<T> {
+        impl<T> crate::bytecode::VM<T> where T: crate::ExternRust<T> {
 
             // Generate methods for executing each bytecode on VM struct.
             $(
@@ -182,6 +191,7 @@ macro_rules! impl_vm {
 
             /// Formats the given VMs bytecode data as human readable output.
             #[allow(unused_imports)]
+            #[allow(unused_mut)]
             pub(crate) fn format_instruction(self: &mut Self) -> Option<String> {
                 use byteorder::{LittleEndian, ReadBytesExt};
                 let position = self.pc;

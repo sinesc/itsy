@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::io::{self, Read};
-use bytecode::*;
+use crate::bytecode::*;
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -21,7 +21,7 @@ pub enum VMState {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T> where T: ::ExternRust<T> {
+pub struct VM<T> where T: crate::ExternRust<T> {
     pub(crate) program  : Program<T>,
     pub stack    : Stack,
     pub(crate) pc       : u32,
@@ -30,7 +30,7 @@ pub struct VM<T> where T: ::ExternRust<T> {
 }
 
 /// Public VM methods.
-impl<T> VM<T> where T: ::ExternRust<T> {
+impl<T> VM<T> where T: crate::ExternRust<T> {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self {
         VM {
@@ -97,7 +97,7 @@ impl<T> VM<T> where T: ::ExternRust<T> {
     }
 }
 
-impl<T> Read for VM<T> where T: ::ExternRust<T> {
+impl<T> Read for VM<T> where T: crate::ExternRust<T> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;
