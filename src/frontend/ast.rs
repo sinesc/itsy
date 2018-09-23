@@ -301,7 +301,7 @@ impl UnaryOperator {
     }*/
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum BinaryOperator {
     // arithmetic
     Add, Sub, Mul, Div, Rem,

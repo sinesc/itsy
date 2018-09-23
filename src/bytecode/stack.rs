@@ -68,11 +68,13 @@ pub trait StackOp<T> {
     fn top(self: &Self) -> T;
 }
 
+/// Trait for stack frame pointer.
 pub trait StackFp<T> {
     /// Offset given value by the current frame pointer
     fn offset_fp(self: &Self, offset: i32) -> u32;
 }
 
+/// Trait for generic stack operations relative to the frame pointer.
 pub trait StackOpFp<T>: StackFp<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
     fn store_fp(self: &mut Self, offset: i32, value: T) {
@@ -162,6 +164,7 @@ macro_rules! impl_stack {
     };
 }
 
+impl_stack!(stack Stack, small, bool);
 impl_stack!(stack Stack, small, u8);
 impl_stack!(stack Stack, small, i8);
 impl_stack!(stack Stack, small, u16);

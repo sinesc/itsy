@@ -4,10 +4,11 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
-use crate::frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type}};
+use std::fmt::Debug;
+use std::cmp::max;
+use crate::frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type, TypeKind}};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::ExternRust;
-use std::fmt::Debug;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
 struct Locals {
@@ -48,36 +49,56 @@ impl LocalsStack {
 pub enum CompareOp {
     DontCare,
     Request,
-    Eq(u32),
-    Neq(u32),
-    Lt(u32),
-    Lte(u32),
-    Gte(u32),
-    Gt(u32),
+    Eq(Type),
+    Neq(Type),
+    Lt(Type),
+    Lte(Type),
 }
 
 impl CompareOp {
-    fn write<T>(self: &Self, writer: &mut Writer<T>, jump_pos: u32, invert: bool) -> u32 where T: ExternRust<T> {
-        if invert {
-            match self {
-                CompareOp::Eq(_) => writer.jneq(jump_pos),
-                CompareOp::Neq(_) => writer.jeq(jump_pos),
-                CompareOp::Lt(_) => writer.jgtes(jump_pos),
-                CompareOp::Lte(_) => writer.jgts(jump_pos),
-                CompareOp::Gte(_) => writer.jlts(jump_pos),
-                CompareOp::Gt(_) => writer.jltes(jump_pos),
-                _ => writer.j0(jump_pos) // todo: jn0?
+    fn write<T>(self: &Self, writer: &mut Writer<T>, jump_pos: u32) -> u32 where T: ExternRust<T> {
+        match self {
+            CompareOp::Eq(ty) => match ty.size() {
+                1 | 2 | 4 => writer.jeqr32(jump_pos),
+                8 => writer.jeqr64(jump_pos),
+                _ => panic!("Unsupported type size"),
             }
-        } else {
-            match self {
-                CompareOp::Eq(_) => writer.jeq(jump_pos),
-                CompareOp::Neq(_) => writer.jneq(jump_pos),
-                CompareOp::Lt(_) => writer.jlts(jump_pos),
-                CompareOp::Lte(_) => writer.jltes(jump_pos),
-                CompareOp::Gte(_) => writer.jgts(jump_pos),
-                CompareOp::Gt(_) => writer.jgts(jump_pos),
-                _ => writer.j0(jump_pos)
+            CompareOp::Neq(ty) => match ty.size() {
+                1 | 2 | 4 => writer.jneqr32(jump_pos),
+                8 => writer.jneqr64(jump_pos),
+                _ => panic!("Unsupported type size"),
             }
+            CompareOp::Lt(ty) => match ty.size() {
+                1 | 2 | 4 => match ty.kind() {
+                    TypeKind::Signed => writer.jlts32(jump_pos),
+                    TypeKind::Unsigned => writer.jltu32(jump_pos),
+                    TypeKind::Float => writer.jltf32(jump_pos),
+                    _ => panic!("Unsupported type kind"),
+                },
+                8 => match ty.kind() {
+                    TypeKind::Signed => writer.jlts64(jump_pos),
+                    TypeKind::Unsigned => writer.jltu64(jump_pos),
+                    TypeKind::Float => writer.jltf64(jump_pos),
+                    _ => panic!("Unsupported type kind"),
+                },
+                _ => panic!("unsupported type size"),
+            }
+            CompareOp::Lte(ty) => match ty.size() {
+                1 | 2 | 4 => match ty.kind() {
+                    TypeKind::Signed => writer.jltes32(jump_pos),
+                    TypeKind::Unsigned => writer.jlteu32(jump_pos),
+                    TypeKind::Float => writer.jltef32(jump_pos),
+                    _ => panic!("Unsupported type kind"),
+                },
+                8 => match ty.kind() {
+                    TypeKind::Signed => writer.jltes64(jump_pos),
+                    TypeKind::Unsigned => writer.jlteu64(jump_pos),
+                    TypeKind::Float => writer.jltef64(jump_pos),
+                    _ => panic!("Unsupported type kind"),
+                },
+                _ => panic!("unsupported type size"),
+            }
+            _ => panic!("nothing to write"),
         }
     }
 }
@@ -183,11 +204,11 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                self.writer.store(index);
+                self.writer.storer32(index);
             },
             compound_assign @ _ => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                self.writer.load(index);
+                self.writer.loadr32(index);
                 match compound_assign {
                     BO::AddAssign => self.writer.add(),
                     BO::SubAssign => self.writer.sub(),
@@ -196,7 +217,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                     BO::RemAssign => unimplemented!("remassign"),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
-                self.writer.store(index);
+                self.writer.storer32(index);
             },
         };
     }
@@ -215,8 +236,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let mut frame = Locals::new();
 
         for arg in item.sig.args.iter() {
-            let next_arg = frame.next_arg;
-            frame.map.insert(arg.binding_id.unwrap(), next_arg);
+            frame.next_arg -= max(0, self.get_type(arg.type_id).size() as i32 / 4 - 1);
+            frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
             frame.next_arg -= 1;
         }
 
@@ -224,7 +245,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             if let ast::Statement::Binding(binding) = statement {
                 let next_var = frame.next_var;
                 frame.map.insert(binding.binding_id.unwrap(), next_var);
-                frame.next_var += 1;
+                frame.next_var += max(1, self.get_type(binding.type_id).size() as i32 / 4);
             }
         }
 
@@ -273,7 +294,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, &mut CompareOp::DontCare);
             let binding_id = item.binding_id.unwrap();
-            self.writer.store(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
+            self.writer.storer32(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
         }
     }
 
@@ -283,20 +304,21 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
         };
-        self.write_load(load_index);
+        let var_type = self.get_type(item.type_id);
+        self.write_load(load_index, var_type.size());
     }
 
     fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock<'a>, cond: &mut CompareOp) {
 
-        let exit_jump = cond.write(&mut self.writer, 123, true);
+        let exit_jump = cond.write(&mut self.writer, 123);
         self.compile_block(&item.if_block);
         let exit_target = self.writer.position();
-        self.writer.overwrite(exit_jump, |w| cond.write(w, exit_target, true));
+        self.writer.overwrite(exit_jump, |w| cond.write(w, exit_target));
     }
 
-    fn compile_if_else_block(self: &mut Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>, cond: &mut CompareOp, invert_cond: bool) {
+    fn compile_if_else_block(self: &mut Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>, cond: &mut CompareOp) {
 
-        let else_jump = cond.write(&mut self.writer, 123, invert_cond);
+        let else_jump = cond.write(&mut self.writer, 123);
         self.compile_block(if_block);
         let exit_jump = self.writer.jmp(123);
 
@@ -306,7 +328,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let exit_target = self.writer.position();
 
         // go back and fix jump targets
-        self.writer.overwrite(else_jump, |w| cond.write(w, else_target, invert_cond));
+        self.writer.overwrite(else_jump, |w| cond.write(w, else_target));
         self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
     }
 
@@ -320,7 +342,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         if item.else_block.is_none() {
             self.compile_if_only_block(item, &mut cmp_op);
         } else {
-            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap(), &mut cmp_op, true);
+            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap(), &mut cmp_op);
         }
     }
 
@@ -370,17 +392,17 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                     Integer::Signed(-1) => { self.writer.litm1(); }
                     Integer::Signed(v) => {
                         match lit_type {
-                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.const32(pos as u8); }
-                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.const32(pos as u8); }
-                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.const32(pos as u8); }
-                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.const64(pos as u8); }
+                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
+                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
+                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.constr32(pos as u8); }
+                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.constr64(pos as u8); }
                             _ => panic!("Unexpected signed integer literal type")
                         }
                     }
                     Integer::Unsigned(v) => {
                         match lit_type {
-                            Type::u8 | Type::u16 | Type::u32 => { let pos = self.writer.write_const(v as u32); self.writer.const32(pos as u8); }
-                            Type::u64 => { let pos = self.writer.write_const(v as u64); self.writer.const64(pos as u8); }
+                            Type::u8 | Type::u16 | Type::u32 => { let pos = self.writer.write_const(v as u32); self.writer.constr32(pos as u8); }
+                            Type::u64 => { let pos = self.writer.write_const(v as u64); self.writer.constr64(pos as u8); }
                             _ => panic!("Unexpected signed integer literal type")
                         }
                     }
@@ -388,8 +410,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             }
             LiteralValue::Float(v) => {
                 match lit_type {
-                    Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.const32(pos as u8); },
-                    Type::f64 => { let pos = self.writer.write_const(v); self.writer.const64(pos as u8); },
+                    Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.constr32(pos as u8); },
+                    Type::f64 => { let pos = self.writer.write_const(v); self.writer.constr64(pos as u8); },
                     _ => panic!("Encountered non-float literal with a float type-id")
                 };
 
@@ -401,19 +423,32 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles the given binary operation.
     pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>, cond: &mut CompareOp) {
         use crate::frontend::ast::BinaryOperator as BO;
-        self.compile_expression(&item.right, &mut CompareOp::DontCare);
-        self.compile_expression(&item.left, &mut CompareOp::DontCare);
+
+        if (*cond == CompareOp::DontCare && (item.op == BO::Greater || item.op == BO::GreaterOrEq)) ||
+           (*cond == CompareOp::Request && (item.op == BO::Less || item.op == BO::LessOrEq)) {
+            // implement these via Less/LessOrEq + swapping arguments,
+            // however: don't swap if a jump is to be generated since those actually have to be inverted
+            //   for those, inversion takes place below
+            self.compile_expression(&item.left, &mut CompareOp::DontCare);
+            self.compile_expression(&item.right, &mut CompareOp::DontCare);
+        } else {
+            self.compile_expression(&item.right, &mut CompareOp::DontCare);
+            self.compile_expression(&item.left, &mut CompareOp::DontCare);
+        }
+
         let result_type = self.get_type(item.type_id);
+        let compare_type = self.get_type(item.left.get_type_id());
+
         match item.op {
             // arithmetic
             BO::Add => { match result_type {
-                Type::f64 => self.writer.add_f64(),
-                Type::f32 => self.writer.add_f32(),
+                Type::f64 => self.writer.addf64(),
+                Type::f32 => self.writer.addf32(),
                 _ => self.writer.add(),
             }; },
             BO::Sub => { match result_type {
-                Type::f64 => self.writer.sub_f64(),
-                Type::f32 => self.writer.sub_f32(),
+                Type::f64 => self.writer.subf64(),
+                Type::f32 => self.writer.subf32(),
                 _ => self.writer.sub(),
             }; },
             BO::Mul => unimplemented!("mul"),
@@ -427,12 +462,22 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             BO::DivAssign => unimplemented!("divassgi"),
             BO::RemAssign => unimplemented!("remassign"),
             // comparison
-            BO::Less => if *cond == CompareOp::Request { *cond = CompareOp::Lt(self.writer.position); } else { self.writer.clts(); },
-            BO::Greater => if *cond == CompareOp::Request { *cond = CompareOp::Gt(self.writer.position); } else { self.writer.cgts(); },
-            BO::LessOrEq => unimplemented!("lessoreq"),
-            BO::GreaterOrEq => unimplemented!("greateroreq"),
-            BO::Equal => if *cond == CompareOp::Request { *cond = CompareOp::Eq(self.writer.position); } else { self.writer.ceq(); },
-            BO::NotEqual => unimplemented!("notequal"),
+            BO::Less | BO::Greater => {
+                // Less/Greater comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lt becomes Lte.
+                if *cond == CompareOp::Request { *cond = CompareOp::Lte(compare_type); } else { self.write_lt(compare_type); }
+            },
+            BO::LessOrEq | BO::GreaterOrEq => {
+                // LessOrEq/GreaterOrEq comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lte becomes Lt.
+                if *cond == CompareOp::Request { *cond = CompareOp::Lt(compare_type); } else { self.write_lte(compare_type); }
+            }
+            BO::Equal => {
+                // Eq comparison. for jumps, we have to invert this to Neq
+                if *cond == CompareOp::Request { *cond = CompareOp::Neq(compare_type); } else { self.write_eq(compare_type); }
+            },
+            BO::NotEqual => {
+                // Neq comparison. for jumps, we have to invert this to Eq
+                if *cond == CompareOp::Request { *cond = CompareOp::Eq(compare_type); } else { self.write_neq(compare_type); }
+            },
             // boolean
             BO::And => unimplemented!("and"),
             BO::Or => unimplemented!("or"),
@@ -454,14 +499,66 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             self.writer.set_position(backup_position);
         }
     }
-    /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &mut Self, index: i32) {
-        match index {
-            -4 => self.writer.load_arg1(),
-            -5 => self.writer.load_arg2(),
-            -6 => self.writer.load_arg3(),
-            _ => self.writer.load(index),
+    fn write_eq(self: &mut Self, ty: Type) {
+        match ty.size() {
+            1 | 2 | 4 => self.writer.ceqr32(),
+            8 => self.writer.ceqr64(),
+            _ => panic!("Unsupported type size"),
         };
+    }
+    fn write_neq(self: &mut Self, ty: Type) {
+        match ty.size() {
+            1 | 2 | 4 => self.writer.cneqr32(),
+            8 => self.writer.cneqr64(),
+            _ => panic!("Unsupported type size"),
+        };
+    }
+    fn write_lt(self: &mut Self, ty: Type) {
+        match ty.size() {
+            1 | 2 | 4 => match ty.kind() {
+                TypeKind::Signed => self.writer.clts32(),
+                TypeKind::Unsigned => self.writer.cltu32(),
+                TypeKind::Float => self.writer.cltf32(),
+                _ => panic!("Unsupported type kind"),
+            },
+            8 => match ty.kind() {
+                TypeKind::Signed => self.writer.clts64(),
+                TypeKind::Unsigned => self.writer.cltu64(),
+                TypeKind::Float => self.writer.cltf64(),
+                _ => panic!("Unsupported type kind"),
+            },
+            _ => panic!("unsupported type size"),
+        };
+    }
+    fn write_lte(self: &mut Self, ty: Type) {
+         match ty.size() {
+            1 | 2 | 4 => match ty.kind() {
+                TypeKind::Signed => self.writer.cltes32(),
+                TypeKind::Unsigned => self.writer.clteu32(),
+                TypeKind::Float => self.writer.cltef32(),
+                _ => panic!("Unsupported type kind"),
+            },
+            8 => match ty.kind() {
+                TypeKind::Signed => self.writer.cltes64(),
+                TypeKind::Unsigned => self.writer.clteu64(),
+                TypeKind::Float => self.writer.cltef64(),
+                _ => panic!("Unsupported type kind"),
+            },
+            _ => panic!("unsupported type size"),
+        };
+    }
+    /// Writes an appropriate variant of the load instruction.
+    fn write_load(self: &mut Self, index: i32, size: u8) {
+        if size <= 4 {
+            match index {
+                -4 => self.writer.load_arg1(),
+                -5 => self.writer.load_arg2(),
+                -6 => self.writer.load_arg3(),
+                _ => self.writer.loadr32(index),
+            };
+        } else if size == 8 {
+            self.writer.loadr64(index);
+        }
     }
 }
 

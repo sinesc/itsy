@@ -2,7 +2,7 @@
 ///
 /// ### Example:
 ///
-/// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `exec::<MyFns>(...)`.
+/// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `vm::<MyFns>(...)`.
 ///
 /// ```
 /// extern_rust!(MyFns, {
@@ -82,6 +82,7 @@ macro_rules! extern_rust {
 #[allow(unused_macros)]
 macro_rules! impl_convert {
     // cast smaller than 32 bit to 32 bit, transmute 32 bit types
+    (small, bool, $input:expr) => { $input != 0 };
     (small, $type:tt, $input:expr) => { $input as $type };
     (normal, $type:tt, $input:expr) => { unsafe { transmute($input) } };
     (large, $type:tt, $input:expr) => { unsafe { transmute($input) } };

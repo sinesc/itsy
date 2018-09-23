@@ -32,11 +32,11 @@ pub trait ExternRust<T>: Clone + Debug + 'static where T: ExternRust<T> {
     fn exec(self: Self, vm: &mut bytecode::VM<T>);
 }
 
-/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code.
+/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a VM for it.
 /// Program execution starts from the "main" function.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
-pub fn exec<T>(program: &str) -> bytecode::VM<T> where T: ExternRust<T> {
+pub fn vm<T>(program: &str) -> bytecode::VM<T> where T: ExternRust<T> {
     use crate::frontend::{parse, resolve};
     use crate::bytecode::{compile, VM};
 

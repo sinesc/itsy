@@ -72,7 +72,7 @@ macro_rules! impl_write_const {
 }
 
 /// Trait for generic const writer operations.
-pub trait WriteConst<T> {
+pub(crate) trait WriteConst<T> {
     /// Write a constant to the constant pool
     fn write_const(self: &mut Self, value: T) -> u32;
 }

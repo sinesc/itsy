@@ -19,6 +19,7 @@ pub use self::stack::*;
 
 /// A stack value.
 pub(crate) type Value = i32;
+pub(crate) type Value64 = i64;
 
 /// An Itsy bytecode program.
 #[derive(Debug)]

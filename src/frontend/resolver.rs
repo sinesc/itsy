@@ -419,8 +419,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         match item.op {
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual | O::And | O::Or => {
-                let selfbool = self.primitives.bool; // todo: fixed with nll
-                self.set_type_from_id(&mut item.type_id, selfbool);
+                self.set_type_from_id(&mut item.type_id, self.primitives.bool);
             },
             O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
                 if let (E::Literal(literal_a), E::Literal(literal_b)) = (&item.left, &item.right) {

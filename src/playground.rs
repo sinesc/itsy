@@ -1,5 +1,4 @@
 use itsy::extern_rust;
-use itsy::ExternRust;
 
 extern_rust!(MyFns, {
     fn printi(vm: &mut VM, value: i32) {
@@ -11,12 +10,22 @@ extern_rust!(MyFns, {
     fn printf64(vm: &mut VM, value: f64) {
         println!("print:{}", value);
     }
+    fn printb(vm: &mut VM, value: bool) {
+        println!("print:{}", value);
+    }
 });
 
 fn main() {
-
+    /*let source = "
+        fn main() {
+            let a: f64 = 2;
+            let b: f64 = 1;
+            let c = a > b; printb(c);
+            if a > b { printi(1); } else { printi(0); }
+        }
+    ";*/
     let source = "
-        fn fibf(n: f32) -> f32 {
+        fn fibf(n: f64) -> f64 {
             if n < 2.0 {
                 n
             } else {
@@ -24,19 +33,11 @@ fn main() {
             }
         }
         fn main() {
-            printf32(fibf(7.0));
+            printf64(fibf(7.0));
         }
     ";
 
-    /*let source = "
-        fn test(y: f64) { }
-        fn main() {
-            let x: f64 = 2.0;
-            test(x);
-        }
-    ";*/
-
-    let mut vm = itsy::exec::<MyFns>(source);
+    let mut vm = itsy::vm::<MyFns>(source);
     println!("{:}", vm.dump_program());
     let vm_start = ::std::time::Instant::now();
     vm.run();

@@ -6,8 +6,8 @@ Naming
     suffix1: refers to inputs
     suffix2: refers to arguments
 
-    f/s/u/i     float/signed/unsigned/any integer, default: unsigned for arguments, any integer for input,
-    8/16/32/64  size, default: 8 for arguments, 32 for input
+    f/s/u/i/r   float/signed/unsigned/any integer/raw, default: any integer for input, unsigned for arguments
+    8/16/32/64  size, default: 32 for input, 8 for arguments
 
 add         add two 32 bit integer (signedness is irrelevant for add/sub/mul)
 addf64      add two 64 bit floats
