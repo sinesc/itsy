@@ -43,6 +43,7 @@ pub enum Type {
     Struct(Struct),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypeKind {
     Unsigned,
     Signed,
@@ -54,6 +55,12 @@ pub enum TypeKind {
 }
 
 impl Type {
+    pub fn is_integer(self: &Self) -> bool {
+        match self {
+            Type::u8 | Type::u16 | Type::u32 | Type::u64 | Type::i8 | Type::i16 | Type::i32 | Type::i64 => true,
+            _ => false,
+        }
+    }
     pub fn is_unsigned(self: &Self) -> bool {
         match self {
             Type::u8 | Type::u16 | Type::u32 | Type::u64 => true,

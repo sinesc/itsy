@@ -204,15 +204,17 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                self.writer.storer32(index);
+                let ty = self.get_type(item.left.type_id);
+                self.write_store(index, &ty);
             },
             compound_assign @ _ => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                self.writer.loadr32(index);
+                let ty = self.get_type(item.left.type_id);
+                self.write_load(index, &ty);
                 match compound_assign {
-                    BO::AddAssign => self.writer.add(),
-                    BO::SubAssign => self.writer.sub(),
-                    BO::MulAssign => self.writer.mul(),
+                    BO::Add => { self.write_add(&ty); },
+                    BO::Sub => { self.write_sub(&ty); },
+                    BO::Mul => { self.write_mul(&ty); },
                     BO::DivAssign => unimplemented!("divassign"),
                     BO::RemAssign => unimplemented!("remassign"),
                     _ => panic!("Unsupported assignment operator encountered"),
@@ -294,7 +296,9 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, &mut CompareOp::DontCare);
             let binding_id = item.binding_id.unwrap();
-            self.writer.storer32(self.locals.lookup(&binding_id).expect("Unresolved binding encountered"));
+            let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
+            let ty = self.get_type(item.type_id);
+            self.write_store(index, &ty);
         }
     }
 
@@ -305,7 +309,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
         };
         let var_type = self.get_type(item.type_id);
-        self.write_load(load_index, var_type.size());
+        self.write_load(load_index, &var_type);
     }
 
     fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock<'a>, cond: &mut CompareOp) {
@@ -386,24 +390,28 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         match item.value {
             LiteralValue::Integer(int) => {
                 match int {
-                    Integer::Signed(0) | Integer::Unsigned(0) => { self.writer.lit0(); }
-                    Integer::Signed(1) | Integer::Unsigned(1) => { self.writer.lit1(); }
-                    Integer::Signed(2) | Integer::Unsigned(2) => { self.writer.lit2(); }
-                    Integer::Signed(-1) => { self.writer.litm1(); }
+                    Integer::Unsigned(0) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
+                    Integer::Unsigned(1) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
+                    Integer::Unsigned(2) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
+                    Integer::Signed(-1) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
                     Integer::Signed(v) => {
                         match lit_type {
                             Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
                             Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
                             Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.constr32(pos as u8); }
                             Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.constr64(pos as u8); }
-                            _ => panic!("Unexpected signed integer literal type")
+                            _ => panic!("Unexpected signed integer literal type: {:?}", lit_type)
                         }
                     }
                     Integer::Unsigned(v) => {
                         match lit_type {
+                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
+                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
+                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.constr32(pos as u8); }
+                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.constr64(pos as u8); }
                             Type::u8 | Type::u16 | Type::u32 => { let pos = self.writer.write_const(v as u32); self.writer.constr32(pos as u8); }
                             Type::u64 => { let pos = self.writer.write_const(v as u64); self.writer.constr64(pos as u8); }
-                            _ => panic!("Unexpected signed integer literal type")
+                            _ => panic!("Unexpected unsigned integer literal type: {:?}", lit_type)
                         }
                     }
                 }
@@ -412,7 +420,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                 match lit_type {
                     Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.constr32(pos as u8); },
                     Type::f64 => { let pos = self.writer.write_const(v); self.writer.constr64(pos as u8); },
-                    _ => panic!("Encountered non-float literal with a float type-id")
+                    _ => panic!("Unexpected float literal type: {:?}", lit_type)
                 };
 
             },
@@ -441,21 +449,13 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         match item.op {
             // arithmetic
-            BO::Add => { match result_type {
-                Type::f64 => self.writer.addf64(),
-                Type::f32 => self.writer.addf32(),
-                _ => self.writer.add(),
-            }; },
-            BO::Sub => { match result_type {
-                Type::f64 => self.writer.subf64(),
-                Type::f32 => self.writer.subf32(),
-                _ => self.writer.sub(),
-            }; },
-            BO::Mul => unimplemented!("mul"),
+            BO::Add => { self.write_add(&result_type); },
+            BO::Sub => { self.write_sub(&result_type); },
+            BO::Mul => { self.write_mul(&result_type); },
             BO::Div => unimplemented!("div"),
             BO::Rem => unimplemented!("rem"),
             // assigments
-            BO::Assign => unimplemented!("assign"),
+            BO::Assign => unimplemented!("assign"), // fixme: thesere are handled in compile_assignment!
             BO::AddAssign => unimplemented!("addassign"),
             BO::SubAssign => unimplemented!("subassign"),
             BO::MulAssign => unimplemented!("mulassign"),
@@ -464,19 +464,19 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             // comparison
             BO::Less | BO::Greater => {
                 // Less/Greater comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lt becomes Lte.
-                if *cond == CompareOp::Request { *cond = CompareOp::Lte(compare_type); } else { self.write_lt(compare_type); }
+                if *cond == CompareOp::Request { *cond = CompareOp::Lte(compare_type); } else { self.write_lt(&compare_type); }
             },
             BO::LessOrEq | BO::GreaterOrEq => {
                 // LessOrEq/GreaterOrEq comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lte becomes Lt.
-                if *cond == CompareOp::Request { *cond = CompareOp::Lt(compare_type); } else { self.write_lte(compare_type); }
+                if *cond == CompareOp::Request { *cond = CompareOp::Lt(compare_type); } else { self.write_lte(&compare_type); }
             }
             BO::Equal => {
                 // Eq comparison. for jumps, we have to invert this to Neq
-                if *cond == CompareOp::Request { *cond = CompareOp::Neq(compare_type); } else { self.write_eq(compare_type); }
+                if *cond == CompareOp::Request { *cond = CompareOp::Neq(compare_type); } else { self.write_eq(&compare_type); }
             },
             BO::NotEqual => {
                 // Neq comparison. for jumps, we have to invert this to Eq
-                if *cond == CompareOp::Request { *cond = CompareOp::Eq(compare_type); } else { self.write_neq(compare_type); }
+                if *cond == CompareOp::Request { *cond = CompareOp::Eq(compare_type); } else { self.write_neq(&compare_type); }
             },
             // boolean
             BO::And => unimplemented!("and"),
@@ -499,21 +499,48 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             self.writer.set_position(backup_position);
         }
     }
-    fn write_eq(self: &mut Self, ty: Type) {
+    fn write_sub(self: &mut Self, ty: &Type) {
+        match ty {
+            Type::f64 => self.writer.subf64(),
+            Type::i64 | Type::u64 => self.writer.subi64(),
+            Type::f32 => self.writer.subf(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.subi(),
+            ty @ _ => panic!("Unsupported Sub operand {:?}", ty),
+        };
+    }
+    fn write_add(self: &mut Self, ty: &Type) {
+        match ty {
+            Type::f64 => self.writer.addf64(),
+            Type::i64 | Type::u64 => self.writer.addi64(),
+            Type::f32 => self.writer.addf(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.addi(),
+            ty @ _ => panic!("Unsupported Add operand {:?}", ty),
+        };
+    }
+    fn write_mul(self: &mut Self, ty: &Type) {
+        match ty {
+            Type::f64 => self.writer.mulf64(),
+            Type::i64 | Type::u64 => self.writer.muli64(),
+            Type::f32 => self.writer.mulf(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.muli(),
+            ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
+        };
+    }
+    fn write_eq(self: &mut Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => self.writer.ceqr32(),
             8 => self.writer.ceqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
-    fn write_neq(self: &mut Self, ty: Type) {
+    fn write_neq(self: &mut Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => self.writer.cneqr32(),
             8 => self.writer.cneqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
-    fn write_lt(self: &mut Self, ty: Type) {
+    fn write_lt(self: &mut Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.clts32(),
@@ -530,7 +557,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             _ => panic!("unsupported type size"),
         };
     }
-    fn write_lte(self: &mut Self, ty: Type) {
+    fn write_lte(self: &mut Self, ty: &Type) {
          match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.cltes32(),
@@ -547,8 +574,20 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             _ => panic!("unsupported type size"),
         };
     }
+    /// Writes an appropriate variant of the store instruction.
+    fn write_store(self: &mut Self, index: i32, ty: &Type) {
+        let size = ty.size();
+        if size <= 4 {
+            self.writer.storer32(index);
+        } else if size == 8 {
+            self.writer.storer64(index);
+        } else {
+            panic!("Unsupported store size: {}", size);
+        }
+    }
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &mut Self, index: i32, size: u8) {
+    fn write_load(self: &mut Self, index: i32, ty: &Type) {
+        let size = ty.size();
         if size <= 4 {
             match index {
                 -4 => self.writer.load_arg1(),
@@ -558,6 +597,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             };
         } else if size == 8 {
             self.writer.loadr64(index);
+        } else {
+            panic!("Unsupported load size: {}", size);
         }
     }
 }

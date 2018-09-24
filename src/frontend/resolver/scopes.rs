@@ -157,6 +157,10 @@ impl<'a> Scopes<'a> {
             }
         }
     }
+
+    pub fn lookup_type(self: &Self, type_id: TypeId) -> &Type {
+        self.types.index(type_id)
+    }
 }
 
 impl<'a> Into<Vec<Type>> for Scopes<'a> {

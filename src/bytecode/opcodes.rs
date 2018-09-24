@@ -137,40 +137,59 @@ impl_vm!{
     }
 
     /// Pops 2 values from the stack and pushes their sum.
-    fn add(self: &mut Self) {
+    fn addi(self: &mut Self) {
         let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their difference.
-    fn sub(self: &mut Self) {
+    fn subi(self: &mut Self) {
         let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
-    fn mul(self: &mut Self) {
+    fn muli(self: &mut Self) {
         let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
         self.stack.push(a * b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
-    fn addf32(self: &mut Self) {
+    fn addf(self: &mut Self) {
         let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their sum.
-    fn subf32(self: &mut Self) {
+    fn subf(self: &mut Self) {
         let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
-    fn mulf32(self: &mut Self) {
+    fn mulf(self: &mut Self) {
         let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        self.stack.push(a * b);
+    }
+
+    /// Pops 2 values from the stack and pushes their sum.
+    fn addi64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        let b: Value64 = self.stack.pop();
+        self.stack.push(a + b);
+    }
+    /// Pops 2 values from the stack and pushes their difference.
+    fn subi64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        let b: Value64 = self.stack.pop();
+        self.stack.push(a - b);
+    }
+    /// Pops 2 values from the stack and pushes their product.
+    fn muli64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        let b: Value64 = self.stack.pop();
         self.stack.push(a * b);
     }
 

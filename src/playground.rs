@@ -1,7 +1,13 @@
 use itsy::extern_rust;
 
 extern_rust!(MyFns, {
-    fn printi(vm: &mut VM, value: i32) {
+    fn printi8(vm: &mut VM, value: i8) {
+        println!("print:{}", value);
+    }
+    fn printi32(vm: &mut VM, value: i32) {
+        println!("print:{}", value);
+    }
+    fn printi64(vm: &mut VM, value: i64) {
         println!("print:{}", value);
     }
     fn printf32(vm: &mut VM, value: f32) {
@@ -18,6 +24,12 @@ extern_rust!(MyFns, {
 fn main() {
     /*let source = "
         fn main() {
+            let x: i32 = 17 + 5 * 4;
+            printi32(x);
+        }
+    ";*/
+    /*let source = "
+        fn main() {
             let a: f64 = 2;
             let b: f64 = 1;
             let c = a > b; printb(c);
@@ -25,15 +37,15 @@ fn main() {
         }
     ";*/
     let source = "
-        fn fibf(n: f64) -> f64 {
-            if n < 2.0 {
+        fn fibf(n: i32) -> i32 {
+            if n < 2 {
                 n
             } else {
-                fibf(n - 1.0) + fibf(n - 2.0)
+                fibf(n - 1) + fibf(n - 2)
             }
         }
         fn main() {
-            printf64(fibf(7.0));
+            printi32(fibf(27));
         }
     ";
 

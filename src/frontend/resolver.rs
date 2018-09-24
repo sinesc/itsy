@@ -166,6 +166,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
         }
     }
+
+    fn get_type(self: &Self, type_id: TypeId) -> &Type {
+        self.scopes.lookup_type(type_id)
+    }
 }
 
 /// Methods to resolve individual AST structures.
@@ -195,7 +199,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             E::Variable(variable)       => self.resolve_variable(variable),
             E::Call(call)               => self.resolve_call(call),
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
-            E::BinaryOp(binary_op)      => self.resolve_binary_op(binary_op),
+            E::BinaryOp(binary_op)      => self.resolve_binary_op(binary_op, type_hint),
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
             E::Block(block)             => self.resolve_block(block),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block),
@@ -289,7 +293,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         // have explicit type and a resolved type for right hand side, check that they match
         if let (Some(TypeSlot::TypeId(lhs)), Some(TypeSlot::TypeId(rhs))) = (lhs, rhs) {
             if lhs != rhs && !self.primitives.is_valid_cast(rhs, lhs) {
-                panic!("invalid cast from {:?} to {:?}", lhs, rhs); // TODO: error handling
+                panic!("invalid cast from {:?} to {:?}", self.get_type(lhs), self.get_type(rhs)); // TODO: error handling
             }
         }
         // have explicit type and/or resolved expression
@@ -401,13 +405,13 @@ impl<'a, 'b> Resolver<'a, 'b> {
     */
 
     /// Resolves a binary operation.
-    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>) {
+    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, type_hint: Option<TypeSlot>) {
 
         use crate::frontend::ast::BinaryOperator as O;
         use crate::frontend::ast::Expression as E;
 
-        self.resolve_expression(&mut item.left, Some(item.right.get_type_id()));
-        self.resolve_expression(&mut item.right, Some(item.left.get_type_id()));
+        self.resolve_expression(&mut item.left, type_hint.or(Some(item.right.get_type_id())));
+        self.resolve_expression(&mut item.right, type_hint.or(Some(item.left.get_type_id())));
 
         // try pinning literals to concrete types
         /*if let E::Literal(literal) = &mut item.left {
@@ -434,7 +438,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     if let Some(type_id) = self.primitives.cast(left_type_id, right_type_id) {
                         self.set_type_from_id(&mut item.type_id, type_id);
                     } else {
-                        panic!("cannot cast between {:?} and {:?}", left_type_id, right_type_id);
+                        panic!("cannot cast between {:?} and {:?}", self.get_type(left_type_id), self.get_type(right_type_id));
                     }
                 }
             },
@@ -449,8 +453,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         self.resolve_expression(&mut item.exp, None);
         match item.op {
             O::Not => {
-                let type_id = self.primitives.bool; // todo: nll fixes this
-                self.set_type_from_id(&mut item.type_id, type_id);
+                self.set_type_from_id(&mut item.type_id, self.primitives.bool);
             },
             _ => { } // fixme: remove and add missing
         }
@@ -469,21 +472,5 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 self.set_type_from_id(&mut item.type_id, type_id);
             }
         }
-        /*
-        match item.value {
-            L::Integer(ref v) => {
-                let type_id = self.primitives.integer_type_id(*v).unwrap();
-                self.set_type_from_id(&mut item.type_id, type_id);
-            },
-            L::Float(_) => {
-                // todo: pick correct float type
-                let type_id = self.primitives.float[0];
-                self.set_type_from_id(&mut item.type_id, type_id);
-            },
-            L::String(_) => {
-                // todo: implement
-            },
-        };
-        */
     }
 }
