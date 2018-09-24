@@ -424,6 +424,13 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                 };
 
             },
+            LiteralValue::Bool(v) =>  {
+                match lit_type {
+                    Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
+                    _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
+                };
+
+            },
             _ => unimplemented!(),
         };
     }

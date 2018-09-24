@@ -46,6 +46,7 @@ fn main() {
         }
         fn main() {
             printi32(fibf(27));
+            printb(true);
         }
     ";
 

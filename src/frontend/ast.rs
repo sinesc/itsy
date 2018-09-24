@@ -178,9 +178,10 @@ pub struct Literal<'a> {
 }
 
 pub enum LiteralValue<'a> {
-    String(&'a str),  // TODO: string literals
+    Bool(bool),
     Integer(Integer),
     Float(f64),
+    String(&'a str),  // TODO: string literals
 }
 
 impl<'a> LiteralValue<'a> {
@@ -207,9 +208,10 @@ impl<'a> LiteralValue<'a> {
 impl<'a> Debug for LiteralValue<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LiteralValue::String(string) => write!(f, "LiteralValue({:?})", string),
+            LiteralValue::Bool(boolean) => write!(f, "LiteralValue({:?})", boolean),
             LiteralValue::Integer(integer) => write!(f, "LiteralValue({:?})", integer),
             LiteralValue::Float(float) => write!(f, "LiteralValue(Float({:?}))", float),
+            LiteralValue::String(string) => write!(f, "LiteralValue({:?})", string),
         }
     }
 }

@@ -98,6 +98,16 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Expression<'_>> {
 
 named!(numerical<Input<'_>, Expression<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), parse_numerical));
 
+// literal boolean (expression)
+
+named!(boolean<Input<'_>, Expression<'_>>, map!(alt!(tag!("true") | tag!("false")), |m| {
+    Expression::Literal(Literal {
+        value   : LiteralValue::Bool(*m == "true"),
+        type_id : TypeSlot::Unresolved,
+        ty      : None,
+    })
+}));
+
 // assignment (expression)
 
 named!(assignment_operator<Input<'_>, BinaryOperator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
@@ -125,7 +135,8 @@ named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("
 }));
 
 named!(operand<Input<'_>, Expression<'_>>, ws!(alt!(
-    map!(if_block, |m| Expression::IfBlock(Box::new(m)))
+    boolean
+    | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
     | prefix
