@@ -253,8 +253,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
             // arguments
             for (index, &arg_type) in function_types.arg_type.iter().enumerate() {
                 self.resolve_expression(&mut item.args[index], Some(arg_type));
-                if arg_type != item.args[index].get_type_id() {
-                    panic!("type mismatch: {:#?}", item);
+                let actual_type = item.args[index].get_type_id();
+                if arg_type != actual_type {
+                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.path.0[0], index + 1, self.get_type(arg_type.unwrap()), self.get_type(actual_type.unwrap()));
                 }
             }
 
