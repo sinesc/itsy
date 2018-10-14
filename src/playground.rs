@@ -36,7 +36,7 @@ fn main() {
             if a > b { printi(1); } else { printi(0); }
         }
     ";*/
-    let source = "
+    /*let source = "
         fn fibf(n: i32) -> i32 {
             if n < 2 {
                 n
@@ -46,7 +46,15 @@ fn main() {
         }
         fn main() {
             printi32(fibf(27));
-            printb(true);
+        }
+    ";*/
+    let source = "
+        fn main() {
+            let x: bool = true;
+            let y: bool = true;
+            let a = 1;
+            let b = 1;
+            printb(x && y && (a == b));
         }
     ";
 

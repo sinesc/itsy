@@ -3,14 +3,11 @@
 mod repository;
 pub(crate) use self::repository::Repository;
 
-mod integer;
-pub use self::integer::*;
+mod numeric;
+pub use self::numeric::*;
 
 mod typed_ids;
 pub use self::typed_ids::*;
-
-mod type_slot;
-pub use self::type_slot::TypeSlot;
 
 mod fn_sig;
 pub use self::fn_sig::{FnSig, FnKind};

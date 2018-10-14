@@ -1,14 +1,14 @@
 // todo: remove
 #![allow(dead_code)]
 
-use crate::frontend::util::{Repository, TypeId, TypeSlot, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
+use crate::frontend::util::{Repository, TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types       : Repository<Type, TypeId, (ScopeId, &'a str)>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings    : Repository<TypeSlot, BindingId, (ScopeId, &'a str)>,
+    bindings    : Repository<Option<TypeId>, BindingId, (ScopeId, &'a str)>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions   : Repository<FnSig, FunctionId, (ScopeId, &'a str)>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -56,12 +56,12 @@ impl<'a> Scopes<'a> {
 impl<'a> Scopes<'a> {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &'a str, result_type_id: TypeSlot, arg_type_ids: Vec<TypeSlot>) -> FunctionId {
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &'a str, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId {
         self.functions.insert((scope_id, name), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Internal })
     }
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_rustfn(self: &mut Self, scope_id: ScopeId, name: &'a str, fn_index: u16, result_type_id: TypeSlot, arg_type_ids: Vec<TypeSlot>) -> FunctionId {
+    pub fn insert_rustfn(self: &mut Self, scope_id: ScopeId, name: &'a str, fn_index: u16, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId {
         self.functions.insert((scope_id, name), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
     }
 
@@ -95,7 +95,7 @@ impl<'a> Scopes<'a> {
 impl<'a> Scopes<'a> {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: TypeSlot) -> BindingId {
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &'a str, type_id: Option<TypeId>) -> BindingId {
         self.bindings.insert((scope_id, name), type_id)
     }
 
@@ -120,12 +120,12 @@ impl<'a> Scopes<'a> {
     }
 
     /// Returns a mutable reference to the type of the given binding id.
-    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut TypeSlot {
+    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
         self.bindings.index_mut(binding_id)
     }
 
     /// Returns a copy of the type of the given binding id.
-    pub fn binding_type(self: &Self, binding_id: BindingId) -> TypeSlot {
+    pub fn binding_type(self: &Self, binding_id: BindingId) -> Option<TypeId> {
         *self.bindings.index(binding_id)
     }
 }
@@ -141,6 +141,10 @@ impl<'a> Scopes<'a> {
     /// Returns the id of the named type originating in exactly this scope.
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<TypeId> {
         self.types.index_of(&(scope_id, name))
+    }
+
+    pub fn void_type(self: &Self) -> TypeId {
+        0.into() // todo: this is a little bit hacky
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.

@@ -1,18 +1,20 @@
-use crate::frontend::util::{TypeId, ScopeId, Integer, Signed, Unsigned};
+use crate::frontend::util::{TypeId, ScopeId, Numeric, Signed, Unsigned};
 use crate::frontend::ast;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::frontend::util::Type;
 
 struct IntegerRange {
     pub type_id: TypeId,
-    pub min: Integer,
-    pub max: Integer,
+    pub min: Numeric,
+    pub max: Numeric,
 }
 
 // todo: remove
 #[allow(dead_code)]
 /// Utility structure to handle primitive type information and casting.
 pub(crate) struct Primitives {
+    /// Void type
+    void        : TypeId,
     /// Boolean type
     pub bool    : TypeId,           // todo: temp pub
     /// String type
@@ -31,50 +33,51 @@ impl Primitives {
     pub fn new(scopes: &mut Scopes<'_>, root_scope_id: ScopeId) -> Self {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
         Primitives {
+            void: scopes.insert_type(root_scope_id, "void", Type::bool), // FIXME: don't actually want void here
             bool: scopes.insert_type(root_scope_id, "bool", Type::bool),
             string: scopes.insert_type(root_scope_id, "String", Type::String),
             unsigned: [
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "u8", Type::u8),
-                    min: Integer::Unsigned(u8::MIN as Unsigned),
-                    max: Integer::Unsigned(u8::MAX as Unsigned),
+                    min: Numeric::Unsigned(u8::MIN as Unsigned),
+                    max: Numeric::Unsigned(u8::MAX as Unsigned),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "u16", Type::u16),
-                    min: Integer::Unsigned(u16::MIN as Unsigned),
-                    max: Integer::Unsigned(u16::MAX as Unsigned),
+                    min: Numeric::Unsigned(u16::MIN as Unsigned),
+                    max: Numeric::Unsigned(u16::MAX as Unsigned),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "u32", Type::u32),
-                    min: Integer::Unsigned(u32::MIN as Unsigned),
-                    max: Integer::Unsigned(u32::MAX as Unsigned),
+                    min: Numeric::Unsigned(u32::MIN as Unsigned),
+                    max: Numeric::Unsigned(u32::MAX as Unsigned),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "u64", Type::u64),
-                    min: Integer::Unsigned(u64::MIN as Unsigned),
-                    max: Integer::Unsigned(u64::MAX as Unsigned),
+                    min: Numeric::Unsigned(u64::MIN as Unsigned),
+                    max: Numeric::Unsigned(u64::MAX as Unsigned),
                 },
             ],
             signed: [
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "i8", Type::i8),
-                    min: Integer::Signed(i8::MIN as Signed),
-                    max: Integer::Signed(i8::MAX as Signed),
+                    min: Numeric::Signed(i8::MIN as Signed),
+                    max: Numeric::Signed(i8::MAX as Signed),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "i16", Type::i16),
-                    min: Integer::Signed(i16::MIN as Signed),
-                    max: Integer::Signed(i16::MAX as Signed),
+                    min: Numeric::Signed(i16::MIN as Signed),
+                    max: Numeric::Signed(i16::MAX as Signed),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "i32", Type::i32),
-                    min: Integer::Signed(i32::MIN as Signed),
-                    max: Integer::Signed(i32::MAX as Signed),
+                    min: Numeric::Signed(i32::MIN as Signed),
+                    max: Numeric::Signed(i32::MAX as Signed),
                 },
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, "i64", Type::i64),
-                    min: Integer::Signed(i64::MIN as Signed),
-                    max: Integer::Signed(i64::MAX as Signed),
+                    min: Numeric::Signed(i64::MIN as Signed),
+                    max: Numeric::Signed(i64::MAX as Signed),
                 },
             ],
             float: [
@@ -136,37 +139,56 @@ impl Primitives {
         }
     }
 
+    pub fn classify_numeric(self: &Self, value: Numeric) -> Option<TypeId> {
+        if value.is_integer() {
+            let allowed_types = [ &self.signed[2], &self.signed[3], &self.unsigned[3] ];
+            allowed_types.iter().find(|s| {
+                value >= s.min && value <= s.max
+            }).map(|t| t.type_id)
+        } else if value.is_float() {
+            Some(self.float[1])
+        } else {
+            None
+        }
+    }
+
+    pub fn classify_numerics(self: &Self, value_a: Numeric, value_b: Numeric) -> Option<TypeId> {
+        if value_a.is_integer() && value_b.is_integer() {
+            let allowed_types = [ &self.signed[2], &self.signed[3], &self.unsigned[3] ];
+            allowed_types.iter().find(|s| {
+                value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max
+            }).map(|t| t.type_id)
+        } else if value_a.is_float() && value_b.is_float() {
+            Some(self.float[1])
+        } else {
+            None
+        }
+    }
+
     /// Tries to find a type capable of holding both given literals.
     pub fn cast_literal(self: &Self, literal_a: &ast::Literal<'_>, literal_b: &ast::Literal<'_>) -> Option<TypeId> {
 
-        if let (Some(value_a), Some(value_b)) = (literal_a.value.as_integer(), literal_b.value.as_integer()) {
-            if value_a.is_signed() || value_b.is_signed() {
+        if let (Some(value_a), Some(value_b)) = (literal_a.value.as_numeric(), literal_b.value.as_numeric()) {
+            if (value_a.is_signed() && value_b.is_integer()) || (value_a.is_integer() && value_b.is_signed()) {
                 // at least one is signed: need common signed type
                 self.signed.iter().find(|s| {
                     value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max
                 }).map(|t| t.type_id)
-            } else {
+            } else if value_a.is_integer() && value_b.is_integer() {
                 // both unsigned
                 self.unsigned.iter().find(|s| {
                     value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max // todo: could just check max(value_a, value_b) < s.max
                 }).map(|t| t.type_id)
+            } else if value_a.is_float() && value_b.is_float() {
+                Some(self.float[1]) // todo: somehow compute actually required precision for given float. quick google => nothing
+            } else {
+                None
             }
-        } else if let (Some(_float_a), Some(_float_b)) = (literal_a.value.as_float(), literal_b.value.as_float()) {
-            Some(self.float[1]) // todo: somehow compute actually required precision for given float. quick google => nothing
         } else {
             None // todo: implement more
         }
     }
-    /*
-    /// Tries to find a type capable of holding the given integer.
-    pub fn integer_type_id(self: &Self, item: Integer) -> Option<TypeId> {
-        if item.is_signed() {
-            self.signed.iter().find(|s| item >= s.min && item <= s.max).map(|t| t.type_id)
-        } else {
-            self.unsigned.iter().find(|s| item >= s.min && item <= s.max).map(|t| t.type_id)
-        }
-    }
-    */
+
     /// Tries to find a type suitable to represent both given types.
     fn promote(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> Option<TypeId> {
 

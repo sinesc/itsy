@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::cmp::max;
-use crate::frontend::{ast, ResolvedProgram, util::{Integer, BindingId, FunctionId, TypeSlot, Type, TypeKind}};
+use crate::frontend::{ast, ResolvedProgram, util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind}};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::ExternRust;
 
@@ -157,8 +157,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
 
     /// Returns type for given AST type slot.
-    pub fn get_type(self: &Self, type_id: TypeSlot) -> Type {
-        self.types[Into::<usize>::into(type_id.unwrap())].clone()
+    pub fn get_type(self: &Self, type_id: Option<TypeId>) -> Type {
+        self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))].clone()
     }
 }
 
@@ -388,13 +388,13 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.get_type(item.type_id);
         match item.value {
-            LiteralValue::Integer(int) => {
+            LiteralValue::Numeric(int) => {
                 match int {
-                    Integer::Unsigned(0) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
-                    Integer::Unsigned(1) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
-                    Integer::Unsigned(2) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
-                    Integer::Signed(-1) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
-                    Integer::Signed(v) => {
+                    Numeric::Unsigned(0) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
+                    Numeric::Unsigned(1) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
+                    Numeric::Unsigned(2) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
+                    Numeric::Signed(-1) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
+                    Numeric::Signed(v) => {
                         match lit_type {
                             Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
                             Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
@@ -403,7 +403,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                             _ => panic!("Unexpected signed integer literal type: {:?}", lit_type)
                         }
                     }
-                    Integer::Unsigned(v) => {
+                    Numeric::Unsigned(v) => {
                         match lit_type {
                             Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
                             Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
@@ -414,16 +414,15 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                             _ => panic!("Unexpected unsigned integer literal type: {:?}", lit_type)
                         }
                     }
+                    Numeric::Float(v) => {
+                        match lit_type {
+                            Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.constr32(pos as u8); },
+                            Type::f64 => { let pos = self.writer.write_const(v); self.writer.constr64(pos as u8); },
+                            _ => panic!("Unexpected float literal type: {:?}", lit_type)
+                        };
+                    },
                 }
             }
-            LiteralValue::Float(v) => {
-                match lit_type {
-                    Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.constr32(pos as u8); },
-                    Type::f64 => { let pos = self.writer.write_const(v); self.writer.constr64(pos as u8); },
-                    _ => panic!("Unexpected float literal type: {:?}", lit_type)
-                };
-
-            },
             LiteralValue::Bool(v) =>  {
                 match lit_type {
                     Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
@@ -486,8 +485,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                 if *cond == CompareOp::Request { *cond = CompareOp::Eq(compare_type); } else { self.write_neq(&compare_type); }
             },
             // boolean
-            BO::And => unimplemented!("and"),
-            BO::Or => unimplemented!("or"),
+            BO::And => { self.writer.and(); },
+            BO::Or => { self.writer.or(); },
             // special
             BO::Range => unimplemented!("range"),
         }

@@ -5,8 +5,9 @@ mod primitives;
 
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use crate::frontend::ast;
-use crate::frontend::util::{ScopeId, TypeId, BindingId, TypeSlot, Type, FunctionId};
+use crate::frontend::util::{ScopeId, TypeId, BindingId, Type, FunctionId};
 use crate::{ExternRust, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -21,18 +22,25 @@ pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
     pub(crate) entry_fn: FunctionId,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum BindingFlag {
+    None,
+    MustResolve,
+}
+
 /// Internal state during program type/binding resolution.
 struct Resolver<'a, 'b> where 'a: 'b {
     /// Counts resolved items.
-    pub counter     : &'b RefCell<u32>,
+    counter     : &'b RefCell<u32>,
     /// Scope id this state operates in.
-    pub scope_id    : ScopeId,
+    scope_id    : ScopeId,
     /// Repository of all scopes.
-    pub scopes      : &'b mut scopes::Scopes<'a>,
+    scopes      : &'b mut scopes::Scopes<'a>,
     /// Grouped primitive types.
-    pub primitives  : &'b primitives::Primitives,
+    primitives  : &'b primitives::Primitives,
     /// Name of the entry/main function.
-    pub entry_fn    : &'b str,
+    entry_fn    : &'b str,
+    binding_flags   : &'b mut HashMap<BindingId, BindingFlag>,
 }
 
 /// Resolves types within the given program AST structure.
@@ -44,38 +52,39 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
     let root_scope_id = scopes::Scopes::root_id();
     let primitives = primitives::Primitives::new(&mut scopes, root_scope_id);
 
+    // insert rust functions into root scope
+    for (name, info) in T::call_info().iter() {
+        let (index, ret_type_name, arg_type_name) = info;
+        let ret_type = if *ret_type_name == "" {
+            Some(scopes.void_type())
+        } else {
+            Some(scopes.type_id(root_scope_id, ret_type_name).expect("Unknown return type encountered"))
+        };
+        let arg_type = arg_type_name
+            .iter()
+            .map(|arg_type| scopes.type_id(root_scope_id, arg_type).expect("Unknown argument type encountered"))
+            .collect();
+        scopes.insert_rustfn(root_scope_id, name, *index, ret_type, arg_type);
+    }
+
     // keep resolving until the number of resolved items no longer increases.
     // perf: ideally we count the number of unresolved items during parsing and then count it down to 0 here. This
     // would avoid the additional "have we resolved everything" check afterwards.
 
     let num_resolved = RefCell::new(0);
     let mut num_resolved_before: u32;
-
-    for (name, info) in T::call_info().iter() {
-        let (index, ret_type_name, arg_type_name) = info;
-        let ret_type = if *ret_type_name == "" {
-            TypeSlot::Void
-        } else {
-            TypeSlot::TypeId(scopes.type_id(root_scope_id, ret_type_name).expect("Unknown return type encountered"))
-        };
-        let arg_type = arg_type_name
-            .iter()
-            .map(|arg_type| TypeSlot::TypeId(scopes.type_id(root_scope_id, arg_type).expect("Unknown argument type encountered")))
-            .collect();
-        scopes.insert_rustfn(root_scope_id, name, *index, ret_type, arg_type);
-    }
-
-    // todo: convert rust_fn signature type strings here
+    let mut binding_flags = HashMap::new();
 
     loop {
         num_resolved_before = *num_resolved.borrow();
         for mut statement in program.iter_mut() {
             let mut resolver = Resolver {
-                counter     : &num_resolved,
-                scope_id    : root_scope_id,
-                scopes      : &mut scopes,
-                primitives  : &primitives,
-                entry_fn    : entry,
+                counter         : &num_resolved,
+                scope_id        : root_scope_id,
+                scopes          : &mut scopes,
+                primitives      : &primitives,
+                entry_fn        : entry,
+                binding_flags   : &mut binding_flags,
             };
             resolver.resolve_statement(&mut statement);
         }
@@ -123,18 +132,18 @@ impl<'a, 'b> Resolver<'a, 'b> {
             if self.scopes.binding_id(self.scope_id, item.name).is_some() {
                 panic!("shadowing NYI"); // todo: support shadowing
             }
-            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, TypeSlot::Unresolved); // todo: a &mut would be nicer than the index
+            let binding_id = self.scopes.insert_binding(self.scope_id, item.name, None); // todo: a &mut would be nicer than the index
             item.binding_id = Some(binding_id);
             binding_id
         }
     }
 
     /// Sets given type_id for the given unresolved type. Increases resolution counter if a change was made.
-    fn set_type_from_id(self: &Self, type_id: &mut TypeSlot, new_type_id: TypeId) {
-        if type_id.is_unresolved() {
-            *type_id = TypeSlot::TypeId(new_type_id);
+    fn set_type_from_id(self: &Self, type_id: &mut Option<TypeId>, new_type_id: TypeId) {
+        if type_id.is_none() {
+            *type_id = Some(new_type_id);
             *self.counter.borrow_mut() += 1
-        } else if let TypeSlot::TypeId(type_id) = type_id {
+        } else if let Some(type_id) = type_id {
             if *type_id != new_type_id {
                 panic!("attempted to change already resolved type");
             }
@@ -142,23 +151,23 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Sets given unresolved type to void.
-    fn set_type_from_void(self: &Self, type_id: &mut TypeSlot) {
-        if type_id.is_unresolved() {
-            *type_id = TypeSlot::Void;
+    fn set_type_from_void(self: &Self, type_id: &mut Option<TypeId>) {
+        if type_id.is_none() {
+            *type_id = Some(TypeId::void());
             *self.counter.borrow_mut() += 1
-        } else if !type_id.is_void() {
+        } else if *type_id != Some(TypeId::void()) {
             panic!("attempted to change already resolved type");
         }
     }
 
     /// Resolves and sets named type for the given unresolved type. Increases resolution counter if a change was made.
-    fn set_type_from_name(self: &Self, type_id: &mut TypeSlot, new_type: &[&'a str]) {
-        if type_id.is_unresolved() {
+    fn set_type_from_name(self: &Self, type_id: &mut Option<TypeId>, new_type: &[&'a str]) {
+        if type_id.is_none() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) { // fixme: handle path segments
-                *type_id = TypeSlot::TypeId(new_type_id);
+                *type_id = Some(new_type_id);
                 *self.counter.borrow_mut() += 1
             }
-        } else if let TypeSlot::TypeId(type_id) = type_id {
+        } else if let Some(type_id) = type_id {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &new_type[0]) {
                 if *type_id != new_type_id {
                     panic!("type resolution result changed, aka 'this should never happen'"); // todo: remove this whole else branch
@@ -167,6 +176,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
     }
 
+    /// Returns the type for given TypeId
     fn get_type(self: &Self, type_id: TypeId) -> &Type {
         self.scopes.lookup_type(type_id)
     }
@@ -192,7 +202,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves types and bindings used in an expression.
-    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'a>, type_hint: Option<TypeSlot>) {
+    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'a>, type_hint: Option<TypeId>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.resolve_literal(literal, type_hint),
@@ -224,8 +234,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         self.resolve_signature(&mut item.sig);
         self.resolve_block(&mut item.block);
         if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
-            let result = item.sig.ret.as_ref().map_or(TypeSlot::Void, |ret| ret.type_id);
-            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id).collect();
+            let result = item.sig.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id);
+            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id.unwrap()).collect();
             item.function_id = Some(self.scopes.insert_function(parent_scope_id, item.sig.name, result, args));
         }
         self.scope_id = parent_scope_id;
@@ -244,18 +254,18 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
             // return value
             let function_types = self.scopes.function_type(function_id).clone();
-            if function_types.ret_type.is_type() {
+            if function_types.ret_type.is_some() {
                 self.set_type_from_id(&mut item.type_id, function_types.ret_type.unwrap());
             } else {
                 self.set_type_from_void(&mut item.type_id);
             }
 
             // arguments
-            for (index, &arg_type) in function_types.arg_type.iter().enumerate() {
-                self.resolve_expression(&mut item.args[index], Some(arg_type));
+            for (index, &expected_type) in function_types.arg_type.iter().enumerate() {
+                self.resolve_expression(&mut item.args[index], Some(expected_type));
                 let actual_type = item.args[index].get_type_id();
-                if arg_type != actual_type {
-                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.path.0[0], index + 1, self.get_type(arg_type.unwrap()), self.get_type(actual_type.unwrap()));
+                if actual_type.is_some() && actual_type.unwrap() != expected_type  {
+                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.path.0[0], index + 1, self.get_type(expected_type), self.get_type(actual_type.unwrap()));
                 }
             }
 
@@ -273,38 +283,53 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves a binding created by let, for or a signature
     fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'a>) {
-        // create binding
+
+        // ensure we have a BindingId
         let binding_id = self.try_create_binding(item);
-        // has an explicit type, determine id
+
+        // get types for lhs(ty) and rhs(expr)
         let lhs = match item.ty {
             Some(ref mut ty) => {
                 self.resolve_type(ty);
-                Some(ty.type_id)
+                ty.type_id
             },
             None => None,
         };
-        // has an initial value
         let rhs = match item.expr {
             Some(ref mut expr) => {
                 self.resolve_expression(expr, lhs);
-                Some(expr.get_type_id())
+                expr.get_type_id()
             },
             None => None,
         };
+
         // have explicit type and a resolved type for right hand side, check that they match
-        if let (Some(TypeSlot::TypeId(lhs)), Some(TypeSlot::TypeId(rhs))) = (lhs, rhs) {
+        if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
             if lhs != rhs && !self.primitives.is_valid_cast(rhs, lhs) {
                 panic!("invalid cast from {:?} to {:?}", self.get_type(lhs), self.get_type(rhs)); // TODO: error handling
             }
         }
-        // have explicit type and/or resolved expression
-        if let Some(TypeSlot::TypeId(lhs)) = lhs {
+
+        // apply type to ast and binding
+        if let Some(lhs) = lhs {
+            // have explicit type: use it
             self.set_type_from_id(&mut item.type_id, lhs);
             self.set_bindingtype_from_id(binding_id, lhs);
-        } else if let Some(TypeSlot::TypeId(rhs)) = rhs {
+        } else if let Some(rhs) = rhs {
+            // expression has type: use that
             self.set_type_from_id(&mut item.type_id, rhs);
             self.set_bindingtype_from_id(binding_id, rhs);
-        } else if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
+        } else if let Some(&flag) = self.binding_flags.get(&binding_id) {
+            // someone in a previous iteration encountered this binding and needs it to be resolved. see if we can come up with a default type
+            if flag == BindingFlag::MustResolve {
+                if let Some(ast::Expression::Literal(literal)) = &mut item.expr {
+                    self.resolve_literal_default(literal);
+                    self.set_bindingtype_from_id(binding_id, literal.type_id.expect("Failed to resolve default literal type"));
+                } else {
+                    panic!("encountered BindingFlag::MustResolve on non-literal binding.");
+                }
+            }
+        } else if let Some(binding_type_id) = self.scopes.binding_type(binding_id) {
             // someone else set the binding type, accept it
             self.set_type_from_id(&mut item.type_id, binding_type_id);
         }
@@ -321,7 +346,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         // try to resolve type from binding
         if let Some(binding_id) = item.binding_id {
-            if let TypeSlot::TypeId(binding_type_id) = self.scopes.binding_type(binding_id) {
+            if let Some(binding_type_id) = self.scopes.binding_type(binding_id) {
                 self.set_type_from_id(&mut item.type_id, binding_type_id);
             }
         }
@@ -334,9 +359,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         if let Some(ref mut else_block) = item.else_block {
             self.resolve_block(else_block);
             if item.if_block.type_id != else_block.type_id
-                && item.if_block.type_id.is_type() && else_block.type_id.is_type()
+                && item.if_block.type_id.is_some() && else_block.type_id.is_some()
             { // TODO: used complete here
-                println!("{:#?}", else_block);
                 panic!("if/else return type mismatch {:?} vs {:?}", item.if_block.type_id, else_block.type_id); // TODO: error handling, attempt cast
             }
         }
@@ -344,17 +368,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
-        // create binding for iterator var
-        let binding_id = self.try_create_binding(&mut item.iter);
+
         // resolve the range type
         self.resolve_expression(&mut item.range, None);
-        // set binding type to range type
-        if let TypeSlot::TypeId(range) = item.range.get_type_id() {
-            self.set_type_from_id(&mut item.iter.type_id, range);
-            self.set_bindingtype_from_id(binding_id, range);
+
+        if let Some(type_id) = item.range.get_type_id() {
+
+            let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+
+            // create binding and set type to range type
+            if self.scopes.binding_id(self.scope_id, item.iter.name).is_none() {
+                self.scopes.insert_binding(self.scope_id, item.iter.name, Some(type_id));
+            }
+            self.set_type_from_id(&mut item.iter.type_id, type_id);
+
+            // handle block
+            self.resolve_block(&mut item.block);
+
+            self.scope_id = parent_scope_id;
         }
-        // handle block
-        self.resolve_block(&mut item.block);
     }
 
     /// Resolves a while loop.
@@ -370,7 +402,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, None);
-            if let TypeSlot::TypeId(type_id) = result.get_type_id() {
+            if let Some(type_id) = result.get_type_id() {
                 self.set_type_from_id(&mut item.type_id, type_id);
             }
         } else {
@@ -388,64 +420,95 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
         self.resolve_variable(&mut item.left);
-        self.resolve_expression(&mut item.right, Some(item.left.type_id));
-        if item.left.binding_id.is_some() && item.left.type_id.is_unresolved() && item.right.get_type_id().is_type() {
+        self.resolve_expression(&mut item.right, item.left.type_id);
+        if item.left.binding_id.is_some() && item.left.type_id.is_none() && item.right.get_type_id().is_some() {
             //self.set_type_from_id(&mut item.left.type_id, item.right.get_type_id().unwrap());
             self.set_bindingtype_from_id(item.left.binding_id.unwrap(), item.right.get_type_id().unwrap());
         }
     }
 
-    /*
-    /// Try to set a concrete type for a literal without explicit type annotation.
-    fn try_pin_literal(self: &Self, item: &mut ast::Literal<'a>, other: &TypeSlot) -> TypeSlot {
-        if item.ty.is_none() && item.type_id.is_unresolved() && other.is_type() {
-            self.set_type_from_id(&mut item.type_id, other.unwrap());
+    fn format_type(self: &Self, type_id: Option<TypeId>) -> String {
+        if let Some(type_id) = type_id {
+            format!("{:?}", self.get_type(type_id))
+        } else {
+            "Unresolved".to_string()
         }
-        item.type_id
     }
-    */
 
     /// Resolves a binary operation.
-    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, type_hint: Option<TypeSlot>) {
+    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, type_hint: Option<TypeId>) {
 
         use crate::frontend::ast::BinaryOperator as O;
         use crate::frontend::ast::Expression as E;
 
-        self.resolve_expression(&mut item.left, type_hint.or(Some(item.right.get_type_id())));
-        self.resolve_expression(&mut item.right, type_hint.or(Some(item.left.get_type_id())));
+        self.resolve_expression(&mut item.left, type_hint.or(item.right.get_type_id()));
+        self.resolve_expression(&mut item.right, type_hint.or(item.left.get_type_id()));
 
-        // try pinning literals to concrete types
-        /*if let E::Literal(literal) = &mut item.left {
-            self.try_pin_literal(literal, &item.right.get_type_id());
+        if !item.left.is_resolved() && !item.right.is_resolved() {
+            if let ast::Expression::Variable(var) = &item.left {
+                // binding type not resolved. since we can't directly access the binding here, set a flag to force it to resolve next iteration
+                let binding_id = var.binding_id.expect("Unresolved binding id when trying to schedule binding-type resolution");
+                self.binding_flags.insert(binding_id, BindingFlag::MustResolve);
+                *self.counter.borrow_mut() += 1;
+            }
+            // fixme: don't default-infer the second operand, have normal inferance handle this (add type_hint on resolve_variable and handle it)
+            if let ast::Expression::Variable(var) = &item.right {
+                // binding type not resolved. since we can't directly access the binding here, set a flag to force it to resolve next iteration
+                let binding_id = var.binding_id.expect("Unresolved binding id when trying to schedule binding-type resolution");
+                self.binding_flags.insert(binding_id, BindingFlag::MustResolve);
+                *self.counter.borrow_mut() += 1;
+            }
         }
-        if let E::Literal(literal) = &mut item.right {
-            self.try_pin_literal(literal, &item.left.get_type_id());
-        }*/
 
-        match item.op {
-            O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual | O::And | O::Or => {
-                self.set_type_from_id(&mut item.type_id, self.primitives.bool);
-            },
-            O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
-                if let (E::Literal(literal_a), E::Literal(literal_b)) = (&item.left, &item.right) {
-                    // both sides are literals, determine type that suits both
-                    if let Some(type_id) = self.primitives.cast_literal(literal_a, literal_b) {
-                        self.set_type_from_id(&mut item.type_id, type_id);
-                    } else {
-                        panic!("cannot cast between {:?} and {:?}", literal_a, literal_b);
+        if item.left.is_resolved() && item.right.is_resolved() {
+
+            /*match (&item.left, &item.right) {
+                (E::Literal(left), E::Literal(right)) => {
+                    if let (Some(left), Some(right)) = (left.value.as_numeric(), right.value.as_numeric()) {
+
                     }
-                } else if let (TypeSlot::TypeId(left_type_id), TypeSlot::TypeId(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
-                    // cast to common type or try to widen type
-                    if let Some(type_id) = self.primitives.cast(left_type_id, right_type_id) {
-                        self.set_type_from_id(&mut item.type_id, type_id);
-                    } else {
-                        panic!("cannot cast between {:?} and {:?}", self.get_type(left_type_id), self.get_type(right_type_id));
-                    }
+
                 }
-            },
-            _ => { }, // fixme: remove and add missing
+                _ => { }
+            }*/
+
+            let left_type_id = item.left.get_type_id();
+            let right_type_id = item.right.get_type_id();
+
+            if left_type_id != right_type_id {
+                panic!("Binary operator {:?} expects both operands to be of same type, got {:?} and {:?} on {:?}", item.op, self.format_type(left_type_id), self.format_type(right_type_id), item);
+            }
+
+            match item.op {
+                O::And | O::Or => {
+                    if left_type_id != right_type_id || left_type_id.unwrap() != self.primitives.bool {
+                        panic!("Logical {:?} expects both operands to be boolean, got {:?} and {:?}", item.op, self.format_type(left_type_id), self.format_type(right_type_id));
+                    }
+                    self.set_type_from_id(&mut item.type_id, self.primitives.bool);
+                }
+                O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
+                    self.set_type_from_id(&mut item.type_id, self.primitives.bool);
+                },
+                O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
+                    if let (E::Literal(literal_a), E::Literal(literal_b)) = (&item.left, &item.right) {
+                        // both sides are literals, determine type that suits both
+                        if let Some(type_id) = self.primitives.cast_literal(literal_a, literal_b) {
+                            self.set_type_from_id(&mut item.type_id, type_id);
+                        } else {
+                            panic!("cannot cast between {:?} and {:?}", literal_a, literal_b);
+                        }
+                    } else if let (Some(left_type_id), Some(right_type_id)) = (item.left.get_type_id(), item.right.get_type_id()) {
+                        // cast to common type or try to widen type
+                        if let Some(type_id) = self.primitives.cast(left_type_id, right_type_id) {
+                            self.set_type_from_id(&mut item.type_id, type_id);
+                        } else {
+                            panic!("cannot cast between {:?} and {:?}", self.get_type(left_type_id), self.get_type(right_type_id));
+                        }
+                    }
+                },
+                _ => { }, // fixme: remove and add missing
+            }
         }
-        // todo: implement
     }
 
     /// Resolves a unary operation.
@@ -461,17 +524,27 @@ impl<'a, 'b> Resolver<'a, 'b> {
         // todo: implement
     }
 
+    /// Resolves literal to its possible default type if all other type resolution failed.
+    fn resolve_literal_default(self: &Self, item: &mut ast::Literal<'a>) {
+        item.type_id = if let ast::LiteralValue::Numeric(value) = item.value {
+            self.primitives.classify_numeric(value)
+        } else {
+            None
+        };
+    }
+
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
-    fn resolve_literal(self: &Self, item: &mut ast::Literal<'a>, type_hint: Option<TypeSlot>) {
+    fn resolve_literal(self: &Self, item: &mut ast::Literal<'a>, type_hint: Option<TypeId>) {
         if let Some(ty) = &mut item.ty {
-            // literal has explicit type, use it
+            // numerical literal has explicit type, use it
             self.resolve_type(ty);
             self.set_type_from_id(&mut item.type_id, ty.type_id.unwrap());
+        } else if let ast::LiteralValue::Bool(_) = item.value {
+            // literal boolean
+            self.set_type_from_id(&mut item.type_id, self.primitives.bool);
         } else if let Some(type_hint) = type_hint {
             // we got a type hint, try to match it
-            if let TypeSlot::TypeId(type_id) = type_hint {
-                self.set_type_from_id(&mut item.type_id, type_id);
-            }
+            self.set_type_from_id(&mut item.type_id, type_hint);
         }
     }
 }

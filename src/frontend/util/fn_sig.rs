@@ -1,4 +1,4 @@
-use super::TypeSlot;
+use super::TypeId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -8,8 +8,8 @@ pub enum FnKind {
 
 #[derive(Clone, Debug)]
 pub struct FnSig {
-    pub ret_type: TypeSlot,
-    pub arg_type: Vec<TypeSlot>,
+    pub ret_type: Option<TypeId>,
+    pub arg_type: Vec<TypeId>,
     pub kind    : FnKind,
 }
 

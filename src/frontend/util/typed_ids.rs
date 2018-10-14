@@ -6,6 +6,12 @@ use std::fmt::{self, Debug};
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd)]
 pub struct TypeId(usize);
 
+impl TypeId {
+    pub fn void() -> TypeId {
+        0.into()
+    }
+}
+
 impl From<TypeId> for usize {
     fn from(input: TypeId) -> usize {
         input.0

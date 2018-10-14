@@ -136,6 +136,19 @@ impl_vm!{
         self.stack.push(retval);
     }
 
+    /// Pops 2 values from the stack and pushes their logical conjunction.
+    fn and(self: &mut Self) {
+        let a: bool = self.stack.pop();
+        let b: bool = self.stack.pop();
+        self.stack.push(a && b);
+    }
+    /// Pops 2 values from the stack and pushes their logical disjunction.
+    fn or(self: &mut Self) {
+        let a: bool = self.stack.pop();
+        let b: bool = self.stack.pop();
+        self.stack.push(a || b);
+    }
+
     /// Pops 2 values from the stack and pushes their sum.
     fn addi(self: &mut Self) {
         let a: Value = self.stack.pop();
