@@ -180,6 +180,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn get_type(self: &Self, type_id: TypeId) -> &Type {
         self.scopes.lookup_type(type_id)
     }
+
+    /// Format a type-name for debug output
+    fn format_type(self: &Self, type_id: Option<TypeId>) -> String {
+        if let Some(type_id) = type_id {
+            format!("{:?}", self.get_type(type_id))
+        } else {
+            "<Unresolved>".to_string()
+        }
+    }
 }
 
 /// Methods to resolve individual AST structures.
@@ -427,14 +436,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
     }
 
-    fn format_type(self: &Self, type_id: Option<TypeId>) -> String {
-        if let Some(type_id) = type_id {
-            format!("{:?}", self.get_type(type_id))
-        } else {
-            "Unresolved".to_string()
-        }
-    }
-
     /// Resolves a binary operation.
     fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, type_hint: Option<TypeId>) {
 
@@ -513,15 +514,18 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves a unary operation.
     fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>) {
-        use crate::frontend::ast::UnaryOperator as O;
-        self.resolve_expression(&mut item.exp, None);
+        use crate::frontend::ast::UnaryOperator as UO;
+        self.resolve_expression(&mut item.expr, None);
         match item.op {
-            O::Not => {
+            UO::Not => {
                 self.set_type_from_id(&mut item.type_id, self.primitives.bool);
             },
-            _ => { } // fixme: remove and add missing
+            UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
+                if let Some(type_id) = item.expr.get_type_id() {
+                    self.set_type_from_id(&mut item.type_id, type_id);
+                }
+            },
         }
-        // todo: implement
     }
 
     /// Resolves literal to its possible default type if all other type resolution failed.

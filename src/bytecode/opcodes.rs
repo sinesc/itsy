@@ -148,6 +148,11 @@ impl_vm!{
         let b: bool = self.stack.pop();
         self.stack.push(a || b);
     }
+    /// Pops a values from the stack and pushes its logical negation.
+    fn not(self: &mut Self) {
+        let a: bool = self.stack.pop();
+        self.stack.push(!a);
+    }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addi(self: &mut Self) {
@@ -478,6 +483,70 @@ impl_vm!{
     fn deci(self: &mut Self) {
         let a: Value = self.stack.pop();
         self.stack.push(a - 1);
+    }
+    /// Increments the value at the top of the stack.
+    fn inci64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        self.stack.push(a + 1);
+    }
+    /// Decrements the value at the top of the stack.
+    fn deci64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        self.stack.push(a - 1);
+    }
+
+    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    fn preinci(self: &mut Self, offset: i32) {
+        let mut local: Value = self.stack.load_fp(offset);
+        local += 1;
+        self.stack.store_fp(offset, local);
+        self.stack.push(local);
+    }
+    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    fn predeci(self: &mut Self, offset: i32) {
+        let mut local: Value = self.stack.load_fp(offset);
+        local -= 1;
+        self.stack.store_fp(offset, local);
+        self.stack.push(local);
+    }
+    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    fn preinci64(self: &mut Self, offset: i32) {
+        let mut local: Value64 = self.stack.load_fp(offset);
+        local += 1;
+        self.stack.store_fp(offset, local);
+        self.stack.push(local);
+    }
+    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    fn predeci64(self: &mut Self, offset: i32) {
+        let mut local: Value64 = self.stack.load_fp(offset);
+        local -= 1;
+        self.stack.store_fp(offset, local);
+        self.stack.push(local);
+    }
+
+    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    fn postinci(self: &mut Self, offset: i32) {
+        let local: Value = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, local + 1);
+        self.stack.push(local);
+    }
+    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    fn postdeci(self: &mut Self, offset: i32) {
+        let local: Value = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, local - 1);
+        self.stack.push(local);
+    }
+    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    fn postinci64(self: &mut Self, offset: i32) {
+        let local: Value64 = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, local + 1);
+        self.stack.push(local);
+    }
+    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    fn postdeci64(self: &mut Self, offset: i32) {
+        let local: Value64 = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, local - 1);
+        self.stack.push(local);
     }
 
     /// Yield program execution.

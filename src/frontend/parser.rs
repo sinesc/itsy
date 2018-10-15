@@ -126,10 +126,18 @@ named!(assignment<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, assign
 
 named!(parens<Input<'_>, Expression<'_>>, ws!(delimited!(char!('('), expression, char!(')'))));
 
-named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)),|m| {
+named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op      : UnaryOperator::prefix_from_string(*m.0),
-        exp     : Expression::Variable(Variable { path: m.1, type_id: None, binding_id: None }),
+        expr    : Expression::Variable(Variable { path: m.1, type_id: None, binding_id: None }),
+        type_id : None
+    }))
+}));
+
+named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident_path, alt!(tag!("++") | tag!("--")))), |m| {
+    Expression::UnaryOp(Box::new(UnaryOp {
+        op      : UnaryOperator::suffix_from_string(*m.1),
+        expr    : Expression::Variable(Variable { path: m.0, type_id: None, binding_id: None }),
         type_id : None
     }))
 }));
@@ -139,6 +147,7 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!(
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
+    | suffix
     | prefix
     | numerical
     | call

@@ -190,7 +190,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op, cond),
-            E::UnaryOp(unary_op)        => { }, // todo: handle,
+            E::UnaryOp(unary_op)        => self.compile_unary_op(unary_op),
             E::Block(block)             => { }, // todo: handle,
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
         };
@@ -434,6 +434,39 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         };
     }
 
+    /// Compiles the given unary operation.
+    pub fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
+        use crate::frontend::ast::UnaryOperator as UO;
+
+        let exp_type = self.get_type(item.expr.get_type_id());
+
+        match item.op {
+            // logical
+            UO::Not => {
+                self.compile_expression(&item.expr, &mut CompareOp::DontCare);
+                self.writer.not();
+            }
+            // arithmetic
+            UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
+                if let ast::Expression::Variable(var) = &item.expr {
+                    let load_index = {
+                        let binding_id = var.binding_id.expect("Unresolved binding encountered");
+                        self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+                    };
+                    match item.op {
+                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
+                        UO::DecBefore => self.write_predec(load_index, &exp_type),
+                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
+                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
+                        _ => panic!("Internal error in operator handling"),
+                    };
+                } else {
+                    panic!("Operator {:?} can only be used on variable bindings", item.op);
+                }
+            },
+        }
+    }
+
     /// Compiles the given binary operation.
     pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>, cond: &mut CompareOp) {
         use crate::frontend::ast::BinaryOperator as BO;
@@ -504,6 +537,34 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             }
             self.writer.set_position(backup_position);
         }
+    }
+    fn write_preinc(self: &mut Self, index: i32, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.preinci64(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.preinci(index),
+            ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
+        };
+    }
+    fn write_predec(self: &mut Self, index: i32, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.predeci64(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.predeci(index),
+            ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
+        };
+    }
+    fn write_postinc(self: &mut Self, index: i32, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.postinci64(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postinci(index),
+            ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
+        };
+    }
+    fn write_postdec(self: &mut Self, index: i32, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.postdeci64(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postdeci(index),
+            ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
+        };
     }
     fn write_sub(self: &mut Self, ty: &Type) {
         match ty {

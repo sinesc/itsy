@@ -268,7 +268,7 @@ pub struct BinaryOp<'a> {
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
     pub op      : UnaryOperator,
-    pub exp     : Expression<'a>,
+    pub expr    : Expression<'a>,
     pub type_id : Option<TypeId>,
 }
 
@@ -280,34 +280,31 @@ impl<'a> Debug for IdentPath<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOperator {
     // boolean
     Not,
     // inc/dec
-    IncBefore, DecBefore, // IncAfter, DecAfter, // TODO: postfix ops
+    IncBefore, DecBefore,
+    IncAfter, DecAfter,
 }
 
 impl UnaryOperator {
     pub fn prefix_from_string(op: &str) -> Self {
         match op {
-
             "!" => UnaryOperator::Not,
             "++" => UnaryOperator::IncBefore,
             "--" => UnaryOperator::DecBefore,
-
             _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
         }
     }
-    /*pub fn suffix_from_string(op: &str) -> Self { / TODO: postfix ops
+    pub fn suffix_from_string(op: &str) -> Self {
         match op {
-
-            "++" => Operator::IncAfter,
-            "--" => Operator::DecAfter,
-
+            "++" => UnaryOperator::IncAfter,
+            "--" => UnaryOperator::DecAfter,
             _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
         }
-    }*/
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

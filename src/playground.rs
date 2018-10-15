@@ -48,13 +48,42 @@ fn main() {
             printi32(fibf(27));
         }
     ";*/
+    /*
     let source = "
         fn main() {
-            let x: bool = true;
-            let y: bool = true;
+            let x: bool = false;
+            let y: bool = false;
             let a = 1;
             let b = 1;
-            printb(x && y && (a == b));
+            printb(x && !y && (a == b));
+        }
+    ";
+    */
+    let source = "
+        fn main() {
+            let a: i32 = 0;
+            printi32(--a);
+            printi32(--a);
+            printi32(--a);
+            printi32(--a);
+
+            let b: i32 = 0;
+            printi32(b--);
+            printi32(b--);
+            printi32(b--);
+            printi32(b--);
+
+            let c: i64 = 0;
+            printi64(--c);
+            printi64(--c);
+            printi64(--c);
+            printi64(--c);
+
+            let d: i64 = 0;
+            printi64(d--);
+            printi64(d--);
+            printi64(d--);
+            printi64(d--);
         }
     ";
 
