@@ -138,7 +138,7 @@ macro_rules! impl_stack {
     };
 
     // implement stack operations for Stack
-    (stack $target:ident, $size:tt, $type:tt) => {
+    ($target:ident, $size:tt, $type:tt) => {
         impl StackOp<$type> for $target {
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn push(self: &mut Self, value: $type) {
@@ -164,14 +164,14 @@ macro_rules! impl_stack {
     };
 }
 
-impl_stack!(stack Stack, small, bool);
-impl_stack!(stack Stack, small, u8);
-impl_stack!(stack Stack, small, i8);
-impl_stack!(stack Stack, small, u16);
-impl_stack!(stack Stack, small, i16);
-impl_stack!(stack Stack, normal, u32);
-impl_stack!(stack Stack, normal, i32);
-impl_stack!(stack Stack, normal, f32);
-impl_stack!(stack Stack, large, u64);
-impl_stack!(stack Stack, large, i64);
-impl_stack!(stack Stack, large, f64);
+impl_stack!(Stack, small, bool);
+impl_stack!(Stack, small, u8);
+impl_stack!(Stack, small, i8);
+impl_stack!(Stack, small, u16);
+impl_stack!(Stack, small, i16);
+impl_stack!(Stack, normal, u32);
+impl_stack!(Stack, normal, i32);
+impl_stack!(Stack, normal, f32);
+impl_stack!(Stack, large, u64);
+impl_stack!(Stack, large, i64);
+impl_stack!(Stack, large, f64);
