@@ -168,6 +168,18 @@ impl<'a> Expression<'a> {
             _ => false,
         }
     }
+    pub fn as_literal(self: &Self) -> Option<&Literal<'a>> {
+        match self {
+            Expression::Literal(literal) => Some(literal),
+            _ => None,
+        }
+    }
+    pub fn as_binary_op(self: &Self) -> Option<&BinaryOp<'a>> {
+        match self {
+            Expression::BinaryOp(literal) => Some(literal),
+            _ => None,
+        }
+    }
 }
 
 impl<'a> Debug for Expression<'a> {
@@ -208,6 +220,12 @@ impl<'a> LiteralValue<'a> {
     pub fn as_numeric(self: &Self) -> Option<Numeric> {
         match self {
             LiteralValue::Numeric(v) => Some(*v),
+            _ => None,
+        }
+    }
+    pub fn as_bool(self: &Self) -> Option<bool> {
+        match self {
+            LiteralValue::Bool(v) => Some(*v),
             _ => None,
         }
     }
@@ -295,14 +313,14 @@ impl UnaryOperator {
             "!" => UnaryOperator::Not,
             "++" => UnaryOperator::IncBefore,
             "--" => UnaryOperator::DecBefore,
-            _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
+            _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
         }
     }
     pub fn suffix_from_string(op: &str) -> Self {
         match op {
             "++" => UnaryOperator::IncAfter,
             "--" => UnaryOperator::DecAfter,
-            _ => panic!(format!("parser yielded invalid prefix operator \"{}\"", op)),
+            _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
         }
     }
 }

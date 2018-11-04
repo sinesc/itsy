@@ -2,6 +2,8 @@
 
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
+use std::ops::{Add, Sub, Mul, Div, Rem};
+//use std::{i64, u64, f64};
 
 /// Signed integer value.
 pub type Signed = i64;
@@ -18,6 +20,7 @@ pub enum Numeric {
     Signed(Signed),
     Unsigned(Unsigned),
     Float(Float),
+    Overflow,
 }
 
 impl Numeric {
@@ -44,6 +47,19 @@ impl Numeric {
         match self {
             Numeric::Float(_) => true,
             _ => false,
+        }
+    }
+    fn as_f64(self: &Self) -> Option<f64> {
+        match self {
+            Numeric::Float(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
+    fn as_i128(self: &Self) -> Option<i128> {
+        match self {
+            Numeric::Signed(v) => Some(*v as i128),
+            Numeric::Unsigned(v) => Some(*v as i128),
+            _ => None,
         }
     }
 }
@@ -101,6 +117,7 @@ impl PartialOrd for Numeric {
                     _ => None,
                 }
             },
+            Numeric::Overflow => None
         }
     }
 }
@@ -111,12 +128,103 @@ impl Ord for Numeric {
     }
 }
 
+impl Add for Numeric {
+    type Output = Numeric;
+    fn add(self: Self, other: Numeric) -> Numeric {
+        if self.is_integer() {
+            let result = self.as_i128().unwrap() + other.as_i128().unwrap();
+            if result >= 0 && result <= std::u64::MAX as i128 {
+                Numeric::Unsigned(result as Unsigned)
+            } else if result <= 0 && result >= std::i64::MIN as i128 {
+                Numeric::Signed(result as Signed)
+            } else {
+                Numeric::Overflow
+            }
+        } else {
+            Numeric::Float(self.as_f64().unwrap() + other.as_f64().unwrap())
+        }
+    }
+}
+
+impl Sub for Numeric {
+    type Output = Numeric;
+    fn sub(self: Self, other: Numeric) -> Numeric {
+        if self.is_integer() {
+            let result = self.as_i128().unwrap() - other.as_i128().unwrap();
+            if result >= 0 && result <= std::u64::MAX as i128 {
+                Numeric::Unsigned(result as Unsigned)
+            } else if result <= 0 && result >= std::i64::MIN as i128 {
+                Numeric::Signed(result as Signed)
+            } else {
+                Numeric::Overflow
+            }
+        } else {
+            Numeric::Float(self.as_f64().unwrap() - other.as_f64().unwrap())
+        }
+    }
+}
+
+impl Mul for Numeric {
+    type Output = Numeric;
+    fn mul(self: Self, other: Numeric) -> Numeric {
+        if self.is_integer() {
+            let result = self.as_i128().unwrap() * other.as_i128().unwrap();
+            if result >= 0 && result <= std::u64::MAX as i128 {
+                Numeric::Unsigned(result as Unsigned)
+            } else if result <= 0 && result >= std::i64::MIN as i128 {
+                Numeric::Signed(result as Signed)
+            } else {
+                Numeric::Overflow
+            }
+        } else {
+            Numeric::Float(self.as_f64().unwrap() * other.as_f64().unwrap())
+        }
+    }
+}
+
+impl Div for Numeric {
+    type Output = Numeric;
+    fn div(self: Self, other: Numeric) -> Numeric {
+        if self.is_integer() {
+            let result = self.as_i128().unwrap() / other.as_i128().unwrap();
+            if result >= 0 && result <= std::u64::MAX as i128 {
+                Numeric::Unsigned(result as Unsigned)
+            } else if result <= 0 && result >= std::i64::MIN as i128 {
+                Numeric::Signed(result as Signed)
+            } else {
+                Numeric::Overflow
+            }
+        } else {
+            Numeric::Float(self.as_f64().unwrap() / other.as_f64().unwrap())
+        }
+    }
+}
+
+impl Rem for Numeric {
+    type Output = Numeric;
+    fn rem(self: Self, other: Numeric) -> Numeric {
+        if self.is_integer() {
+            let result = self.as_i128().unwrap() % other.as_i128().unwrap();
+            if result >= 0 && result <= std::u64::MAX as i128 {
+                Numeric::Unsigned(result as Unsigned)
+            } else if result <= 0 && result >= std::i64::MIN as i128 {
+                Numeric::Signed(result as Signed)
+            } else {
+                Numeric::Overflow
+            }
+        } else {
+            Numeric::Float(self.as_f64().unwrap() % other.as_f64().unwrap())
+        }
+    }
+}
+
 impl Debug for Numeric {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Numeric::Signed(v) => write!(f, "Signed({})", v),
             Numeric::Unsigned(v) => write!(f, "Unsigned({})", v),
             Numeric::Float(v) => write!(f, "Float({})", v),
+            Numeric::Overflow => write!(f, "Overflow"),
         }
     }
 }

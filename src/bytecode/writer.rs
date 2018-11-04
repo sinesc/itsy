@@ -1,7 +1,7 @@
 //! Bytecode buffer and writer.
 
 use std::io::{self, Write, Seek, SeekFrom};
-use crate::bytecode::{Value, Program};
+use crate::bytecode::{Value, VALUE_SIZE, Program};
 use std::mem::transmute;
 use crate::ExternRust;
 
@@ -52,19 +52,19 @@ impl<T> Writer<T> where T: ExternRust<T> {
 #[allow(unused_macros)]
 macro_rules! impl_write_const {
     // push operations
-    (@push large, $type:tt, $writer: ident, $var:ident) => { {
+    (@push large, $writer: ident, $var:ident) => { {
         let (low, high): (u32, u32) = unsafe { transmute($var) };
-        impl_write_const!(@push normal, u32, $writer, low);
-        impl_write_const!(@push normal, u32, $writer, high);
+        impl_write_const!(@push normal, $writer, low);
+        impl_write_const!(@push normal, $writer, high);
     } };
-    (@push $size:tt, $type:tt, $writer: ident, $var:ident) => { $writer.program.consts.push( impl_convert!($size, Value, $var) ); };
+    (@push $size:tt, $writer: ident, $var:ident) => { $writer.program.consts.push( impl_convert!($size, Value, $var) ); };
 
     // implement const write operations for Writer
     ($size:tt, $type:tt) => {
         impl<P> WriteConst<$type> for Writer<P> where P: ExternRust<P> {
             fn write_const(self: &mut Self, value: $type) -> u32 {
                 let position = self.program.consts.len();
-                impl_write_const!(@push $size, $type, self, value);
+                impl_write_const!(@push $size, self, value);
                 position as u32
             }
         }
@@ -87,6 +87,26 @@ impl_write_const!(normal, f32);
 impl_write_const!(large, u64);
 impl_write_const!(large, i64);
 impl_write_const!(large, f64);
+
+impl<P> WriteConst<&str> for Writer<P> where P: ExternRust<P> {
+    fn write_const(self: &mut Self, value: &str) -> u32 {
+        let position = self.program.consts.len();
+        let size = value.len() as u32;
+        impl_write_const!(@push normal, self, size);
+        for chunk in value.as_bytes().chunks(VALUE_SIZE) {
+            if chunk.len() == VALUE_SIZE {
+                self.program.consts.push( ((chunk[3] as Value) << 24) | ((chunk[2] as Value) << 16) | ((chunk[1] as Value) << 8) | chunk[0] as Value );
+            } else {
+                self.program.consts.push(
+                    (chunk[0] as Value)
+                    | if chunk.len() > 1 { ((chunk[1] as Value) << 8) } else { 0 }
+                    | if chunk.len() > 2 { ((chunk[2] as Value) << 16) } else { 0 }
+                );
+            }
+        }
+        position as u32
+    }
+}
 
 impl<T> Write for Writer<T> where T: ExternRust<T> {
     fn write(self: &mut Self, buf: &[u8]) -> io::Result<usize> {

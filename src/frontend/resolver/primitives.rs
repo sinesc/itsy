@@ -18,7 +18,7 @@ pub(crate) struct Primitives {
     /// Boolean type
     pub bool    : TypeId,           // todo: temp pub
     /// String type
-    string      : TypeId,
+    pub string  : TypeId,
     /// Unsigned types ordered by bit count.
     unsigned    : [ IntegerRange; 4 ],
     /// Signed types ordered by bit count.
@@ -97,28 +97,35 @@ impl Primitives {
         type_id >= self.signed.first().unwrap().type_id && type_id <= self.signed.last().unwrap().type_id
     }
 
+    /// Check if the given type is integral.
+    pub fn is_integer(self: &Self, type_id: TypeId) -> bool {
+        self.is_unsigned(type_id) || self.is_signed(type_id)
+    }
+
     /// Check if the given type is a float.
     pub fn is_float(self: &Self, type_id: TypeId) -> bool {
         type_id >= *self.float.first().unwrap() && type_id <= *self.float.last().unwrap()
     }
 
-    /// Check if it is possible to cast from->to given types.
-    pub fn is_valid_cast(self: &Self, from_type_id: TypeId, to_type_id: TypeId) -> bool {
-        if self.is_unsigned(from_type_id) {
-            if self.is_unsigned(to_type_id) && from_type_id <= to_type_id {
+    /// Check if it is possible to represent source as target-type.
+    pub fn is_compatible(self: &Self, source_type_id: TypeId, target_type_id: TypeId) -> bool {
+        if source_type_id == target_type_id {
+            true
+        } else if self.is_unsigned(source_type_id) {
+            if self.is_unsigned(target_type_id) && source_type_id <= target_type_id {
                 // unsigned -> unsigned: valid if target has equal or more bits (primitive type_ids are ordered)
                 true
-            } else if self.is_signed(to_type_id) {
+            } else if self.is_signed(target_type_id) {
                 // unsigned -> signed: valid if target has more bits (compare index within group of signed / unsigned types)
-                Self::group_index(from_type_id, &self.unsigned) < Self::group_index(to_type_id, &self.signed)
+                Self::group_index(source_type_id, &self.unsigned) < Self::group_index(target_type_id, &self.signed)
             } else {
                 // unsigned -> everything else: invalid
                 false
             }
-        } else if self.is_signed(from_type_id) && self.is_signed(to_type_id) && from_type_id <= to_type_id {
+        } else if self.is_signed(source_type_id) && self.is_signed(target_type_id) && source_type_id <= target_type_id {
             // signed -> signed: valid if target has equal or more bits (primitive type_ids are ordered)
             true
-        } else if self.is_float(from_type_id) && self.is_float(to_type_id) && from_type_id <= to_type_id {
+        } else if self.is_float(source_type_id) && self.is_float(target_type_id) && source_type_id <= target_type_id {
             true
         } else {
             // everything else: invalid
@@ -126,11 +133,64 @@ impl Primitives {
         }
     }
 
+    /// Check if it is possible to store given numeric using given target type.
+    pub fn is_compatible_numeric(self: &Self, source_value: Numeric, target_type_id: TypeId) -> bool {
+        if source_value.is_float() && self.is_float(target_type_id) {
+            true
+        } else if source_value.is_integer() && self.is_integer(target_type_id) {
+            let range = self.integer_range(target_type_id);
+            range.min <= source_value && range.max >= source_value
+        } else {
+            false
+        }
+    }
+
+    /// Returns integer min/max information for given type. Panics if not an integer type.
+    fn integer_range(self: &Self, type_id: TypeId) -> &IntegerRange {
+        if self.is_signed(type_id) {
+            let index = Self::group_index(type_id, &self.signed);
+            &self.signed[index]
+        } else if self.is_unsigned(type_id) {
+            let index = Self::group_index(type_id, &self.unsigned);
+            &self.unsigned[index]
+        } else {
+            panic!("integer_range type argument is not an integer")
+        }
+    }
+
+    /// Returns the index of a type within its type group or panics.
+    fn group_index(type_id: TypeId, type_group: &[ IntegerRange; 4 ]) -> usize {
+        let type_usize: usize = type_id.into();
+        let group_usize: usize = type_group.first().unwrap().type_id.into();
+        debug_assert!(type_usize >= group_usize);
+        let index = type_usize - group_usize;
+        debug_assert!(index < type_group.len());
+        index
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     /// Tries to find a type capable of holding both given types.
     pub fn cast(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> Option<TypeId> {
-        if self.is_valid_cast(type_id_a, type_id_b) {
+        if self.is_compatible(type_id_a, type_id_b) {
             Some(type_id_b)
-        } else if self.is_valid_cast(type_id_b, type_id_a) {
+        } else if self.is_compatible(type_id_b, type_id_a) {
             Some(type_id_a)
         } else if let Some(type_id) = self.promote(type_id_a, type_id_b) {
             Some(type_id)
@@ -146,19 +206,6 @@ impl Primitives {
                 value >= s.min && value <= s.max
             }).map(|t| t.type_id)
         } else if value.is_float() {
-            Some(self.float[1])
-        } else {
-            None
-        }
-    }
-
-    pub fn classify_numerics(self: &Self, value_a: Numeric, value_b: Numeric) -> Option<TypeId> {
-        if value_a.is_integer() && value_b.is_integer() {
-            let allowed_types = [ &self.signed[2], &self.signed[3], &self.unsigned[3] ];
-            allowed_types.iter().find(|s| {
-                value_a >= s.min && value_a <= s.max && value_b >= s.min && value_b <= s.max
-            }).map(|t| t.type_id)
-        } else if value_a.is_float() && value_b.is_float() {
             Some(self.float[1])
         } else {
             None
@@ -209,15 +256,5 @@ impl Primitives {
         } else {
             None
         }
-    }
-
-    /// Returns the index of a type within its type group or panics.
-    fn group_index(type_id: TypeId, type_group: &[ IntegerRange; 4 ]) -> usize {
-        let type_usize: usize = type_id.into();
-        let group_usize: usize = type_group.first().unwrap().type_id.into();
-        debug_assert!(type_usize >= group_usize);
-        let index = type_usize - group_usize;
-        debug_assert!(index < type_group.len());
-        index
     }
 }

@@ -32,7 +32,7 @@ macro_rules! extern_rust {
             _dummy
         }
     };
-    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $arg_type:tt ),* ] [ $($ret_type:tt)* ] $code:block )* ) => {
+    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $( $arg_type:tt )+ ),* ] [ $($ret_type:tt)* ] $code:block )* ) => {
         impl $crate::ExternRust<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
@@ -44,7 +44,7 @@ macro_rules! extern_rust {
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)*), vec![ $(stringify!($arg_type)),* ]));
+                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)*), vec![ $(stringify!( $($arg_type)+ )),* ]));
                 )*
                 map
             }
@@ -56,7 +56,7 @@ macro_rules! extern_rust {
                     $(
                         $enum_name::$name => {
                             $(
-                                let $arg_name: $arg_type = vm.stack.pop();
+                                let $arg_name: $($arg_type)+ = vm.stack.pop();
                             )*
                             $code
                         },
@@ -69,12 +69,12 @@ macro_rules! extern_rust {
     (
         $enum_name:ident, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $arg_type:tt)* ) $( -> $ret_type:tt )* $code:block
+            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $( $arg_type:tt )+ )* ) $( -> $ret_type:tt )* $code:block
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
         extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $arg_type ),* ] [ $($ret_type)* ] $code )* );
+        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $($arg_type)+ ),* ] [ $($ret_type)* ] $code )* );
     };
 }
 

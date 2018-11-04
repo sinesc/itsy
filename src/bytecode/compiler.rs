@@ -421,6 +421,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                             _ => panic!("Unexpected float literal type: {:?}", lit_type)
                         };
                     },
+                    Numeric::Overflow => panic!("Literal computation overflow")
                 }
             }
             LiteralValue::Bool(v) =>  {
@@ -428,9 +429,16 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                     Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
                     _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
                 };
-
             },
-            _ => unimplemented!(),
+            LiteralValue::String(v) => {
+                match lit_type {
+                    Type::String => {
+                        let pos = self.writer.write_const(v);
+                        self.writer.consts(pos as u8);
+                    },
+                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
+                };
+            }
         };
     }
 
@@ -643,29 +651,31 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &mut Self, index: i32, ty: &Type) {
-        let size = ty.size();
-        if size <= 4 {
+        if ty.kind() == TypeKind::String {
+            self.writer.stores(index);
+        } else if ty.size() <= 4 {
             self.writer.storer32(index);
-        } else if size == 8 {
+        } else if ty.size() == 8 {
             self.writer.storer64(index);
         } else {
-            panic!("Unsupported store size: {}", size);
+            panic!("Unsupported type {:?} for store operation", ty);
         }
     }
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &mut Self, index: i32, ty: &Type) {
-        let size = ty.size();
-        if size <= 4 {
+        if ty.kind() == TypeKind::String {
+            self.writer.loads(index);
+        } else if ty.size() <= 4 {
             match index {
                 -4 => self.writer.load_arg1(),
                 -5 => self.writer.load_arg2(),
                 -6 => self.writer.load_arg3(),
                 _ => self.writer.loadr32(index),
             };
-        } else if size == 8 {
+        } else if ty.size() == 8 {
             self.writer.loadr64(index);
         } else {
-            panic!("Unsupported load size: {}", size);
+            panic!("Unsupported type {:?} for load operation", ty);
         }
     }
 }

@@ -19,6 +19,9 @@ extern_rust!(MyFns, {
     fn printb(vm: &mut VM, value: bool) {
         println!("print:{}", value);
     }
+    fn prints(vm: &mut VM, value: &str) {
+        println!("print:{}", value);
+    }
 });
 
 fn main() {
@@ -48,8 +51,7 @@ fn main() {
             printi32(fibf(27));
         }
     ";*/
-    /*
-    let source = "
+    /*let source = "
         fn main() {
             let x: bool = false;
             let y: bool = false;
@@ -57,9 +59,8 @@ fn main() {
             let b = 1;
             printb(x && !y && (a == b));
         }
-    ";
-    */
-    let source = "
+    ";*/
+    /*let source = "
         fn main() {
             let a: i32 = 0;
             printi32(--a);
@@ -85,8 +86,28 @@ fn main() {
             printi64(d--);
             printi64(d--);
         }
+    ";*/
+    /*let source = "
+        fn main() {
+            let b = 1 > 2;
+            let i = 1 + 2;
+            printb(b);
+            printi32(i);
+        }
+    ";*/
+    let source = "
+        fn main() {
+            let x = \"Hello World!\";
+            prints(x);
+        }
     ";
-
+    /*let source = "
+        fn main() {
+            let x = 1;
+            printi32(x);
+        }
+    ";*/
+    println!("{}", source);
     let mut vm = itsy::vm::<MyFns>(source);
     println!("{:}", vm.dump_program());
     let vm_start = ::std::time::Instant::now();

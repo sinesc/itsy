@@ -108,6 +108,16 @@ named!(boolean<Input<'_>, Expression<'_>>, map!(alt!(tag!("true") | tag!("false"
     })
 }));
 
+// literal string (expression)
+
+named!(string<Input<'_>, Expression<'_>>, map!(delimited!(char!('"'), escaped!(none_of!("\\\""), '\\', one_of!("\"n\\")), char!('"')), |m| {
+    Expression::Literal(Literal {
+        value   : LiteralValue::String(*m),
+        type_id : None,
+        ty      : None,
+    })
+}));
+
 // assignment (expression)
 
 named!(assignment_operator<Input<'_>, BinaryOperator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
@@ -142,8 +152,9 @@ named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident_path, alt!(tag!("
     }))
 }));
 
-named!(operand<Input<'_>, Expression<'_>>, ws!(alt!(
+named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
     boolean
+    | string
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
@@ -176,7 +187,7 @@ named!(prec4<Input<'_>, Expression<'_>>, ws!(do_parse!(
 
 named!(prec3<Input<'_>, Expression<'_>>, ws!(do_parse!(
     init: prec4 >>
-    res: fold_many0!(
+    res: fold_many0!( // todo: does this work? see comment on "operand"
         pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| BinaryOperator::from_string(*o)), prec4),
         init,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: None }))

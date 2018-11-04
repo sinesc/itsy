@@ -175,3 +175,47 @@ impl_stack!(Stack, normal, f32);
 impl_stack!(Stack, large, u64);
 impl_stack!(Stack, large, i64);
 impl_stack!(Stack, large, f64);
+
+impl<'a> StackOp<&'a str> for Stack {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn push(self: &mut Self, value: &str) {
+        let ptr = value.as_ptr() as u64;
+        let len = value.len() as u32;
+        self.push(ptr);
+        self.push(len);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn pop(self: &mut Self) -> &'a str {
+        use std::slice;
+        use std::str;
+        let len: u32 = self.pop();
+        let ptr: u64 = self.pop();
+        println!("len: {}, ptr: {:?}", len, ptr);
+        unsafe {
+            let slice = slice::from_raw_parts(ptr as *const _, len as usize);
+            str::from_utf8(slice).unwrap()
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn store(self: &mut Self, pos: u32, value: &str) {
+        let ptr = value.as_ptr() as u64;
+        let len = value.len() as u32;
+        self.store(pos, ptr);
+        self.store(pos + 2, len);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn load(self: &Self, pos: u32) -> &'a str {
+        use std::slice;
+        use std::str;
+        let ptr: u64 = self.load(pos);
+        let len: u32 = self.load(pos + 2);
+        unsafe {
+            let slice = slice::from_raw_parts(ptr as *const _, len as usize);
+            str::from_utf8(slice).unwrap()
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn top(self: &Self) -> &'a str {
+        self.load(self.sp() - 3)
+    }
+}

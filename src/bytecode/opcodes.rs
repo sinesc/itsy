@@ -17,7 +17,7 @@ impl_vm!{
 
     /// Load constant from constant pool onto stack.
     fn constr32(self: &mut Self, const_id: u8) {
-        let tmp = self.program.consts[const_id as usize];
+        let tmp = self.program.consts[const_id as usize]; // todo: just call constr32_16 here
         self.stack.push(tmp);
     }
     /// Load constant from constant pool onto stack.
@@ -27,7 +27,7 @@ impl_vm!{
     }
     /// Load constant from constant pool onto stack.
     fn constr64(self: &mut Self, const_id: u8) {
-        let l = self.program.consts[const_id as usize];         // todo: reuse stackops here
+        let l = self.program.consts[const_id as usize];          // todo: just call constr64_16 here
         let h = self.program.consts[(const_id + 1) as usize];
         self.stack.push(l);
         self.stack.push(h);
@@ -38,6 +38,14 @@ impl_vm!{
         let h = self.program.consts[(const_id + 1) as usize];
         self.stack.push(l);
         self.stack.push(h);
+    }
+    /// Load constant from constant pool onto stack.
+    fn consts(self: &mut Self, const_id: u8) {                  // todo: impl _16
+        let len = self.program.consts[const_id as usize] as u32;
+        let ptr = &self.program.consts[(const_id + 1) as usize] as *const _ as u64;
+        println!("consts: ptr {}m len {}", ptr, len);
+        self.stack.push(ptr);
+        self.stack.push(len);
     }
 
     /// Push 0 onto stack.
@@ -77,6 +85,21 @@ impl_vm!{
     fn storer64(self: &mut Self, offset: i32) {
         let local: i64 = self.stack.pop();
         self.stack.store_fp(offset, local);
+    }
+
+    /// Load string from offset (relative to the stackframe) and push onto the stack.
+    fn loads(self: &mut Self, offset: i32) {
+        let ptr: u64 = self.stack.load_fp(offset);
+        let len: u32 = self.stack.load_fp(offset + 2);
+        self.stack.push(ptr);
+        self.stack.push(len);
+    }
+    /// Pop string and store it at the given offset (relative to the stackframe).
+    fn stores(self: &mut Self, offset: i32) {
+        let len: u32 = self.stack.pop();
+        let ptr: u64 = self.stack.pop();
+        self.stack.store_fp(offset, ptr);
+        self.stack.store_fp(offset + 2, len);
     }
 
     /// Load function argument 1 and push it onto the stack. Equivalent to load -4.

@@ -5,7 +5,7 @@ authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-nom = { version = "4.0", features = [ "verbose-errors" ] }
+nom = { version = "4.1.1", features = [ "verbose-errors" ] }
 byteorder = "1.2.6"
 
 [lib]

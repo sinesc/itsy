@@ -18,6 +18,8 @@ pub use self::compiler::{compile, Compiler};
 pub use self::stack::*;
 
 /// A stack value.
+pub(crate) const VALUE_SIZE: usize = 4;
+pub(crate) const VALUE64_SIZE: usize = 8;
 pub(crate) type Value = i32;
 pub(crate) type Value64 = i64;
 
