@@ -137,6 +137,14 @@ macro_rules! impl_stack {
         impl_convert!($size, $type, *$stack.data.get($pos as usize).expect("Stack bounds exceeded"))
     };
 
+    // top operations
+    (@top large, $stack: ident) => { {
+        $stack.load($stack.sp() - 2)
+    } };
+    (@top $size:tt, $stack: ident) => {
+        $stack.load($stack.sp() - 1)
+    };
+
     // implement stack operations for Stack
     ($target:ident, $size:tt, $type:tt) => {
         impl StackOp<$type> for $target {
@@ -158,7 +166,7 @@ macro_rules! impl_stack {
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn top(self: &Self) -> $type {
-                self.load(self.sp() - 1)
+                impl_stack!(@top $size, self)
             }
         }
     };

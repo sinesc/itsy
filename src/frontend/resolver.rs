@@ -252,7 +252,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Computes the result of a literal x literal binary expression and alters the item variant to literal.
-    fn precompute_expression_binary_op(self: &mut Self, item: &mut ast::Expression<'a>, type_hint: Option<TypeId>) {
+    fn precompute_expression_binary_op(self: &mut Self, item: &mut ast::Expression<'a>, _type_hint: Option<TypeId>) {
 
         use crate::frontend::ast::BinaryOperator as O;
 
