@@ -1,18 +1,20 @@
 // todo: remove
 #![allow(dead_code)]
-
+use std::collections::HashMap;
 use crate::frontend::util::{Repository, TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
-    types       : Repository<Type, TypeId, (ScopeId, &'a str)>,
+    types           : Repository<Type, TypeId, (ScopeId, &'a str)>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings    : Repository<Option<TypeId>, BindingId, (ScopeId, &'a str)>,
+    bindings        : Repository<Option<TypeId>, BindingId, (ScopeId, &'a str)>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions   : Repository<FnSig, FunctionId, (ScopeId, &'a str)>,
+    functions       : Repository<FnSig, FunctionId, (ScopeId, &'a str)>,
+    /// Function scopes (the function containing this scope)
+    scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
-    parent_map  : Vec<ScopeId>, // ScopeId => ScopeId
+    parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
 }
 
 impl<'a> Scopes<'a> {
@@ -20,10 +22,11 @@ impl<'a> Scopes<'a> {
     pub fn new() -> Self {
         let root_id = Self::root_id();
         Scopes {
-            types       : Repository::new(),
-            bindings    : Repository::new(),
-            functions   : Repository::new(),
-            parent_map  : vec![ root_id ],
+            types           : Repository::new(),
+            bindings        : Repository::new(),
+            functions       : Repository::new(),
+            scopefunction   : HashMap::new(),
+            parent_map      : vec![ root_id ],
         }
     }
 
@@ -49,6 +52,32 @@ impl<'a> Scopes<'a> {
             scope_id = parent_scope_id;
         }
         println!("");
+    }
+}
+
+/// Function-scope handling
+impl<'a> Scopes<'a> {
+    /// Sets the id of the function containing this scope.
+    pub fn set_scopefunction_id(self: &mut Self, scope_id: ScopeId, function_id: FunctionId) {
+        self.scopefunction.insert(scope_id, Some(function_id));
+    }
+    /// Gets the id of the function containing this scope.
+    pub fn scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
+        *self.scopefunction.get(&scope_id).unwrap_or(&None)
+    }
+    /// Finds the id of the closest function containing this scope.
+    pub fn lookup_scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
+        if let Some(function_id) = self.scopefunction_id(scope_id) {
+            Some(function_id)
+        } else {
+            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
+            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
+            if parent_scope_id != scope_id {
+                self.lookup_scopefunction_id(parent_scope_id)
+            } else {
+                None
+            }
+        }
     }
 }
 

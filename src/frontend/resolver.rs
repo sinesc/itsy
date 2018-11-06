@@ -24,9 +24,9 @@ pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum BindingFlag {
-    None,
+    //None,
     MustResolve,
-    ExpectedType(TypeId),
+    //ExpectedType(TypeId),
 }
 
 /// Internal state during program type/binding resolution.
@@ -41,8 +41,7 @@ struct Resolver<'a, 'b> where 'a: 'b {
     scopes      : &'b mut scopes::Scopes<'a>,
     /// Grouped primitive types.
     primitives  : &'b primitives::Primitives,
-    /// Name of the entry/main function.
-    entry_fn    : &'b str,
+    /// WIP todo: document or remove
     binding_flags   : &'b mut HashMap<BindingId, BindingFlag>,
 }
 
@@ -92,7 +91,6 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
                 scope_id        : root_scope_id,
                 scopes          : &mut scopes,
                 primitives      : &primitives,
-                entry_fn        : entry,
                 binding_flags   : &mut binding_flags,
             };
             resolver.resolve_statement(&mut statement);
@@ -370,17 +368,42 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_signature(&mut item.sig);
-        self.resolve_block(&mut item.block, None);
         if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
-            let result = item.sig.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id);
-            let args: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id.unwrap()).collect();
-            item.function_id = Some(self.scopes.insert_function(parent_scope_id, item.sig.name, result, args));
+            let result_type_id = item.sig.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id);
+            let arg_type_ids: Vec<_> = item.sig.args.iter().map(|arg| arg.type_id.unwrap()).collect();
+            let function_id = self.scopes.insert_function(parent_scope_id, item.sig.name, result_type_id, arg_type_ids);
+            item.function_id = Some(function_id);
+            self.scopes.set_scopefunction_id(self.scope_id, function_id);
+            // todo: needs to check that block return type matches
+        }
+        if let Some(function_id) = item.function_id {
+            let function_type = self.scopes.function_type(function_id);
+            self.resolve_block(&mut item.block, function_type.ret_type);
         }
         self.scope_id = parent_scope_id;
     }
 
+    /// Resolves a return statement.
+    fn resolve_return(self: &mut Self, item: &mut ast::Return<'a>) {
+        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).expect("Encountered return outside of function");
+        let ret_type_id = self.scopes.function_type(function_id).ret_type;
+        if ret_type_id.is_some() && item.expr.is_none() {
+            panic!("Expected return value");
+        } else if ret_type_id.is_none() && item.expr.is_some() {
+            panic!("Unexpected return value");
+        }
+        if let Some(expr) = &mut item.expr {
+            item.fn_ret_type_id = ret_type_id;
+            self.resolve_expression(expr, ret_type_id);
+            let expression_type_id = expr.get_type_id();
+            if expression_type_id.is_some() && ret_type_id != expression_type_id {
+                panic!("Expected return type {:?}, got {:?}", self.get_type(ret_type_id.unwrap()), self.get_type(expression_type_id.unwrap()));
+            }
+        }
+    }
+
     /// Resolves an occurance of a function call.
-    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>, type_hint: Option<TypeId>) {
+    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>, _type_hint: Option<TypeId>) {
 
         // locate function definition
         if item.function_id.is_none() {
@@ -500,7 +523,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an if block.
-    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>, type_hint: Option<TypeId>) {
+    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>, _type_hint: Option<TypeId>) {
         self.resolve_expression(&mut item.cond, None);
         self.resolve_block(&mut item.if_block, None);
         if let Some(ref mut else_block) = item.else_block {
@@ -548,7 +571,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             self.resolve_statement(&mut statement);
         }
         if let Some(ref mut result) = item.result {
-            self.resolve_expression(result, None);
+            self.resolve_expression(result, type_hint);
             if let Some(type_id) = result.get_type_id() {
                 self.set_type_from_id(&mut item.type_id, type_id);
             }
@@ -557,15 +580,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
     }
 
-    /// Resolves a return statement.
-    fn resolve_return(self: &mut Self, item: &mut ast::Return<'a>) {
-        if let Some(expr) = &mut item.expr {
-            self.resolve_expression(expr, None);
-        }
-    }
-
     /// Resolves an assignment expression.
-    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>, type_hint: Option<TypeId>) {
+    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>, _type_hint: Option<TypeId>) {
         self.resolve_variable(&mut item.left, None);
         self.resolve_expression(&mut item.right, item.left.type_id);
         if item.left.binding_id.is_some() && item.left.type_id.is_none() && item.right.get_type_id().is_some() {
@@ -589,7 +605,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, type_hint: Option<TypeId>) {
 
         use crate::frontend::ast::BinaryOperator as O;
-        use crate::frontend::ast::Expression as E;
+        //use crate::frontend::ast::Expression as E;
 
         self.resolve_expression(&mut item.left, type_hint.or(item.right.get_type_id()));
         self.resolve_expression(&mut item.right, type_hint.or(item.left.get_type_id()));
@@ -630,7 +646,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a unary operation.
-    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>, type_hint: Option<TypeId>) {
+    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>, _type_hint: Option<TypeId>) {
         use crate::frontend::ast::UnaryOperator as UO;
         self.resolve_expression(&mut item.expr, None);
         match item.op {

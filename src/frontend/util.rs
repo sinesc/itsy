@@ -82,8 +82,8 @@ impl Type {
             Type::u16 | Type::i16 => 2,
             Type::u32 | Type::i32 | Type::f32 => 4,
             Type::u64 | Type::i64 | Type::f64 => 8,
-            Type::String => 12, // point
-            _ => unimplemented!(), // todo: what do I want here? size of string ref and total enum/struct size?
+            Type::String => 12, // pointer+len
+            _ => unimplemented!(), // todo: remaining types
         }
     }
     pub fn kind(self: &Self) -> TypeKind {

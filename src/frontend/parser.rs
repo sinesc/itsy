@@ -349,7 +349,8 @@ named!(while_loop<Input<'_>, WhileLoop<'_>>, map!(ws!(preceded!(tag!("while"), t
 
 named!(return_statement<Input<'_>, Statement<'_>>, map!(ws!(preceded!(tag!("return"), terminated!(opt!(expression), char!(';')))),
     |m| Statement::Return(Return {
-        expr        : m,
+        expr            : m,
+        fn_ret_type_id  : None,
     })
 ));
 

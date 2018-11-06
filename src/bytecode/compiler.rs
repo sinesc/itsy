@@ -257,7 +257,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         self.locals.push(frame);
         self.compile_block(&item.block);
-        self.writer.ret(); // todo: skip if last statement was "return"
+        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| (self.get_type(ret.type_id).size() as i32 / 4) as u8 )); // todo: skip if last statement was "return"
         self.locals.pop();
     }
 
@@ -368,7 +368,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         } else {
             self.writer.lit0(); // todo: need to return something for now
         }
-        self.writer.ret();
+        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| (self.get_type(Some(ret)).size() as i32 / 4) as u8 ));
     }
 
     /// Compiles the given block.

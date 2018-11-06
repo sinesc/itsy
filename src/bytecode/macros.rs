@@ -55,10 +55,16 @@ macro_rules! extern_rust {
                 match self {
                     $(
                         $enum_name::$name => {
+                            let ret = {
+                                $(
+                                    let $arg_name: $($arg_type)+ = vm.stack.pop();
+                                )*
+                                $code
+                            };
                             $(
-                                let $arg_name: $($arg_type)+ = vm.stack.pop();
+                                let ret_typed: $ret_type = ret;
+                                vm.stack.push(ret_typed);
                             )*
-                            $code
                         },
                     )*
                     $enum_name::_dummy => panic!("Attempted to execute dummy function")

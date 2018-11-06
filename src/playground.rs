@@ -7,6 +7,9 @@ extern_rust!(MyFns, {
     fn printi32(vm: &mut VM, value: i32) {
         println!("print:{}", value);
     }
+    fn printu32(vm: &mut VM, value: u32) {
+        println!("print:{}", value);
+    }
     fn printi64(vm: &mut VM, value: i64) {
         println!("print:{}", value);
     }
@@ -21,6 +24,9 @@ extern_rust!(MyFns, {
     }
     fn prints(vm: &mut VM, value: &str) {
         println!("print:{}", value);
+    }
+    fn strlen(vm: &mut VM, value: &str) -> u32 {
+        value.len() as u32
     }
 });
 
@@ -95,18 +101,31 @@ fn main() {
             printi32(i);
         }
     ";*/
-    let source = "
-        fn main() {
+    /*let source = "
+        fn test() -> u32 {
             let x = \"Hello World!\";
             prints(x);
+            return strlen(x);
         }
-    ";
+        fn main() {
+            printu32(test());
+        }
+    ";*/
     /*let source = "
         fn main() {
             let x = 1;
             printi32(x);
         }
     ";*/
+    let source = "
+        fn test(x: String) -> u32 {
+            prints(x);
+            return strlen(x);
+        }
+        fn main() {
+            printu32(test(\"Hello World!\"));
+        }
+    ";
     println!("{}", source);
     let mut vm = itsy::vm::<MyFns>(source);
     println!("{:}", vm.dump_program());

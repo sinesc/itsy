@@ -190,7 +190,6 @@ impl<'a> StackOp<&'a str> for Stack {
         use std::str;
         let len: u32 = self.pop();
         let ptr: u64 = self.pop();
-        println!("len: {}, ptr: {:?}", len, ptr);
         unsafe {
             let slice = slice::from_raw_parts(ptr as *const _, len as usize);
             str::from_utf8(slice).unwrap()

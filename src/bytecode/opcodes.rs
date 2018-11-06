@@ -43,7 +43,6 @@ impl_vm!{
     fn consts(self: &mut Self, const_id: u8) {                  // todo: impl _16
         let len = self.program.consts[const_id as usize] as u32;
         let ptr = &self.program.consts[(const_id + 1) as usize] as *const _ as u64;
-        println!("consts: ptr {}m len {}", ptr, len);
         self.stack.push(ptr);
         self.stack.push(len);
     }
@@ -125,7 +124,7 @@ impl_vm!{
 
     /// Function call. Saves state and sets programm counter to given addr. Expects
     /// callee arguments on the stack and number of arguments (in 32 bit words) as num_args.
-    fn call(self: &mut Self, addr: u32, num_args: u8) {
+    fn call(self: &mut Self, addr: u32, num_args: u8) { // todo: move num_args to ret? avoids one push
         let next_pc = self.pc;
         let fp = self.stack.fp;
         self.stack.push(num_args);          // save number of arguments
@@ -136,10 +135,9 @@ impl_vm!{
     }
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
-    fn ret(self: &mut Self) {
+    fn ret(self: &mut Self, num_ret: u8) {
 
-        // save return value
-        let retval: Value = self.stack.top();
+        let num_ret = num_ret as u32;
 
         // get previous state
         let prev_pc = self.stack.load_fp(-1);           // load program counter from before the call
@@ -148,15 +146,17 @@ impl_vm!{
 
         // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
         // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
-        let new_size = self.stack.fp - 3 - prev_num_args as u32;
-        self.stack.truncate(new_size);
+        let ret_pos = self.stack.fp - 3 - prev_num_args as u32;
+
+        for i in 0..num_ret {
+            self.stack[ret_pos + i] = self.stack[self.stack.sp() - num_ret + i];
+        }
+
+        self.stack.truncate(ret_pos + num_ret);
 
         // restore previous program counter and frame pointer
         self.stack.fp = prev_fp;
         self.pc = prev_pc;
-
-        // push the return value back onto the stack
-        self.stack.push(retval);
     }
 
     /// Pops 2 values from the stack and pushes their logical conjunction.

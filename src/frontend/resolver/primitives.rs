@@ -1,5 +1,5 @@
 use crate::frontend::util::{TypeId, ScopeId, Numeric, Signed, Unsigned};
-use crate::frontend::ast;
+//use crate::frontend::ast;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::frontend::util::Type;
 
@@ -185,7 +185,7 @@ impl Primitives {
 
 
 
-
+/*
     /// Tries to find a type capable of holding both given types.
     pub fn cast(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> Option<TypeId> {
         if self.is_compatible(type_id_a, type_id_b) {
@@ -198,7 +198,7 @@ impl Primitives {
             None
         }
     }
-
+*/
     pub fn classify_numeric(self: &Self, value: Numeric) -> Option<TypeId> {
         if value.is_integer() {
             let allowed_types = [ &self.signed[2], &self.signed[3], &self.unsigned[3] ];
@@ -211,7 +211,7 @@ impl Primitives {
             None
         }
     }
-
+/*
     /// Tries to find a type capable of holding both given literals.
     pub fn cast_literal(self: &Self, literal_a: &ast::Literal<'_>, literal_b: &ast::Literal<'_>) -> Option<TypeId> {
 
@@ -257,4 +257,5 @@ impl Primitives {
             None
         }
     }
+*/
 }

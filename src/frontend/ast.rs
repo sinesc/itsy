@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use crate::frontend::util::{BindingId, FunctionId, ScopeId, Numeric, TypeId};
 
-#[derive(Debug)]
 pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
@@ -32,6 +31,22 @@ impl<'a> Statement<'a> {
             Statement::Block(block)             => Expression::Block(Box::new(block)),
             Statement::Expression(expression)   => expression,
             _                                   => panic!("invalid statement to expression conversion"),
+        }
+    }
+}
+
+impl<'a> Debug for Statement<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Statement::Binding(v)   => write!(f, "{:#?}", v),
+            Statement::Function(v)  => write!(f, "{:#?}", v),
+            Statement::Structure(v) => write!(f, "{:#?}", v),
+            Statement::ForLoop(v)   => write!(f, "{:#?}", v),
+            Statement::WhileLoop(v) => write!(f, "{:#?}", v),
+            Statement::IfBlock(v)   => write!(f, "{:#?}", v),
+            Statement::Block(v)     => write!(f, "{:#?}", v),
+            Statement::Return(v)    => write!(f, "{:#?}", v),
+            Statement::Expression(v)=> write!(f, "Statement{:#?}", v),
         }
     }
 }
@@ -110,7 +125,8 @@ pub struct WhileLoop<'a> {
 
 #[derive(Debug)]
 pub struct Return<'a> {
-    pub expr    : Option<Expression<'a>>,
+    pub expr            : Option<Expression<'a>>,
+    pub fn_ret_type_id  : Option<TypeId>,
 }
 
 #[derive(Debug)]
