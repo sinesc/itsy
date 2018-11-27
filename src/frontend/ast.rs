@@ -56,7 +56,7 @@ pub struct Binding<'a> {
     pub name        : &'a str,
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
-    pub ty          : Option<Type<'a>>,
+    pub type_name   : Option<TypeName<'a>>,
     pub type_id     : Option<TypeId>,
     pub binding_id  : Option<BindingId>,
 }
@@ -73,7 +73,7 @@ pub struct Function<'a> {
 pub struct Signature<'a> {
     pub name    : &'a str,
     pub args    : Vec<Binding<'a>>,
-    pub ret     : Option<Type<'a>>,
+    pub ret     : Option<TypeName<'a>>,
 }
 
 impl<'a> Signature<'a> {
@@ -86,15 +86,15 @@ impl<'a> Signature<'a> {
 }
 
 #[derive(Debug)]
-pub struct Type<'a> {
+pub struct TypeName<'a> {
     pub name    : IdentPath<'a>,
     pub type_id : Option<TypeId>,
 }
 
-impl<'a> Type<'a> {
+impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
     pub fn unknown(name: IdentPath<'a>) -> Self {
-        Type {
+        TypeName {
             name    : name,
             type_id : None,
         }
@@ -104,7 +104,7 @@ impl<'a> Type<'a> {
 #[derive(Debug)]
 pub struct Structure<'a> {
     pub name    : &'a str,
-    pub items   : HashMap<&'a str, Type<'a>>,
+    pub items   : HashMap<&'a str, TypeName<'a>>,
     pub type_id : Option<TypeId>,
 }
 
@@ -215,15 +215,23 @@ impl<'a> Debug for Expression<'a> {
 
 #[derive(Debug)]
 pub struct Literal<'a> {
-    pub value   : LiteralValue<'a>,
-    pub ty      : Option<Type<'a>>,
-    pub type_id : Option<TypeId>,
+    pub value       : LiteralValue<'a>,
+    pub type_name   : Option<TypeName<'a>>,
+    pub type_id     : Option<TypeId>,
 }
 
 pub enum LiteralValue<'a> {
     Bool(bool),
     Numeric(Numeric),
-    String(&'a str),  // TODO: string literals
+    String(&'a str),
+    Array(Array<'a>),
+}
+
+#[derive(Debug)]
+pub struct Array<'a> {
+    pub items       : Vec<Literal<'a>>,
+    pub type_id     : Option<TypeId>,
+    pub binding_id  : Option<BindingId>,
 }
 
 impl<'a> LiteralValue<'a> {
@@ -253,6 +261,7 @@ impl<'a> Debug for LiteralValue<'a> {
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
             LiteralValue::Numeric(v) => write!(f, "{:?}", v),
             LiteralValue::String(v) => write!(f, "String({:?})", v),
+            LiteralValue::Array(v) => write!(f, "Array({:#?})", v),
         }
     }
 }
@@ -352,7 +361,7 @@ pub enum BinaryOperator {
     // boolean
     And, Or,
     // special
-    Range,
+    Range, Index
 }
 
 impl BinaryOperator {

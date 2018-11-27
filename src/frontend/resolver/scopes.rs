@@ -1,12 +1,17 @@
 // todo: remove
 #![allow(dead_code)]
-use std::collections::HashMap;
+use std::{collections::HashMap, borrow::Cow};
 use crate::frontend::util::{Repository, TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
+
+pub enum Identifier<'a> {
+    Name(&'a str),
+    Array(Vec<(usize, TypeId)>),
+}
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes<'a> {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
-    types           : Repository<Type, TypeId, (ScopeId, &'a str)>,
+    types           : Repository<Type, TypeId, (ScopeId, Cow<'a, str>)>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings        : Repository<Option<TypeId>, BindingId, (ScopeId, &'a str)>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
@@ -164,12 +169,17 @@ impl<'a> Scopes<'a> {
 
     /// Insert a type into the given scope, returning a type id.
     pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: &'a str, ty: Type) -> TypeId {
-        self.types.insert((scope_id, name), ty)
+        self.types.insert((scope_id, Cow::from(name)), ty)
+    }
+
+    /// Insert a type into the given scope, returning a type id.
+    pub fn insert_type2(self: &mut Self, scope_id: ScopeId, name: String, ty: Type) -> TypeId { // todo: name
+        self.types.insert((scope_id, Cow::from(name)), ty)
     }
 
     /// Returns the id of the named type originating in exactly this scope.
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<TypeId> {
-        self.types.index_of(&(scope_id, name))
+        self.types.index_of(&(scope_id, Cow::from(name)))
     }
 
     pub fn void_type(self: &Self) -> TypeId {
@@ -178,7 +188,7 @@ impl<'a> Scopes<'a> {
 
     /// Finds the id of the named type within the scope or its parent scopes.
     pub fn lookup_type_id(self: &Self, scope_id: ScopeId, name: &'a str) -> Option<TypeId> {
-        if let Some(index) = self.types.index_of(&(scope_id, name)) {
+        if let Some(index) = self.types.index_of(&(scope_id, Cow::from(name))) {
             Some(index)
         } else {
             // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop

@@ -6,8 +6,9 @@ mod primitives;
 use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::borrow::Cow;
 use crate::frontend::ast;
-use crate::frontend::util::{ScopeId, TypeId, BindingId, Type, FunctionId};
+use crate::frontend::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct};
 use crate::{ExternRust, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -150,7 +151,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
             if self.scopes.binding_id(self.scope_id, item.name).is_some() {
-                panic!("shadowing NYI"); // todo: support shadowing
+                unimplemented!("shadowing"); // todo: support shadowing
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, item.name, None); // todo: a &mut would be nicer than the index
             item.binding_id = Some(binding_id);
@@ -274,9 +275,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 };
                 self.flag_rewritten();
                 *item = ast::Expression::Literal(ast::Literal {
-                    value   : ast::LiteralValue::Bool(result),
-                    ty      : None,
-                    type_id : Some(self.primitives.bool),
+                    value       : ast::LiteralValue::Bool(result),
+                    type_name   : None,
+                    type_id     : Some(self.primitives.bool),
                 });
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
@@ -291,7 +292,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         O::GreaterOrEq  => lval >= rval,
                         O::Equal        => lval == rval,
                         O::NotEqual     => lval != rval,
-                        _ => panic!(),
+                        _ => unreachable!(),
                     };
                 } else if binary_op.left.as_literal().unwrap().value.as_numeric().is_some() {
                     let lval = binary_op.left.as_literal().unwrap().value.as_numeric().unwrap();
@@ -303,7 +304,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         O::GreaterOrEq  => lval >= rval,
                         O::Equal        => lval == rval,
                         O::NotEqual     => lval != rval,
-                        _ => panic!(),
+                        _ => unreachable!(),
                     };
                 } else {
                     let lval = binary_op.left.as_literal().unwrap().value.as_string().unwrap();
@@ -315,17 +316,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         O::GreaterOrEq  => lval >= rval,
                         O::Equal        => lval == rval,
                         O::NotEqual     => lval != rval,
-                        _ => panic!(),
+                        _ => unreachable!(),
                     };
                 }
                 self.flag_rewritten();
                 *item = ast::Expression::Literal(ast::Literal {
-                    value   : ast::LiteralValue::Bool(result),
-                    ty      : None,
-                    type_id : Some(self.primitives.bool),
+                    value       : ast::LiteralValue::Bool(result),
+                    type_name   : None,
+                    type_id     : Some(self.primitives.bool),
                 });
             },
-            O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
+            O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
                 if binary_op.left.as_literal().unwrap().value.as_numeric().is_some() {
                     let lval = binary_op.left.as_literal().unwrap().value.as_numeric().unwrap();
                     let rval = binary_op.right.as_literal().unwrap().value.as_numeric().unwrap();
@@ -335,19 +336,21 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         O::Mul  => lval * rval,
                         O::Div  => lval / rval,
                         O::Rem  => lval % rval,
-                        //O::Range=> lval != rval,
-                        _ => panic!(),
+                        _ => unreachable!(),
                     };
                     self.flag_rewritten();
                     *item = ast::Expression::Literal(ast::Literal {
-                        value   : ast::LiteralValue::Numeric(result),
-                        ty      : None,
-                        type_id : None,
+                        value       : ast::LiteralValue::Numeric(result),
+                        type_name   : None,
+                        type_id     : None,
                     });
                 }
             },
+            O::Range | O::Index => {
+                unimplemented!("range/index");
+            },
             O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
-                panic!("nyi");
+                unimplemented!("assignments");
             },
         }
     }
@@ -438,7 +441,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a type (name) to a type_id.
-    fn resolve_type(self: &Self, item: &mut ast::Type<'a>) {
+    fn resolve_type(self: &Self, item: &mut ast::TypeName<'a>) {
         self.set_type_from_name(&mut item.type_id, &item.name.0);
     }
 
@@ -449,7 +452,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let binding_id = self.try_create_binding(item);
 
         // get types for lhs(ty) and rhs(expr)
-        let lhs = match item.ty {
+        let lhs = match item.type_name {
             Some(ref mut ty) => {
                 self.resolve_type(ty);
                 ty.type_id
@@ -635,11 +638,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
                     self.set_type_from_id(&mut item.type_id, self.primitives.bool);
                 },
-                O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range => {
+                O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
                     self.set_type_from_id(&mut item.type_id, left_type_id.unwrap());
                 },
+                O::Range => {
+                    unimplemented!("range");
+                },
+                O::Index => {
+                    //unimplemented!("index");
+                }
                 O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
-                    panic!("nyi");
+                    unimplemented!("assignments");
                 },
             }
         }
@@ -670,25 +679,68 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
     }
 
+    /// Resolves an array literal and creates the required array types.
+    fn resolve_literal_array(self: &mut Self, item: &mut ast::Literal<'a>) {
+
+        use crate::frontend::ast::{Literal, LiteralValue};
+
+        let mut current_item = &mut *item;
+
+        while let Literal { value: LiteralValue::Array(ref mut a), type_id: ref mut array_type_id, .. } = current_item {
+
+            let mut item_type_id = None;
+
+            for literal in a.items.iter_mut() {
+                self.resolve_literal(literal, None);
+                if item_type_id == None {
+                    item_type_id = literal.type_id;
+                } else if literal.type_id != None && item_type_id != literal.type_id {
+                    panic!("array element type mismatch");
+                }
+            }
+
+            a.type_id = item_type_id;
+
+            if item_type_id.is_some() {
+                let ty = Type::Array(Array {
+                    len: Some(a.items.len()),
+                    ty: Box::new(self.scopes.lookup_type(item_type_id.unwrap()).clone()),
+                });
+                let type_name = format!("{:?}", ty);
+                *array_type_id = Some(self.scopes.insert_type2(self.scope_id, type_name, ty));
+            }
+
+            if let Some(next_level) = a.items.get_mut(0) {
+                current_item = next_level;
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
-    fn resolve_literal(self: &Self, item: &mut ast::Literal<'a>, type_hint: Option<TypeId>) {
+    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>, type_hint: Option<TypeId>) {
         use self::ast::LiteralValue as LV;
-        if let Some(ty) = &mut item.ty {
-            // numerical literal has explicit type, use it
-            self.resolve_type(ty);
-            self.set_type_from_id(&mut item.type_id, ty.type_id.unwrap());
-        } else if let ast::LiteralValue::Bool(_) = item.value {
+        if let Some(type_name) = &mut item.type_name {
+            // literal has explicit type, use it
+            self.resolve_type(type_name);
+            self.set_type_from_id(&mut item.type_id, type_name.type_id.unwrap()); // todo: might not be known
+            // todo: compare against literal
+        } else if let LV::Bool(_) = item.value {
             // literal boolean
             self.set_type_from_id(&mut item.type_id, self.primitives.bool);
-        } else if let ast::LiteralValue::String(_) = item.value {
+        } else if let LV::String(_) = item.value {
             // literal string
             self.set_type_from_id(&mut item.type_id, self.primitives.string);
+        } else if let LV::Array(_) = item.value {
+            self.resolve_literal_array(item);
         } else if let Some(type_hint) = type_hint {
             // we got a type hint, try to match it
             match item.value {
                 LV::Bool(_) => if type_hint != self.primitives.bool { panic!("Inferred type is incompatible to this boolean literal") },
                 LV::Numeric(n) => if !self.primitives.is_compatible_numeric(n, type_hint) { panic!("Inferred type is incompatible to this numeric literal") },
                 LV::String(_) => if type_hint != self.primitives.string { panic!("Inferred type is incompatible to this string literal") }
+                LV::Array(ref n) => unimplemented!("Array literal {:?}", n) // todo: how to approach this?
             }
             self.set_type_from_id(&mut item.type_id, type_hint);
         }

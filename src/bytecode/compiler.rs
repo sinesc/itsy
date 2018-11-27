@@ -438,7 +438,10 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                     },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
-            }
+            },
+            LiteralValue::Array(ref v) => {
+                unimplemented!("array literal");
+            },
         };
     }
 
@@ -530,6 +533,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             BO::Or => { self.writer.or(); },
             // special
             BO::Range => unimplemented!("range"),
+            BO::Index => unimplemented!("index"),
         }
     }
 }

@@ -32,99 +32,14 @@ extern_rust!(MyFns, {
 
 fn main() {
     /*let source = "
-        fn main() {
-            let x: i32 = 17 + 5 * 4;
-            printi32(x);
-        }
-    ";*/
-    /*let source = "
-        fn main() {
-            let a: f64 = 2;
-            let b: f64 = 1;
-            let c = a > b; printb(c);
-            if a > b { printi(1); } else { printi(0); }
-        }
-    ";*/
-    /*let source = "
-        fn fibf(n: i32) -> i32 {
-            if n < 2 {
-                n
-            } else {
-                fibf(n - 1) + fibf(n - 2)
-            }
-        }
-        fn main() {
-            printi32(fibf(27));
-        }
-    ";*/
-    /*let source = "
-        fn main() {
-            let x: bool = false;
-            let y: bool = false;
-            let a = 1;
-            let b = 1;
-            printb(x && !y && (a == b));
-        }
-    ";*/
-    /*let source = "
-        fn main() {
-            let a: i32 = 0;
-            printi32(--a);
-            printi32(--a);
-            printi32(--a);
-            printi32(--a);
-
-            let b: i32 = 0;
-            printi32(b--);
-            printi32(b--);
-            printi32(b--);
-            printi32(b--);
-
-            let c: i64 = 0;
-            printi64(--c);
-            printi64(--c);
-            printi64(--c);
-            printi64(--c);
-
-            let d: i64 = 0;
-            printi64(d--);
-            printi64(d--);
-            printi64(d--);
-            printi64(d--);
-        }
-    ";*/
-    /*let source = "
-        fn main() {
-            let b = 1 > 2;
-            let i = 1 + 2;
-            printb(b);
-            printi32(i);
-        }
-    ";*/
-    /*let source = "
-        fn test() -> u32 {
-            let x = \"Hello World!\";
-            prints(x);
-            return strlen(x);
-        }
-        fn main() {
-            printu32(test());
-        }
-    ";*/
-    /*let source = "
-        fn main() {
-            let x = 1;
-            printi32(x);
-        }
+        let m = 2;
+        let g = 3;
+        let x = [ [ 1, 2, 3, 4, 5, 6, 7 ] ];
+        let y = m + x[0][m*g] * g;
     ";*/
     let source = "
-        fn test(x: String) -> u32 {
-            prints(x);
-            return strlen(x);
-        }
-        fn main() {
-            printu32(test(\"Hello World!\"));
-        }
+        let x = [ [ \"1\", \"2\" ] ];
+        let y: u32 = x[0];
     ";
     println!("{}", source);
     let mut vm = itsy::vm::<MyFns>(source);

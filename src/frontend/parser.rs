@@ -61,61 +61,77 @@ named!(call<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, call_argumen
     rust_fn_index: None,
 })));
 
-// literal numerical (expression)
+// literal numerical
 
 named!(opt_sign<Input<'_>, Option<Input<'_>>>, opt!(recognize!(one_of!("+-"))));
 named!(opt_fract<Input<'_>, Option<Input<'_>>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
 
-fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Expression<'_>> {
+fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
     if n.contains(".") {
         if let Ok(float) = str::parse::<f64>(*n) {
-            return Ok((n, Expression::Literal(Literal {
-                value   : LiteralValue::Numeric(Numeric::Float(float)),
-                type_id : None,
-                ty      : None, // todo support e.g. "23i32"
-            })))
+            return Ok((n, Literal {
+                value       : LiteralValue::Numeric(Numeric::Float(float)),
+                type_id     : None,
+                type_name   : None, // todo support e.g. "23i32"
+            }))
         }
     } else if n.starts_with("-") {
         if let Ok(integer) = str::parse::<i64>(*n) {
-            return Ok((n, Expression::Literal(Literal {
-                value   : LiteralValue::Numeric(Numeric::Signed(integer)),
-                type_id : None,
-                ty      : None, // todo: support e.g. "-232i32"
-            })))
+            return Ok((n, Literal {
+                value       : LiteralValue::Numeric(Numeric::Signed(integer)),
+                type_id     : None,
+                type_name   : None, // todo: support e.g. "-232i32"
+            }))
         }
     } else {
         if let Ok(integer) = str::parse::<u64>(*n) {
-            return Ok((n, Expression::Literal(Literal {
-                value   : LiteralValue::Numeric(Numeric::Unsigned(integer)),
-                type_id : None,
-                ty      : None, // todo: see above
-            })))
+            return Ok((n, Literal {
+                value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
+                type_id     : None,
+                type_name   : None, // todo: see above
+            }))
         }
     }
 
     Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseError::InvalidNumerical as u32))))
 }
 
-named!(numerical<Input<'_>, Expression<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), parse_numerical));
+named!(numerical<Input<'_>, Literal<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), parse_numerical));
 
-// literal boolean (expression)
+// literal boolean
 
-named!(boolean<Input<'_>, Expression<'_>>, map!(alt!(tag!("true") | tag!("false")), |m| {
-    Expression::Literal(Literal {
-        value   : LiteralValue::Bool(*m == "true"),
-        type_id : None,
-        ty      : None,
-    })
+named!(boolean<Input<'_>, Literal<'_>>, map!(alt!(tag!("true") | tag!("false")), |m| {
+    Literal {
+        value       : LiteralValue::Bool(*m == "true"),
+        type_id     : None,
+        type_name   : None,
+    }
 }));
 
-// literal string (expression)
+// literal string
 
-named!(string<Input<'_>, Expression<'_>>, map!(delimited!(char!('"'), escaped!(none_of!("\\\""), '\\', one_of!("\"n\\")), char!('"')), |m| {
-    Expression::Literal(Literal {
-        value   : LiteralValue::String(*m),
-        type_id : None,
-        ty      : None,
-    })
+named!(string<Input<'_>, Literal<'_>>, map!(delimited!(char!('"'), escaped!(none_of!("\\\""), '\\', one_of!("\"n\\")), char!('"')), |m| {
+    Literal {
+        value       : LiteralValue::String(*m),
+        type_id     : None,
+        type_name   : None,
+    }
+}));
+
+// literal array
+
+named!(array_element<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array | numerical)));
+
+named!(array<Input<'_>, Literal<'_>>, map!(ws!(delimited!(char!('['), separated_list_complete!(char!(','), array_element), char!(']'))), |m| {
+    Literal {
+        value: LiteralValue::Array(Array {
+            items       : m,
+            type_id     : None,
+            binding_id  : None,
+        }),
+        type_name: None,
+        type_id: None,
+    }
 }));
 
 // assignment (expression)
@@ -153,22 +169,32 @@ named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident_path, alt!(tag!("
 }));
 
 named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
-    boolean
-    | string
+    map!(boolean, |m| Expression::Literal(m))
+    | map!(string, |m| Expression::Literal(m))
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
     | suffix
     | prefix
-    | numerical
+    | map!(numerical, |m| Expression::Literal(m))
     | call
     | map!(ident_path, |m| Expression::Variable(Variable { path: m, type_id: None, binding_id: None }))
 )));
 
-named!(prec5<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec6<Input<'_>, Expression<'_>>, ws!(do_parse!(
     init: operand >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), operand),
+        delimited!(tag!("["), expression, tag!("]")),
+        init,
+        |acc, val| Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::Index, left: acc, right: val, type_id: None }))
+    ) >>
+    (res)
+)));
+
+named!(prec5<Input<'_>, Expression<'_>>, ws!(do_parse!(
+    init: prec6 >>
+    res: fold_many0!(
+        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
         init,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, type_id: None }))
     ) >>
@@ -232,16 +258,20 @@ named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
 
 // let
 
+// todo: add array_expression to wrap array literal, then change expression to alt!(expression | array_expression)
+
+named!(array_expression<Input<'_>, Expression<'_>>, map!(array, |m| Expression::Literal(m)));
+
 named!(binding<Input<'_>, Statement<'_>>, map!(
     preceded!(ws!(tag!("let")), return_error!(
         ErrorKind::Custom(ParseError::SyntaxLet as u32),
-        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
+        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), alt!(array_expression | expression))), char!(';')))
     )),
     |m| Statement::Binding(Binding {
         name        : *m.1,
         mutable     : m.0.is_some(),
         expr        : m.3,
-        ty          : m.2.map(|t| Type::unknown(t)),
+        type_name   : m.2.map(|t| TypeName::unknown(t)),
         type_id     : None,
         binding_id  : None,
     })
@@ -249,12 +279,12 @@ named!(binding<Input<'_>, Statement<'_>>, map!(
 
 // structure
 
-named!(structure_item<Input<'_>, (Input<'_>, Type<'_>)>, map!(
+named!(structure_item<Input<'_>, (Input<'_>, TypeName<'_>)>, map!(
     ws!(tuple!(ident, char!(':'), ident_path)),
-    |tuple| (tuple.0, Type::unknown(tuple.2))
+    |tuple| (tuple.0, TypeName::unknown(tuple.2))
 ));
 
-named!(structure_items<Input<'_>, HashMap<&str, Type<'_>>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| {
+named!(structure_items<Input<'_>, HashMap<&str, TypeName<'_>>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| {
     list.into_iter().map(|item| (*item.0, item.1)).collect()
 }));
 
@@ -270,7 +300,7 @@ named!(signature_argument<Input<'_>, Binding<'_>>, map!(ws!(tuple!(opt!(tag!("mu
     name        : *tuple.1,
     expr        : None,
     mutable     : tuple.0.is_some(),
-    ty          : Some(Type::unknown(tuple.3)),
+    type_name   : Some(TypeName::unknown(tuple.3)),
     type_id     : None,
     binding_id  : None,
 }));
@@ -286,7 +316,7 @@ named!(signature<Input<'_>, Signature<'_>>, map!(
     )), |sig| Signature {
     name    : *sig.0,
     args    : sig.1,
-    ret     : if let Some(sig_ty) = sig.2 { Some(Type::unknown(sig_ty)) } else { None },
+    ret     : if let Some(sig_ty) = sig.2 { Some(TypeName::unknown(sig_ty)) } else { None },
 }));
 
 named!(function<Input<'_>, Statement<'_>>, map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
@@ -328,7 +358,7 @@ named!(for_loop<Input<'_>, ForLoop<'_>>, map!(ws!(tuple!(tag!("for"), ident, tag
         name        : *m.1,
         mutable     : true,
         expr        : None,
-        ty          : None,
+        type_name   : None,
         type_id     : None,
         binding_id  : None,
     },
