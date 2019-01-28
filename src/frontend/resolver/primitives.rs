@@ -30,7 +30,7 @@ pub(crate) struct Primitives {
 impl Primitives {
 
     /// Create new instance.
-    pub fn new(scopes: &mut Scopes<'_>, root_scope_id: ScopeId) -> Self {
+    pub fn new(scopes: &mut Scopes, root_scope_id: ScopeId) -> Self {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
         Primitives {
             void: scopes.insert_type(root_scope_id, "void", Type::bool), // FIXME: don't actually want void here

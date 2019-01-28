@@ -37,9 +37,17 @@ fn main() {
         let x = [ [ 1, 2, 3, 4, 5, 6, 7 ] ];
         let y = m + x[0][m*g] * g;
     ";*/
+    /*let source = "
+        let x = [ [ 1, 2 ] ];
+        let y: u32 = x[0][0];
+    ";*/
     let source = "
-        let x = [ [ \"1\", \"2\" ] ];
-        let y: u32 = x[0];
+        fn main() {
+            let x: u32 = 1;
+            let y = x + 1;
+            printu32(x);
+            printu32(y);
+        }
     ";
     println!("{}", source);
     let mut vm = itsy::vm::<MyFns>(source);

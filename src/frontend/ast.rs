@@ -4,6 +4,68 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use crate::frontend::util::{BindingId, FunctionId, ScopeId, Numeric, TypeId};
 
+/// A trait for bindable ast structures.
+pub(crate) trait Bindable {
+    /// Returns a mutable reference to the binding_id.
+    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId>;
+    /// Returns the binding_id.
+    fn binding_id(self: &Self) -> Option<BindingId>;
+    /// Sets the binding_id or panics if it is already set.
+    fn set_binding_id(self: &mut Self, binding_id: BindingId) {
+        let current_binding_id = self.binding_id_mut();
+        if current_binding_id.is_none() {
+            *current_binding_id = Some(binding_id);
+        } else {
+            panic!("attempted to reassign binding_id");
+        }
+    }
+}
+
+/// Implements the bindable trait for given structure.
+macro_rules! impl_bindable {
+    ($struct_name:ident) => {
+        impl<'a> Bindable for $struct_name<'a> {
+            fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+                &mut self.binding_id
+            }
+            fn binding_id(self: &Self) -> Option<BindingId> {
+                self.binding_id
+            }
+        }
+    };
+}
+
+/// A trait for bindable ast structures.
+pub(crate) trait Typeable {
+    /// Returns a mutable reference to the type_id.
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId>;
+    /// Returns the type_id.
+    fn type_id(self: &Self) -> Option<TypeId>;
+    /// Sets the type_id or panics if it is already set.
+    fn set_type_id(self: &mut Self, type_id: TypeId) {
+        let current_type_id = self.type_id_mut();
+        if current_type_id.is_none() {
+            *current_type_id = Some(type_id);
+        } else {
+            panic!("attempted to reassign type_id");
+        }
+    }
+}
+
+/// Implements the typeable trait for given structure.
+macro_rules! impl_typeable {
+    ($struct_name:ident) => {
+        impl<'a> Typeable for $struct_name<'a> {
+            fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+                &mut self.type_id
+            }
+            fn type_id(self: &Self) -> Option<TypeId> {
+                self.type_id
+            }
+        }
+    };
+}
+
 pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
@@ -57,9 +119,9 @@ pub struct Binding<'a> {
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
     pub type_name   : Option<TypeName<'a>>,
-    pub type_id     : Option<TypeId>,
     pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(Binding);
 
 #[derive(Debug)]
 pub struct Function<'a> {
@@ -80,8 +142,14 @@ impl<'a> Signature<'a> {
     pub fn ret_resolved(self: &Self) -> bool {
         self.ret.as_ref().map_or(true, |ret| ret.type_id.is_some())
     }
+    pub fn ret_type_id(self: &Self) -> Option<TypeId> {
+        self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id)
+    }
     pub fn args_resolved(self: &Self) -> bool {
-        self.args.iter().fold(true, |acc, arg| acc && arg.type_id.is_some())
+        self.args.iter().fold(true, |acc, arg| acc && arg.type_name.as_ref().map_or(false, |type_name| type_name.type_id.is_some()))
+    }
+    pub fn arg_type_ids(self: &Self) -> Vec<Option<TypeId>> {
+        self.args.iter().map(|arg| arg.type_name.as_ref().map_or(None, |type_name| type_name.type_id)).collect()
     }
 }
 
@@ -90,6 +158,7 @@ pub struct TypeName<'a> {
     pub name    : IdentPath<'a>,
     pub type_id : Option<TypeId>,
 }
+impl_typeable!(TypeName);
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
@@ -107,6 +176,7 @@ pub struct Structure<'a> {
     pub items   : HashMap<&'a str, TypeName<'a>>,
     pub type_id : Option<TypeId>,
 }
+impl_typeable!(Structure);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -137,12 +207,37 @@ pub struct IfBlock<'a> {
     pub scope_id    : Option<ScopeId>,
 }
 
+impl<'a> Bindable for IfBlock<'a> {
+    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+        if let Some(result) = &mut self.if_block.result {
+            result.binding_id_mut()
+        } else {
+            panic!("attempted to set return type of if statement")
+        }
+    }
+    fn binding_id(self: &Self) -> Option<BindingId> {
+        self.if_block.result.as_ref().map_or(None, |e| e.binding_id())
+    }
+}
+
 #[derive(Debug)]
 pub struct Block<'a> {
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
-    pub type_id     : Option<TypeId>,
     pub scope_id    : Option<ScopeId>,
+}
+
+impl<'a> Bindable for Block<'a> {
+    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+        if let Some(result) = &mut self.result {
+            result.binding_id_mut()
+        } else {
+            panic!("attempted to set return binding of block statement (not an expression)")
+        }
+    }
+    fn binding_id(self: &Self) -> Option<BindingId> {
+        self.result.as_ref().map_or(None, |e| e.binding_id())
+    }
 }
 
 pub enum Expression<'a> {
@@ -157,21 +252,9 @@ pub enum Expression<'a> {
 }
 
 impl<'a> Expression<'a> {
-    pub fn get_type_id(self: &Self) -> Option<TypeId> {
-        match self {
-            Expression::Literal(literal)        => literal.type_id,
-            Expression::Variable(variable)      => variable.type_id,
-            Expression::Call(call)              => call.type_id,
-            Expression::Assignment(assignment)  => assignment.left.type_id,
-            Expression::BinaryOp(binary_op)     => binary_op.type_id,
-            Expression::UnaryOp(unary_op)       => unary_op.type_id,
-            Expression::Block(block)            => block.result.as_ref().map_or(Some(TypeId::void()), |e| e.get_type_id()),
-            Expression::IfBlock(if_block)       => if_block.if_block.result.as_ref().map_or(Some(TypeId::void()), |e| e.get_type_id()),
-        }
-    }
-    pub fn is_resolved(self: &Self) -> bool {
-        self.get_type_id().is_some()
-    }
+    /*pub fn is_resolved(self: &Self) -> bool {
+        self.type_id().is_some()
+    }*/
     pub fn is_literal(self: &Self) -> bool {
         match self {
             Expression::Literal(_) => true,
@@ -198,6 +281,33 @@ impl<'a> Expression<'a> {
     }
 }
 
+impl<'a> Bindable for Expression<'a> {
+    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+        match self {
+            Expression::Literal(literal)        => literal.binding_id_mut(),
+            Expression::Variable(variable)      => variable.binding_id_mut(),
+            Expression::Call(call)              => call.binding_id_mut(),
+            Expression::Assignment(assignment)  => assignment.binding_id_mut(),
+            Expression::BinaryOp(binary_op)     => binary_op.binding_id_mut(),
+            Expression::UnaryOp(unary_op)       => unary_op.binding_id_mut(),
+            Expression::Block(block)            => block.binding_id_mut(),
+            Expression::IfBlock(if_block)       => if_block.binding_id_mut(),
+        }
+    }
+    fn binding_id(self: &Self) -> Option<BindingId> {
+        match self {
+            Expression::Literal(literal)        => literal.binding_id(),
+            Expression::Variable(variable)      => variable.binding_id(),
+            Expression::Call(call)              => call.binding_id(),
+            Expression::Assignment(assignment)  => assignment.binding_id(),
+            Expression::BinaryOp(binary_op)     => binary_op.binding_id(),
+            Expression::UnaryOp(unary_op)       => unary_op.binding_id(),
+            Expression::Block(block)            => block.binding_id(),
+            Expression::IfBlock(if_block)       => if_block.binding_id(),
+        }
+    }
+}
+
 impl<'a> Debug for Expression<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -216,9 +326,10 @@ impl<'a> Debug for Expression<'a> {
 #[derive(Debug)]
 pub struct Literal<'a> {
     pub value       : LiteralValue<'a>,
-    pub type_name   : Option<TypeName<'a>>,
-    pub type_id     : Option<TypeId>,
+    pub type_name   : Option<TypeName<'a>>, // used in e.g. 1i8, 3.1415f32
+    pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(Literal);
 
 pub enum LiteralValue<'a> {
     Bool(bool),
@@ -230,14 +341,14 @@ pub enum LiteralValue<'a> {
 #[derive(Debug)]
 pub struct Array<'a> {
     pub items       : Vec<Literal<'a>>,
-    pub type_id     : Option<TypeId>,
     pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(Array);
 
 impl<'a> LiteralValue<'a> {
     pub fn as_string(self: &Self) -> Option<&'a str> {
         match self {
-            LiteralValue::String(string) => Some(string),
+            LiteralValue::String(v) => Some(v),
             _ => None,
         }
     }
@@ -250,6 +361,12 @@ impl<'a> LiteralValue<'a> {
     pub fn as_bool(self: &Self) -> Option<bool> {
         match self {
             LiteralValue::Bool(v) => Some(*v),
+            _ => None,
+        }
+    }
+    pub fn as_array(self: &Self) -> Option<&Array> {
+        match self {
+            LiteralValue::Array(v) => Some(v),
             _ => None,
         }
     }
@@ -269,28 +386,29 @@ impl<'a> Debug for LiteralValue<'a> {
 #[derive(Debug)]
 pub struct Variable<'a> {
     pub path        : IdentPath<'a>,
-    pub type_id     : Option<TypeId>, // todo: just get from binding?
     pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(Variable);
 
 #[derive(Debug)]
 pub struct Call<'a> {
     pub path        : IdentPath<'a>,
     pub args        : Vec<Expression<'a>>,
-    pub type_id     : Option<TypeId>, // todo: just get from function?
     pub function_id : Option<FunctionId>,
     pub rust_fn_index: Option<u16>,
+    pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(Call);
 
 impl<'a> Call<'a> {
-    /// Returns whether the return type has been resolved.
+    /* /// Returns whether the return type has been resolved.
     pub fn ret_resolved(self: &Self) -> bool {
         self.type_id.is_some()
     }
     /// Returns whether the argument list has been resolved.
     pub fn args_resolved(self: &Self) -> bool {
-        self.args.iter().fold(true, |acc, arg| acc && arg.get_type_id().is_some())
-    }
+        self.args.iter().fold(true, |acc, arg| acc && arg.type_id().is_some())
+    } */
 }
 
 #[derive(Debug)]
@@ -300,20 +418,31 @@ pub struct Assignment<'a> {
     pub right   : Expression<'a>,
 }
 
+impl<'a> Bindable for Assignment<'a> {
+    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+        self.left.binding_id_mut()
+    }
+    fn binding_id(self: &Self) -> Option<BindingId> {
+        self.left.binding_id()
+    }
+}
+
 #[derive(Debug)]
 pub struct BinaryOp<'a> {
-    pub op      : BinaryOperator,
-    pub left    : Expression<'a>,
-    pub right   : Expression<'a>,
-    pub type_id : Option<TypeId>,
+    pub op          : BinaryOperator,
+    pub left        : Expression<'a>,
+    pub right       : Expression<'a>,
+    pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(BinaryOp);
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
     pub op      : UnaryOperator,
     pub expr    : Expression<'a>,
-    pub type_id : Option<TypeId>,
+    pub binding_id  : Option<BindingId>,
 }
+impl_bindable!(UnaryOp);
 
 pub struct IdentPath<'a>(pub Vec<&'a str>);
 

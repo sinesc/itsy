@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::fmt::{Debug, Formatter, Result};
 use std::ops::Index;
 use std::borrow::Borrow;
-//use std::slice::IterMut;
+use std::slice::{Iter, IterMut};
 use std::iter::FromIterator;
 
 /// A datastructure that stores items by name and index.
@@ -62,6 +62,10 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
     /// Returns the index of the named item.
     pub fn index_of<Q: ?Sized>(self: &Self, name: &Q) -> Option<I> where K: Borrow<Q>, Q: Hash + Eq {
         self.map.get(name).map(|i| *i)
+    }
+    /// Returns an iterator over the items.
+    pub fn values(self: &Self) -> Iter<V> {
+        self.data.iter()
     }
     /* /// Returns an iterator over the mutable items.
     pub fn values_mut(self: &mut Self) -> IterMut<V> {

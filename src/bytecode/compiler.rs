@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::cmp::max;
-use crate::frontend::{ast, ResolvedProgram, util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind}};
+use crate::frontend::{ast::{self, Typeable, Bindable}, ResolvedProgram, util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind}};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::ExternRust;
 
@@ -106,6 +106,8 @@ impl CompareOp {
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: ExternRust<T> {
     writer          : Writer<T>,
+    /// List of bindings mapped to their TypeIds
+    type_ids        : Vec<TypeId>,
     /// List of registered types, effectively mapped via vector index = TypeId.
     types           : Vec<Type>,
     /// Maps from binding id to load-argument for each frame.
@@ -124,6 +126,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         Compiler {
             writer      : Writer::new(),
             types       : Vec::new(),
+            type_ids    : Vec::new(),
             locals      : LocalsStack::new(),
             functions   : HashMap::new(),
             unresolved  : HashMap::new(),
@@ -133,7 +136,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles the current program.
     pub fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
 
-        let ResolvedProgram { ast: statements, types, entry_fn, .. } = program;
+        let ResolvedProgram { ast: statements, type_ids, types, entry_fn, .. } = program;
 
         // write placeholder jump to program entry
         let initial_pos = self.writer.position();
@@ -142,6 +145,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         // compile program
         self.types = types;
+        self.type_ids = type_ids;
         for statement in statements.iter() {
             self.compile_statement(statement);
         }
@@ -154,6 +158,13 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Returns compiled bytecode program.
     pub fn into_program(self: Self) -> Program<T> {
         self.writer.into_program()
+    }
+
+    /// Returns the type of the given binding.
+    fn bindingtype<B>(self: &Self, item: &B) -> Type where B: Bindable {
+        let binding_id = Into::<usize>::into(item.binding_id().unwrap());
+        let type_id = self.type_ids[binding_id];
+        self.types[Into::<usize>::into(type_id)].clone()
     }
 
     /// Returns type for given AST type slot.
@@ -204,12 +215,12 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                let ty = self.get_type(item.left.type_id);
+                let ty = self.bindingtype(&item.left);
                 self.write_store(index, &ty);
             },
             compound_assign @ _ => {
                 self.compile_expression(&item.right, &mut CompareOp::DontCare);
-                let ty = self.get_type(item.left.type_id);
+                let ty = self.bindingtype(&item.left);
                 self.write_load(index, &ty);
                 match compound_assign {
                     BO::Add => { self.write_add(&ty); },
@@ -238,7 +249,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let mut frame = Locals::new();
 
         for arg in item.sig.args.iter() {
-            frame.next_arg -= max(0, self.get_type(arg.type_id).size() as i32 / 4 - 1);
+            frame.next_arg -= max(0, self.bindingtype(arg).size() as i32 / 4 - 1);
             frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
             frame.next_arg -= 1;
         }
@@ -247,7 +258,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             if let ast::Statement::Binding(binding) = statement {
                 let next_var = frame.next_var;
                 frame.map.insert(binding.binding_id.unwrap(), next_var);
-                frame.next_var += max(1, self.get_type(binding.type_id).size() as i32 / 4);
+                frame.next_var += max(1, self.bindingtype(binding).size() as i32 / 4);
             }
         }
 
@@ -297,7 +308,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             self.compile_expression(expr, &mut CompareOp::DontCare);
             let binding_id = item.binding_id.unwrap();
             let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
-            let ty = self.get_type(item.type_id);
+            let ty = self.bindingtype(item);
             self.write_store(index, &ty);
         }
     }
@@ -308,7 +319,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
         };
-        let var_type = self.get_type(item.type_id);
+        let var_type = self.bindingtype(item);
         self.write_load(load_index, &var_type);
     }
 
@@ -386,7 +397,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Compiles the given literal
     pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
         use crate::frontend::ast::LiteralValue;
-        let lit_type = self.get_type(item.type_id);
+        let lit_type = self.bindingtype(item);
         match item.value {
             LiteralValue::Numeric(int) => {
                 match int {
@@ -449,7 +460,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     pub fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
         use crate::frontend::ast::UnaryOperator as UO;
 
-        let exp_type = self.get_type(item.expr.get_type_id());
+        let exp_type = self.bindingtype(&item.expr);
 
         match item.op {
             // logical
@@ -494,8 +505,8 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             self.compile_expression(&item.left, &mut CompareOp::DontCare);
         }
 
-        let result_type = self.get_type(item.type_id);
-        let compare_type = self.get_type(item.left.get_type_id());
+        let result_type = self.bindingtype(item);
+        let compare_type = self.bindingtype(&item.left);
 
         match item.op {
             // arithmetic
