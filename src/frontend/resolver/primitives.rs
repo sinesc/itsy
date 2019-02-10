@@ -3,7 +3,7 @@ use crate::frontend::util::{TypeId, ScopeId, Numeric, Signed, Unsigned};
 use crate::frontend::resolver::scopes::Scopes;
 use crate::frontend::util::Type;
 
-struct IntegerRange {
+pub struct IntegerRange {
     pub type_id: TypeId,
     pub min: Numeric,
     pub max: Numeric,
@@ -20,69 +20,70 @@ pub(crate) struct Primitives {
     /// String type
     pub string  : TypeId,
     /// Unsigned types ordered by bit count.
-    unsigned    : [ IntegerRange; 4 ],
+    pub unsigned: [ IntegerRange; 4 ],
     /// Signed types ordered by bit count.
     signed      : [ IntegerRange; 4 ],
     /// Floating point types ordered by bit count.
     pub float   : [ TypeId; 2 ],        // todo: temp pub
 }
 
+#[allow(dead_code)]
 impl Primitives {
 
     /// Create new instance.
     pub fn new(scopes: &mut Scopes, root_scope_id: ScopeId) -> Self {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
         Primitives {
-            void: scopes.insert_type(root_scope_id, "void", Type::bool), // FIXME: don't actually want void here
-            bool: scopes.insert_type(root_scope_id, "bool", Type::bool),
-            string: scopes.insert_type(root_scope_id, "String", Type::String),
+            void: scopes.insert_type(root_scope_id, None, Type::void), // FIXME: don't actually want void here
+            bool: scopes.insert_type(root_scope_id, Some("bool"), Type::bool),
+            string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
             unsigned: [
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "u8", Type::u8),
+                    type_id: scopes.insert_type(root_scope_id, Some("u8"), Type::u8),
                     min: Numeric::Unsigned(u8::MIN as Unsigned),
                     max: Numeric::Unsigned(u8::MAX as Unsigned),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "u16", Type::u16),
+                    type_id: scopes.insert_type(root_scope_id, Some("u16"), Type::u16),
                     min: Numeric::Unsigned(u16::MIN as Unsigned),
                     max: Numeric::Unsigned(u16::MAX as Unsigned),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "u32", Type::u32),
+                    type_id: scopes.insert_type(root_scope_id, Some("u32"), Type::u32),
                     min: Numeric::Unsigned(u32::MIN as Unsigned),
                     max: Numeric::Unsigned(u32::MAX as Unsigned),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "u64", Type::u64),
+                    type_id: scopes.insert_type(root_scope_id, Some("u64"), Type::u64),
                     min: Numeric::Unsigned(u64::MIN as Unsigned),
                     max: Numeric::Unsigned(u64::MAX as Unsigned),
                 },
             ],
             signed: [
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "i8", Type::i8),
+                    type_id: scopes.insert_type(root_scope_id, Some("i8"), Type::i8),
                     min: Numeric::Signed(i8::MIN as Signed),
                     max: Numeric::Signed(i8::MAX as Signed),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "i16", Type::i16),
+                    type_id: scopes.insert_type(root_scope_id, Some("i16"), Type::i16),
                     min: Numeric::Signed(i16::MIN as Signed),
                     max: Numeric::Signed(i16::MAX as Signed),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "i32", Type::i32),
+                    type_id: scopes.insert_type(root_scope_id, Some("i32"), Type::i32),
                     min: Numeric::Signed(i32::MIN as Signed),
                     max: Numeric::Signed(i32::MAX as Signed),
                 },
                 IntegerRange {
-                    type_id: scopes.insert_type(root_scope_id, "i64", Type::i64),
+                    type_id: scopes.insert_type(root_scope_id, Some("i64"), Type::i64),
                     min: Numeric::Signed(i64::MIN as Signed),
                     max: Numeric::Signed(i64::MAX as Signed),
                 },
             ],
             float: [
-                scopes.insert_type(root_scope_id, "f32", Type::f32),
-                scopes.insert_type(root_scope_id, "f64", Type::f64),
+                scopes.insert_type(root_scope_id, Some("f32"), Type::f32),
+                scopes.insert_type(root_scope_id, Some("f64"), Type::f64),
             ],
         }
     }

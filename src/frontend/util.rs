@@ -6,14 +6,32 @@ pub(crate) use self::repository::Repository;
 mod numeric;
 pub use self::numeric::*;
 
+#[macro_use] // apparently still needed inside the crate...
 mod typed_ids;
-pub use self::typed_ids::*;
 
 mod fn_sig;
 pub use self::fn_sig::{FnSig, FnKind};
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+
+/// Unique numeric id of a type.
+impl_typed_id!(TypeId);
+
+impl TypeId {
+    pub fn void() -> TypeId {
+        0.into()
+    }
+}
+
+/// Unique numeric id of a scope.
+impl_typed_id!(ScopeId);
+
+/// Unique numeric id of a variable binding.
+impl_typed_id!(BindingId);
+
+/// Unique numeric id of a function.
+impl_typed_id!(FunctionId);
 
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,15 +49,15 @@ pub struct Struct {
 #[derive(Clone, PartialEq)]
 pub struct Array {
     pub len: Option<usize>,
-    pub ty: Box<Type>,
+    pub type_id: Option<TypeId>,
 }
 
 impl Debug for Array {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(len) = self.len {
-            write!(f, "[ {:?}, {} ]", &*self.ty, len)
+            write!(f, "[ {}; {:?} ]", self.type_id.as_ref().map(|ty| format!("{:?}", ty)).unwrap_or("???".to_string()), len)
         } else {
-            write!(f, "[ {:?} ]", &*self.ty)
+            write!(f, "[ {} ]", self.type_id.as_ref().map(|ty| format!("{:?}", ty)).unwrap_or("???".to_string()))
         }
     }
 }
@@ -47,6 +65,7 @@ impl Debug for Array {
 #[allow(non_camel_case_types)]
 #[derive(Clone, PartialEq)]
 pub enum Type {
+    void,
     u8, u16, u32, u64,
     i8, i16, i32, i64,
     f32, f64,
@@ -60,6 +79,7 @@ pub enum Type {
 impl Debug for Type {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Type::void => write!(f, "void"),
             Type::u8 => write!(f, "u8"),
             Type::u16 => write!(f, "u16"),
             Type::u32 => write!(f, "u32"),
@@ -82,6 +102,7 @@ impl Debug for Type {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypeKind {
+    Void,
     Unsigned,
     Signed,
     Float,
@@ -117,18 +138,19 @@ impl Type {
             _ => false,
         }
     }
-    pub fn size(self: &Self) -> u8 {
+    pub fn size(self: &Self) -> Option<u8> {
         match self {
-            Type::u8 | Type::i8 | Type::bool => 1,
-            Type::u16 | Type::i16 => 2,
-            Type::u32 | Type::i32 | Type::f32 => 4,
-            Type::u64 | Type::i64 | Type::f64 => 8,
-            Type::String => 12, // pointer+len
-            _ => unimplemented!(), // todo: remaining types
+            Type::u8 | Type::i8 | Type::bool => Some(1),
+            Type::u16 | Type::i16 => Some(2),
+            Type::u32 | Type::i32 | Type::f32 => Some(4),
+            Type::u64 | Type::i64 | Type::f64 => Some(8),
+            Type::String => Some(12), // pointer+len
+            _ => None,
         }
     }
     pub fn kind(self: &Self) -> TypeKind {
         match self {
+            Type::void => TypeKind::Void,
             Type::u8 | Type::u16 | Type::u32 | Type::u64 => TypeKind::Unsigned,
             Type::i8 | Type::i16 | Type::i32 | Type::i64 => TypeKind::Signed,
             Type::f32 | Type::f64 => TypeKind::Float,

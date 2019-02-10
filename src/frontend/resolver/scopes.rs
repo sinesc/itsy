@@ -1,27 +1,20 @@
-// todo: remove
-#![allow(dead_code)]
 use std::{collections::HashMap, convert::Into};
 use crate::frontend::util::{Repository, TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
 
-pub enum Identifier<'a> {
-    Name(&'a str),
-    Array(Vec<(usize, TypeId)>),
-}
+// todo: move into resolver.rs, scrap struct or maybe just the impls on it (they have become trivial one-liners except for lookup_*)
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
-    types           : Repository<Type, TypeId, (ScopeId, String)>, // todo: try to implement borrow for (ScopeId, String) so that lookup via (ScopeId, &str) workds
+    types           : Repository<TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings        : Repository<Option<TypeId>, BindingId, (ScopeId, String)>,
+    bindings        : Repository<BindingId, Option<TypeId>>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions       : Repository<FnSig, FunctionId, (ScopeId, String)>,
+    functions       : Repository<FunctionId, FnSig>,
     /// Function scopes (the function containing this scope)
     scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
     parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
-    // temporary hack to handle anonymous bindings
-    anon_id         : u32,
 }
 
 impl Scopes {
@@ -35,7 +28,6 @@ impl Scopes {
             functions       : Repository::new(),
             scopefunction   : HashMap::new(),
             parent_map      : vec![ root_id ],
-            anon_id         : 0,
         }
     }
 
@@ -56,6 +48,7 @@ impl Scopes {
         index.into()
     }
 
+    #[allow(dead_code)]
     pub fn dump_parents(self: &Self, start_scope_id: ScopeId) {
         print!("self({:?})", start_scope_id);
         let mut scope_id = start_scope_id;
@@ -102,22 +95,22 @@ impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
     pub fn insert_function<T>(self: &mut Self, scope_id: ScopeId, name: T, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
-        self.functions.insert((scope_id, name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Internal })
+        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Internal })
     }
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
     pub fn insert_rustfn<T>(self: &mut Self, scope_id: ScopeId, name: T, fn_index: u16, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
-        self.functions.insert((scope_id, name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
+        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
     }
 
     /// Returns the id of the named function originating in exactly this scope.
     pub fn function_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<FunctionId> {
-        self.functions.index_of(&(scope_id, name.into())) // todo: remove conversion if/when borrow becomes possible
+        self.functions.id_of(scope_id, name)
     }
 
-    /// Finds the id of the named function within the scope or its parent scopes.
+    /// Finds the id of the named function within the scope or its parent scopes. // todo: generalize lookup functions, then integrate into resolver
     pub fn lookup_function_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<FunctionId> {
-        if let Some(index) = self.functions.index_of(&(scope_id, name.into())) { // todo: remove conversion if/when borrow becomes possible
+        if let Some(index) = self.functions.id_of(scope_id, name) {
             Some(index)
         } else {
             // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
@@ -132,7 +125,7 @@ impl Scopes {
 
     /// Returns the signature of the given function id.
     pub fn function_type(self: &Self, function_id: FunctionId) -> &FnSig {
-        self.functions.index(function_id)
+        self.functions.by_id(function_id)
     }
 }
 
@@ -140,24 +133,18 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_binding<T>(self: &mut Self, scope_id: ScopeId, name: T, type_id: Option<TypeId>) -> BindingId where T: Into<String> {
-        self.bindings.insert((scope_id, name.into()), type_id)
-    }
-
-    /// Insert an anonymous binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_anon_binding(self: &mut Self, scope_id: ScopeId, type_id: Option<TypeId>) -> BindingId {
-        self.anon_id += 1;
-        self.bindings.insert((scope_id, self.anon_id.to_string()), type_id)
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, type_id: Option<TypeId>) -> BindingId {
+        self.bindings.insert(scope_id, name.map(|n| n.into()), type_id)
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
     pub fn binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        self.bindings.index_of(&(scope_id, name.into())) // todo: remove into if/when borrow becomes possible
+        self.bindings.id_of(scope_id, name)
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
     pub fn lookup_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        if let Some(index) = self.bindings.index_of(&(scope_id, name.into())) { // todo: remove into if/when borrow becomes possible
+        if let Some(index) = self.bindings.id_of(scope_id, name) {
             Some(index)
         } else {
             // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
@@ -170,14 +157,14 @@ impl Scopes {
         }
     }
 
-    /// Returns a mutable reference to the type of the given binding id.
-    pub fn binding_type_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
-        self.bindings.index_mut(binding_id)
+    /// Returns a mutable reference to the type-id of the given binding id.
+    pub fn binding_type_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
+        self.bindings.by_id_mut(binding_id)
     }
 
-    /// Returns a copy of the type of the given binding id.
-    pub fn binding_type(self: &Self, binding_id: BindingId) -> Option<TypeId> {
-        *self.bindings.index(binding_id)
+    /// Returns a copy of the type-id of the given binding id.
+    pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
+        *self.bindings.by_id(binding_id)
     }
 }
 
@@ -185,22 +172,18 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a type into the given scope, returning a type id.
-    pub fn insert_type<T>(self: &mut Self, scope_id: ScopeId, name: T, ty: Type) -> TypeId where T: Into<String> { // todo: name
-        self.types.insert((scope_id, name.into()), ty)
+    pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: Option<&str>, ty: Type) -> TypeId {
+        self.types.insert(scope_id, name.map(|n| n.into()), ty)
     }
 
     /// Returns the id of the named type originating in exactly this scope.
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        self.types.index_of(&(scope_id, name.into())) // todo: can I use name here somehow? implement borrow for (ScopeId, String)?
-    }
-
-    pub fn void_type(self: &Self) -> TypeId {
-        0.into() // todo: this is a little bit hacky
+        self.types.id_of(scope_id, name)
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
     pub fn lookup_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        if let Some(index) = self.types.index_of(&(scope_id, name.into())) {
+        if let Some(index) = self.types.id_of(scope_id, name) {
             Some(index)
         } else {
             // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
@@ -213,15 +196,29 @@ impl Scopes {
         }
     }
 
-    pub fn lookup_type(self: &Self, type_id: TypeId) -> &Type {
-        self.types.index(type_id)
+    /// Returns a mutable reference to the type of the given type id.
+    pub fn type_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
+        self.types.by_id_mut(type_id)
+    }
+
+    /// Returns a reference to the type of the given type id.
+    pub fn type_ref(self: &Self, type_id: TypeId) -> &Type {
+        self.types.by_id(type_id)
+    }
+
+    /// Returns the id of type void.
+    pub fn void_type(self: &Self) -> TypeId {
+        0.into() // todo: this is a little bit hacky
     }
 }
 
 impl Into<(Vec<TypeId>, Vec<Type>)> for Scopes {
     /// convert scopes into type vector
     fn into(self: Self) -> (Vec<TypeId>, Vec<Type>) {
+        let x: Vec<Type> = self.types.into();
+
+        println!("bindingtypes: {:?}", self.bindings.values().map(|type_id| type_id.map(|type_id| x[Into::<usize>::into(type_id)].clone())).enumerate().collect::<Vec<(usize, Option<Type>)>>());
         let type_map = self.bindings.values().map(|type_id| type_id.unwrap()).collect();
-        (type_map, self.types.into())
+        (type_map, x)
     }
 }

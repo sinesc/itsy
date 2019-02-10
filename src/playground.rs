@@ -39,13 +39,12 @@ fn main() {
     ";*/
     /*let source = "
         let x = [ [ 1, 2 ] ];
-        let y: u32 = x[0][0];
+        let y: u32 = x[7][8];
     ";*/
     let source = "
         fn main() {
-            let x: u32 = 1;
-            let y = x + 1;
-            printu32(x);
+            let x = [ 1, 2 ];
+            let y: u32 = x[0];
             printu32(y);
         }
     ";

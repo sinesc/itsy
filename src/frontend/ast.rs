@@ -340,10 +340,8 @@ pub enum LiteralValue<'a> {
 
 #[derive(Debug)]
 pub struct Array<'a> {
-    pub items       : Vec<Literal<'a>>,
-    pub binding_id  : Option<BindingId>,
+    pub items: Vec<Literal<'a>>,
 }
-impl_bindable!(Array);
 
 impl<'a> LiteralValue<'a> {
     pub fn as_string(self: &Self) -> Option<&'a str> {

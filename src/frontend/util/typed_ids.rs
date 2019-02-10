@@ -1,97 +1,23 @@
-//! Various new-typed usize unique identifiers.
+//! Macro to implement typesafe ids.
 
-use std::fmt::{self, Debug};
-
-/// Unique numeric id of a type.
-#[derive(Copy, Clone, Default, PartialEq, PartialOrd)]
-pub struct TypeId(usize);
-
-impl TypeId {
-    pub fn void() -> TypeId {
-        0.into()
-    }
-}
-
-impl From<TypeId> for usize {
-    fn from(input: TypeId) -> usize {
-        input.0
-    }
-}
-
-impl From<usize> for TypeId {
-    fn from(input: usize) -> TypeId {
-        TypeId(input)
-    }
-}
-
-impl Debug for TypeId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TypeId({})", self.0)
-    }
-}
-
-/// Unique numeric id of a scope.
-#[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
-pub struct ScopeId(usize);
-
-impl From<ScopeId> for usize {
-    fn from(input: ScopeId) -> usize {
-        input.0
-    }
-}
-
-impl From<usize> for ScopeId {
-    fn from(input: usize) -> ScopeId {
-        ScopeId(input)
-    }
-}
-
-impl Debug for ScopeId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ScopeId({})", self.0)
-    }
-}
-
-/// Unique numeric id of a variable binding.
-#[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
-pub struct BindingId(usize);
-
-impl From<BindingId> for usize {
-    fn from(input: BindingId) -> usize {
-        input.0
-    }
-}
-
-impl From<usize> for BindingId {
-    fn from(input: usize) -> BindingId {
-        BindingId(input)
-    }
-}
-
-impl Debug for BindingId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BindingId({})", self.0)
-    }
-}
-
-/// Unique numeric id of a function.
-#[derive(Copy, Clone, Default, Eq, Hash, PartialEq)]
-pub struct FunctionId(usize);
-
-impl From<FunctionId> for usize {
-    fn from(input: FunctionId) -> usize {
-        input.0
-    }
-}
-
-impl From<usize> for FunctionId {
-    fn from(input: usize) -> FunctionId {
-        FunctionId(input)
-    }
-}
-
-impl Debug for FunctionId {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "FunctionId({})", self.0)
-    }
+macro_rules! impl_typed_id {
+    ($name:ident) => {
+        #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Hash)]
+        pub struct $name(usize);
+        impl From<$name> for usize {
+            fn from(input: $name) -> usize {
+                input.0
+            }
+        }
+        impl From<usize> for $name {
+            fn from(input: usize) -> $name {
+                $name(input)
+            }
+        }
+        impl ::std::fmt::Debug for $name {
+            fn fmt(self: &Self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
+    };
 }

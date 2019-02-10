@@ -1,19 +1,15 @@
 use std::collections::HashMap;
-use std::cmp::Eq;
-use std::hash::Hash;
 use std::fmt::{Debug, Formatter, Result};
-use std::ops::Index;
-use std::borrow::Borrow;
-use std::slice::{Iter, IterMut};
-use std::iter::FromIterator;
+use crate::frontend::util::ScopeId;
 
 /// A datastructure that stores items by name and index.
-pub(crate) struct Repository<V, I = usize, K = String> {
-    map: HashMap<K, I>,
-    data: Vec<V>,
+pub(crate) struct Repository<I, V> {
+    map     : HashMap<(String, ScopeId), I>,
+    data    : Vec<(V, ScopeId)>,
 }
 
-impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + From<usize> {
+#[allow(dead_code)]
+impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     /// Creates a new repository.
     pub fn new() -> Self {
         Repository {
@@ -21,80 +17,66 @@ impl<V, I, K> Repository<V, I, K> where K: Eq + Hash, I: Copy + Into<usize> + Fr
             data: Vec::new(),
         }
     }
-    /* /// Creates a new repository with given capacity.
-    pub fn with_capacity(cap: usize) -> Self {
-        Repository {
-            map: HashMap::with_capacity(cap),
-            data: Vec::with_capacity(cap),
-        }
-    }*/
     /// Inserts an item into the repository and returns its index.
-    pub fn insert(self: &mut Self, name: K, element: V) -> I {
+    pub fn insert(self: &mut Self, scope_id: ScopeId, name: Option<String>, element: V) -> I {
         let index = I::from(self.data.len());
-        self.data.push(element);
-        self.map.insert(name, index);
+        self.data.push((element, scope_id));
+        if let Some(name) = name {
+            self.map.insert((name, scope_id), index);
+        }
         index
     }
-    /// Fetches an item by index.
-    pub fn index(self: &Self, index: I) -> &V {
-        &self.data[index.into()]
+    /// Sets a name for given index or removes it.
+    pub fn set_name(self: &mut Self, index: I, name: Option<String>) where I: PartialEq {
+        let scope_id = self.data[index.into()].1;
+        if let Some(name) = name {
+            self.map.entry((name, scope_id)).or_insert(index);
+        } else if let Some(name) = self.map.iter().find(|&item| *item.1 == index).map(|item| (*item.0).clone()) {
+            self.map.remove(&name);
+        }
     }
-    /// Fetches an item by index.
-    pub fn index_mut(self: &mut Self, index: I) -> &mut V {
-        &mut self.data[index.into()]
+    /// Fetches an item by its id.
+    pub fn by_id(self: &Self, index: I) -> &V {
+        &self.data[index.into()].0
+    }
+    /// Mutably fetches an item by its id.
+    pub fn by_id_mut(self: &mut Self, index: I) -> &mut V {
+        &mut self.data[index.into()].0
     }
     /// Fetches an item by name.
-    pub fn name<Q: ?Sized>(self: &Self, name: &Q) -> Option<&V> where K: Borrow<Q>, Q: Hash + Eq {
-        if let Some(&index) = self.map.get(name) {
-            Some(&self.data[index.into()])
+    pub fn by_name(self: &Self, scope_id: ScopeId, name: &str) -> Option<&V> {
+        if let Some(index) = self.id_of(scope_id, name) {
+            Some(&self.data[index.into()].0)
         } else {
             None
         }
     }
-    /* /// Fetches an item mutably by name.
-    pub fn name_mut<Q: ?Sized>(self: &mut Self, name: & Q) -> Option<& mut V> where K: Borrow<Q>, Q: Hash + Eq {
-        if let Some(&index) = self.map.get(name) {
-            Some(&mut self.data[Into::<usize>::into(index)])
+    /// Mutably fetches an item by name.
+    pub fn by_name_mut(self: &mut Self, scope_id: ScopeId, name: &str) -> Option<&mut V> {
+        if let Some(index) = self.id_of(scope_id, name) {
+            Some(&mut self.data[index.into()].0)
         } else {
             None
         }
-    }*/
-    /// Returns the index of the named item.
-    pub fn index_of<Q: ?Sized>(self: &Self, name: &Q) -> Option<I> where K: Borrow<Q>, Q: Hash + Eq {
-        self.map.get(name).map(|i| *i)
+    }
+    /// Returns the id of the named item.
+    pub fn id_of(self: &Self, scope_id: ScopeId, name: &str) -> Option<I> {
+        self.map.get(&(name.to_string(), scope_id)).map(|i| *i)
     }
     /// Returns an iterator over the items.
-    pub fn values(self: &Self) -> Iter<V> {
-        self.data.iter()
+    pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {
+        self.data.iter().map(|item| &item.0)
     }
-    /* /// Returns an iterator over the mutable items.
-    pub fn values_mut(self: &mut Self) -> IterMut<V> {
-        self.data.iter_mut()
-    }*/
 }
 
-impl<V, I, K> Into<Vec<V>> for Repository<V, I, K> {
+impl<I, V> Into<Vec<V>> for Repository<I, V> {
     fn into(self: Self) -> Vec<V> {
-        self.data
+        self.data.into_iter().map(|item| item.0).collect()
     }
 }
 
-impl<'a, K, Q: ?Sized, V, I> Index<&'a Q> for Repository<V, I, K>
-    where K: Eq + Hash + Borrow<Q>,
-          Q: Eq + Hash,
-          I: Debug + Copy + Into<usize> + From<usize>
-{
-    type Output = V;
-
-    #[inline]
-    fn index(&self, key: &Q) -> &V {
-        self.name(key).expect("no entry found for key")
-    }
-}
-
-impl<V, I, K> Debug for Repository<V, I, K>
+impl<I, V> Debug for Repository<I, V>
 where
-    K: Eq + Hash + Debug,
     V: Debug,
     I: Debug + Copy + Into<usize> + From<usize>
 {
@@ -107,7 +89,21 @@ where
             .finish()
     }
 }
+/*
+impl<'a, K, Q: ?Sized, V, I, S> Index<&'a Q> for Repository<V, I, S, K>
+    where K: Eq + Hash + Borrow<Q>,
+          Q: Eq + Hash,
+          I: Debug + Copy + Into<usize> + From<usize>
+{
+    type Output = V;
 
+    #[inline]
+    fn index(&self, key: &Q) -> &V {
+        self.name(key).expect("no entry found for key")
+    }
+}
+*/
+/*
 impl<V, I, K> FromIterator<(K, V)> for Repository<V, I, K>
 where
     K: Eq + Hash,
@@ -118,9 +114,10 @@ where
         let mut repository = Repository::new();
 
         for (k, v) in iter {
-            repository.insert(k, v);
+            repository.insert(Some(k), v);
         }
 
         repository
     }
 }
+*/
