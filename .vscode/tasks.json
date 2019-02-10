@@ -13,7 +13,8 @@
                 "build"
             ],
             "group": "build",
-            "problemMatcher": "$rustc"
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo build (release)",
@@ -24,7 +25,8 @@
                 "--release"
             ],
             "group": "build",
-            "problemMatcher": "$rustc"
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run",
@@ -34,7 +36,8 @@
                 "run"
             ],
             "group": "build",
-            "problemMatcher": "$rustc"
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run (release)",
@@ -45,7 +48,8 @@
                 "--release"
             ],
             "group": "build",
-            "problemMatcher": "$rustc"
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
         },
         /*{
             "label": "cargo run example",
