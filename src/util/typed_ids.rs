@@ -1,22 +1,30 @@
+use std::num::NonZeroUsize;
+use std::fmt::Debug;
+use std::default::Default;
+use std::convert::Into;
+
 /// Macro to implement typesafe ids.
 macro_rules! impl_typed_id {
     ($name:ident) => {
-        #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Hash)]
-        pub struct $name(usize);
+        #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
+        pub struct $name(NonZeroUsize);
         impl From<$name> for usize {
             fn from(input: $name) -> usize {
-                input.0
+                Into::<usize>::into(input.0) - 1
             }
         }
         impl From<usize> for $name {
             fn from(input: usize) -> $name {
-                $name(input)
+                $name(NonZeroUsize::new(input + 1).expect("Expected non-zero input id"))
             }
         }
-        impl ::std::fmt::Debug for $name {
+        impl Debug for $name {
             fn fmt(self: &Self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                write!(f, "{}({})", stringify!($name), self.0)
+                write!(f, "{}({})", stringify!($name), Into::<usize>::into(self.0) - 1)
             }
+        }
+        impl Default for $name {
+            fn default() -> Self { Self(NonZeroUsize::new(1).unwrap()) }
         }
     };
 }
