@@ -173,16 +173,21 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
 
-    /// Returns the size of the given type.
-    pub fn sizeof(self: &Self, ty: &Type) -> usize {
+    /// Returns the size of the given type in bytes.
+    pub fn bytesize(self: &Self, ty: &Type) -> usize {
         if let Some(size) = ty.size() {
             size as usize
         } else if let Type::Array(Array { len, type_id }) = ty {
             let ty = self.get_type(*type_id);
-            self.sizeof(ty) * len.unwrap()
+            self.bytesize(ty) * len.unwrap()
         } else {
             unimplemented!("sizeof {:?}", ty)
         }
+    }
+
+    /// Returns the size of the given type in stack elements.
+    pub fn quadsize(self: &Self, ty: &Type) -> usize {
+        (self.bytesize(ty) + 3) / 4
     }
 }
 
@@ -262,7 +267,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let mut frame = Locals::new();
 
         for arg in item.sig.args.iter() {
-            frame.next_arg -= max(0, self.sizeof(&self.bindingtype(arg)) as i32 / 4 - 1);
+            frame.next_arg -= max(0, self.bytesize(&self.bindingtype(arg)) as i32 / 4 - 1);
             frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
             frame.next_arg -= 1;
         }
@@ -271,7 +276,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             if let ast::Statement::Binding(binding) = statement {
                 let next_var = frame.next_var;
                 frame.map.insert(binding.binding_id.unwrap(), next_var);
-                frame.next_var += max(1, self.sizeof(&self.bindingtype(binding)) as i32 / 4);
+                frame.next_var += max(1, self.bytesize(&self.bindingtype(binding)) as i32 / 4);
             }
         }
 
@@ -281,7 +286,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         self.locals.push(frame);
         self.compile_block(&item.block);
-        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| (self.sizeof(&self.get_type(ret.type_id)) as i32 / 4) as u8 )); // todo: skip if last statement was "return"
+        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.quadsize(&self.get_type(ret.type_id)) as u8)); // todo: skip if last statement was "return"
         self.locals.pop();
     }
 
@@ -392,7 +397,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         } else {
             self.writer.lit0(); // todo: need to return something for now
         }
-        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| (self.sizeof(&self.get_type(Some(ret))) as i32 / 4) as u8 ));
+        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.quadsize(&self.get_type(Some(ret))) as u8));
     }
 
     /// Compiles the given block.
@@ -630,21 +635,21 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         };
     }
     fn write_eq(self: &mut Self, ty: &Type) {
-        match self.sizeof(ty) {
+        match self.bytesize(ty) {
             1 | 2 | 4 => self.writer.ceqr32(),
             8 => self.writer.ceqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
     fn write_neq(self: &mut Self, ty: &Type) {
-        match self.sizeof(ty) {
+        match self.bytesize(ty) {
             1 | 2 | 4 => self.writer.cneqr32(),
             8 => self.writer.cneqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
     fn write_lt(self: &mut Self, ty: &Type) {
-        match self.sizeof(ty) {
+        match self.bytesize(ty) {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.clts32(),
                 TypeKind::Unsigned => self.writer.cltu32(),
@@ -661,7 +666,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         };
     }
     fn write_lte(self: &mut Self, ty: &Type) {
-        match self.sizeof(ty) {
+        match self.bytesize(ty) {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.cltes32(),
                 TypeKind::Unsigned => self.writer.clteu32(),
@@ -679,7 +684,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &mut Self, index: i32, ty: &Type) {
-        let size = self.sizeof(ty);
+        let size = self.bytesize(ty);
         if ty.kind() == TypeKind::String {
             self.writer.stores(index);
         } else if size <= 4 {
@@ -692,7 +697,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &mut Self, index: i32, ty: &Type) {
-        let size = self.sizeof(ty);
+        let size = self.bytesize(ty);
         if ty.kind() == TypeKind::String {
             self.writer.loads(index);
         } else if size <= 4 {
