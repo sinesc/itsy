@@ -1,8 +1,5 @@
 //! Misc. utility code.
 
-mod repository;
-pub(crate) use self::repository::Repository;
-
 mod numeric;
 pub use self::numeric::*;
 

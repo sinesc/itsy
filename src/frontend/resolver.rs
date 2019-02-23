@@ -2,10 +2,11 @@
 
 mod scopes;
 mod primitives;
+mod repository;
 
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable};
-use crate::frontend::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array};
+use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array};
 use crate::{ExternRust, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.

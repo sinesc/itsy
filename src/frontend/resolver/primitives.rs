@@ -1,7 +1,5 @@
-use crate::frontend::util::{TypeId, ScopeId, Numeric, Signed, Unsigned};
-//use crate::frontend::ast;
+use crate::util::{Type, TypeId, ScopeId, Numeric, Signed, Unsigned};
 use crate::frontend::resolver::scopes::Scopes;
-use crate::frontend::util::Type;
 
 pub struct IntegerRange {
     pub type_id: TypeId,

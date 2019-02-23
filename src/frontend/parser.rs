@@ -5,7 +5,7 @@ use nom::types::CompleteStr as Input;
 use nom::verbose_errors::Context;
 use nom::*;
 use std::collections::HashMap;
-use crate::frontend::util::Numeric;
+use crate::util::Numeric;
 use crate::frontend::ast::*;
 use crate::frontend::Program;
 

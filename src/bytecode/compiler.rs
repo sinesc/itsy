@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::cmp::max;
-use crate::frontend::{ast::{self, Bindable}, ResolvedProgram, util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, Array}};
+use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, Array};
+use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::ExternRust;
 

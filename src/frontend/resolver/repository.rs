@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter, Result};
-use crate::frontend::util::ScopeId;
+use crate::util::ScopeId;
 
 /// A datastructure that stores items by name and index.
 pub(crate) struct Repository<I, V> {

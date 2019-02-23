@@ -5,6 +5,7 @@
 pub mod frontend;
 #[macro_use]
 pub mod bytecode;
+pub(crate)mod util;
 
 use std::fmt::Debug;
 use std::collections::HashMap;

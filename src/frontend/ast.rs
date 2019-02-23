@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::frontend::util::{BindingId, FunctionId, ScopeId, Numeric, TypeId};
+use crate::util::{BindingId, FunctionId, ScopeId, Numeric, TypeId};
 
 /// A trait for bindable ast structures.
 pub(crate) trait Bindable {
