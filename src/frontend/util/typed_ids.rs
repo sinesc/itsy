@@ -1,5 +1,4 @@
-//! Macro to implement typesafe ids.
-
+/// Macro to implement typesafe ids.
 macro_rules! impl_typed_id {
     ($name:ident) => {
         #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Hash)]
@@ -21,3 +20,21 @@ macro_rules! impl_typed_id {
         }
     };
 }
+
+/// Unique numeric id of a type.
+impl_typed_id!(TypeId);
+
+impl TypeId {
+    pub fn void() -> TypeId {
+        0.into()
+    }
+}
+
+/// Unique numeric id of a scope.
+impl_typed_id!(ScopeId);
+
+/// Unique numeric id of a variable binding.
+impl_typed_id!(BindingId);
+
+/// Unique numeric id of a function.
+impl_typed_id!(FunctionId);

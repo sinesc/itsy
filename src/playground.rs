@@ -43,9 +43,16 @@ fn main() {
     ";*/
     let source = "
         fn main() {
-            let x = [ 1, 2 ];
-            let y: u32 = x[0];
-            printu32(y);
+            let x = [ [ 1 ] ];
+            let y = x[0];
+            let z = y[0];
+            printu32(z);
+        }
+    ";
+    let source = "
+        fn main() {
+            let x = [ [ [ 1 ], [ 2 ] ] ];
+            let z: u32 = x[0][0][0];
         }
     ";
     println!("{}", source);

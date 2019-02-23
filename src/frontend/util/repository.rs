@@ -63,6 +63,10 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     pub fn id_of(self: &Self, scope_id: ScopeId, name: &str) -> Option<I> {
         self.map.get(&(name.to_string(), scope_id)).map(|i| *i)
     }
+    /// Returns the name of the given id.
+    pub fn name_of(self: &Self, index: I) -> Option<&str> where I: PartialEq  {
+        self.map.iter().find(|&item| *item.1 == index).map(|item| &*(item.0).0)
+    }
     /// Returns an iterator over the items.
     pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {
         self.data.iter().map(|item| &item.0)
@@ -89,35 +93,3 @@ where
             .finish()
     }
 }
-/*
-impl<'a, K, Q: ?Sized, V, I, S> Index<&'a Q> for Repository<V, I, S, K>
-    where K: Eq + Hash + Borrow<Q>,
-          Q: Eq + Hash,
-          I: Debug + Copy + Into<usize> + From<usize>
-{
-    type Output = V;
-
-    #[inline]
-    fn index(&self, key: &Q) -> &V {
-        self.name(key).expect("no entry found for key")
-    }
-}
-*/
-/*
-impl<V, I, K> FromIterator<(K, V)> for Repository<V, I, K>
-where
-    K: Eq + Hash,
-    I: Copy + Into<usize> + From<usize>
-{
-    fn from_iter<F: IntoIterator<Item=(K, V)>>(iter: F) -> Self {
-
-        let mut repository = Repository::new();
-
-        for (k, v) in iter {
-            repository.insert(Some(k), v);
-        }
-
-        repository
-    }
-}
-*/

@@ -49,6 +49,26 @@ impl Numeric {
             _ => false,
         }
     }
+    pub fn as_signed(self: &Self) -> Option<i64> {
+        match self {
+            Numeric::Signed(v) => Some(*v as i64),
+            Numeric::Unsigned(v) => Some(*v as i64),
+            _ => None,
+        }
+    }
+    pub fn as_unsigned(self: &Self) -> Option<u64> {
+        match self {
+            Numeric::Signed(v) => Some(*v as u64),
+            Numeric::Unsigned(v) => Some(*v as u64),
+            _ => None,
+        }
+    }
+    pub fn as_float(self: &Self) -> Option<f64> {
+        match self {
+            Numeric::Float(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
     fn as_f64(self: &Self) -> Option<f64> {
         match self {
             Numeric::Float(v) => Some(*v as f64),

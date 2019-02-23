@@ -33,7 +33,11 @@ impl Scopes {
 
     /// Returns the number of unresolved items in the Scopes.
     pub fn num_unresolved(self: &Self) -> u32 {
-        self.bindings.values().fold(0, |acc, x| if x.is_none() { acc + 1 } else { acc }) // todo: consider functions as well
+        self.bindings.values().fold(0, |acc, x| acc + if x.is_some() { 0 } else { 1 })
+        + self.types.values().fold(0, |acc, x| acc + match x {
+            Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
+            _ => 0,
+        }) // todo: consider functions as well
     }
 
     /// Returns the root scope id.
@@ -165,6 +169,11 @@ impl Scopes {
     /// Returns a copy of the type-id of the given binding id.
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
         *self.bindings.by_id(binding_id)
+    }
+
+    /// Returns the id of the named binding originating in exactly this scope.
+    pub fn binding_name(self: &Self, binding_id: BindingId) -> Option<&str> {
+        self.bindings.name_of(binding_id)
     }
 }
 

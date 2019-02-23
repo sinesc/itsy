@@ -84,14 +84,19 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
         now_unresolved = scopes.num_unresolved();
 
         if now_unresolved == 0 || (now_unresolved == prev_unresolved && infer_literals) {
+            println!("done resolving with {} unresolved, infer_literals: {}", now_unresolved, infer_literals);
             break;
         }
 
         infer_literals = now_unresolved == prev_unresolved && !infer_literals;
-        println!("now_unresolved: {}, infer_literals: {}", now_unresolved, infer_literals);
+        println!("now {} unresolved, infer_literals: {}", now_unresolved, infer_literals);
     }
 
-    //println!("{:?}", program);
+    if let ast::Statement::Function(f) = &program[0] {
+        for statement in &f.block.statements {
+            println!("{:?}", statement);
+        }
+    }
 
     let entry_fn = scopes.lookup_function_id(root_scope_id, entry).expect("Failed to resolve entry function");
     let (bindingtype_ids, types) = scopes.into();
@@ -127,11 +132,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
             if self.scopes.binding_id(self.scope_id, name).is_some() {
-                unimplemented!("shadowing"); // todo: support shadowing
+                //unimplemented!("cannot shadow {}", name); // fixme: disabled for array stuff todo: support shadowing
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, Some(name), None);
             *item.binding_id_mut() = Some(binding_id);
-            println!("binding {} = {:?}", name, binding_id);
+            println!("created binding {:?} = {}", binding_id, name);
             binding_id
         }
     }
@@ -159,10 +164,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
         *type_id = Some(new_type_id);
     }
 
-    // Returns TypeId for the given binding, generating a BindingId if required.
-    fn bindingtype_id<T>(self: &mut Self, item: &mut T) -> Option<TypeId> where T: Bindable {
-        let binding_id = self.try_create_anon_binding(item);
-        self.scopes.binding_type_id(binding_id)
+    // Returns TypeId for the given binding.
+    fn bindingtype_id<T>(self: &Self, item: &mut T) -> Option<TypeId> where T: Bindable {
+        item.binding_id().and_then(|binding_id| self.scopes.binding_type_id(binding_id))
     }
 
     // Returns a mutable reference to the type of the given binding.
@@ -438,25 +442,24 @@ impl<'a, 'b> Resolver<'a, 'b> {
         item.type_id
     }
 
+    /// Resolves bound array literal.
     fn resolve_array_literal_binding(self: &mut Self, item: &mut ast::Literal<'a>, binding_name: &str) {
-        let array_name = format!("{}[]", binding_name);
-        self.try_create_binding(item, &array_name);
-
         // recursively descend resolve contained arrays
         if let ast::Literal { value: ast::LiteralValue::Array(ref mut array), .. } = item {
-            self.resolve_array_literal_binding(&mut array.items[0], &array_name);
+            let array_name = format!("{}[]", binding_name);
+            let item_binding_id = self.scopes.binding_id(self.scope_id, &array_name)
+                                    .unwrap_or_else(|| self.scopes.insert_binding(self.scope_id, Some(&array_name), None) );
+            for item in &mut array.items {
+                *item.binding_id_mut() = Some(item_binding_id);
+                self.resolve_array_literal_binding(item, &array_name);
+            }
+        } else {
+            self.resolve_literal(item);
         }
     }
 
-    /// Resolves a binding created by let, for or a signature
+    /// Resolves a binding created by let, for or a signature.
     fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'a>) {
-
-        // bind contained array literals // todo: should happen in resolve_array but we need the binding name and don't have parent access
-        if let Some(ast::Expression::Literal(ref mut array_literal)) = &mut item.expr {
-            if let ast::Literal { value: ast::LiteralValue::Array(ref mut array), ..} = array_literal {
-                self.resolve_array_literal_binding(&mut array.items[0], item.name);
-            }
-        }
 
         // check if a type is specified
         let explicit = match item.type_name {
@@ -467,10 +470,24 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
 
         // apply explicit type to binding
-        self.try_create_binding(item, item.name);
+        let binding_id = self.try_create_binding(item, item.name);
 
         if let Some(explicit) = explicit {
             self.set_bindingtype_id(item, explicit);
+        }
+
+        // resolve right hand side, link bindings
+        if let Some(ast::Expression::Literal(ref mut array_literal)) = &mut item.expr {
+            // bind contained array literals // todo: should happen in resolve_array but we need the binding name and don't have parent access
+            if array_literal.binding_id().is_none() {
+                *array_literal.binding_id_mut() = Some(binding_id);
+                self.resolve_array_literal_binding(array_literal, item.name);
+            }
+        }
+
+        if let Some(expr) = &mut item.expr {
+            *expr.binding_id_mut() = Some(binding_id);
+            self.resolve_expression(expr);
         }
 
         // appy binding type to right hand side
@@ -482,26 +499,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         // apply right hand side back to binding
         if let Some(expr) = &mut item.expr {
-            self.resolve_expression(expr);
             if let Some(expr_type) = self.bindingtype_id(expr) {
                 self.set_bindingtype_id(item, expr_type);
             }
         };
-
-
-
-        /*
-        // have explicit type and a resolved type for right hand side, check that they match
-        if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
-            if lhs != rhs && !self.primitives.is_compatible(rhs, lhs) {
-                panic!("incompatible types {:?} and {:?}", self.get_type(lhs), self.get_type(rhs)); // TODO: error handling
-
-                //todo: don't just check here, SET the type and binding for the right hand side
-
-
-            }
-        }
-        */
     }
 
     /// Resolves an occurance of a variable.
@@ -624,19 +625,24 @@ impl<'a, 'b> Resolver<'a, 'b> {
             O::Index => {
                 self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[3].type_id);
 
-                println!("index op binding {:?}: type: {:?} left: {:?}", item.binding_id(), type_id.map(|t| self.scopes.type_ref(t)), left_type_id.map(|t| self.scopes.type_ref(t)));
+                if let Some(left_binding_id) = item.left.binding_id() {
+                    if let Some(left_binding_name) = self.scopes.binding_name(left_binding_id) {
+                        let item_name = format!("{}[]", left_binding_name);
 
-                if type_id.is_some() {
-                    //let result_type = self.scopes.type_ref(type_id.unwrap()).clone();
+                        *item.binding_id_mut() = self.scopes.lookup_binding_id(self.scope_id, &item_name);
 
-                    if let Some(array) = self.bindingtype_mut(&mut item.left) {
-                        // got a type for the result of the index op,
-                        println!("array={:?}", array);
-                        if let Type::Array(Array { type_id: array_item_type_id @ None, .. }) = array {
+                        println!("set binding name {:?} = {}", item.binding_id().unwrap(), item_name);
+                        let mybid = self.bindingtype_id(item);
+                        println!("my type is {:?} = {:?}", mybid, mybid.map(|t| self.scopes.type_ref(t)));
 
-                            *array_item_type_id = type_id;
+                        if let Some(binding_type_id) = self.bindingtype_id(item) {
+                            println!("applying my type to argument");
 
-                            println!("index op type name: {:?}", array_item_type_id);
+                            let ty = self.bindingtype_mut(&mut item.left);
+
+                            if let Some(Type::Array(array)) = ty {
+                                array.type_id = Some(binding_type_id);
+                            }
                         }
                     }
                 }
@@ -666,80 +672,45 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves an array literal and creates the required array types.
     fn resolve_literal_array(self: &mut Self, item: &mut ast::Literal<'a>) {
 
-        use crate::frontend::ast::{Literal, LiteralValue};
+        // wait until the literal has a binding id
 
-        let mut current_item = &mut *item;
+        let binding_id = if let Some(binding_id) = item.binding_id() {
+            binding_id
+        } else {
+            return;
+        };
 
-        while let Literal { value: LiteralValue::Array(ref mut a), binding_id: Some(binding_id), .. } = current_item {
+        // recursively start resolution from the innermost array elements
 
-            // resolve item type
+        if let ast::Literal { value: ast::LiteralValue::Array(ref mut array), .. } = item {
+
+            // resolve inner type
 
             let mut item_type_id = None;
 
-            for literal in a.items.iter_mut() {
-                self.resolve_literal(literal);
+            for array_item in &mut array.items {
+                self.resolve_literal(array_item);
                 if item_type_id == None {
-                    item_type_id = self.bindingtype_id(literal);
-                } else if item_type_id != None && item_type_id != self.bindingtype_id(literal) {
-                    panic!("array element type mismatch");
+                    item_type_id = self.bindingtype_id(array_item);
+                } else if item_type_id != None && item_type_id != self.bindingtype_id(array_item) {
+                    panic!("array element type mismatch {:?} - {:?}", self.scopes.type_ref(item_type_id.unwrap()), self.scopes.type_ref(self.bindingtype_id(array_item).unwrap()));
                 }
             }
 
-            // ensure array type is registered
+            // create this levels type based on the inner type
 
-            if self.scopes.binding_type_id(*binding_id).is_none() {
+            if self.scopes.binding_type_id(binding_id).is_none() {
 
                 let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                    len: Some(a.items.len()),
-                    type_id: item_type_id,
+                    len     : Some(array.items.len()),
+                    type_id : item_type_id,
                 }));
 
-                *self.scopes.binding_type_id_mut(*binding_id) = Some(new_type_id);
-            }
+                *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);
 
-            // update type
-
-            let array_type_id = self.scopes.binding_type_id(*binding_id).unwrap();
-
-            if let Some(item_type_id) = item_type_id {
-                //let item_type = self.scopes.type_ref(item_type_id).clone();
-                let ty = self.scopes.type_mut(array_type_id);
-                if let Type::Array(array) = ty {
-                    if let Some(current_item_type) = &mut array.type_id {
-                        // update existing type
-                        *current_item_type = item_type_id; // todo: this shouldn't happen?
-                    } else {
-                        // set type
-                        array.type_id = Some(item_type_id);
-                    }
-                }
-
-                println!("defined array type: {:?}", ty);
-            }
-
-            let array_type = self.scopes.binding_type_id(*binding_id).map(|type_id| self.scopes.type_mut(type_id));
-
-            if let Some(Type::Array(Array { type_id: Some(type_id), .. })) = array_type {
-                let type_id = *type_id;
-
-                // fixme: ty on array probably needs to be a type_id instead :-(  otherwise I need to reverse lookup here (type->type_id)
-                // since array might have needed an rc anyway, typeid is probably better
-
-                for literal in a.items.iter_mut() {
-                    self.set_bindingtype_id(literal, type_id);
-                }
-            }
-
-
-            // recurse
-
-            if let Some(next_level) = a.items.get_mut(0) {
-                current_item = next_level;
-            } else {
-                break;
+                println!("created type {:?} = {:?}", new_type_id, self.scopes.type_ref(new_type_id));
             }
         }
-
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
@@ -766,6 +737,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.set_bindingtype_id(item, type_id);
                 }
             }*/
+        } else {
+            self.try_create_anon_binding(item);
         }
 
 
