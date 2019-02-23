@@ -35,37 +35,6 @@ macro_rules! impl_bindable {
     };
 }
 
-/// A trait for bindable ast structures.
-pub(crate) trait Typeable {
-    /// Returns a mutable reference to the type_id.
-    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId>;
-    /// Returns the type_id.
-    fn type_id(self: &Self) -> Option<TypeId>;
-    /// Sets the type_id or panics if it is already set.
-    fn set_type_id(self: &mut Self, type_id: TypeId) {
-        let current_type_id = self.type_id_mut();
-        if current_type_id.is_none() {
-            *current_type_id = Some(type_id);
-        } else {
-            panic!("attempted to reassign type_id");
-        }
-    }
-}
-
-/// Implements the typeable trait for given structure.
-macro_rules! impl_typeable {
-    ($struct_name:ident) => {
-        impl<'a> Typeable for $struct_name<'a> {
-            fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
-                &mut self.type_id
-            }
-            fn type_id(self: &Self) -> Option<TypeId> {
-                self.type_id
-            }
-        }
-    };
-}
-
 pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
@@ -158,7 +127,6 @@ pub struct TypeName<'a> {
     pub name    : IdentPath<'a>,
     pub type_id : Option<TypeId>,
 }
-impl_typeable!(TypeName);
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
@@ -176,7 +144,6 @@ pub struct Structure<'a> {
     pub items   : HashMap<&'a str, TypeName<'a>>,
     pub type_id : Option<TypeId>,
 }
-impl_typeable!(Structure);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -252,9 +219,6 @@ pub enum Expression<'a> {
 }
 
 impl<'a> Expression<'a> {
-    /*pub fn is_resolved(self: &Self) -> bool {
-        self.type_id().is_some()
-    }*/
     pub fn is_literal(self: &Self) -> bool {
         match self {
             Expression::Literal(_) => true,
@@ -397,17 +361,6 @@ pub struct Call<'a> {
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Call);
-
-impl<'a> Call<'a> {
-    /* /// Returns whether the return type has been resolved.
-    pub fn ret_resolved(self: &Self) -> bool {
-        self.type_id.is_some()
-    }
-    /// Returns whether the argument list has been resolved.
-    pub fn args_resolved(self: &Self) -> bool {
-        self.args.iter().fold(true, |acc, arg| acc && arg.type_id().is_some())
-    } */
-}
 
 #[derive(Debug)]
 pub struct Assignment<'a> {
