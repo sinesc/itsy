@@ -200,17 +200,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
             S::IfBlock(if_block)        => self.resolve_if_block(if_block),
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.resolve_while_loop(while_loop),
-            S::Block(block)             => self.resolve_block(block),
+            S::Block(block)             => self.resolve_block(block, None),
             S::Return(ret)              => self.resolve_return(ret),
-            S::Expression(expression)   => self.resolve_expression(expression),
+            S::Expression(expression)   => self.resolve_expression(expression, None),
         }
     }
 
     /// Resolves types and bindings used in an expression.
-    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'a>) {
+    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'a>, expected_result: Option<TypeId>) {
         use self::ast::Expression as E;
         match item {
-            E::Literal(literal)         => self.resolve_literal(literal),
+            E::Literal(literal)         => self.resolve_literal(literal, expected_result),
             E::Variable(variable)       => self.resolve_variable(variable),
             E::Call(call)               => self.resolve_call(call),
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
@@ -222,7 +222,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 //}
             }
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
-            E::Block(block)             => self.resolve_block(block),
+            E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block),
         };
     }
@@ -358,10 +358,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
             // todo: needs to check that block return type matches
         }
         if let Some(function_id) = item.function_id {
-            // todo:typehint
-            //let function_type = self.scopes.function_type(function_id);
-            //self.resolve_block(&mut item.block, function_type.ret_type);
-            self.resolve_block(&mut item.block);
+            let function_type = self.scopes.function_type(function_id);
+            self.resolve_block(&mut item.block, function_type.ret_type);
         }
         self.scope_id = parent_scope_id;
     }
@@ -377,9 +375,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         if let Some(expr) = &mut item.expr {
             item.fn_ret_type_id = ret_type_id;
-            // todo:typehint
-            //self.resolve_expression(expr, ret_type_id);
-            self.resolve_expression(expr);
+            self.resolve_expression(expr, ret_type_id);
             let expression_type_id = self.bindingtype_id(expr);
             if expression_type_id.is_some() && ret_type_id != expression_type_id {
                 panic!("Expected return type {:?}, got {:?}", self.scopes.type_ref(ret_type_id.unwrap()), self.scopes.type_ref(expression_type_id.unwrap()));
@@ -408,9 +404,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
             // arguments
             for (index, &expected_type) in function_types.arg_type.iter().enumerate() {
-                //todo: typehint
-                //self.resolve_expression(&mut item.args[index], Some(expected_type));
-                self.resolve_expression(&mut item.args[index]);
+                self.resolve_expression(&mut item.args[index], Some(expected_type));
                 let actual_type = self.bindingtype_id(&mut item.args[index]);
                 // infer arguments
                 if actual_type.is_none() {
@@ -455,7 +449,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 self.resolve_array_literal_binding(item, &array_name);
             }
         } else {
-            self.resolve_literal(item);
+            self.resolve_literal(item, None); // todo: provide type?
         }
     }
 
@@ -488,17 +482,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         if let Some(expr) = &mut item.expr {
             *expr.binding_id_mut() = Some(binding_id);
-            self.resolve_expression(expr);
+            self.resolve_expression(expr, explicit);
         }
 
-        // appy binding type to right hand side
+        // if we have a binding type, apply it to the expression
         let lhs = self.bindingtype_id(item);
 
         if let (Some(lhs), Some(expr)) = (lhs, &mut item.expr) {
             self.set_bindingtype_id(expr, lhs);
         }
 
-        // apply right hand side back to binding
+        // if the expression has a type, apply it back to the binding
         if let Some(expr) = &mut item.expr {
             if let Some(expr_type) = self.bindingtype_id(expr) {
                 self.set_bindingtype_id(item, expr_type);
@@ -520,11 +514,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
         // resolve condition and block
-        self.resolve_expression(&mut item.cond);
-        self.resolve_block(&mut item.if_block);
+        self.resolve_expression(&mut item.cond, None); // todo: pass in expected type
+        self.resolve_block(&mut item.if_block, None);
         // optionally resolve else block
         if let Some(else_block) = &mut item.else_block {
-            self.resolve_block(else_block);
+            self.resolve_block(else_block, None); // todo: pass in expected type
             if let (Some(if_type_id), Some(else_type_id)) = (self.bindingtype_id(&mut item.if_block), self.bindingtype_id(else_block)) {
                 if if_type_id != else_type_id {
                     panic!("if/else return type mismatch {:?} vs {:?}", if_type_id, else_type_id); // TODO: error handling, attempt cast
@@ -537,7 +531,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
 
         // resolve the range type
-        self.resolve_expression(&mut item.range);
+        self.resolve_expression(&mut item.range, None);
 
         if let Some(type_id) = self.bindingtype_id(&mut item.range) {
 
@@ -551,7 +545,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             //self.set_type_from_id(&mut item.iter.type_id, type_id);
 
             // handle block
-            self.resolve_block(&mut item.block);
+            self.resolve_block(&mut item.block, None);
 
             self.scope_id = parent_scope_id;
         }
@@ -559,27 +553,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves a while loop.
     fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'a>) {
-        self.resolve_expression(&mut item.expr);
-        self.resolve_block(&mut item.block);
+        self.resolve_expression(&mut item.expr, None);
+        self.resolve_block(&mut item.block, None);
     }
 
     /// Resolves a block.
-    fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>) {
+    fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>, expected_result: Option<TypeId>) {
         for mut statement in item.statements.iter_mut() {
             self.resolve_statement(&mut statement);
         }
         if let Some(ref mut result) = item.result {
-            self.resolve_expression(result);
+            self.resolve_expression(result, expected_result);
         }
     }
 
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
         self.resolve_variable(&mut item.left);
-        // todo: typehint
-        //let left_type_id = self.bindingtype_id(&mut item.left);
-        //self.resolve_expression(&mut item.right, left_type_id);
-        self.resolve_expression(&mut item.right);
+        let left_type_id = self.bindingtype_id(&mut item.left);
+        self.resolve_expression(&mut item.right, left_type_id);
         if item.left.binding_id.is_some() && self.bindingtype_id(&mut item.left).is_none() && self.bindingtype_id(&mut item.right).is_some() {
             let right_type_id = self.bindingtype_id(&mut item.right).unwrap();
             self.set_bindingtype_id(&mut item.left, right_type_id);
@@ -591,8 +583,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         use crate::frontend::ast::BinaryOperator as O;
 
-        self.resolve_expression(&mut item.left);
-        self.resolve_expression(&mut item.right);
+        self.resolve_expression(&mut item.left, None); // todo: set expected type
+        self.resolve_expression(&mut item.right, None);
 
         let type_id = self.bindingtype_id(item);
         let left_type_id = self.bindingtype_id(&mut item.left);
@@ -657,7 +649,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves a unary operation.
     fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>) {
         use crate::frontend::ast::UnaryOperator as UO;
-        self.resolve_expression(&mut item.expr);
+        self.resolve_expression(&mut item.expr, None);
         match item.op {
             UO::Not => {
                 self.set_bindingtype_id(item, self.primitives.bool);
@@ -690,7 +682,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             let mut item_type_id = None;
 
             for array_item in &mut array.items {
-                self.resolve_literal(array_item);
+                self.resolve_literal(array_item, None);
                 if item_type_id == None {
                     item_type_id = self.bindingtype_id(array_item);
                 } else if item_type_id != None && item_type_id != self.bindingtype_id(array_item) {
@@ -715,13 +707,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
-    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>) {
+    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>, expected_type: Option<TypeId>) {
         use self::ast::LiteralValue as LV;
         if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
-            self.resolve_type(type_name);
-            // todo: compare against literal
-        } else if let LV::Bool(_) = item.value {
+            if let Some(explicit_type_id) = self.resolve_type(type_name) {
+                self.set_bindingtype_id(item, explicit_type_id);
+                if expected_type.is_some() && expected_type.unwrap() != explicit_type_id {
+                    panic!("type mismatch");
+                }
+            }
+        } else if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
             // literal boolean
             self.set_bindingtype_id(item, self.primitives.bool);
         } else if let LV::String(_) = item.value {
@@ -730,6 +726,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else if let LV::Array(_) = item.value {
             // literal array
             self.resolve_literal_array(item);
+        } else if let (LV::Numeric(_), Some(expected_type)) = (&item.value, expected_type) {
+            self.set_bindingtype_id(item, expected_type);
         } else if self.infer_literals {
             // numerics, once normal resolution has failed
             // todo: re-enable
