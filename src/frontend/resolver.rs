@@ -597,13 +597,19 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         match item.op {
             O::And | O::Or => {
-                if left_type_id != right_type_id || left_type_id.unwrap() != self.primitives.bool {
+                /*if left_type_id != right_type_id || left_type_id.unwrap() != self.primitives.bool {
                     panic!("Logical {:?} expects both operands to be boolean, got {:?} and {:?}", item.op, self.format_type(left_type_id), self.format_type(right_type_id));
-                }
+                }*/
                 self.set_bindingtype_id(item, self.primitives.bool);
+                self.set_bindingtype_id(&mut item.left, self.primitives.bool);
+                self.set_bindingtype_id(&mut item.right, self.primitives.bool);
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
                 self.set_bindingtype_id(item, self.primitives.bool);
+                if let Some(common_type_id) = left_type_id.or(right_type_id) {
+                    self.set_bindingtype_id(&mut item.left, common_type_id);
+                    self.set_bindingtype_id(&mut item.right, common_type_id);
+                }
             },
             O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
