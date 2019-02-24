@@ -64,29 +64,58 @@ named!(call<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, call_argumen
 
 named!(opt_sign<Input<'_>, Option<Input<'_>>>, opt!(recognize!(one_of!("+-"))));
 named!(opt_fract<Input<'_>, Option<Input<'_>>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
+named!(opt_type<Input<'_>, Option<Input<'_>>>, opt!(recognize!(tuple!(one_of!("iuf"), alt!(tag!("8") | tag!("16") | tag!("32") | tag!("64"))))));
+
+fn parse_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
+    // todo: there must be something in std to simplify this
+    let tail = if n.len() > 3 {
+        let tail = &n[n.len() - 3 ..];
+        if &tail[0..1] != "u" && &tail[0..1] != "i" && &tail[0..1] != "f" {
+            &tail[1..]
+        } else {
+            tail
+        }
+    } else if n.len() > 2 {
+        &n[n.len() - 2 ..]
+    } else {
+        ""
+    };
+
+    if tail.len() == 2 && (tail == "u8" || tail == "i8") {
+        (&n[0..n.len() - 2], Some(tail))
+    } else if tail.len() == 3 && (&tail[0..1] == "u" || &tail[0..1] == "i" || &tail[0..1] == "f") && (&tail[1..] == "16" || &tail[1..] == "32" || &tail[1..] == "64") && tail != "f16" {
+        (&n[0..n.len() - 3], Some(tail))
+    } else {
+        (*n, None)
+    }
+}
 
 fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
-    if n.contains(".") {
-        if let Ok(float) = str::parse::<f64>(*n) {
+    let (value, type_name) = parse_numerical_suffix(n);
+    if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
+        if let Ok(float) = str::parse::<f64>(value) {
+            //println!("f {} {:?}", float, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
-                type_name   : None, // todo support e.g. "23i32"
+                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
                 binding_id  : None,
             }))
         }
-    } else if n.starts_with("-") {
-        if let Ok(integer) = str::parse::<i64>(*n) {
+    } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
+        if let Ok(integer) = str::parse::<i64>(value) {
+            //println!("i {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Signed(integer)),
-                type_name   : None, // todo: support e.g. "-232i32"
+                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
                 binding_id  : None,
             }))
         }
     } else {
-        if let Ok(integer) = str::parse::<u64>(*n) {
+        if let Ok(integer) = str::parse::<u64>(value) {
+            //println!("u {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
-                type_name   : None, // todo: see above
+                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
                 binding_id  : None,
             }))
         }
@@ -95,7 +124,7 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
     Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseError::InvalidNumerical as u32))))
 }
 
-named!(numerical<Input<'_>, Literal<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract)), parse_numerical));
+named!(numerical<Input<'_>, Literal<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), parse_numerical));
 
 // literal boolean
 

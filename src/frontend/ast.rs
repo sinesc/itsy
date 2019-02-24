@@ -397,6 +397,12 @@ impl_bindable!(UnaryOp);
 
 pub struct IdentPath<'a>(pub Vec<&'a str>);
 
+impl<'a> IdentPath<'a> {
+    pub fn root(root: &'a str) -> Self {
+        IdentPath(vec![ root ])
+    }
+}
+
 impl<'a> Debug for IdentPath<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "IdentPath({})", self.0.join("."))
