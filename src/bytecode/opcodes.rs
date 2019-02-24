@@ -58,7 +58,11 @@ impl_vm!{
     }
 
     /// Push value onto stack.
-    fn lit(self: &mut Self, value: u8) {
+    fn litu(self: &mut Self, value: u8) {
+        self.stack.push(value);
+    }
+    /// Push value onto stack.
+    fn lits(self: &mut Self, value: i8) {
         self.stack.push(value);
     }
     /// Push 0 onto stack.
