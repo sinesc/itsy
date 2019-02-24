@@ -425,28 +425,30 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
                     Numeric::Signed(-1) if lit_type.is_signed() && lit_type.size().unwrap() <= 4 => { self.writer.litm1(); }
                     Numeric::Signed(v) => {
                         match lit_type {
-                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
-                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
-                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.constr32(pos as u8); }
-                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.constr64(pos as u8); }
+                            Type::i8 => { self.writer.lit(v as u8); } // fixme: this will lose sign?
+                            Type::i16 => { let pos = self.writer.store_const(v as i16); self.writer.constr16(pos as u8); } // todo: handle pos > 255
+                            Type::i32 => { let pos = self.writer.store_const(v as i32); self.writer.constr32(pos as u8); }
+                            Type::i64 => { let pos = self.writer.store_const(v as i64); self.writer.constr64(pos as u8); }
                             _ => panic!("Unexpected signed integer literal type: {:?}", lit_type)
                         }
                     }
                     Numeric::Unsigned(v) => {
                         match lit_type {
-                            Type::i8 => { let pos = self.writer.write_const(v as i8); self.writer.constr32(pos as u8); }
-                            Type::i16 => { let pos = self.writer.write_const(v as i16); self.writer.constr32(pos as u8); }
-                            Type::i32 => { let pos = self.writer.write_const(v as i32); self.writer.constr32(pos as u8); }
-                            Type::i64 => { let pos = self.writer.write_const(v as i64); self.writer.constr64(pos as u8); }
-                            Type::u8 | Type::u16 | Type::u32 => { let pos = self.writer.write_const(v as u32); self.writer.constr32(pos as u8); }
-                            Type::u64 => { let pos = self.writer.write_const(v as u64); self.writer.constr64(pos as u8); }
+                            Type::i8 => { self.writer.lit(v as u8); } // fixme: this will lose sign? // todo: annoying code duplication
+                            Type::i16 => { let pos = self.writer.store_const(v as i16); self.writer.constr16(pos as u8); }
+                            Type::i32 => { let pos = self.writer.store_const(v as i32); self.writer.constr32(pos as u8); }
+                            Type::i64 => { let pos = self.writer.store_const(v as i64); self.writer.constr64(pos as u8); }
+                            Type::u8 => { self.writer.lit(v as u8); }
+                            Type::u16 => { let pos = self.writer.store_const(v as u16); self.writer.constr64(pos as u8); }
+                            Type::u32 => { let pos = self.writer.store_const(v as u32); self.writer.constr64(pos as u8); }
+                            Type::u64 => { let pos = self.writer.store_const(v as u64); self.writer.constr64(pos as u8); }
                             _ => panic!("Unexpected unsigned integer literal type: {:?}", lit_type)
                         }
                     }
                     Numeric::Float(v) => {
                         match lit_type {
-                            Type::f32 => { let pos = self.writer.write_const(v as f32); self.writer.constr32(pos as u8); },
-                            Type::f64 => { let pos = self.writer.write_const(v); self.writer.constr64(pos as u8); },
+                            Type::f32 => { let pos = self.writer.store_const(v as f32); self.writer.constr32(pos as u8); },
+                            Type::f64 => { let pos = self.writer.store_const(v); self.writer.constr64(pos as u8); },
                             _ => panic!("Unexpected float literal type: {:?}", lit_type)
                         };
                     },
@@ -461,10 +463,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             },
             LiteralValue::String(v) => {
                 match lit_type {
-                    Type::String => {
-                        let pos = self.writer.write_const(v);
-                        self.writer.consts(pos as u8);
-                    },
+                    Type::String => { let pos = self.writer.store_const(v); self.writer.consts(pos as u8); },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
             },

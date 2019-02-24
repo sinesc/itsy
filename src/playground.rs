@@ -2,28 +2,40 @@ use itsy::extern_rust;
 
 extern_rust!(MyFns, {
     fn printi8(vm: &mut VM, value: i8) {
-        println!("print:{}", value);
+        println!("printi8:{}", value);
+    }
+    fn printi16(vm: &mut VM, value: i16) {
+        println!("printi16:{}", value);
     }
     fn printi32(vm: &mut VM, value: i32) {
-        println!("print:{}", value);
-    }
-    fn printu32(vm: &mut VM, value: u32) {
-        println!("print:{}", value);
+        println!("printi32:{}", value);
     }
     fn printi64(vm: &mut VM, value: i64) {
-        println!("print:{}", value);
+        println!("printi64:{}", value);
+    }
+    fn printu8(vm: &mut VM, value: u8) {
+        println!("printu8:{}", value);
+    }
+    fn printu16(vm: &mut VM, value: u16) {
+        println!("printu16:{}", value);
+    }
+    fn printu32(vm: &mut VM, value: u32) {
+        println!("printu32:{}", value);
+    }
+    fn printu64(vm: &mut VM, value: u64) {
+        println!("printu64:{}", value);
     }
     fn printf32(vm: &mut VM, value: f32) {
-        println!("print:{}", value);
+        println!("printf32:{}", value);
     }
     fn printf64(vm: &mut VM, value: f64) {
-        println!("print:{}", value);
+        println!("printf64:{}", value);
     }
     fn printb(vm: &mut VM, value: bool) {
-        println!("print:{}", value);
+        println!("printb:{}", value);
     }
     fn prints(vm: &mut VM, value: &str) {
-        println!("print:{}", value);
+        println!("prints:{}", value);
     }
     fn strlen(vm: &mut VM, value: &str) -> u32 {
         value.len() as u32
@@ -53,6 +65,18 @@ fn main() {
         fn main() {
             let x = [ [ [ 1 ], [ 2 ] ] ];
             let z: u32 = x[0][0][0];
+            let x = -23;
+            printi8(x);
+            let y = -299;
+            printi16(y);
+            let z = -299555;
+            printi32(z);
+        }
+    ";
+    let source = "
+        fn main() {
+            let s = \"Hello World\";
+            prints(s);
         }
     ";
     println!("{}", source);

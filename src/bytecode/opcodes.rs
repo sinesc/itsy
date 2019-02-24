@@ -15,38 +15,52 @@ impl_vm!{
         }
     }
 
-    /// Load constant from constant pool onto stack.
+    /// Load 2 byte from constant pool onto stack.
+    fn constr16(self: &mut Self, const_id: u8) {
+        self.constr16_16(const_id as u16);
+    }
+    /// Load 2 byte from constant pool onto stack.
+    fn constr16_16(self: &mut Self, const_id: u16) {
+        let tmp = self.program.consts16[const_id as usize];
+        self.stack.push(tmp);
+    }
+
+    /// Load 4 byte from constant pool onto stack.
     fn constr32(self: &mut Self, const_id: u8) {
-        let tmp = self.program.consts[const_id as usize]; // todo: just call constr32_16 here
-        self.stack.push(tmp);
+        self.constr32_16(const_id as u16);
     }
-    /// Load constant from constant pool onto stack.
+    /// Load 4 byte from constant pool onto stack.
     fn constr32_16(self: &mut Self, const_id: u16) {
-        let tmp = self.program.consts[const_id as usize];
+        let tmp = self.program.consts32[const_id as usize];
         self.stack.push(tmp);
     }
-    /// Load constant from constant pool onto stack.
+
+    /// Load 8 byte from constant pool onto stack.
     fn constr64(self: &mut Self, const_id: u8) {
-        let l = self.program.consts[const_id as usize];          // todo: just call constr64_16 here
-        let h = self.program.consts[(const_id + 1) as usize];
-        self.stack.push(l);
-        self.stack.push(h);
+        self.constr64_16(const_id as u16);
     }
-    /// Load constant from constant pool onto stack.
+    /// Load 8 byte from constant pool onto stack.
     fn constr64_16(self: &mut Self, const_id: u16) {
-        let l = self.program.consts[const_id as usize];         // todo: reuse stackops here
-        let h = self.program.consts[(const_id + 1) as usize];
-        self.stack.push(l);
-        self.stack.push(h);
+        let tmp = self.program.consts64[const_id as usize];
+        self.stack.push(tmp);
     }
-    /// Load constant from constant pool onto stack.
-    fn consts(self: &mut Self, const_id: u8) {                  // todo: impl _16
-        let len = self.program.consts[const_id as usize] as u32;
-        let ptr = &self.program.consts[(const_id + 1) as usize] as *const _ as u64;
+
+    /// Load string from constant pool onto stack.
+    fn consts(self: &mut Self, const_id: u8) {
+        self.consts_16(const_id as u16);
+    }
+    /// Load string from constant pool onto stack.
+    fn consts_16(self: &mut Self, const_id: u16) {
+        let len = self.program.consts_str[const_id as usize].len() as u32;
+        let ptr = self.program.consts_str[const_id as usize].as_ptr() as *const _ as u64;
         self.stack.push(ptr);
         self.stack.push(len);
     }
 
+    /// Push value onto stack.
+    fn lit(self: &mut Self, value: u8) {
+        self.stack.push(value);
+    }
     /// Push 0 onto stack.
     fn lit0(self: &mut Self) {
         self.stack.push(0u32);
@@ -148,7 +162,7 @@ impl_vm!{
         // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
         let ret_pos = self.stack.fp - 3 - prev_num_args as u32;
 
-        for i in 0..num_ret {
+        for i in 0..num_ret {   // todo: this could be avoided if caller were to clean up the stack (prev_pc/fp stuff)
             self.stack[ret_pos + i] = self.stack[self.stack.sp() - num_ret + i];
         }
 
