@@ -117,9 +117,10 @@ impl_store_const!(consts64, f64);
 
 impl<P> WriteConst<&str> for Writer<P> where P: ExternRust<P> {
     fn store_const(self: &mut Self, value: &str) -> u32 {
-        println!("{} ({}) into {}", value, "&str", "consts_str");
-        let position = self.program.consts_str.len();
-        self.program.consts_str.push(value.to_string());
+        let position = self.program.consts8.len();
+        let len = value.len() as u32;
+        self.program.consts8.extend_from_slice(&len.to_le_bytes());
+        self.program.consts8.extend_from_slice(&value.as_bytes());
         position as u32
     }
 }

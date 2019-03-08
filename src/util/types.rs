@@ -116,30 +116,6 @@ pub enum TypeKind {
 }
 
 impl Type {
-    pub fn is_integer(self: &Self) -> bool {
-        match self {
-            Type::u8 | Type::u16 | Type::u32 | Type::u64 | Type::i8 | Type::i16 | Type::i32 | Type::i64 => true,
-            _ => false,
-        }
-    }
-    pub fn is_unsigned(self: &Self) -> bool {
-        match self {
-            Type::u8 | Type::u16 | Type::u32 | Type::u64 => true,
-            _ => false,
-        }
-    }
-    pub fn is_signed(self: &Self) -> bool {
-        match self {
-            Type::i8 | Type::i16 | Type::i32 | Type::i64 => true,
-            _ => false,
-        }
-    }
-    pub fn is_float(self: &Self) -> bool {
-        match self {
-            Type::f32 | Type::f64 => true,
-            _ => false,
-        }
-    }
     pub fn size(self: &Self) -> Option<u8> {
         match self {
             Type::u8 | Type::i8 | Type::bool => Some(1),
@@ -161,6 +137,42 @@ impl Type {
             Type::Enum(_) => TypeKind::Enum,
             Type::Struct(_) => TypeKind::Struct,
             Type::Array(_) => TypeKind::Array,
+        }
+    }
+    pub fn is_array(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Array => true,
+            _ => false
+        }
+    }
+    pub fn is_primitive(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool | TypeKind::String => true,
+            _ => false
+        }
+    }
+    pub fn is_integer(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Unsigned | TypeKind::Signed => true,
+            _ => false
+        }
+    }
+    pub fn is_unsigned(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Unsigned => true,
+            _ => false
+        }
+    }
+    pub fn is_signed(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Signed => true,
+            _ => false
+        }
+    }
+    pub fn is_float(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Float => true,
+            _ => false
         }
     }
 }

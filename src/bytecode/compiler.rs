@@ -163,7 +163,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
     /// Returns the type of the given binding.
     fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
-        let binding_id = Into::<usize>::into(item.binding_id().unwrap());
+        let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
         let type_id = self.bindingtype_ids[binding_id];
         &self.types[Into::<usize>::into(type_id)]
     }
@@ -412,47 +412,94 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         }
     }
 
-    /// Compiles the given literal
-    pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
+    fn store_literal(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
             LiteralValue::Numeric(int) => {
                 match int {
-                    Numeric::Unsigned(0) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit0(); }
-                    Numeric::Unsigned(1) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit1(); }
-                    Numeric::Unsigned(2) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit2(); }
-                    Numeric::Signed(-1) if lit_type.is_signed() && lit_type.size().unwrap() <= 4 => { self.writer.litm1(); }
                     Numeric::Signed(v) => {
                         match lit_type {
-                            Type::i8 => { self.writer.lits(v as i8); }
-                            Type::i16 => { let pos = self.writer.store_const(v as i16); self.writer.constr16(pos as u8); } // todo: handle pos > 255
-                            Type::i32 => { let pos = self.writer.store_const(v as i32); self.writer.constr32(pos as u8); }
-                            Type::i64 => { let pos = self.writer.store_const(v as i64); self.writer.constr64(pos as u8); }
+                            Type::i8 => self.writer.store_const(v as i8), // todo: handle pos > 255
+                            Type::i16 => self.writer.store_const(v as i16),
+                            Type::i32 => self.writer.store_const(v as i32),
+                            Type::i64 => self.writer.store_const(v as i64),
                             _ => panic!("Unexpected signed integer literal type: {:?}", lit_type)
                         }
-                    }
+                    },
                     Numeric::Unsigned(v) => {
                         match lit_type {
-                            Type::i8 => { self.writer.lits(v as i8); }  // todo: annoying code duplication
-                            Type::i16 => { let pos = self.writer.store_const(v as i16); self.writer.constr16(pos as u8); }
-                            Type::i32 => { let pos = self.writer.store_const(v as i32); self.writer.constr32(pos as u8); }
-                            Type::i64 => { let pos = self.writer.store_const(v as i64); self.writer.constr64(pos as u8); }
-                            Type::u8 => { self.writer.litu(v as u8); }
-                            Type::u16 => { let pos = self.writer.store_const(v as u16); self.writer.constr64(pos as u8); }
-                            Type::u32 => { let pos = self.writer.store_const(v as u32); self.writer.constr64(pos as u8); }
-                            Type::u64 => { let pos = self.writer.store_const(v as u64); self.writer.constr64(pos as u8); }
+                            Type::i8 => self.writer.store_const(v as i8),
+                            Type::i16 => self.writer.store_const(v as i16),
+                            Type::i32 => self.writer.store_const(v as i32),
+                            Type::i64 => self.writer.store_const(v as i64),
+                            Type::u8 => self.writer.store_const(v as u8),
+                            Type::u16 => self.writer.store_const(v as u16),
+                            Type::u32 => self.writer.store_const(v as u32),
+                            Type::u64 => self.writer.store_const(v as u64),
                             _ => panic!("Unexpected unsigned integer literal type: {:?}", lit_type)
                         }
-                    }
+                    },
                     Numeric::Float(v) => {
                         match lit_type {
-                            Type::f32 => { let pos = self.writer.store_const(v as f32); self.writer.constr32(pos as u8); },
-                            Type::f64 => { let pos = self.writer.store_const(v); self.writer.constr64(pos as u8); },
+                            Type::f32 => self.writer.store_const(v as f32),
+                            Type::f64 => self.writer.store_const(v),
                             _ => panic!("Unexpected float literal type: {:?}", lit_type)
-                        };
+                        }
                     },
                     Numeric::Overflow => panic!("Literal computation overflow")
+                }
+            },
+            LiteralValue::Bool(v) =>  {
+                match lit_type {
+                    Type::bool => self.writer.store_const(if v { 1 } else { 0 }),
+                    _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
+                }
+            },
+            LiteralValue::String(v) => {
+                match lit_type {
+                    Type::String => self.writer.store_const(v),
+                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
+                }
+            },
+            LiteralValue::Array(ref v) => {
+                let ty = self.bindingtype(&v.items[0]); // todo: requires one item
+                let mut pos = 0;
+                if ty.is_primitive() || ty.is_array() {
+                    for item in &v.items {
+                        let item_pos = self.store_literal(item);
+                        if pos == 0 {
+                            pos = item_pos; // todo: ugly getitdone solution
+                        }
+                    }
+                    pos
+                } else {
+                    for item in &v.items {
+                        println!("non-primitive{:?}", item);
+                    }
+                    unimplemented!("non-primitive array")
+                }
+            },
+        }
+    }
+
+    /// Compiles the given literal
+    pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
+        use crate::frontend::ast::LiteralValue;
+        let lit_type = self.bindingtype(item);
+        match item.value {
+            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit0(); }
+            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit1(); }
+            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit2(); }
+            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size().unwrap() <= 4 => { self.writer.litm1(); }
+            LiteralValue::Numeric(int) => {
+                match lit_type {
+                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
+                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
+                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.constr16(pos as u8); } // todo: handle pos > 255
+                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr32(pos as u8); } // todo: handle pos > 255
+                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.constr64(pos as u8); } // todo: handle pos > 255
+                    _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
                 }
             }
             LiteralValue::Bool(v) =>  {
@@ -463,14 +510,17 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             },
             LiteralValue::String(v) => {
                 match lit_type {
-                    Type::String => { let pos = self.writer.store_const(v); self.writer.consts(pos as u8); },
+                    Type::String => { let pos = self.writer.store_const(v); self.writer.consto(pos as u8); },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
             },
             LiteralValue::Array(ref v) => {
-                unimplemented!("array literal");
+                match lit_type {
+                    Type::Array(_) => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
+                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
+                };
             },
-        };
+        }
     }
 
     /// Compiles the given unary operation.
@@ -684,8 +734,9 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &mut Self, index: i32, ty: &Type) {
         let size = self.bytesize(ty);
-        if ty.kind() == TypeKind::String {
-            self.writer.stores(index);
+        let kind = ty.kind();
+        if kind == TypeKind::String || kind == TypeKind::Array {
+            self.writer.storer32(index);
         } else if size <= 4 {
             self.writer.storer32(index);
         } else if size == 8 {
@@ -697,8 +748,9 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &mut Self, index: i32, ty: &Type) {
         let size = self.bytesize(ty);
-        if ty.kind() == TypeKind::String {
-            self.writer.loads(index);
+        let kind = ty.kind();
+        if kind == TypeKind::String || kind == TypeKind::Array {
+            self.writer.loadr32(index);
         } else if size <= 4 {
             match index {
                 -4 => self.writer.load_arg1(),

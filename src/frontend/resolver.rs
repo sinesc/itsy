@@ -56,8 +56,9 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
         let arg_type_id = arg_type_names
             .iter()
             .map(|arg_type_name| {
+                let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
                 scopes
-                    .type_id(root_scope_id, if arg_type_name == &"& str" { "String" } else { arg_type_name })
+                    .type_id(root_scope_id, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
                     .expect(&format!("Unknown argument type encountered: {}", &arg_type_name))
             })
             .collect();
@@ -85,18 +86,10 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
         now_unresolved = scopes.num_unresolved();
 
         if now_unresolved == 0 || (now_unresolved == prev_unresolved && infer_literals) {
-            println!("done resolving with {} unresolved, infer_literals: {}", now_unresolved, infer_literals);
             break;
         }
 
         infer_literals = now_unresolved == prev_unresolved && !infer_literals;
-        println!("now {} unresolved, infer_literals: {}", now_unresolved, infer_literals);
-    }
-
-    if let ast::Statement::Function(f) = &program[0] {
-        for statement in &f.block.statements {
-            println!("{:?}", statement);
-        }
     }
 
     let entry_fn = scopes.lookup_function_id(root_scope_id, entry).expect("Failed to resolve entry function");

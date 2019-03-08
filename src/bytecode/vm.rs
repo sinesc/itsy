@@ -23,9 +23,9 @@ pub enum VMState {
 #[derive(Debug)]
 pub struct VM<T> where T: crate::ExternRust<T> {
     pub(crate) program  : Program<T>,
-    pub stack    : Stack,
+    pub stack           : Stack,
+    pub heap            : Heap,
     pub(crate) pc       : u32,
-    pub(crate) mem      : Vec<Value>,
     pub(crate) state    : VMState,
 }
 
@@ -36,8 +36,8 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
         VM {
             program     : program,
             stack       : Stack::new(),
+            heap        : Heap::new(),
             pc          : 0,
-            mem         : Vec::with_capacity(256),
             state       : VMState::Continue,
         }
     }
@@ -45,7 +45,7 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
     /// Resets the VM, keeping only code and constants.
     pub fn reset(self: &mut Self) {
         self.stack.reset();
-        self.mem.truncate(0);
+        self.heap.reset();
         self.pc = 0;
         self.state = VMState::Continue;
     }

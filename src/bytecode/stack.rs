@@ -183,7 +183,7 @@ impl_stack!(Stack, normal, f32);
 impl_stack!(Stack, large, u64);
 impl_stack!(Stack, large, i64);
 impl_stack!(Stack, large, f64);
-
+/*
 impl<'a> StackOp<&'a str> for Stack {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn push(self: &mut Self, value: &str) {
@@ -194,8 +194,7 @@ impl<'a> StackOp<&'a str> for Stack {
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn pop(self: &mut Self) -> &'a str {
-        use std::slice;
-        use std::str;
+        use std::{slice,str};
         let len: u32 = self.pop();
         let ptr: u64 = self.pop();
         unsafe {
@@ -212,8 +211,7 @@ impl<'a> StackOp<&'a str> for Stack {
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn load(self: &Self, pos: u32) -> &'a str {
-        use std::slice;
-        use std::str;
+        use std::{slice,str};
         let ptr: u64 = self.load(pos);
         let len: u32 = self.load(pos + 2);
         unsafe {
@@ -226,3 +224,29 @@ impl<'a> StackOp<&'a str> for Stack {
         self.load(self.sp() - 3)
     }
 }
+
+impl StackOp<String> for Stack {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn push(self: &mut Self, value: String) {
+        self.push(&value[..]);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn pop(self: &mut Self) -> String {
+        let result: &str = self.pop();
+        result.to_string()
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn store(self: &mut Self, pos: u32, value: String) {
+        self.store(pos, &value[..]);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn load(self: &Self, pos: u32) -> String {
+        let result: &str = self.load(pos);
+        result.to_string()
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn top(self: &Self) -> String {
+        self.load(self.sp() - 3)
+    }
+}
+*/

@@ -32,7 +32,48 @@ macro_rules! extern_rust {
             _dummy
         }
     };
-    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $( $arg_type:tt )+ ),* ] [ $($ret_type:tt)* ] $code:block )* ) => {
+    // handle return values
+    (@handle-ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value); };
+    (@handle-ret $vm:ident, $_:tt, $value:ident) => { // object by value
+        let heap_index: u32 = $vm.heap.store($value);
+        $vm.stack.push(heap_index);
+    };
+    // handle parameters
+    (@handle-param $vm:ident, u8) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, u16) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, u32) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, u64) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, i8) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, i16) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, i32) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, i64) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, f32) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, f64) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, bool) => { $vm.stack.pop() };
+    (@handle-param $vm:ident, & str) => { { // rust &str specialcase
+        let heap_index: u32 = $vm.stack.pop();
+        let string_ref: &String = $vm.heap.load(heap_index);
+        &string_ref[..]
+    } };
+    (@handle-param $vm:ident, & $_:tt) => { { // object by reference
+        let heap_index: u32 = $vm.stack.pop();
+        $vm.heap.load(heap_index)
+    } };
+    (@handle-param $vm:ident, $_:tt) => { { // object by value
+        let heap_index: u32 = $vm.stack.pop();
+        $vm.heap.clone(heap_index)
+    } };
+    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::ExternRust<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
@@ -44,7 +85,7 @@ macro_rules! extern_rust {
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)*), vec![ $(stringify!( $($arg_type)+ )),* ]));
+                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
                 )*
                 map
             }
@@ -52,19 +93,22 @@ macro_rules! extern_rust {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name>) {
                 use $crate::bytecode::StackOp;
+                use $crate::bytecode::HeapOp;
                 match self {
                     $(
                         $enum_name::$name => {
+                            // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = vm.stack.pop();
+                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param vm, $($arg_type)*);
                                 )*
                                 $code
                             };
+                            // set return value, if any
                             $(
                                 let ret_typed: $ret_type = ret;
-                                vm.stack.push(ret_typed);
-                            )*
+                                extern_rust!(@handle-ret vm, $ret_type, ret_typed);
+                            )?
                         },
                     )*
                     $enum_name::_dummy => panic!("Attempted to execute dummy function")
@@ -75,12 +119,12 @@ macro_rules! extern_rust {
     (
         $enum_name:ident, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $( $arg_type:tt )+ )* ) $( -> $ret_type:tt )* $code:block
+            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
         extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $($arg_type)+ ),* ] [ $($ret_type)* ] $code )* );
+        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
@@ -97,7 +141,7 @@ macro_rules! impl_convert {
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_vm {
 
-    // slightly faster reader
+    // slightly faster reader // todo: look into 1.32's new .from/to_le_bytes api
     (fastread $ty:tt $size:tt $from:ident) => ( {
         let mut dest: $ty;
         unsafe {
@@ -149,7 +193,7 @@ macro_rules! impl_vm {
         /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         #[allow(non_camel_case_types)]
         #[repr(u8)]
-        enum ByteCode {
+        pub(crate) enum ByteCode {
             $(
                 $( #[ $attr ] )*
                 $name $(= $id)*
@@ -159,12 +203,12 @@ macro_rules! impl_vm {
         impl ByteCode {
             /// Converts bytecode to u8.
             #[inline(always)]
-            fn into_u8(self: Self) -> u8 {
+            pub(crate) fn into_u8(self: Self) -> u8 {
                 unsafe { ::std::mem::transmute(self) }
             }
             /// Converts u8 to bytecode.
             #[inline(always)]
-            fn from_u8(bytecode: u8) -> Self {
+            pub(crate) fn from_u8(bytecode: u8) -> Self {
                 unsafe { ::std::mem::transmute(bytecode) }
             }
         }
@@ -191,7 +235,7 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[cfg_attr(not(debug_assertions), inline(always))]
-                pub(crate) fn $name ( $self: &mut Self, $($op_name: impl_vm!(map_reader_type $op_type)),* ) {
+                pub fn $name ( $self: &mut Self, $($op_name: impl_vm!(map_reader_type $op_type)),* ) {
                     $code
                 }
             )+

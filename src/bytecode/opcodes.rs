@@ -1,10 +1,10 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use crate::bytecode::{Value, Value64, StackOp, StackOpFp};
+use crate::{util::{array4, array8}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
 
 impl_vm!{
 
-    /// Does nothing. Uses as label when debugging.
+    /// Does nothing. Used as label when debugging.
     #[allow(unused_variables)]
     fn debug(self: &mut Self, label: u32) { }
 
@@ -45,16 +45,20 @@ impl_vm!{
         self.stack.push(tmp);
     }
 
-    /// Load string from constant pool onto stack.
-    fn consts(self: &mut Self, const_id: u8) {
-        self.consts_16(const_id as u16);
+    /// Load object from constant pool onto stack+heap.
+    fn consto(self: &mut Self, const_id: u8) {
+        self.consto_16(const_id as u16);
     }
-    /// Load string from constant pool onto stack.
-    fn consts_16(self: &mut Self, const_id: u16) {
-        let len = self.program.consts_str[const_id as usize].len() as u32;
-        let ptr = self.program.consts_str[const_id as usize].as_ptr() as *const _ as u64;
-        self.stack.push(ptr);
-        self.stack.push(len);
+    /// Load object from constant pool onto stack+heap.
+    fn consto_16(self: &mut Self, const_id: u16) {
+        let pos = const_id as usize;
+        let len = u32::from_le_bytes(array4(&self.program.consts8[pos .. pos + 4])) as usize;
+        //let ptr = &self.program.consts8[pos + 4] as *const _ as usize;
+        //self.stack.push(ptr as u64);
+        //self.stack.push(len);
+        let data = self.program.consts8[pos + 4 .. pos + 4 + len].to_vec();
+        let heap_index: u32 = self.heap.store(data);
+        self.stack.push(heap_index);
     }
 
     /// Push value onto stack.
@@ -103,22 +107,23 @@ impl_vm!{
         let local: i64 = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
-
-    /// Load string from offset (relative to the stackframe) and push onto the stack.
-    fn loads(self: &mut Self, offset: i32) {
+/*
+    /// Load object (string/array) from offset (relative to the stackframe) and push onto the stack.
+    fn loado(self: &mut Self, offset: i32) {
         let ptr: u64 = self.stack.load_fp(offset);
         let len: u32 = self.stack.load_fp(offset + 2);
+        println!("loado ptr:{} len:{}", ptr, len);
         self.stack.push(ptr);
         self.stack.push(len);
     }
-    /// Pop string and store it at the given offset (relative to the stackframe).
-    fn stores(self: &mut Self, offset: i32) {
+    /// Pop object (string/array) and store it at the given offset (relative to the stackframe).
+    fn storeo(self: &mut Self, offset: i32) {
         let len: u32 = self.stack.pop();
         let ptr: u64 = self.stack.pop();
         self.stack.store_fp(offset, ptr);
         self.stack.store_fp(offset + 2, len);
     }
-
+*/
     /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
     fn load_arg1(self: &mut Self) {
         let local: Value = self.stack.load_fp(-4);
