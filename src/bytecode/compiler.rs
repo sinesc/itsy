@@ -59,17 +59,17 @@ pub enum CompareOp {
 impl CompareOp {
     fn write<T>(self: &Self, writer: &mut Writer<T>, jump_pos: u32) -> u32 where T: ExternRust<T> {
         match self {
-            CompareOp::Eq(ty) => match ty.size().unwrap() { // todo: unwrap will fail on array
+            CompareOp::Eq(ty) => match ty.size() {
                 1 | 2 | 4 => writer.jeqr32(jump_pos),
                 8 => writer.jeqr64(jump_pos),
                 _ => panic!("Unsupported type size"),
             }
-            CompareOp::Neq(ty) => match ty.size().unwrap() {
+            CompareOp::Neq(ty) => match ty.size() {
                 1 | 2 | 4 => writer.jneqr32(jump_pos),
                 8 => writer.jneqr64(jump_pos),
                 _ => panic!("Unsupported type size"),
             }
-            CompareOp::Lt(ty) => match ty.size().unwrap() {
+            CompareOp::Lt(ty) => match ty.size() {
                 1 | 2 | 4 => match ty.kind() {
                     TypeKind::Signed => writer.jlts32(jump_pos),
                     TypeKind::Unsigned => writer.jltu32(jump_pos),
@@ -84,7 +84,7 @@ impl CompareOp {
                 },
                 _ => panic!("unsupported type size"),
             }
-            CompareOp::Lte(ty) => match ty.size().unwrap() {
+            CompareOp::Lte(ty) => match ty.size() {
                 1 | 2 | 4 => match ty.kind() {
                     TypeKind::Signed => writer.jltes32(jump_pos),
                     TypeKind::Unsigned => writer.jlteu32(jump_pos),
@@ -172,23 +172,6 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     pub fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
-
-    /// Returns the size of the given type in bytes.
-    pub fn bytesize(self: &Self, ty: &Type) -> usize {
-        if let Some(size) = ty.size() {
-            size as usize
-        } else if let Type::Array(Array { len, type_id }) = ty {
-            let ty = self.get_type(*type_id);
-            self.bytesize(ty) * len.unwrap()
-        } else {
-            unimplemented!("sizeof {:?}", ty)
-        }
-    }
-
-    /// Returns the size of the given type in stack elements.
-    pub fn quadsize(self: &Self, ty: &Type) -> usize {
-        (self.bytesize(ty) + 3) / 4
-    }
 }
 
 /// Methods for compiling individual code structures.
@@ -267,7 +250,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         let mut frame = Locals::new();
 
         for arg in item.sig.args.iter() {
-            frame.next_arg -= max(0, self.bytesize(&self.bindingtype(arg)) as i32 / 4 - 1);
+            frame.next_arg -= self.bindingtype(arg).quadsize() as i32 - 1;
             frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
             frame.next_arg -= 1;
         }
@@ -276,7 +259,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             if let ast::Statement::Binding(binding) = statement {
                 let next_var = frame.next_var;
                 frame.map.insert(binding.binding_id.unwrap(), next_var);
-                frame.next_var += max(1, self.bytesize(&self.bindingtype(binding)) as i32 / 4);
+                frame.next_var += self.bindingtype(binding).quadsize() as i32;
             }
         }
 
@@ -286,7 +269,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 
         self.locals.push(frame);
         self.compile_block(&item.block);
-        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.quadsize(&self.get_type(ret.type_id)) as u8)); // todo: skip if last statement was "return"
+        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize())); // todo: skip if last statement was "return"
         self.locals.pop();
     }
 
@@ -397,7 +380,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         } else {
             self.writer.lit0(); // todo: need to return something for now
         }
-        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.quadsize(&self.get_type(Some(ret))) as u8));
+        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.get_type(Some(ret)).quadsize()));
     }
 
     /// Compiles the given block.
@@ -488,10 +471,10 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
-            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit0(); }
-            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit1(); }
-            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size().unwrap() <= 4 => { self.writer.lit2(); }
-            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size().unwrap() <= 4 => { self.writer.litm1(); }
+            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
+            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
+            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
+            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
             LiteralValue::Numeric(int) => {
                 match lit_type {
                     Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
@@ -631,28 +614,28 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     fn write_preinc(self: &mut Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.preinci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.preinci(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.preinci(index),
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
     fn write_predec(self: &mut Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.predeci(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.predeci(index),
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
     fn write_postinc(self: &mut Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postinci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.postinci(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postinci(index),
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
     fn write_postdec(self: &mut Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.postdeci(index),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postdeci(index),
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
@@ -661,7 +644,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             Type::f64 => self.writer.subf64(),
             Type::i64 | Type::u64 => self.writer.subi64(),
             Type::f32 => self.writer.subf(),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.subi(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.subi(),
             ty @ _ => panic!("Unsupported Sub operand {:?}", ty),
         };
     }
@@ -670,7 +653,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             Type::f64 => self.writer.addf64(),
             Type::i64 | Type::u64 => self.writer.addi64(),
             Type::f32 => self.writer.addf(),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.addi(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.addi(),
             ty @ _ => panic!("Unsupported Add operand {:?}", ty),
         };
     }
@@ -679,26 +662,26 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
             Type::f64 => self.writer.mulf64(),
             Type::i64 | Type::u64 => self.writer.muli64(),
             Type::f32 => self.writer.mulf(),
-            ref ty @ _ if ty.is_integer() && ty.size().unwrap() <= 4 => self.writer.muli(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.muli(),
             ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
         };
     }
     fn write_eq(self: &mut Self, ty: &Type) {
-        match self.bytesize(ty) {
+        match ty.size() {
             1 | 2 | 4 => self.writer.ceqr32(),
             8 => self.writer.ceqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
     fn write_neq(self: &mut Self, ty: &Type) {
-        match self.bytesize(ty) {
+        match ty.size() {
             1 | 2 | 4 => self.writer.cneqr32(),
             8 => self.writer.cneqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
     fn write_lt(self: &mut Self, ty: &Type) {
-        match self.bytesize(ty) {
+        match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.clts32(),
                 TypeKind::Unsigned => self.writer.cltu32(),
@@ -715,7 +698,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
         };
     }
     fn write_lte(self: &mut Self, ty: &Type) {
-        match self.bytesize(ty) {
+        match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.cltes32(),
                 TypeKind::Unsigned => self.writer.clteu32(),
@@ -733,7 +716,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &mut Self, index: i32, ty: &Type) {
-        let size = self.bytesize(ty);
+        let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
             self.writer.storer32(index);
@@ -747,7 +730,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &mut Self, index: i32, ty: &Type) {
-        let size = self.bytesize(ty);
+        let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
             self.writer.loadr32(index);

@@ -116,15 +116,19 @@ pub enum TypeKind {
 }
 
 impl Type {
-    pub fn size(self: &Self) -> Option<u8> {
+    // size of the type in bytes
+    pub fn size(self: &Self) -> u8 {
         match self {
-            Type::u8 | Type::i8 | Type::bool => Some(1),
-            Type::u16 | Type::i16 => Some(2),
-            Type::u32 | Type::i32 | Type::f32 => Some(4),
-            Type::u64 | Type::i64 | Type::f64 => Some(8),
-            Type::String => Some(12), // pointer+len
-            _ => None,
+            Type::u8 | Type::i8 | Type::bool    => 1,
+            Type::u16 | Type::i16               => 2,
+            Type::u32 | Type::i32 | Type::f32   => 4,
+            Type::u64 | Type::i64 | Type::f64   => 8,
+            _ => 4, // heap object: u32
         }
+    }
+    // size of the type in stack elements
+    pub fn quadsize(self: &Self) -> u8 {
+        (self.size() + 3) / 4
     }
     pub fn kind(self: &Self) -> TypeKind {
         match self {
