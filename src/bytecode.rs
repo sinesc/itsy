@@ -21,7 +21,7 @@ pub(crate) type Value64 = i64;
 
 /// An Itsy bytecode program.
 #[derive(Debug)]
-pub struct Program<T> where T: crate::ExternRust<T> {
+pub struct Program<T> where T: crate::VMFunc<T> {
     rust_fn: PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
     pub(crate) consts8      : Vec<u8>,
@@ -30,7 +30,7 @@ pub struct Program<T> where T: crate::ExternRust<T> {
     pub(crate) consts64     : Vec<i64>,
 }
 
-impl<T> Program<T> where T: crate::ExternRust<T> {
+impl<T> Program<T> where T: crate::VMFunc<T> {
     pub fn new() -> Self {
         Program {
             rust_fn     : PhantomData,

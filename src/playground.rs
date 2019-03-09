@@ -1,6 +1,6 @@
 use itsy::extern_rust;
 
-extern_rust!(MyFns, {
+extern_rust!(MyFns, (), {
     fn printi8(vm: &mut VM, value: i8) {
         println!("printi8:{}", value);
     }
@@ -50,28 +50,12 @@ extern_rust!(MyFns, {
 
 #[allow(unused_variables)]
 fn main() {
-    /*let source = "
-        let m = 2;
-        let g = 3;
-        let x = [ [ 1, 2, 3, 4, 5, 6, 7 ] ];
-        let y = m + x[0][m*g] * g;
-    ";*/
-    /*let source = "
-        let x = [ [ 1, 2 ] ];
-        let y: u32 = x[7][8];
-    ";*/
-    let source = "
-        fn main() {
-            let x = [ [ 1 ] ];
-            let y = x[0];
-            let z = y[0];
-            printu32(z);
-        }
-    ";
-    let source = "
-        fn main() {
+    /*
             let x = [ [ 1, 2 ], [ 3, 4 ] ];
             printi32(x[0][0]);
+    */
+    let source = "
+        fn main() {
             let x = -13;
             printi8(x);
             let y = -299;
@@ -96,7 +80,7 @@ fn main() {
         }
     ";
     println!("{}", source);
-    let mut vm = itsy::vm::<MyFns>(source);
+    let mut vm = itsy::vm::<MyFns, ()>(source);
     println!("{:}", vm.dump_program());
     let vm_start = ::std::time::Instant::now();
     vm.run();

@@ -2,16 +2,16 @@
 
 use std::{io::{self, Write, Seek, SeekFrom}, mem::transmute};
 use crate::bytecode::Program;
-use crate::ExternRust;
+use crate::VMFunc;
 
 /// Bytecode buffer and writer. Extended from opcodes.rs with the individual opcodes that can be written.
 #[derive(Debug)]
-pub struct Writer<T> where T: ExternRust<T> {
+pub struct Writer<T> where T: VMFunc<T> {
     pub(crate) program: Program<T>,
     pub(crate) position: u32,
 }
 
-impl<T> Writer<T> where T: ExternRust<T> {
+impl<T> Writer<T> where T: VMFunc<T> {
     /// Creates a new writer instance.
     pub fn new() -> Self {
         Writer {
@@ -48,7 +48,7 @@ impl<T> Writer<T> where T: ExternRust<T> {
 }
 
 /// Implement Write trait for program instructions.
-impl<T> Write for Writer<T> where T: ExternRust<T> {
+impl<T> Write for Writer<T> where T: VMFunc<T> {
     fn write(self: &mut Self, buf: &[u8]) -> io::Result<usize> {
         let buf_len = buf.len() as u32;
         if self.position == self.len() {
@@ -72,7 +72,7 @@ impl<T> Write for Writer<T> where T: ExternRust<T> {
 }
 
 /// Implement Seek trait for program instructions.
-impl<T> Seek for Writer<T> where T: ExternRust<T> {
+impl<T> Seek for Writer<T> where T: VMFunc<T> {
     fn seek(self: &mut Self, pos: SeekFrom) -> io::Result<u64> {
         self.position = match pos {
             SeekFrom::Start(pos) => pos as u32,
@@ -87,7 +87,7 @@ impl<T> Seek for Writer<T> where T: ExternRust<T> {
 #[allow(unused_macros)]
 macro_rules! impl_store_const {
     ($size:tt, $type:tt) => {
-        impl<P> WriteConst<$type> for Writer<P> where P: ExternRust<P> {
+        impl<P> WriteConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &mut Self, value: $type) -> u32 {
                 println!("{} ({}) into {}", value, stringify!($type), stringify!($size));
                 let position = self.program.$size.len();
@@ -115,7 +115,7 @@ impl_store_const!(consts64, u64);
 impl_store_const!(consts64, i64);
 impl_store_const!(consts64, f64);
 
-impl<P> WriteConst<&str> for Writer<P> where P: ExternRust<P> {
+impl<P> WriteConst<&str> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &mut Self, value: &str) -> u32 {
         let position = self.program.consts8.len();
         let len = value.len() as u32;

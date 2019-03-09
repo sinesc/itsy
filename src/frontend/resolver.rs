@@ -7,11 +7,11 @@ mod repository;
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable};
 use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array};
-use crate::{ExternRust, Standalone};
+use crate::{VMFunc, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
 #[derive(Debug)]
-pub struct ResolvedProgram<'a, T> where T: ExternRust<T> {
+pub struct ResolvedProgram<'a, T> where T: VMFunc<T> {
     ty: PhantomData<T>,
     /// Program AST with types and bindings resolved.
     pub ast: super::Program<'a>,
@@ -38,7 +38,7 @@ struct Resolver<'a, 'b> where 'a: 'b {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: ExternRust<T> {
+pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();

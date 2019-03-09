@@ -18,17 +18,17 @@ pub enum VMState {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T> where T: crate::ExternRust<T> {
+pub struct VM<T, U> where T: crate::VMFunc<T>, U: Default {
     pub(crate) program  : Program<T>,
     pub(crate) pc       : u32,
     pub(crate) state    : VMState,
+    context             : U,
     pub stack           : Stack,
     pub heap            : Heap,
-    pub custom          : Vec<Value>,
 }
 
 /// Public VM methods.
-impl<T> VM<T> where T: crate::ExternRust<T> {
+impl<T, U> VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self {
         VM {
@@ -37,7 +37,7 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
             state       : VMState::Continue,
             stack       : Stack::new(),
             heap        : Heap::new(),
-            custom      : Vec::new(),
+            context     : U::default(),
         }
     }
 
@@ -95,9 +95,19 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
     pub fn state(self: &Self) -> VMState {
         self.state
     }
+
+    /// Returns a reference to the custom context.
+    pub fn context(self: &mut Self) -> &mut U {
+        &mut self.context
+    }
+
+    /// Destroys the VM and returns its custom context.
+    pub fn into_context(self: Self) -> U {
+        self.context
+    }
 }
 
-impl<T> Read for VM<T> where T: crate::ExternRust<T> {
+impl<T, U> Read for VM<T, U> where T: crate::VMFunc<T>, U: Default {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;
@@ -189,7 +199,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
-        impl<T> crate::bytecode::Writer<T> where T: crate::ExternRust<T> {
+        impl<T> crate::bytecode::Writer<T> where T: crate::VMFunc<T> {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -204,7 +214,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl<T> crate::bytecode::VM<T> where T: crate::ExternRust<T> {
+        impl<T, U> crate::bytecode::VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
 
             // Generate methods for executing each bytecode on VM struct.
             $(

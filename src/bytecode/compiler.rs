@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
-use crate::ExternRust;
+use crate::VMFunc;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
 struct Locals {
@@ -43,7 +43,7 @@ impl LocalsStack {
 }
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler<T> where T: ExternRust<T> {
+pub struct Compiler<T> where T: VMFunc<T> {
     writer          : Writer<T>,
     /// List of bindings mapped to their TypeIds
     bindingtype_ids : Vec<TypeId>,
@@ -58,7 +58,7 @@ pub struct Compiler<T> where T: ExternRust<T> {
 }
 
 /// Basic compiler functionality.
-impl<'a, T> Compiler<T> where T: ExternRust<T> {
+impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Creates a new compiler.
     pub fn new() -> Self {
@@ -113,7 +113,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 }
 
 /// Methods for compiling individual code structures.
-impl<'a, T> Compiler<T> where T: ExternRust<T> {
+impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
     pub fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
@@ -533,7 +533,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
     }
 }
 
-impl<'a, T> Compiler<T> where T: ExternRust<T> {
+impl<'a, T> Compiler<T> where T: VMFunc<T> {
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
         if let Some(targets) = self.unresolved.remove(&function_id) {
@@ -684,7 +684,7 @@ impl<'a, T> Compiler<T> where T: ExternRust<T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: ExternRust<T>+Debug {
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: VMFunc<T>+Debug {
     let mut compiler = Compiler::new();
     compiler.compile(program);
     compiler.into_program()
