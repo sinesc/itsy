@@ -130,7 +130,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, Some(name), None);
             *item.binding_id_mut() = Some(binding_id);
-            println!("created binding {:?} = {}", binding_id, name);
             binding_id
         }
     }

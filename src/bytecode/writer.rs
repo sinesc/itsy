@@ -89,7 +89,6 @@ macro_rules! impl_store_const {
     ($size:tt, $type:tt) => {
         impl<P> WriteConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &mut Self, value: $type) -> u32 {
-                println!("{} ({}) into {}", value, stringify!($type), stringify!($size));
                 let position = self.program.$size.len();
                 self.program.$size.push(unsafe { transmute(value) });
                 position as u32
