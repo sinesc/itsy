@@ -5,6 +5,7 @@
 /// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `vm::<MyFns>(...)`.
 ///
 /// ```
+/// # #[macro_use] extern crate itsy; fn main() {
 /// extern_rust!(MyFns, {
 ///     /// prints given i32 value
 ///     fn print(vm: &mut VM, value: i32) {
@@ -15,6 +16,7 @@
 ///         println!("hello world!");
 ///     }
 /// });
+/// # }
 /// ```
 
 #[macro_export]
@@ -73,7 +75,7 @@ macro_rules! extern_rust {
         let heap_index: u32 = $vm.stack.pop();
         $vm.heap.clone(heap_index)
     } };
-    (@trait $enum_name:ident $(, $name:tt [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+    (@trait $enum_name:ident $(, $name:tt, $vm:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::ExternRust<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
@@ -92,22 +94,22 @@ macro_rules! extern_rust {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name>) {
-                use $crate::bytecode::StackOp;
-                use $crate::bytecode::HeapOp;
+                use $crate::bytecode::{StackOp, HeapOp};
                 match self {
                     $(
                         $enum_name::$name => {
+                            let $vm = vm;
                             // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param vm, $($arg_type)*);
+                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param $vm, $($arg_type)*);
                                 )*
                                 $code
                             };
                             // set return value, if any
                             $(
                                 let ret_typed: $ret_type = ret;
-                                extern_rust!(@handle-ret vm, $ret_type, ret_typed);
+                                extern_rust!(@handle-ret $vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -119,12 +121,12 @@ macro_rules! extern_rust {
     (
         $enum_name:ident, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( $self:ident : & mut VM $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
+            fn $name:tt ( $vm:ident : & mut VM $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
-        /// Rust function mapping. Generated from function signatures defined via the `register_vm!` macro.
+        /// Rust function mapping. Generated from function signatures defined via the `extern_rust!` macro.
         extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name $(, $name [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
+        extern_rust!(@trait $enum_name $(, $name, $vm [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
     };
 }
 

@@ -53,9 +53,6 @@ impl_vm!{
     fn consto_16(self: &mut Self, const_id: u16) {
         let pos = const_id as usize;
         let len = u32::from_le_bytes(array4(&self.program.consts8[pos .. pos + 4])) as usize;
-        //let ptr = &self.program.consts8[pos + 4] as *const _ as usize;
-        //self.stack.push(ptr as u64);
-        //self.stack.push(len);
         let data = self.program.consts8[pos + 4 .. pos + 4 + len].to_vec();
         let heap_index: u32 = self.heap.store(data);
         self.stack.push(heap_index);

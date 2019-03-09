@@ -20,10 +20,11 @@ pub enum VMState {
 #[derive(Debug)]
 pub struct VM<T> where T: crate::ExternRust<T> {
     pub(crate) program  : Program<T>,
-    pub stack           : Stack,
-    pub heap            : Heap,
     pub(crate) pc       : u32,
     pub(crate) state    : VMState,
+    pub stack           : Stack,
+    pub heap            : Heap,
+    pub custom          : Vec<Value>,
 }
 
 /// Public VM methods.
@@ -32,10 +33,11 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
     pub fn new(program: Program<T>) -> Self {
         VM {
             program     : program,
-            stack       : Stack::new(),
-            heap        : Heap::new(),
             pc          : 0,
             state       : VMState::Continue,
+            stack       : Stack::new(),
+            heap        : Heap::new(),
+            custom      : Vec::new(),
         }
     }
 
@@ -79,13 +81,14 @@ impl<T> VM<T> where T: crate::ExternRust<T> {
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self) {
+    pub fn run(self: &mut Self) -> &mut Self {
         while self.state == VMState::Continue {
             self.exec();
         }
         if self.state == VMState::Terminate {
             self.reset();
         }
+        self
     }
 
     /// Returns the current VM state.
