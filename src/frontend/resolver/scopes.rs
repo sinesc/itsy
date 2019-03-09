@@ -108,10 +108,10 @@ impl Scopes {
         self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
     }
 
-    /// Returns the id of the named function originating in exactly this scope.
+    /*/// Returns the id of the named function originating in exactly this scope.
     pub fn function_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<FunctionId> {
         self.functions.id_of(scope_id, name)
-    }
+    }*/
 
     /// Finds the id of the named function within the scope or its parent scopes. // todo: generalize lookup functions, then integrate into resolver
     pub fn lookup_function_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<FunctionId> {

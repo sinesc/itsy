@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use crate::{util::{array4, array8}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
+use crate::{util::{array4}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
 
 impl_vm!{
 

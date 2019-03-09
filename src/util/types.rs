@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use super::TypeId;
+use crate::{util::TypeId, bytecode::Value};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -128,7 +128,7 @@ impl Type {
     }
     // size of the type in stack elements
     pub fn quadsize(self: &Self) -> u8 {
-        (self.size() + 3) / 4
+        (self.size() + (std::mem::size_of::<Value>() as u8 - 1)) / std::mem::size_of::<Value>() as u8
     }
     pub fn kind(self: &Self) -> TypeKind {
         match self {

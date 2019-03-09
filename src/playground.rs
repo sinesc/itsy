@@ -1,7 +1,6 @@
 use itsy::extern_rust;
 
 extern_rust!(MyFns, {
-/*
     fn printi8(vm: &mut VM, value: i8) {
         println!("printi8:{}", value);
     }
@@ -38,15 +37,18 @@ extern_rust!(MyFns, {
     fn strlen(vm: &mut VM, value: &str) -> u32 {
         value.len() as u32
     }
-*/
-    fn prints(vm: &mut VM, value: &str) {
+    fn prints_ref(vm: &mut VM, value: &str) {
         println!("prints:{}", value);
+    }
+    fn prints_val(vm: &mut VM, value: String) {
+        println!("prints2:{}", &value);
     }
     fn hello(vm: &mut VM) -> String {
         "Hello World, from Rust, with love".to_string()
     }
 });
 
+#[allow(unused_variables)]
 fn main() {
     /*let source = "
         let m = 2;
@@ -68,8 +70,6 @@ fn main() {
     ";
     let source = "
         fn main() {
-            let x = [ [ [ 1 ], [ 2 ] ] ];
-            let z: u32 = x[0][0][0];
             let x = [ [ 1, 2 ], [ 3, 4 ] ];
             printi32(x[0][0]);
             let x = -13;
@@ -84,10 +84,15 @@ fn main() {
     ";
     let source = "
         fn main() {
-            let s1 = \"Hello !\";
-            let s2 = hello();
-            prints(s1);
-            prints(s2);
+            let x = 3;
+            let y = 3;
+            if x < y {
+                printi32(x);
+            } else if x > y {
+                printi32(y);
+            } else {
+                printi32(x + y);
+            }
         }
     ";
     println!("{}", source);

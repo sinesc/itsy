@@ -1,8 +1,5 @@
 //! A virtual machine for running Itsy bytecode.
 
-// todo: remove
-#![allow(dead_code)]
-
 use std::io::{self, Read};
 use crate::bytecode::*;
 

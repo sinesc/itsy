@@ -1,8 +1,5 @@
 //! Bytecode generation and execution.
 
-// todo: remove
-#![allow(dead_code)]
-
 mod vm;
 #[macro_use]
 mod macros;
@@ -20,8 +17,6 @@ pub use self::stack::*;
 pub use self::heap::*;
 
 /// A stack value.
-pub(crate) const VALUE_SIZE: usize = 4;
-pub(crate) const VALUE64_SIZE: usize = 8;
 pub(crate) type Value = i32;
 pub(crate) type Value64 = i64;
 

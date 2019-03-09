@@ -170,14 +170,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
             .map(move |type_id| self.scopes.type_mut(type_id))
     }
 
-    /// Format a type-name for debug output
+    /* /// Format a type-name for debug output
     fn format_type(self: &Self, type_id: Option<TypeId>) -> String {
         if let Some(type_id) = type_id {
             format!("{:?}", self.scopes.type_ref(type_id))
         } else {
             "???".to_string()
         }
-    }
+    } */
 }
 
 /// Methods to resolve individual AST structures.
