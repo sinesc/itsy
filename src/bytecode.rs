@@ -1,8 +1,7 @@
 //! Bytecode generation and execution.
 
-mod vm;
 #[macro_use]
-mod macros;
+mod vm;
 mod writer;
 mod opcodes;
 mod compiler;
@@ -12,7 +11,7 @@ mod heap;
 use std::marker::PhantomData;
 pub use self::vm::{VM, VMState};
 pub use self::writer::*;
-pub use self::compiler::{compile, Compiler};
+pub use self::compiler::compile;
 pub use self::stack::*;
 pub use self::heap::*;
 
