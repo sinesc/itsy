@@ -1,8 +1,14 @@
 [package]
 name = "itsy"
 version = "0.1.0"
-authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 edition = "2018"
+authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
+description = "Strongly typed scripting language with a rusty syntax and nice Rust integration."
+documentation = "https://docs.rs/itsy/"
+repository = "https://github.com/sinesc/itsy.git"
+license = "MIT"
+readme = "README.md"
+keywords = [ "language", "scripting" ]
 
 [dependencies]
 nom = { version = "4.1.1", features = [ "verbose-errors" ] }
