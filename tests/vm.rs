@@ -1,6 +1,6 @@
 use itsy::*;
-use std::any::Any;
-use std::fmt::Debug;
+use std::{any::Any, fmt::Debug};
+use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
 type ContextElement = Box<Any>;
 type Context = Vec<ContextElement>;
@@ -21,14 +21,39 @@ fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+Co
     }
 }
 
-/// Implement some VM methods to write values to the VM context.
+/// Implement some VM methods to write values of specific types to the VM context.
 extern_rust!(TestFns, Context, {
-    /// Pushes an i32 to the context.
+    fn ret_u8(vm: &mut VM, value: u8) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_u16(vm: &mut VM, value: u16) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_u32(vm: &mut VM, value: u32) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_u64(vm: &mut VM, value: u64) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_i8(vm: &mut VM, value: i8) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_i16(vm: &mut VM, value: i16) {
+        vm.context().push(Box::new(value));
+    }
     fn ret_i32(vm: &mut VM, value: i32) {
         vm.context().push(Box::new(value));
     }
-    /// Pushes an f32 to the context.
+    fn ret_i64(vm: &mut VM, value: i64) {
+        vm.context().push(Box::new(value));
+    }
     fn ret_f32(vm: &mut VM, value: f32) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_f64(vm: &mut VM, value: f64) {
+        vm.context().push(Box::new(value));
+    }
+    fn ret_bool(vm: &mut VM, value: bool) {
         vm.context().push(Box::new(value));
     }
 });
@@ -45,27 +70,7 @@ fn run(code: &str) -> Context {
 }
 
 #[test]
-fn recursion() {
-    let result = run("
-        fn fib(n: i32) -> i32 {
-            if n < 2 {
-                n
-            } else {
-                fib(n - 1) + fib(n - 2)
-            }
-        }
-        fn main() {
-            ret_i32(fib(1));
-            ret_i32(fib(2));
-            ret_i32(fib(5));
-            ret_i32(fib(7));
-        }
-    ");
-    assert_all(&result, &[ 1i32, 1, 5, 13 ]);
-}
-
-#[test]
-fn binary_op() {
+fn binary_op_native_stack_value() {
     let result = run("
         ret_i32(1 + 4);
         ret_i32(1 + 4 * 2);
@@ -74,6 +79,60 @@ fn binary_op() {
         ret_i32(5 - 7 * 2);
     ");
     assert_all(&result, &[ 5i32, 9, 10, -2, -9 ]);
+}
+
+#[test]
+fn binary_op_numerics() {
+    let result = run("
+        ret_u8( 255 - 1 );
+        ret_u16( 65535 - 2 );
+        ret_u32( 4294967295 - 3 );
+        ret_u64( 18446744073709551615 - 4 );
+
+        ret_i8( 127 - 5 );
+        ret_i16( 32767 - 6 );
+        ret_i32( 2147483647 - 7 );
+        ret_i64( 9223372036854775807 - 8 );
+
+        ret_f32( 1234567.0 * 7654321.0 );
+        ret_f64( 123456789.0 * 987654321.0 );
+    ");
+
+    assert(&result[0], 255u8 - 1);
+    assert(&result[1], 65535u16 - 2);
+    assert(&result[2], 4294967295u32 - 3);
+    assert(&result[3], 18446744073709551615u64 - 4);
+
+    assert(&result[4], 127i8 - 5);
+    assert(&result[5], 32767i16 - 6);
+    assert(&result[6], 2147483647i32 - 7);
+    assert(&result[7], 9223372036854775807i64 - 8);
+
+    assert(&result[8], 1234567.0f32 * 7654321.0);
+    assert(&result[9], 123456789.0f64 * 987654321.0);
+}
+
+#[test]
+fn binary_op_bool() {
+    let result = run("
+        ret_bool(true && true);
+        ret_bool(true && false);
+        ret_bool(false && true);
+        ret_bool(false && false);
+
+        ret_bool(true || true);
+        ret_bool(true || false);
+        ret_bool(false || true);
+        ret_bool(false || false);
+
+        ret_bool(!false);
+        ret_bool(!true);
+    ");
+    assert_all(&result, &[
+        true, false, false, false,
+        true, true, true, false,
+        true, false
+    ]);
 }
 
 #[test]
@@ -96,11 +155,21 @@ fn branching() {
 }
 
 #[test]
-fn floats() {
+fn recursion() {
     let result = run("
-        let x = 2.34;
-        let y = 1.23;
-        ret_f32(x + y);
+        fn fib(n: i32) -> i32 {
+            if n < 2 {
+                n
+            } else {
+                fib(n - 1) + fib(n - 2)
+            }
+        }
+        fn main() {
+            ret_i32(fib(1));
+            ret_i32(fib(2));
+            ret_i32(fib(5));
+            ret_i32(fib(7));
+        }
     ");
-    assert_all(&result, &[ 3.57f32 ]);
+    assert_all(&result, &[ 1i32, 1, 5, 13 ]);
 }
