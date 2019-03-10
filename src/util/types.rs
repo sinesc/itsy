@@ -116,7 +116,7 @@ pub enum TypeKind {
 }
 
 impl Type {
-    // size of the type in bytes
+    /// Size of the type in bytes.
     pub fn size(self: &Self) -> u8 {
         match self {
             Type::u8 | Type::i8 | Type::bool    => 1,
@@ -126,10 +126,11 @@ impl Type {
             _ => 4, // heap object: u32
         }
     }
-    // size of the type in stack elements
+    /// Size of the type in stack elements.
     pub fn quadsize(self: &Self) -> u8 {
         (self.size() + (std::mem::size_of::<Value>() as u8 - 1)) / std::mem::size_of::<Value>() as u8
     }
+    /// Kind of the type, e.g. Signed or Array.
     pub fn kind(self: &Self) -> TypeKind {
         match self {
             Type::void => TypeKind::Void,
@@ -143,36 +144,42 @@ impl Type {
             Type::Array(_) => TypeKind::Array,
         }
     }
+    /// Whether the type is an array.
     pub fn is_array(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Array => true,
             _ => false
         }
     }
+    /// Whether the type is a primitive.
     pub fn is_primitive(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool | TypeKind::String => true,
             _ => false
         }
     }
+    /// Whether the type is an integer.
     pub fn is_integer(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Unsigned | TypeKind::Signed => true,
             _ => false
         }
     }
+    /// Whether the type is unsigned
     pub fn is_unsigned(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Unsigned => true,
             _ => false
         }
     }
+    /// Whether the type is signed.
     pub fn is_signed(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Signed => true,
             _ => false
         }
     }
+    /// Whether the type is a float.
     pub fn is_float(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Float => true,

@@ -16,11 +16,11 @@ pub struct ResolvedProgram<'a, T> where T: VMFunc<T> {
     /// Program AST with types and bindings resolved.
     pub ast: super::Program<'a>,
     /// Mapping from BindingId (vector index) to TypeId
-    pub(crate) bindingtype_ids: Vec<TypeId>,
+    pub bindingtype_ids: Vec<TypeId>,
     /// Mapping from TypeId (vector index) to primitive type.
-    pub(crate) types: Vec<Type>,
+    pub types: Vec<Type>,
     /// Function id of the entry/main function.
-    pub(crate) entry_fn: FunctionId,
+    pub entry_fn: FunctionId,
 }
 
 /// Internal state during program type/binding resolution.
