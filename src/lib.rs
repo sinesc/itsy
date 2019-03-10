@@ -19,11 +19,11 @@ use std::collections::HashMap;
 /// # #[macro_use] extern crate itsy; fn main() {
 /// extern_rust!(MyFns, (), {
 ///     /// prints given i32 value
-///     fn print(vm: &mut VM, value: i32) {
+///     fn print(&mut context, value: i32) {
 ///         println!("print:{}", value);
 ///     }
 ///     /// prints hello world!
-///     fn hello_world(vm: &mut VM) {
+///     fn hello_world(&mut context) {
 ///         println!("hello world!");
 ///     }
 /// });
@@ -85,7 +85,7 @@ macro_rules! extern_rust {
         let heap_index: u32 = $vm.stack.pop();
         $vm.heap.clone(heap_index)
     } };
-    (@trait $enum_name:ident, $custom_type:ty $(, $name:tt, $vm:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+    (@trait $enum_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::VMFunc<$enum_name> for $enum_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
@@ -102,26 +102,26 @@ macro_rules! extern_rust {
                 map
             }
         }
-        impl $crate::VMData<$enum_name, $custom_type> for $enum_name {
+        impl $crate::VMData<$enum_name, $context_type> for $enum_name {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
-            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name, $custom_type>) {
+            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name, $context_type>, context: &mut $context_type) {
                 use $crate::bytecode::{StackOp, HeapOp};
                 match self {
                     $(
                         $enum_name::$name => {
-                            let $vm = vm;
+                            let $context = context;
                             // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param $vm, $($arg_type)*);
+                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param vm, $($arg_type)*);
                                 )*
                                 $code
                             };
                             // set return value, if any
                             $(
                                 let ret_typed: $ret_type = ret;
-                                extern_rust!(@handle-ret $vm, $ret_type, ret_typed);
+                                extern_rust!(@handle-ret vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -131,14 +131,14 @@ macro_rules! extern_rust {
         }
     };
     (
-        $enum_name:ident, $custom_type:ty, { $(
+        $enum_name:ident, $context_type:ty, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( $vm:ident : & mut VM $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
+            fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `extern_rust!` macro.
         extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name, $custom_type $(, $name, $vm [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
+        extern_rust!(@trait $enum_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
@@ -165,9 +165,9 @@ pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
 
 /// An internal trait used to make VM generic over a set of Rust functions.
 /// Use the `extern_rust!` macro to generate a type implementing `VMData` and `VMFunc`.
-pub trait VMData<T, U> where T: VMFunc<T>, U: Default {
+pub trait VMData<T, U> where T: VMFunc<T> {
     #[doc(hidden)]
-    fn exec(self: Self, vm: &mut bytecode::VM<T, U>);
+    fn exec(self: Self, vm: &mut bytecode::VM<T, U>, context: &mut U);
 }
 
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a VM for it.
@@ -175,7 +175,7 @@ pub trait VMData<T, U> where T: VMFunc<T>, U: Default {
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
 ///
-/// The following example defines a VM with an `i32` context (for custom data) and makes the
+/// The following example defines a VM with an `i32` context (this would typically be a struct) and makes the
 /// rust functions `print` and `send` available to it.
 ///
 /// ```
@@ -183,12 +183,12 @@ pub trait VMData<T, U> where T: VMFunc<T>, U: Default {
 ///
 /// extern_rust!(MyFns, i32, {
 ///     /// Prints given i32 value.
-///     fn print(vm: &mut VM, value: i32) {
+///     fn print(&mut context, value: i32) {
 ///         println!("print: {}", value);
 ///     }
 ///     /// Sets VM context to given value.
-///     fn send(vm: &mut VM, value: i32) {
-///         *vm.context() = value;
+///     fn send(&mut context, value: i32) {
+///         *context = value;
 ///     }
 /// });
 ///
@@ -201,9 +201,9 @@ pub trait VMData<T, U> where T: VMFunc<T>, U: Default {
 ///             send(x+y);
 ///         }
 ///     ");
-///
-///     vm.run();
-///     println!("vm sent: {}", vm.into_context());
+///     let mut result = 0;
+///     vm.run(&mut result);
+///     println!("vm sent: {}", result);
 /// }
 /// ```
 ///
@@ -212,7 +212,7 @@ pub trait VMData<T, U> where T: VMFunc<T>, U: Default {
 /// print: 3
 /// vm sent: 3
 /// ```
-pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U>, U: Default {
+pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U> {
     use crate::{frontend::{parse, resolve}, bytecode::{compile, VM}};
     let parsed = parse(program).unwrap();
     let resolved = resolve::<T>(parsed, "main");

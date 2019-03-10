@@ -18,26 +18,26 @@ pub enum VMState {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T, U> where T: crate::VMFunc<T>, U: Default {
+pub struct VM<T, U> where T: crate::VMFunc<T> {
+    context_type        : std::marker::PhantomData<U>,
     pub(crate) program  : Program<T>,
     pub(crate) pc       : u32,
     pub(crate) state    : VMState,
-    context             : U,
     pub stack           : Stack,
     pub heap            : Heap,
 }
 
 /// Public VM methods.
-impl<T, U> VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
+impl<T, U> VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U> {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self {
         VM {
+            context_type: std::marker::PhantomData,
             program     : program,
             pc          : 0,
             state       : VMState::Continue,
             stack       : Stack::new(),
             heap        : Heap::new(),
-            context     : U::default(),
         }
     }
 
@@ -81,9 +81,9 @@ impl<T, U> VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self) -> &mut Self {
+    pub fn run(self: &mut Self, context: &mut U) -> &mut Self {
         while self.state == VMState::Continue {
-            self.exec();
+            self.exec(context);
         }
         if self.state == VMState::Terminate {
             self.reset();
@@ -95,19 +95,9 @@ impl<T, U> VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
     pub fn state(self: &Self) -> VMState {
         self.state
     }
-
-    /// Returns a reference to the custom context.
-    pub fn context(self: &mut Self) -> &mut U {
-        &mut self.context
-    }
-
-    /// Destroys the VM and returns its custom context.
-    pub fn into_context(self: Self) -> U {
-        self.context
-    }
 }
 
-impl<T, U> Read for VM<T, U> where T: crate::VMFunc<T>, U: Default {
+impl<T, U> Read for VM<T, U> where T: crate::VMFunc<T> {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;
@@ -179,6 +169,7 @@ macro_rules! impl_vm {
         #[allow(non_camel_case_types)]
         #[repr(u8)]
         pub(crate) enum ByteCode {
+            rustcall,
             $(
                 $( #[ $attr ] )*
                 $name $(= $id)*
@@ -200,6 +191,14 @@ macro_rules! impl_vm {
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         impl<T> crate::bytecode::Writer<T> where T: crate::VMFunc<T> {
+            /// Calls the given Rust function.
+            pub fn rustcall(self: &mut Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
+                use byteorder::{LittleEndian, WriteBytesExt};
+                let insert_pos = self.position;
+                impl_vm!(write u8, ByteCode::rustcall.into_u8(), self);
+                impl_vm!(write RustFn, func, self);
+                insert_pos as u32
+            }
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -214,7 +213,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl<T, U> crate::bytecode::VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U>, U: Default {
+        impl<T, U> crate::bytecode::VM<T, U> where T: crate::VMFunc<T>+crate::VMData<T, U> {
 
             // Generate methods for executing each bytecode on VM struct.
             $(
@@ -233,6 +232,14 @@ macro_rules! impl_vm {
                 let position = self.pc;
                 if let Ok(instruction) = self.read_u8() {
                     match ByteCode::from_u8(instruction) {
+                        // todo: rustcall specialcase is required since normal opcodes don't receive the context
+                        // considering refactoring this so that all opcodes receive the context if it turns out that
+                        // additional opcodes require it
+                        ByteCode::rustcall => {
+                            let mut result = format!("{:?} {} ", position, stringify!(rustcall));
+                            result.push_str(&format!("{:?} ", impl_vm!(read RustFn, self) ));
+                            Some(result)
+                        }
                         $(
                             ByteCode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
@@ -251,10 +258,13 @@ macro_rules! impl_vm {
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
             #[cfg_attr(not(debug_assertions), inline(always))]
-            pub(crate) fn exec(self: &mut Self) {
+            pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use byteorder::{LittleEndian, ReadBytesExt};
                 let instruction = impl_vm!(read u8, self);
                 match ByteCode::from_u8(instruction) {
+                    ByteCode::rustcall => {
+                        T::from_u16(impl_vm!(read RustFn, self)).exec(self, context);
+                    },
                     $(
                         ByteCode::$name => {
                             let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self) ),* );

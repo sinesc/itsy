@@ -136,12 +136,12 @@ impl_vm!{
         let local: Value = self.stack.load_fp(-6);
         self.stack.push(local);
     }
-
+/*
     /// Calls the given Rust function.
     fn rustcall(self: &mut Self, func: RustFn) {
         T::from_u16(func).exec(self);
     }
-
+*/
     /// Function call. Saves state and sets programm counter to given addr. Expects
     /// callee arguments on the stack and number of arguments (in 32 bit words) as num_args.
     fn call(self: &mut Self, addr: u32, num_args: u8) { // todo: move num_args to ret? avoids one push

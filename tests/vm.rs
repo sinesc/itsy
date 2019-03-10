@@ -23,38 +23,38 @@ fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+Co
 
 /// Implement some VM methods to write values of specific types to the VM context.
 extern_rust!(TestFns, Context, {
-    fn ret_u8(vm: &mut VM, value: u8) {
-        vm.context().push(Box::new(value));
+    fn ret_u8(&mut context, value: u8) {
+        context.push(Box::new(value));
     }
-    fn ret_u16(vm: &mut VM, value: u16) {
-        vm.context().push(Box::new(value));
+    fn ret_u16(&mut context, value: u16) {
+        context.push(Box::new(value));
     }
-    fn ret_u32(vm: &mut VM, value: u32) {
-        vm.context().push(Box::new(value));
+    fn ret_u32(&mut context, value: u32) {
+        context.push(Box::new(value));
     }
-    fn ret_u64(vm: &mut VM, value: u64) {
-        vm.context().push(Box::new(value));
+    fn ret_u64(&mut context, value: u64) {
+        context.push(Box::new(value));
     }
-    fn ret_i8(vm: &mut VM, value: i8) {
-        vm.context().push(Box::new(value));
+    fn ret_i8(&mut context, value: i8) {
+        context.push(Box::new(value));
     }
-    fn ret_i16(vm: &mut VM, value: i16) {
-        vm.context().push(Box::new(value));
+    fn ret_i16(&mut context, value: i16) {
+        context.push(Box::new(value));
     }
-    fn ret_i32(vm: &mut VM, value: i32) {
-        vm.context().push(Box::new(value));
+    fn ret_i32(&mut context, value: i32) {
+        context.push(Box::new(value));
     }
-    fn ret_i64(vm: &mut VM, value: i64) {
-        vm.context().push(Box::new(value));
+    fn ret_i64(&mut context, value: i64) {
+        context.push(Box::new(value));
     }
-    fn ret_f32(vm: &mut VM, value: f32) {
-        vm.context().push(Box::new(value));
+    fn ret_f32(&mut context, value: f32) {
+        context.push(Box::new(value));
     }
-    fn ret_f64(vm: &mut VM, value: f64) {
-        vm.context().push(Box::new(value));
+    fn ret_f64(&mut context, value: f64) {
+        context.push(Box::new(value));
     }
-    fn ret_bool(vm: &mut VM, value: bool) {
-        vm.context().push(Box::new(value));
+    fn ret_bool(&mut context, value: bool) {
+        context.push(Box::new(value));
     }
 });
 
@@ -65,8 +65,9 @@ fn run(code: &str) -> Context {
     } else {
         vm::<TestFns, Context>(&format!("fn main() {{ {} }}", code))
     };
-    vm.run();
-    vm.into_context()
+    let mut context = Vec::new();
+    vm.run(&mut context);
+    context
 }
 
 #[test]
