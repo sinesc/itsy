@@ -178,18 +178,26 @@ named!(assignment<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, assign
 
 named!(parens<Input<'_>, Expression<'_>>, ws!(delimited!(char!('('), expression, char!(')'))));
 
+named!(unary<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!")), expression)), |m| {
+    Expression::UnaryOp(Box::new(UnaryOp {
+        op          : UnaryOperator::prefix_from_string(*m.0),
+        expr        : m.1,
+        binding_id  : None,
+    }))
+}));
+
 named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
-        op      : UnaryOperator::prefix_from_string(*m.0),
-        expr    : Expression::Variable(Variable { path: m.1, binding_id: None }),
+        op          : UnaryOperator::prefix_from_string(*m.0),
+        expr        : Expression::Variable(Variable { path: m.1, binding_id: None }),
         binding_id  : None,
     }))
 }));
 
 named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident_path, alt!(tag!("++") | tag!("--")))), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
-        op      : UnaryOperator::suffix_from_string(*m.1),
-        expr    : Expression::Variable(Variable { path: m.0, binding_id: None }),
+        op          : UnaryOperator::suffix_from_string(*m.1),
+        expr        : Expression::Variable(Variable { path: m.0, binding_id: None }),
         binding_id  : None,
     }))
 }));
@@ -200,6 +208,7 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require c
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
+    | unary
     | suffix
     | prefix
     | map!(numerical, |m| Expression::Literal(m))
