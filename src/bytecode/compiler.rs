@@ -481,7 +481,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op == BO::Greater || item.op == BO::GreaterOrEq {
-            // implement these via Less/LessOrEq + swapping arguments,
+            // implement these via Less/LessOrEq + swapping arguments
+            // fixme: this fails if values change within those expressions (e.g. via ++ op)
             self.compile_expression(&item.left);
             self.compile_expression(&item.right);
         } else {
@@ -507,22 +508,10 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::DivAssign => unimplemented!("divassgi"),
             BO::RemAssign => unimplemented!("remassign"),
             // comparison
-            BO::Less | BO::Greater => {
-                // Less/Greater comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lt becomes Lte.
-                self.write_lt(&compare_type);
-            },
-            BO::LessOrEq | BO::GreaterOrEq => {
-                // LessOrEq/GreaterOrEq comparison. For Greater, arguments have been swapped above (unless jump). For jumps Lte becomes Lt.
-                self.write_lte(&compare_type);
-            }
-            BO::Equal => {
-                // Eq comparison. for jumps, we have to invert this to Neq
-                self.write_eq(&compare_type);
-            },
-            BO::NotEqual => {
-                // Neq comparison. for jumps, we have to invert this to Eq
-                self.write_neq(&compare_type);
-            },
+            BO::Less | BO::Greater => { self.write_lt(&compare_type); }, // Less/Greater, for Greater, arguments have been swapped above.
+            BO::LessOrEq | BO::GreaterOrEq => { self.write_lte(&compare_type); } //  swapped above for GreaterOrEqual
+            BO::Equal => { self.write_eq(&compare_type); },
+            BO::NotEqual => { self.write_neq(&compare_type); },
             // boolean
             BO::And => { self.writer.and(); },
             BO::Or => { self.writer.or(); },

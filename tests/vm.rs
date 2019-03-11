@@ -8,17 +8,22 @@ type Context = Vec<ContextElement>;
 /// Compare a ContextElement with given value.
 fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+'static {
     if let Some(result) = result.downcast_ref::<T>() {
-        assert_eq!(result, &expected, "Result {:?} did not match expected {:?}", result, &expected);
+        assert!(result == &expected, "Result <{:?}> did not match expected <{:?}>", result, &expected);
     } else {
-        panic!("Result-type did not match type of expected value {:?}", &expected);
+        panic!("Result-type did not match type of expected value <{:?}>", &expected);
     }
 }
 
 /// Compare Context with given values.
 fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+Copy+'static {
     for index in 0..expected.len() {
-        assert(&result[index], expected[index]);
+        if let Some(result) = result[index].downcast_ref::<T>() {
+            assert!(result == &expected[index], "Result <{:?}> did not match expected <{:?}> at index {}", result, &expected[index], index);
+        } else {
+            panic!("Result-type did not match type of expected value <{:?}>", &expected);
+        }
     }
+    assert!(result.len() == expected.len(), "Result length {} did not match expected length {}", result.len(), expected.len());
 }
 
 /// Implement some VM methods to write values of specific types to the VM context.
@@ -143,6 +148,26 @@ fn op_bool() {
         !false && !false,
         !true || false
     ]);
+}
+
+#[test]
+fn op_order_gt() {
+    let result = run("
+        let x = 1u8;
+        ret_bool(x*3 > --x*3);
+        ret_bool(x == 0);
+    ");
+    assert_all(&result, &[ true, true ]);
+}
+
+#[test]
+fn op_order_lt() {
+    let result = run("
+        let y = 1u8;
+        ret_bool(y*3 < ++y*3);
+        ret_bool(y == 2);
+    ");
+    assert_all(&result, &[ true, true ]);
 }
 
 #[test]
