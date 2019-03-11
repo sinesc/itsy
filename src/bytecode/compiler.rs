@@ -497,7 +497,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::Add => { self.write_add(&result_type); },
             BO::Sub => { self.write_sub(&result_type); },
             BO::Mul => { self.write_mul(&result_type); },
-            BO::Div => unimplemented!("div"),
+            BO::Div => { self.write_div(&result_type); },
             BO::Rem => unimplemented!("rem"),
             // assigments
             BO::Assign => unimplemented!("assign"), // fixme: thesere are handled in compile_assignment!
@@ -598,6 +598,15 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             Type::f32 => self.writer.mulf(),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.muli(),
             ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
+        };
+    }
+    fn write_div(self: &mut Self, ty: &Type) {
+        match ty {
+            Type::f64 => self.writer.divf64(),
+            Type::i64 | Type::u64 => self.writer.divi64(),
+            Type::f32 => self.writer.divf(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.divi(),
+            ty @ _ => panic!("Unsupported Div operand {:?}", ty),
         };
     }
     fn write_eq(self: &mut Self, ty: &Type) {

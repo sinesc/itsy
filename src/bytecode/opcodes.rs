@@ -215,6 +215,12 @@ impl_vm!{
         let b: Value = self.stack.pop();
         self.stack.push(a * b);
     }
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn divi(self: &mut Self) {
+        let a: Value = self.stack.pop();
+        let b: Value = self.stack.pop();
+        self.stack.push(a / b);
+    }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf(self: &mut Self) {
@@ -233,6 +239,12 @@ impl_vm!{
         let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
         self.stack.push(a * b);
+    }
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn divf(self: &mut Self) {
+        let a: f32 = self.stack.pop();
+        let b: f32 = self.stack.pop();
+        self.stack.push(a / b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
@@ -253,6 +265,12 @@ impl_vm!{
         let b: Value64 = self.stack.pop();
         self.stack.push(a * b);
     }
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn divi64(self: &mut Self) {
+        let a: Value64 = self.stack.pop();
+        let b: Value64 = self.stack.pop();
+        self.stack.push(a / b);
+    }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf64(self: &mut Self) {
@@ -271,6 +289,12 @@ impl_vm!{
         let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
         self.stack.push(a * b);
+    }
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn divf64(self: &mut Self) {
+        let a: f64 = self.stack.pop();
+        let b: f64 = self.stack.pop();
+        self.stack.push(a / b);
     }
 
     /// Jumps unconditionally to the given address.

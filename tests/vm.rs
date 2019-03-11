@@ -71,19 +71,21 @@ fn run(code: &str) -> Context {
 }
 
 #[test]
-fn binary_op_native_stack_value() {
+fn op_native_stack_value() {
     let result = run("
         ret_i32(1 + 4);
         ret_i32(1 + 4 * 2);
         ret_i32((1 + 4) * 2);
         ret_i32(5 - 7);
         ret_i32(5 - 7 * 2);
+        ret_i32((5 - 7 * 2) / 3);
+        ret_i32(5 - 8 * 2 / 4);
     ");
-    assert_all(&result, &[ 5i32, 9, 10, -2, -9 ]);
+    assert_all(&result, &[ 5i32, 9, 10, -2, -9, -3, 1 ]);
 }
 
 #[test]
-fn binary_op_numerics() {
+fn op_numerics() {
     let result = run("
         ret_u8( 255 - 1 );
         ret_u16( 65535 - 2 );
@@ -114,7 +116,7 @@ fn binary_op_numerics() {
 }
 
 #[test]
-fn binary_op_bool() {
+fn op_bool() {
     let result = run("
         ret_bool(true && true);
         ret_bool(true && false);
@@ -128,11 +130,18 @@ fn binary_op_bool() {
 
         ret_bool(!false);
         ret_bool(!true);
+
+        ret_bool(true && !false);
+        ret_bool(!false && !false);
+        ret_bool(!true || false);
     ");
     assert_all(&result, &[
         true, false, false, false,
         true, true, true, false,
-        true, false
+        true, false,
+        true && !false,
+        !false && !false,
+        !true || false
     ]);
 }
 
