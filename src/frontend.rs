@@ -2,11 +2,8 @@
 
 pub mod ast;
 
-/// Parsed program AST.
-pub type Program<'a> = Vec<ast::Statement<'a>>;
-
 mod parser;
-pub use crate::frontend::parser::{parse, ParseError};
+pub use crate::frontend::parser::{parse, ParseError, ParsedProgram};
 
 mod resolver;
 pub use crate::frontend::resolver::{resolve, ResolvedProgram};

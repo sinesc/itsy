@@ -7,7 +7,6 @@ use nom::*;
 use std::collections::HashMap;
 use crate::util::Numeric;
 use crate::frontend::ast::*;
-use crate::frontend::Program;
 
 /// Represents the various possible parser errors.
 #[repr(u32)]
@@ -431,24 +430,26 @@ named!(statement<Input<'_>, Statement<'_>>, alt!(
 
 // root
 
-named!(program(Input<'_>) -> Program<'_>, return_error!(
+named!(root(Input<'_>) -> Vec<Statement<'_>>, return_error!(
     ErrorKind::Custom(ParseError::SyntaxError as u32),
     ws!(many0!(statement))
 ));
 
-//fn
+/// Parsed program AST.
+#[derive(Debug)]
+pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(input: &str) -> Result<Program<'_>, u32> {
+pub fn parse(input: &str) -> Result<ParsedProgram<'_>, u32> {
     // todo: error handling!
-    let result = program(Input(input));
+    let result = root(Input(input));
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
                 println!("result: {:#?}", result);
                 Err(4) // todo: not sure what this case it. just getting the entire input back, no error
             } else {
-                Ok(result.1)
+                Ok(ParsedProgram(result.1))
             }
         },
         Err(error) => {

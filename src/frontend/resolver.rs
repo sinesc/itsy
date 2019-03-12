@@ -13,13 +13,13 @@ use crate::{VMFunc, Standalone};
 #[derive(Debug)]
 pub struct ResolvedProgram<'a, T> where T: VMFunc<T> {
     ty: PhantomData<T>,
-    /// Program AST with types and bindings resolved.
-    pub ast: super::Program<'a>,
-    /// Mapping from BindingId (vector index) to TypeId
+    /// Program AST with resolved `BindingId`s.
+    pub ast: super::ParsedProgram<'a>,
+    /// Mapping from `BindingId` (vector index) to `TypeId`.
     pub bindingtype_ids: Vec<TypeId>,
-    /// Mapping from TypeId (vector index) to primitive type.
+    /// Mapping from `TypeId` (vector index) to primitive type.
     pub types: Vec<Type>,
-    /// Function id of the entry/main function.
+    /// `FunctionId` of the entry/main function.
     pub entry_fn: FunctionId,
 }
 
@@ -38,7 +38,7 @@ struct Resolver<'a, 'b> where 'a: 'b {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: VMFunc<T> {
+pub fn resolve<'a, T=Standalone>(mut program: super::ParsedProgram<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -72,7 +72,7 @@ pub fn resolve<'a, T=Standalone>(mut program: super::Program<'a>, entry: &str) -
     loop {
         prev_unresolved = now_unresolved;
 
-        for mut statement in program.iter_mut() {
+        for mut statement in program.0.iter_mut() {
             let mut resolver = Resolver {
                 stop_bugging_me_about_this_lifetime_every_fkn_refactoring: PhantomData,
                 scope_id        : root_scope_id,

@@ -1,5 +1,7 @@
 
-//! Itsy, a tiny language for embedded use.
+//! Strongly typed scripting language with a rusty syntax and nice Rust integration.
+//!
+//! Look at the [`vm` Examples](fn.vm.html#examples) to get started.
 
 pub mod frontend;
 #[macro_use]
@@ -11,7 +13,7 @@ use std::collections::HashMap;
 
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
 ///
-/// ### Example:
+/// # Examples
 ///
 /// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `vm::<MyFns>(...)`.
 ///
@@ -152,7 +154,7 @@ pub enum Standalone {
 }
 extern_rust!(@trait Standalone, ());
 
-/// An internal trait used to make resolver, compiler and VM generic over a set of Rust functions.
+/// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `extern_rust!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
     #[doc(hidden)]
@@ -163,7 +165,7 @@ pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
     fn call_info() -> HashMap<&'static str, (u16, &'static str, Vec<&'static str>)>;
 }
 
-/// An internal trait used to make VM generic over a set of Rust functions.
+/// An internal trait used to make VM generic over a user-defined data context.
 /// Use the `extern_rust!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMData<T, U> where T: VMFunc<T> {
     #[doc(hidden)]
@@ -175,42 +177,55 @@ pub trait VMData<T, U> where T: VMFunc<T> {
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
 ///
-/// The following example defines a VM with an `i32` context (this would typically be a struct) and makes the
-/// rust functions `print` and `send` available to it.
+/// # Examples
+///
+/// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
 ///
 /// ```
 /// use itsy::*;
 ///
-/// extern_rust!(MyFns, i32, {
-///     /// Prints given i32 value.
-///     fn print(&mut context, value: i32) {
-///         println!("print: {}", value);
+/// #[derive(Debug)]
+/// struct MyGameState {
+///     lives: i32,
+///     // ...
+/// }
+///
+/// extern_rust!(MyFns, MyGameState, {
+///     // Retrieve some game state.
+///     fn get_lives(&mut context) -> i32 {
+///         context.lives
 ///     }
-///     /// Sets VM context to given value.
-///     fn send(&mut context, value: i32) {
-///         *context = value;
+///     // Set some game state.
+///     fn set_lives(&mut context, value: i32) {
+///         context.lives = value;
 ///     }
 /// });
 ///
 /// fn main() {
-///     let mut vm = vm::<MyFns, i32>("
+///     // Create a VM for the given context and set of rust functions
+///     // and compile the given source code.
+///     let mut vm = vm::<MyFns, MyGameState>("
 ///         fn main() {
-///             let x = 1;
-///             let y = 2;
-///             print(x+y);
-///             send(x+y);
+///             let lives = get_lives();
+///             set_lives(lives - 1);
 ///         }
 ///     ");
-///     let mut result = 0;
-///     vm.run(&mut result);
-///     println!("vm sent: {}", result);
+///
+///     // Create some application state and run the VM a few times on it.
+///     let mut state = MyGameState { lives: 3 };
+///     println!("game state before: {:?}", state);
+///     vm.run(&mut state);
+///     println!("game state first run: {:?}", state);
+///     vm.run(&mut state);
+///     println!("game state second run: {:?}", state);
 /// }
 /// ```
 ///
 /// Output:
 /// ```text
-/// print: 3
-/// vm sent: 3
+/// game state before: MyGameState { lives: 3 }
+/// game state first run: MyGameState { lives: 2 }
+/// game state second run: MyGameState { lives: 1 }
 /// ```
 pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U> {
     use crate::{frontend::{parse, resolve}, bytecode::{compile, VM}};

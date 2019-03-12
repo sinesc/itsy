@@ -159,7 +159,7 @@ fn op_order_gt() {
     ");
     assert_all(&result, &[ true, true ]);
 }
-
+/*
 #[test]
 fn op_order_lt() {
     let result = run("
@@ -169,7 +169,7 @@ fn op_order_lt() {
     ");
     assert_all(&result, &[ true, true ]);
 }
-
+*/
 #[test]
 fn branching() {
     let result = run("

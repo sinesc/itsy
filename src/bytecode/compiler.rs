@@ -85,7 +85,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         // compile program
         self.types = types;
         self.bindingtype_ids = bindingtype_ids;
-        for statement in statements.iter() {
+        for statement in statements.0.iter() {
             self.compile_statement(statement);
         }
 
