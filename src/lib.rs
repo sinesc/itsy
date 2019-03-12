@@ -13,13 +13,18 @@ use std::collections::HashMap;
 
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
 ///
+/// The VM is generic over `VMFunc` and `VMData`. Parser and Resolver are generic over `VMFunc`.
+///
+/// `extern_rust!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
+///
 /// # Examples
 ///
 /// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `vm::<MyFns>(...)`.
+/// The resulting type will be `pub` within the module.
 ///
 /// ```
 /// # #[macro_use] extern crate itsy; fn main() {
-/// extern_rust!(MyFns, (), {
+/// extern_rust!(pub MyFns, (), {
 ///     /// prints given i32 value
 ///     fn print(&mut context, value: i32) {
 ///         println!("print:{}", value);
@@ -33,11 +38,11 @@ use std::collections::HashMap;
 /// ```
 #[macro_export]
 macro_rules! extern_rust {
-    (@enum $enum_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
+    (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[repr(u16)]
         #[derive(Copy, Clone, Debug)]
-        pub enum $enum_name {
+        $vis enum $type_name {
             $(
                 $( #[ $attr ] )*
                 $name,
@@ -87,8 +92,8 @@ macro_rules! extern_rust {
         let heap_index: u32 = $vm.stack.pop();
         $vm.heap.clone(heap_index)
     } };
-    (@trait $enum_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
-        impl $crate::VMFunc<$enum_name> for $enum_name {
+    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+        impl $crate::VMFunc<$type_name> for $type_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
             }
@@ -99,19 +104,19 @@ macro_rules! extern_rust {
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($enum_name::$name.to_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
+                    map.insert(stringify!($name), ($type_name::$name.to_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
                 )*
                 map
             }
         }
-        impl $crate::VMData<$enum_name, $context_type> for $enum_name {
+        impl $crate::VMData<$type_name, $context_type> for $type_name {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
-            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$enum_name, $context_type>, context: &mut $context_type) {
+            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$type_name, $context_type>, context: &mut $context_type) {
                 use $crate::bytecode::{StackOp, HeapOp};
                 match self {
                     $(
-                        $enum_name::$name => {
+                        $type_name::$name => {
                             let $context = context;
                             // set rust function arguments, insert function body
                             let ret = {
@@ -127,20 +132,20 @@ macro_rules! extern_rust {
                             )?
                         },
                     )*
-                    $enum_name::_dummy => panic!("Attempted to execute dummy function")
+                    $type_name::_dummy => panic!("Attempted to execute dummy function")
                 }
             }
         }
     };
     (
-        $enum_name:ident, $context_type:ty, { $(
+        $vis:vis $type_name:ident, $context_type:ty, { $(
             $( #[ $attr:meta ] )*
             fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `extern_rust!` macro.
-        extern_rust!(@enum $enum_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $enum_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
+        extern_rust!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
+        extern_rust!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
