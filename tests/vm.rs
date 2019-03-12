@@ -151,6 +151,59 @@ fn op_bool() {
 }
 
 #[test]
+fn compound_i8() {
+    let result = run("
+        let x = 1;
+        x += 1;
+        ret_i8(x);
+        x *= 6;
+        ret_i8(x);
+        x -= 3;
+        ret_i8(x);
+        x /= 3;
+        ret_i8(x);
+    ");
+    assert_all(&result, &[ 2i8, 12, 9, 3 ]);
+}
+
+#[test]
+fn compound_i64() {
+    let result = run("
+        let x = 10000000000;
+        x += 1;
+        ret_i64(x);
+        x *= 6;
+        ret_i64(x);
+        x -= 6;
+        ret_i64(x);
+        x /= 3;
+        ret_i64(x);
+    ");
+    assert_all(&result, &[ 10000000001i64, 60000000006, 60000000000, 20000000000 ]);
+}
+
+#[test]
+fn compound_f64() {
+    let result = run("
+        let x = 1.000001;
+        x += 1.0;
+        ret_f64(x);
+        x *= 6.0;
+        ret_f64(x);
+        x -= 3.0;
+        ret_f64(x);
+        x /= 3.0;
+        ret_f64(x);
+    ");
+    assert_all(&result, &[
+        1.000001f64 + 1.0,
+        (1.000001 + 1.0) * 6.0,
+        ((1.000001 + 1.0) * 6.0) - 3.,
+        (((1.000001 + 1.0) * 6.0) - 3.) / 3.
+    ]);
+}
+
+#[test]
 fn op_order_gt() {
     let result = run("
         let x = 1u8;

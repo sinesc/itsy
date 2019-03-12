@@ -162,14 +162,14 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 let ty = self.bindingtype(&item.left).clone();  // todo sucks
                 self.write_load(index, &ty);
                 match compound_assign {
-                    BO::Add => { self.write_add(&ty); },
-                    BO::Sub => { self.write_sub(&ty); },
-                    BO::Mul => { self.write_mul(&ty); },
-                    BO::DivAssign => unimplemented!("divassign"),
+                    BO::AddAssign => { self.write_add(&ty); },
+                    BO::SubAssign => { self.write_sub(&ty); },
+                    BO::MulAssign => { self.write_mul(&ty); },
+                    BO::DivAssign => { self.write_div(&ty) },
                     BO::RemAssign => unimplemented!("remassign"),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
-                self.writer.storer32(index);
+                self.write_store(index, &ty);
             },
         };
     }
@@ -428,13 +428,13 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
                 };
             },
-            LiteralValue::String(v) => {
+            LiteralValue::String(_v) => {
                 match lit_type {
-                    Type::String => { let pos = self.writer.store_const(v); self.writer.consto(pos as u8); },
+                    Type::String => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
             },
-            LiteralValue::Array(ref _v) => {
+            LiteralValue::Array(_) => {
                 match lit_type {
                     Type::Array(_) => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
