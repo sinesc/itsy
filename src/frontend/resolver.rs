@@ -622,12 +622,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
                         *item.binding_id_mut() = self.scopes.lookup_binding_id(self.scope_id, &item_name);
 
-                        println!("set binding name {:?} = {}", item.binding_id().unwrap(), item_name);
-                        let mybid = self.bindingtype_id(item);
-                        println!("my type is {:?} = {:?}", mybid, mybid.map(|t| self.scopes.type_ref(t)));
-
                         if let Some(binding_type_id) = self.bindingtype_id(item) {
-                            println!("applying my type to argument");
 
                             let ty = self.bindingtype_mut(&mut item.left);
 
@@ -698,8 +693,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }));
 
                 *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);
-
-                println!("created type {:?} = {:?}", new_type_id, self.scopes.type_ref(new_type_id));
             }
         }
     }
