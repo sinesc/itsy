@@ -1,3 +1,4 @@
+use crate::util::{array2, array4, array8};
 
 /// A heap holding non-primitive objects, e.g. strings.
 #[derive(Debug)]
@@ -45,6 +46,44 @@ impl Heap {
     pub fn reset(self: &mut Self) {
         self.data = Vec::with_capacity(128);
         self.free = Vec::with_capacity(16);
+    }
+
+    pub fn read8(self: &Self, position: u32, offset: u32) -> u8 {
+        self.data[position as usize][offset as usize]
+    }
+
+    pub fn read16(self: &Self, position: u32, offset: u32) -> u16 {
+        let offset = offset as usize;
+        u16::from_ne_bytes(array2(&self.data[position as usize][offset..offset + 2]))
+    }
+
+    pub fn read32(self: &Self, position: u32, offset: u32) -> u32 {
+        let offset = offset as usize;
+        u32::from_ne_bytes(array4(&self.data[position as usize][offset..offset + 4]))
+    }
+
+    pub fn read64(self: &Self, position: u32, offset: u32) -> u64 {
+        let offset = offset as usize;
+        u64::from_ne_bytes(array8(&self.data[position as usize][offset..offset + 8]))
+    }
+
+    pub fn write8(self: &mut Self, position: u32, offset: u32, value: u8) {
+        self.data[position as usize][offset as usize] = value;
+    }
+
+    pub fn write16(self: &mut Self, position: u32, offset: u32, value: u16) {
+        let offset = offset as usize;
+        self.data[position as usize][offset..offset+2].copy_from_slice(&value.to_ne_bytes());
+    }
+
+    pub fn write32(self: &mut Self, position: u32, offset: u32, value: u32) {
+        let offset = offset as usize;
+        self.data[position as usize][offset..offset+4].copy_from_slice(&value.to_ne_bytes());
+    }
+
+    pub fn write64(self: &mut Self, position: u32, offset: u32, value: u64) {
+        let offset = offset as usize;
+        self.data[position as usize][offset..offset+8].copy_from_slice(&value.to_ne_bytes());
     }
 }
 

@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use crate::{util::{array4}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
+use crate::{util::{array2, array4, array8}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
 
 impl_vm!{
 
@@ -21,7 +21,8 @@ impl_vm!{
     }
     /// Load 2 byte from constant pool onto stack.
     fn constr16_16(self: &mut Self, const_id: u16) {
-        let tmp = self.program.consts16[const_id as usize];
+        let const_id = const_id as usize;
+        let tmp: u16 = u16::from_le_bytes(array2(&self.program.consts[const_id..const_id +2]));
         self.stack.push(tmp);
     }
 
@@ -31,7 +32,8 @@ impl_vm!{
     }
     /// Load 4 byte from constant pool onto stack.
     fn constr32_16(self: &mut Self, const_id: u16) {
-        let tmp = self.program.consts32[const_id as usize];
+        let const_id = const_id as usize;
+        let tmp: u32 = u32::from_le_bytes(array4(&self.program.consts[const_id..const_id +4]));
         self.stack.push(tmp);
     }
 
@@ -41,7 +43,8 @@ impl_vm!{
     }
     /// Load 8 byte from constant pool onto stack.
     fn constr64_16(self: &mut Self, const_id: u16) {
-        let tmp = self.program.consts64[const_id as usize];
+        let const_id = const_id as usize;
+        let tmp: u64 = u64::from_le_bytes(array8(&self.program.consts[const_id..const_id +8]));
         self.stack.push(tmp);
     }
 
@@ -52,8 +55,8 @@ impl_vm!{
     /// Load object from constant pool onto stack+heap.
     fn consto_16(self: &mut Self, const_id: u16) {
         let pos = const_id as usize;
-        let len = u32::from_le_bytes(array4(&self.program.consts8[pos .. pos + 4])) as usize;
-        let data = self.program.consts8[pos + 4 .. pos + 4 + len].to_vec();
+        let len = u32::from_le_bytes(array4(&self.program.consts[pos .. pos + 4])) as usize;
+        let data = self.program.consts[pos + 4 .. pos + 4 + len].to_vec();
         let heap_index: u32 = self.heap.store(data);
         self.stack.push(heap_index);
     }
@@ -104,23 +107,42 @@ impl_vm!{
         let local: i64 = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
-/*
-    /// Load object (string/array) from offset (relative to the stackframe) and push onto the stack.
-    fn loado(self: &mut Self, offset: i32) {
-        let ptr: u64 = self.stack.load_fp(offset);
-        let len: u32 = self.stack.load_fp(offset + 2);
-        println!("loado ptr:{} len:{}", ptr, len);
-        self.stack.push(ptr);
-        self.stack.push(len);
+
+    fn index(self: &mut Self, element_size: u32) {
+        let element_index: u64 = self.stack.pop();
+        let current_heap_offset: u32 = self.stack.pop();
+        self.stack.push(current_heap_offset + (element_index as u32 * element_size));
+
     }
-    /// Pop object (string/array) and store it at the given offset (relative to the stackframe).
-    fn storeo(self: &mut Self, offset: i32) {
-        let len: u32 = self.stack.pop();
-        let ptr: u64 = self.stack.pop();
-        self.stack.store_fp(offset, ptr);
-        self.stack.store_fp(offset + 2, len);
+
+    /// Load heapvalue and push onto the stack.
+    fn hgetr(self: &mut Self, element_size: u32) {
+        let element_index: u64 = self.stack.pop();
+        let current_heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let heap_offset = current_heap_offset + (element_size * element_index as u32);
+
+        match element_size {
+            4 => {
+                let data = self.heap.read32(heap_index, heap_offset);
+                self.stack.push(data);
+            },
+            2 => {
+                let data = self.heap.read16(heap_index, heap_offset);
+                self.stack.push(data);
+            }
+            8 => {
+                let data = self.heap.read64(heap_index, heap_offset);
+                self.stack.push(data);
+            }
+            1 => {
+                let data = self.heap.read8(heap_index, heap_offset);
+                self.stack.push(data);
+            }
+            _ => panic!("Invalid argument {} to hgetr", element_size)
+        }
     }
-*/
+
     /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
     fn load_arg1(self: &mut Self) {
         let local: Value = self.stack.load_fp(-4);

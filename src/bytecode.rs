@@ -24,10 +24,7 @@ pub(crate) type Value64 = i64;
 pub struct Program<T> where T: crate::VMFunc<T> {
     rust_fn: PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
-    pub(crate) consts8      : Vec<u8>,
-    pub(crate) consts16     : Vec<i16>,
-    pub(crate) consts32     : Vec<i32>,
-    pub(crate) consts64     : Vec<i64>,
+    pub(crate) consts       : Vec<u8>,
 }
 
 impl<T> Program<T> where T: crate::VMFunc<T> {
@@ -35,10 +32,7 @@ impl<T> Program<T> where T: crate::VMFunc<T> {
         Program {
             rust_fn     : PhantomData,
             instructions: Vec::new(),
-            consts8     : Vec::new(),
-            consts16    : Vec::new(),
-            consts32    : Vec::new(),
-            consts64    : Vec::new(),
+            consts      : Vec::new(),
         }
     }
 }

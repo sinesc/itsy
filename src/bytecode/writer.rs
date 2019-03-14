@@ -86,11 +86,18 @@ impl<T> Seek for Writer<T> where T: VMFunc<T> {
 /// Implements const pool write traits
 #[allow(unused_macros)]
 macro_rules! impl_store_const {
-    ($size:tt, $type:tt) => {
+    (@write u8, $self:ident, $value:ident) => {
+        $self.program.consts.push(unsafe { transmute($value) });
+    };
+    (@write $size:ident, $self:ident, $value:ident) => {
+        let unsigned: $size = unsafe { transmute($value) };
+        $self.program.consts.extend_from_slice(&unsigned.to_le_bytes());
+    };
+    ($size:ident, $type:tt) => {
         impl<P> WriteConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &mut Self, value: $type) -> u32 {
-                let position = self.program.$size.len();
-                self.program.$size.push(unsafe { transmute(value) });
+                let position = self.program.consts.len();
+                impl_store_const!(@write $size, self, value);
                 position as u32
             }
         }
@@ -103,23 +110,23 @@ pub(crate) trait WriteConst<T> {
     fn store_const(self: &mut Self, value: T) -> u32;
 }
 
-impl_store_const!(consts8, u8);
-impl_store_const!(consts8, i8);
-impl_store_const!(consts16, u16);
-impl_store_const!(consts16, i16);
-impl_store_const!(consts32, u32);
-impl_store_const!(consts32, i32);
-impl_store_const!(consts32, f32);
-impl_store_const!(consts64, u64);
-impl_store_const!(consts64, i64);
-impl_store_const!(consts64, f64);
+impl_store_const!(u8, u8);
+impl_store_const!(u8, i8);
+impl_store_const!(u16, u16);
+impl_store_const!(u16, i16);
+impl_store_const!(u32, u32);
+impl_store_const!(u32, i32);
+impl_store_const!(u32, f32);
+impl_store_const!(u64, u64);
+impl_store_const!(u64, i64);
+impl_store_const!(u64, f64);
 
 impl<P> WriteConst<&str> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &mut Self, value: &str) -> u32 {
-        let position = self.program.consts8.len();
+        let position = self.program.consts.len();
         let len = value.len() as u32;
-        self.program.consts8.extend_from_slice(&len.to_le_bytes());
-        self.program.consts8.extend_from_slice(&value.as_bytes());
+        self.program.consts.extend_from_slice(&len.to_le_bytes());
+        self.program.consts.extend_from_slice(&value.as_bytes());
         position as u32
     }
 }

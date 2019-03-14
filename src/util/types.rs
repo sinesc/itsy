@@ -123,7 +123,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            _ => 4, // heap object: u32
+            _ => 8, // heap object: 2xu32
         }
     }
     /// Size of the type in stack elements.
@@ -149,6 +149,13 @@ impl Type {
         match self.kind() {
             TypeKind::Array => true,
             _ => false
+        }
+    }
+    /// Returns the type as an array.
+    pub fn as_array(self: &Self) -> Option<&Array> {
+        match self {
+            Type::Array(array) => Some(array),
+            _ => None
         }
     }
     /// Whether the type is a primitive.

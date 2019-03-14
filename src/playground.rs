@@ -53,44 +53,32 @@ extern_rust!(MyFns, u32, {
 
 #[allow(unused_variables)]
 fn main() {
-    /*
-            let x = [ [ 1, 2 ], [ 3, 4 ] ];
-            printi32(x[0][0]);
-    */
     let source = "
         fn main() {
-            let x = -13;
-            printi8(x);
-            let y = -299;
-            printi16(y);
-            let z = -299555;
-            printi32(z);
-            let s = \"Hello World\";
-            prints(s);
+            let x = \"Hello World!\";
+            prints_ref(x);
+            prints_val(x);
         }
     ";
     let source = "
         fn main() {
-            let x = 3;
-            let y = 3;
-            if x < y {
-                printi32(x);
-            } else if x > y {
-                printi32(y);
-            } else {
-                printi32(x + y);
-            }
-            ret(255);
+            let x = [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ];
+            printi16(x[0][0]);
+        }
+    ";
+    let source = "
+        fn main() {
+            let dummy = [ 0u32 ];
+            let x = [ [ 1, 2, 3, 4 ], [ 4, 5, 6, 7 ], [ 8, 9, 10, 11 ] ];
+            printi16(x[2][3]);
         }
     ";
     println!("{}", source);
     let mut vm = itsy::vm::<MyFns, u32>(source);
     println!("{:}", vm.dump_program());
-    let vm_start = ::std::time::Instant::now();
+    let vm_start = std::time::Instant::now();
     let mut result = 0;
     vm.run(&mut result);
     println!("result: {:}", result);
-    let vm_runtime = ::std::time::Instant::now() - vm_start;
-    let vm_runtime = vm_runtime.as_secs() as f64 + vm_runtime.subsec_nanos() as f64 * 1e-9;
-    println!("vm time: {:.4}s", vm_runtime);
+    println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
 }

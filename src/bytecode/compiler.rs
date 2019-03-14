@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
+use crate::util::{Numeric, BindingId, FunctionId, Type, Array, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::VMFunc;
@@ -332,6 +332,140 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
+    /// Compiles the given literal
+    pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
+        use crate::frontend::ast::LiteralValue;
+        let lit_type = self.bindingtype(item);
+        match item.value {
+            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
+            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
+            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
+            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
+            LiteralValue::Numeric(int) => {
+                match lit_type {
+                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
+                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
+                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.constr16(pos as u8); } // todo: handle pos > 255
+                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr32(pos as u8); } // todo: handle pos > 255
+                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.constr64(pos as u8); } // todo: handle pos > 255
+                    _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
+                }
+            }
+            LiteralValue::Bool(v) =>  {
+                match lit_type {
+                    Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
+                    _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
+                };
+            },
+            LiteralValue::String(_) => {
+                match lit_type {
+                    Type::String => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
+                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
+                };
+            },
+            LiteralValue::Array(_) => {
+                match lit_type {
+                    Type::Array(_) => {
+                        let pos = self.store_literal(item);
+                        self.writer.consto(pos as u8);  // array heap index
+                        self.writer.lit0();             //  offset into the array
+                    },
+                    _ => panic!("Unexpected array literal type: {:?}", lit_type)
+                };
+            },
+        }
+    }
+
+    /// Compiles the given unary operation.
+    pub fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
+        use crate::frontend::ast::UnaryOperator as UO;
+
+        let exp_type = self.bindingtype(&item.expr).clone();  // todo sucks
+
+        match item.op {
+            // logical
+            UO::Not => {
+                self.compile_expression(&item.expr);
+                self.writer.not();
+            }
+            // arithmetic
+            UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
+                if let ast::Expression::Variable(var) = &item.expr {
+                    let load_index = {
+                        let binding_id = var.binding_id.expect("Unresolved binding encountered");
+                        self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+                    };
+                    match item.op {
+                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
+                        UO::DecBefore => self.write_predec(load_index, &exp_type),
+                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
+                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
+                        _ => panic!("Internal error in operator handling"),
+                    };
+                } else {
+                    panic!("Operator {:?} can only be used on variable bindings", item.op);
+                }
+            },
+        }
+    }
+
+    /// Compiles the given binary operation.
+    pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
+        use crate::frontend::ast::BinaryOperator as BO;
+
+        if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index {
+            // implement these via Less/LessOrEq + swapping arguments
+            // fixme: this fails if values change within those expressions (e.g. via ++ op)
+            self.compile_expression(&item.left);
+            self.compile_expression(&item.right);
+        } else {
+            self.compile_expression(&item.right);
+            self.compile_expression(&item.left);
+        }
+
+        let result_type = self.bindingtype(item).clone();
+        let compare_type = self.bindingtype(&item.left).clone();
+
+        match item.op {
+            // arithmetic
+            BO::Add => { self.write_add(&result_type); },
+            BO::Sub => { self.write_sub(&result_type); },
+            BO::Mul => { self.write_mul(&result_type); },
+            BO::Div => { self.write_div(&result_type); },
+            BO::Rem => unimplemented!("rem"),
+            // assigments
+            BO::Assign => unimplemented!("assign"), // fixme: thesere are handled in compile_assignment!
+            BO::AddAssign => unimplemented!("addassign"),
+            BO::SubAssign => unimplemented!("subassign"),
+            BO::MulAssign => unimplemented!("mulassign"),
+            BO::DivAssign => unimplemented!("divassgi"),
+            BO::RemAssign => unimplemented!("remassign"),
+            // comparison
+            BO::Less | BO::Greater => { self.write_lt(&compare_type); }, // Less/Greater, for Greater, arguments have been swapped above.
+            BO::LessOrEq | BO::GreaterOrEq => { self.write_lte(&compare_type); } //  swapped above for GreaterOrEqual
+            BO::Equal => { self.write_eq(&compare_type); },
+            BO::NotEqual => { self.write_neq(&compare_type); },
+            // boolean
+            BO::And => { self.writer.and(); },
+            BO::Or => { self.writer.or(); },
+            // special
+            BO::Range => unimplemented!("range"),
+            BO::Index => {
+                if result_type.is_array() {
+                    // stack: <heap_index> <heap_offset> <index_operand>
+                    let size = self.array_size(result_type.as_array().unwrap());
+                    self.writer.index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
+                    // stack now <heap_index> <new_heap_offset>
+                } else {
+                    self.writer.hgetr(result_type.size() as u32);
+                }
+            },
+        }
+    }
+}
+
+impl<'a, T> Compiler<T> where T: VMFunc<T> {
+    /// Stores given literal on the const pool.
     fn store_literal(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
@@ -382,147 +516,59 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 }
             },
-            LiteralValue::Array(ref v) => {
-                let ty = self.bindingtype(&v.items[0]); // todo: requires one item
-                let mut pos = 0;
-                if ty.is_primitive() || ty.is_array() {
-                    for item in &v.items {
-                        let item_pos = self.store_literal(item);
-                        if pos == 0 {
-                            pos = item_pos; // todo: ugly getitdone solution
-                        }
-                    }
-                    pos
-                } else {
-                    for item in &v.items {
-                        println!("non-primitive{:?}", item);
-                    }
-                    unimplemented!("non-primitive array")
-                }
-            },
-        }
-    }
-
-    /// Compiles the given literal
-    pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
-        use crate::frontend::ast::LiteralValue;
-        let lit_type = self.bindingtype(item);
-        match item.value {
-            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
-            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
-            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
-            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
-            LiteralValue::Numeric(int) => {
-                match lit_type {
-                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
-                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
-                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.constr16(pos as u8); } // todo: handle pos > 255
-                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr32(pos as u8); } // todo: handle pos > 255
-                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.constr64(pos as u8); } // todo: handle pos > 255
-                    _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
-                }
-            }
-            LiteralValue::Bool(v) =>  {
-                match lit_type {
-                    Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
-                    _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
-                };
-            },
-            LiteralValue::String(_v) => {
-                match lit_type {
-                    Type::String => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
-                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
-                };
-            },
             LiteralValue::Array(_) => {
-                match lit_type {
-                    Type::Array(_) => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
-                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
-                };
+                let size = self.array_literal_size(item);
+                let pos = self.writer.store_const(size);
+                self.store_array_data(item);
+                pos
             },
         }
     }
-
-    /// Compiles the given unary operation.
-    pub fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
-        use crate::frontend::ast::UnaryOperator as UO;
-
-        let exp_type = self.bindingtype(&item.expr).clone();  // todo sucks
-
-        match item.op {
-            // logical
-            UO::Not => {
-                self.compile_expression(&item.expr);
-                self.writer.not();
-            }
-            // arithmetic
-            UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
-                if let ast::Expression::Variable(var) = &item.expr {
-                    let load_index = {
-                        let binding_id = var.binding_id.expect("Unresolved binding encountered");
-                        self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
-                    };
-                    match item.op {
-                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
-                        UO::DecBefore => self.write_predec(load_index, &exp_type),
-                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
-                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
-                        _ => panic!("Internal error in operator handling"),
-                    };
-                } else {
-                    panic!("Operator {:?} can only be used on variable bindings", item.op);
-                }
-            },
-        }
-    }
-
-    /// Compiles the given binary operation.
-    pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
-        use crate::frontend::ast::BinaryOperator as BO;
-
-        if item.op == BO::Greater || item.op == BO::GreaterOrEq {
-            // implement these via Less/LessOrEq + swapping arguments
-            // fixme: this fails if values change within those expressions (e.g. via ++ op)
-            self.compile_expression(&item.left);
-            self.compile_expression(&item.right);
+    /// Computes the size of an array-literal in bytes.
+    fn array_literal_size(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
+        let array = item.value.as_array().unwrap();
+        if array.items.len() == 0 {
+            0
         } else {
-            self.compile_expression(&item.right);
-            self.compile_expression(&item.left);
-        }
-
-        let result_type = self.bindingtype(item).clone();
-        let compare_type = self.bindingtype(&item.left).clone();
-
-        match item.op {
-            // arithmetic
-            BO::Add => { self.write_add(&result_type); },
-            BO::Sub => { self.write_sub(&result_type); },
-            BO::Mul => { self.write_mul(&result_type); },
-            BO::Div => { self.write_div(&result_type); },
-            BO::Rem => unimplemented!("rem"),
-            // assigments
-            BO::Assign => unimplemented!("assign"), // fixme: thesere are handled in compile_assignment!
-            BO::AddAssign => unimplemented!("addassign"),
-            BO::SubAssign => unimplemented!("subassign"),
-            BO::MulAssign => unimplemented!("mulassign"),
-            BO::DivAssign => unimplemented!("divassgi"),
-            BO::RemAssign => unimplemented!("remassign"),
-            // comparison
-            BO::Less | BO::Greater => { self.write_lt(&compare_type); }, // Less/Greater, for Greater, arguments have been swapped above.
-            BO::LessOrEq | BO::GreaterOrEq => { self.write_lte(&compare_type); } //  swapped above for GreaterOrEqual
-            BO::Equal => { self.write_eq(&compare_type); },
-            BO::NotEqual => { self.write_neq(&compare_type); },
-            // boolean
-            BO::And => { self.writer.and(); },
-            BO::Or => { self.writer.or(); },
-            // special
-            BO::Range => unimplemented!("range"),
-            BO::Index => unimplemented!("index"),
+            let ty = self.bindingtype(&array.items[0]);
+            if ty.is_array() {
+                array.items.len() as u32 * self.array_literal_size(&array.items[0])
+            } else {
+                array.items.len() as u32 * ty.size() as u32
+            }
         }
     }
-}
-
-impl<'a, T> Compiler<T> where T: VMFunc<T> {
+    /// Computes the size of an array in bytes.
+    fn array_size(self: &Self, array: &Array) -> u32 {
+        let len = array.len.unwrap();
+        if len == 0 {
+            0
+        } else {
+            let ty = self.get_type(array.type_id);
+            match ty {
+                Type::Array(array) => { len as u32 * self.array_size(array) }
+                _ => { len as u32 * ty.size() as u32 }
+            }
+        }
+    }
+    /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
+    fn store_array_data(self: &mut Self, item: &ast::Literal<'a>) {
+        let array = item.value.as_array().unwrap();
+        if array.items.len() > 0 {
+            let ty = self.bindingtype(&array.items[0]);
+            if ty.is_array() {
+                for item in &array.items {
+                    self.store_array_data(item);
+                }
+            } else if ty.is_primitive()  {
+                for item in &array.items {
+                    self.store_literal(item);
+                }
+            } else {
+                unimplemented!("non-primitive array");
+            }
+        }
+    }
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
         if let Some(targets) = self.unresolved.remove(&function_id) {
@@ -651,7 +697,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
-            self.writer.storer32(index);
+            self.writer.storer64(index);
         } else if size <= 4 {
             self.writer.storer32(index);
         } else if size == 8 {
@@ -665,7 +711,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
-            self.writer.loadr32(index);
+            self.writer.loadr64(index);
         } else if size <= 4 {
             match index {
                 -4 => self.writer.load_arg1(),
