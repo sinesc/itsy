@@ -169,6 +169,48 @@ fn branching() {
 }
 
 #[test]
+fn array_literal() {
+    let result = run("
+        let x = [ 1, 2, 3, 4 ];
+        ret_i32(x[0]);
+        ret_i32(x[1]);
+        ret_i32(x[2]);
+        ret_i32(x[3]);
+    ");
+    assert_all(&result, &[ 1i32, 2, 3, 4 ]);
+}
+
+#[test]
+fn array_nesting() {
+    let result = run("
+        let x = [ [ 1, 2, 3 ], [ 4, 5, 6 ] ];
+        ret_i32(x[0][0]);
+        ret_i32(x[0][1]);
+        ret_i32(x[0][2]);
+        ret_i32(x[1][0]);
+        ret_i32(x[1][1]);
+        ret_i32(x[1][2]);
+    ");
+    assert_all(&result, &[ 1i32, 2, 3, 4, 5, 6 ]);
+}
+
+#[test]
+fn array_subindex() {
+    let result = run("
+        let x = [ [ 1, 2, 3 ], [ 4, 5, 6 ] ];
+        let y = x[0];
+        let z = x[1];
+        ret_i32(y[0]);
+        ret_i32(y[1]);
+        ret_i32(y[2]);
+        ret_i32(z[0]);
+        ret_i32(z[1]);
+        ret_i32(z[2]);
+    ");
+    assert_all(&result, &[ 1i32, 2, 3, 4, 5, 6 ]);
+}
+
+#[test]
 fn recursion() {
     let result = run("
         fn fib(n: i32) -> i32 {

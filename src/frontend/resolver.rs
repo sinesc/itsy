@@ -614,7 +614,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 unimplemented!("range");
             },
             O::Index => {
-                self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[3].type_id);
+                self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2].type_id); // u32
 
                 if let Some(left_binding_id) = item.left.binding_id() {
                     if let Some(left_binding_name) = self.scopes.binding_name(left_binding_id) {

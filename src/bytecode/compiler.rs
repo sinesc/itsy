@@ -454,10 +454,10 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 if result_type.is_array() {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.array_size(result_type.as_array().unwrap());
-                    self.writer.index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
+                    self.write_index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                     // stack now <heap_index> <new_heap_offset>
                 } else {
-                    self.writer.hgetr(result_type.size() as u32);
+                    self.write_hgetr(result_type.size());
                 }
             },
         }
@@ -465,6 +465,17 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 }
 
 impl<'a, T> Compiler<T> where T: VMFunc<T> {
+    /// Fixes function call targets for previously not generated functions.
+    fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
+        if let Some(targets) = self.unresolved.remove(&function_id) {
+            let backup_position = self.writer.position();
+            for &target in targets.iter() {
+                self.writer.set_position(target);
+                self.writer.call(position, num_args); // todo: may have to handle multiple call types
+            }
+            self.writer.set_position(backup_position);
+        }
+    }
     /// Stores given literal on the const pool.
     fn store_literal(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
         use crate::frontend::ast::LiteralValue;
@@ -569,15 +580,22 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
-    /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
-        if let Some(targets) = self.unresolved.remove(&function_id) {
-            let backup_position = self.writer.position();
-            for &target in targets.iter() {
-                self.writer.set_position(target);
-                self.writer.call(position, num_args); // todo: may have to handle multiple call types
-            }
-            self.writer.set_position(backup_position);
+    fn write_index(self: &mut Self, element_size: u32) {
+        if element_size < (1 << 8) {
+            self.writer.index(element_size as u8);
+        } else if element_size < (1 << 16) {
+            self.writer.index_16(element_size as u16);
+        } else {
+            self.writer.index_32(element_size);
+        }
+    }
+    fn write_hgetr(self: &mut Self, element_size: u8) {
+        match element_size {
+            1 => { self.writer.hgetr8(); },
+            2 => { self.writer.hgetr16(); },
+            4 => { self.writer.hgetr32(); },
+            8 => { self.writer.hgetr64(); },
+            _ => panic!("Invalid element size {} for hgetr", element_size)
         }
     }
     fn write_preinc(self: &mut Self, index: i32, ty: &Type) {

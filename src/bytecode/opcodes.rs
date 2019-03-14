@@ -108,39 +108,56 @@ impl_vm!{
         self.stack.store_fp(offset, local);
     }
 
-    fn index(self: &mut Self, element_size: u32) {
-        let element_index: u64 = self.stack.pop();
+    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    fn index(self: &mut Self, element_size: u8) {
+        self.index_32(element_size as u32);
+    }
+    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    fn index_16(self: &mut Self, element_size: u16) {
+        self.index_32(element_size as u32);
+    }
+    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    fn index_32(self: &mut Self, element_size: u32) {
+        let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         self.stack.push(current_heap_offset + (element_index as u32 * element_size));
-
     }
 
-    /// Load heapvalue and push onto the stack.
-    fn hgetr(self: &mut Self, element_size: u32) {
-        let element_index: u64 = self.stack.pop();
+    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
+    fn hgetr8(self: &mut Self) {
+        let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
-        let heap_offset = current_heap_offset + (element_size * element_index as u32);
-
-        match element_size {
-            4 => {
-                let data = self.heap.read32(heap_index, heap_offset);
-                self.stack.push(data);
-            },
-            2 => {
-                let data = self.heap.read16(heap_index, heap_offset);
-                self.stack.push(data);
-            }
-            8 => {
-                let data = self.heap.read64(heap_index, heap_offset);
-                self.stack.push(data);
-            }
-            1 => {
-                let data = self.heap.read8(heap_index, heap_offset);
-                self.stack.push(data);
-            }
-            _ => panic!("Invalid argument {} to hgetr", element_size)
-        }
+        let heap_offset = current_heap_offset + (element_index as u32);
+        let data = self.heap.read8(heap_index, heap_offset);
+        self.stack.push(data);
+    }
+    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
+    fn hgetr16(self: &mut Self) {
+        let element_index: u32 = self.stack.pop();
+        let current_heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let heap_offset = current_heap_offset + (2 * element_index as u32);
+        let data = self.heap.read16(heap_index, heap_offset);
+        self.stack.push(data);
+    }
+    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
+    fn hgetr32(self: &mut Self) {
+        let element_index: u32 = self.stack.pop();
+        let current_heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let heap_offset = current_heap_offset + (4 * element_index as u32);
+        let data = self.heap.read32(heap_index, heap_offset);
+        self.stack.push(data);
+    }
+    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
+    fn hgetr64(self: &mut Self) {
+        let element_index: u32 = self.stack.pop();
+        let current_heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let heap_offset = current_heap_offset + (8 * element_index as u32);
+        let data = self.heap.read64(heap_index, heap_offset);
+        self.stack.push(data);
     }
 
     /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
