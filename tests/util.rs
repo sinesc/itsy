@@ -15,7 +15,7 @@ pub fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+
 }
 
 /// Compare Context with given values.
-pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+Copy+'static {
+pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+'static {
     for index in 0..expected.len() {
         if let Some(result) = result[index].downcast_ref::<T>() {
             assert!(result == &expected[index], "Result <{:?}> did not match expected <{:?}> at index {}", result, &expected[index], index);
@@ -60,6 +60,12 @@ extern_rust!(TestFns, Context, {
     }
     fn ret_bool(&mut context, value: bool) {
         context.push(Box::new(value));
+    }
+    fn ret_string(&mut context, value: String) {
+        context.push(Box::new(value));
+    }
+    fn ret_str(&mut context, value: &str) {
+        context.push(Box::new(value.to_string()));
     }
 });
 

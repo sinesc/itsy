@@ -216,10 +216,10 @@ fn array_inference1() {
         let x = [ [ [ 1, 2, 3, 4 ] ] ];
         let y = x[0];
         let z = y[0];
-        let u = z[0];
+        let u = z[1];
         ret_i8(u);
     ");
-    assert_all(&result, &[ 1i8 ]);
+    assert_all(&result, &[ 2i8 ]);
 }
 
 #[test]
@@ -231,9 +231,18 @@ fn array_inference2() {
         ret_i8(z[0]);
         ret_i8(z[1]);
         ret_i8(z[2]);
-        ret_i8(z[3]);
     ");
-    assert_all(&result, &[ 1i8, 2, 3, 4 ]);
+    assert_all(&result, &[ 1i8, 2, 3 ]);
+}
+
+#[test]
+fn string_literal() {
+    let result = run("
+        let hello = \"Hello World!\";
+        ret_str(hello);
+        ret_string(hello);
+    ");
+    assert_all(&result, &[ "Hello World!".to_string(), "Hello World!".to_string() ]);
 }
 
 #[test]

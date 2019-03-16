@@ -359,7 +359,11 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::String(_) => {
                 match lit_type {
-                    Type::String => { let pos = self.store_literal(item); self.writer.consto(pos as u8); },
+                    Type::String => {
+                        let pos = self.store_literal(item);
+                        self.writer.consto(pos as u8);  // string heap index
+                        self.writer.lit0();             //  offset into the string
+                    },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
             },
