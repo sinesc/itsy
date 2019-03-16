@@ -433,13 +433,6 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::Mul => { self.write_mul(&result_type); },
             BO::Div => { self.write_div(&result_type); },
             BO::Rem => unimplemented!("rem"),
-            // assigments
-            BO::Assign => unimplemented!("assign"), // fixme: thesere are handled in compile_assignment!
-            BO::AddAssign => unimplemented!("addassign"),
-            BO::SubAssign => unimplemented!("subassign"),
-            BO::MulAssign => unimplemented!("mulassign"),
-            BO::DivAssign => unimplemented!("divassgi"),
-            BO::RemAssign => unimplemented!("remassign"),
             // comparison
             BO::Less | BO::Greater => { self.write_lt(&compare_type); }, // Less/Greater, for Greater, arguments have been swapped above.
             BO::LessOrEq | BO::GreaterOrEq => { self.write_lte(&compare_type); } //  swapped above for GreaterOrEqual
@@ -451,6 +444,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             // special
             BO::Range => unimplemented!("range"),
             BO::Index => {
+                // todo need to handle both constpool (a byte array) and heap (arrays of byte arrays)
+                //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
                 if result_type.is_array() {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.array_size(result_type.as_array().unwrap());
@@ -460,6 +455,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     self.write_hgetr(result_type.size());
                 }
             },
+            // others are handled elsewhere
+            _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
         }
     }
 }

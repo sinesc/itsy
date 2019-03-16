@@ -332,6 +332,12 @@ impl<'a> LiteralValue<'a> {
             _ => None,
         }
     }
+    pub fn as_array_mut(self: &mut Self) -> Option<&mut Array<'a>> {
+        match self {
+            LiteralValue::Array(v) => Some(v),
+            _ => None,
+        }
+    }
 }
 
 impl<'a> Debug for LiteralValue<'a> {

@@ -211,6 +211,32 @@ fn array_subindex() {
 }
 
 #[test]
+fn array_inference1() {
+    let result = run("
+        let x = [ [ [ 1, 2, 3, 4 ] ] ];
+        let y = x[0];
+        let z = y[0];
+        let u = z[0];
+        ret_i8(u);
+    ");
+    assert_all(&result, &[ 1i8 ]);
+}
+
+#[test]
+fn array_inference2() {
+    let result = run("
+        let x = [ [ [ 1, 2, 3, 4 ] ] ];
+        let y = x[0];
+        let z = y[0];
+        ret_i8(z[0]);
+        ret_i8(z[1]);
+        ret_i8(z[2]);
+        ret_i8(z[3]);
+    ");
+    assert_all(&result, &[ 1i8, 2, 3, 4 ]);
+}
+
+#[test]
 fn recursion() {
     let result = run("
         fn fib(n: i32) -> i32 {

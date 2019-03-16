@@ -68,9 +68,11 @@ fn main() {
     ";
     let source = "
         fn main() {
-            let dummy = [ 0u32 ];
-            let x = [ [ 1, 2, 3, 4 ], [ 4, 5, 6, 7 ], [ 8, 9, 10, 11 ] ];
-            printi16(x[2][3]);
+            let x = [ [ [ 6 ] ] ];
+            let y = x[0];
+            let z = y[0];
+            let u = z[0];
+            printi8(u);
         }
     ";
     println!("{}", source);
