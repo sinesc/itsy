@@ -535,14 +535,14 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     /// Computes the size of an array-literal in bytes.
     fn array_literal_size(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
         let array = item.value.as_array().unwrap();
-        if array.items.len() == 0 {
+        if array.elements.len() == 0 {
             0
         } else {
-            let ty = self.bindingtype(&array.items[0]);
+            let ty = self.bindingtype(&array.elements[0]);
             if ty.is_array() {
-                array.items.len() as u32 * self.array_literal_size(&array.items[0])
+                array.elements.len() as u32 * self.array_literal_size(&array.elements[0])
             } else {
-                array.items.len() as u32 * ty.size() as u32
+                array.elements.len() as u32 * ty.size() as u32
             }
         }
     }
@@ -562,14 +562,14 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
     fn store_array_data(self: &mut Self, item: &ast::Literal<'a>) {
         let array = item.value.as_array().unwrap();
-        if array.items.len() > 0 {
-            let ty = self.bindingtype(&array.items[0]);
+        if array.elements.len() > 0 {
+            let ty = self.bindingtype(&array.elements[0]);
             if ty.is_array() {
-                for item in &array.items {
+                for item in &array.elements {
                     self.store_array_data(item);
                 }
             } else if ty.is_primitive()  {
-                for item in &array.items {
+                for item in &array.elements {
                     self.store_literal(item);
                 }
             } else {

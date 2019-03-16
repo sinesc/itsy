@@ -152,10 +152,10 @@ named!(array_element<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array 
 named!(array<Input<'_>, Literal<'_>>, map!(ws!(delimited!(char!('['), separated_list_complete!(char!(','), array_element), char!(']'))), |m| {
     Literal {
         value: LiteralValue::Array(Array {
-            items       : m,
+            elements: m,
         }),
         type_name: None,
-        binding_id  : None,
+        binding_id: None,
     }
 }));
 
@@ -323,7 +323,7 @@ named!(structure_items<Input<'_>, HashMap<&str, TypeName<'_>>>, map!(ws!(separat
 
 named!(structure<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), structure_items, char!('}'))), |tuple| Statement::Structure(Structure {
     name    : *tuple.1,
-    items   : tuple.3,
+    fields  : tuple.3,
     type_id : None,
 })));
 

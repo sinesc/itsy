@@ -141,7 +141,7 @@ impl<'a> TypeName<'a> {
 #[derive(Debug)]
 pub struct Structure<'a> {
     pub name    : &'a str,
-    pub items   : HashMap<&'a str, TypeName<'a>>,
+    pub fields  : HashMap<&'a str, TypeName<'a>>,
     pub type_id : Option<TypeId>,
 }
 
@@ -304,7 +304,7 @@ pub enum LiteralValue<'a> {
 
 #[derive(Debug)]
 pub struct Array<'a> {
-    pub items: Vec<Literal<'a>>,
+    pub elements: Vec<Literal<'a>>,
 }
 
 impl<'a> LiteralValue<'a> {

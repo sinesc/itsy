@@ -171,11 +171,12 @@ impl Scopes {
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
         *self.bindings.by_id(binding_id)
     }
-
+/*
     /// Returns the id of the named binding originating in exactly this scope.
     pub fn binding_name(self: &Self, binding_id: BindingId) -> Option<&str> {
         self.bindings.name_of(binding_id)
     }
+*/
 }
 
 /// Type handling

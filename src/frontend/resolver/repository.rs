@@ -8,7 +8,7 @@ pub(crate) struct Repository<I, V> {
     data    : Vec<(V, ScopeId)>,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // todo: remove and clean up
 impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     /// Creates a new repository.
     pub fn new() -> Self {
