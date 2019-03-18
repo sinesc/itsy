@@ -57,11 +57,18 @@ pub struct Compiler<T> where T: VMFunc<T> {
     unresolved      : HashMap<FunctionId, Vec<u32>>,
 }
 
+/// Compiles a resolved program into bytecode.
+pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: VMFunc<T>+Debug {
+    let mut compiler = Compiler::new();
+    compiler.compile(program);
+    compiler.into_program()
+}
+
 /// Basic compiler functionality.
 impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Creates a new compiler.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Compiler {
             writer          : Writer::new(),
             types           : Vec::new(),
@@ -73,7 +80,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the current program.
-    pub fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
+    fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
 
         let ResolvedProgram { ast: statements, bindingtype_ids, types, entry_fn, .. } = program;
 
@@ -95,7 +102,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Returns compiled bytecode program.
-    pub fn into_program(self: Self) -> Program<T> {
+    fn into_program(self: Self) -> Program<T> {
         self.writer.into_program()
     }
 
@@ -106,8 +113,25 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         &self.types[Into::<usize>::into(type_id)]
     }
 
+    /// Computes the size of a type in bytes.
+    fn type_size(self: &Self, ty: &Type) -> u32 {
+        match ty {
+            Type::Array(array) => {
+                let len = array.len.unwrap();
+                if len == 0 {
+                    0
+                } else {
+                    len as u32 * self.type_size(self.get_type(array.type_id))
+                }
+            }
+            Type::Struct(_) => unimplemented!("struct"),
+            Type::Enum(_) => unimplemented!("enum"),
+            _ => ty.size() as u32
+        }
+    }
+
     /// Returns type for given type_id.
-    pub fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
+    fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
 }
@@ -116,7 +140,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
-    pub fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
+    fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.compile_function(function),
@@ -132,7 +156,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given expression.
-    pub fn compile_expression(self: &mut Self, item: &ast::Expression<'a>) {
+    fn compile_expression(self: &mut Self, item: &ast::Expression<'a>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
@@ -147,7 +171,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    pub fn compile_assignment(self: &mut Self, item: &ast::Assignment<'a>) {
+    fn compile_assignment(self: &mut Self, item: &ast::Assignment<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id.unwrap();
         let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
@@ -175,7 +199,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given function.
-    pub fn compile_function(self: &mut Self, item: &ast::Function<'a>) {
+    fn compile_function(self: &mut Self, item: &ast::Function<'a>) {
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
@@ -212,7 +236,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given call.
-    pub fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
+    fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
 
         // put args on stack
         for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
@@ -242,7 +266,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    pub fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
+    fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
             let binding_id = item.binding_id.unwrap();
@@ -253,7 +277,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given variable.
-    pub fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
+    fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
@@ -287,7 +311,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given if block.
-    pub fn compile_if_block(self: &mut Self, item: &ast::IfBlock<'a>) {
+    fn compile_if_block(self: &mut Self, item: &ast::IfBlock<'a>) {
 
         // compile condition and jump placeholder
         self.compile_expression(&item.cond);
@@ -300,7 +324,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a while loop.
-    pub fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
+    fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
         let start_target = self.writer.position;
         self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
@@ -311,7 +335,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a return statement
-    pub fn compile_return(self: &mut Self, item: &ast::Return<'a>) {
+    fn compile_return(self: &mut Self, item: &ast::Return<'a>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
         } else {
@@ -321,7 +345,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given block.
-    pub fn compile_block(self: &mut Self, item: &ast::Block<'a>) {
+    fn compile_block(self: &mut Self, item: &ast::Block<'a>) {
 
         for statement in item.statements.iter() {
             self.compile_statement(statement);
@@ -333,7 +357,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given literal
-    pub fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
+    fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
@@ -357,7 +381,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
                 };
             },
-            LiteralValue::String(_) => {
+            LiteralValue::String(_) => { // todo refactor string, array, struct into one block
                 match lit_type {
                     Type::String => {
                         let pos = self.store_literal(item);
@@ -381,7 +405,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given unary operation.
-    pub fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
+    fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
         use crate::frontend::ast::UnaryOperator as UO;
 
         let exp_type = self.bindingtype(&item.expr).clone();  // todo sucks
@@ -414,7 +438,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given binary operation.
-    pub fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
+    fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index {
@@ -452,7 +476,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
                 if result_type.is_array() {
                     // stack: <heap_index> <heap_offset> <index_operand>
-                    let size = self.array_size(result_type.as_array().unwrap());
+                    let size = self.type_size(&result_type);
                     self.write_index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                     // stack now <heap_index> <new_heap_offset>
                 } else {
@@ -529,55 +553,28 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             LiteralValue::Array(_) => {
-                let size = self.array_literal_size(item);
+                let ty = self.bindingtype(item);
+                let size = self.type_size(ty);
                 let pos = self.writer.store_const(size);
-                self.store_array_data(item);
+                self.store_literal_data(item);
                 pos
             },
         }
     }
-    /// Computes the size of an array-literal in bytes.
-    fn array_literal_size(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
-        let array = item.value.as_array().unwrap();
-        if array.elements.len() == 0 {
-            0
-        } else {
-            let ty = self.bindingtype(&array.elements[0]);
-            if ty.is_array() {
-                array.elements.len() as u32 * self.array_literal_size(&array.elements[0])
-            } else {
-                array.elements.len() as u32 * ty.size() as u32
-            }
-        }
-    }
-    /// Computes the size of an array in bytes.
-    fn array_size(self: &Self, array: &Array) -> u32 {
-        let len = array.len.unwrap();
-        if len == 0 {
-            0
-        } else {
-            let ty = self.get_type(array.type_id);
-            match ty {
-                Type::Array(array) => { len as u32 * self.array_size(array) }
-                _ => { len as u32 * ty.size() as u32 }
-            }
-        }
-    }
     /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
-    fn store_array_data(self: &mut Self, item: &ast::Literal<'a>) {
-        let array = item.value.as_array().unwrap();
-        if array.elements.len() > 0 {
-            let ty = self.bindingtype(&array.elements[0]);
-            if ty.is_array() {
-                for item in &array.elements {
-                    self.store_array_data(item);
+    fn store_literal_data(self: &mut Self, item: &ast::Literal<'a>) {
+        use crate::frontend::ast::LiteralValue;
+
+        match &item.value {
+            LiteralValue::Array(array) => {
+                if array.elements.len() > 0 {
+                    for item in &array.elements {
+                        self.store_literal_data(item);
+                    }
                 }
-            } else if ty.is_primitive()  {
-                for item in &array.elements {
-                    self.store_literal(item);
-                }
-            } else {
-                unimplemented!("non-primitive array");
+            }
+            _ => {
+                self.store_literal(item);
             }
         }
     }
@@ -744,11 +741,4 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             panic!("Unsupported type {:?} for load operation", ty);
         }
     }
-}
-
-/// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: VMFunc<T>+Debug {
-    let mut compiler = Compiler::new();
-    compiler.compile(program);
-    compiler.into_program()
 }

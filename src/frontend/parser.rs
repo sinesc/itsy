@@ -20,15 +20,12 @@ pub enum ParseError {
 
 // identifier [a-z_][a-z0-9_]*
 
-named!(ident(Input<'_>) -> Input<'_>, recognize!(tuple!(
-    take_while1!(|m| is_alphabetic(m as u8) || m == '_'),
-    take_while!(|m| is_alphanumeric(m as u8) || m == '_')
-)));
+named!(ident(Input<'_>) -> &str, map!(recognize!(tuple!(take_while1!(|m| is_alphabetic(m as u8) || m == '_'), take_while!(|m| is_alphanumeric(m as u8) || m == '_'))), |s| *s));
 
 // identifier path
 
 named!(ident_path(Input<'_>) -> IdentPath<'_>, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| IdentPath(
-    m.into_iter().map(|s| *s).collect()
+    m.into_iter().collect()
 )));
 
 // block
@@ -47,17 +44,17 @@ named!(block(Input<'_>) -> Block<'_>, map!(ws!(tuple!(char!('{'), block_items, o
     }
 }));
 
-// function call (expression)
+// function call
 
 named!(call_argument_list<Input<'_>, Vec<Expression<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
 
-named!(call<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Expression::Call(Call {
+named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Call {
     path        : m.0,
     args        : m.1,
     function_id : None,
     rust_fn_index: None,
     binding_id  : None,
-})));
+}));
 
 // literal numerical
 
@@ -147,30 +144,32 @@ named!(string<Input<'_>, Literal<'_>>, map!(delimited!(char!('"'), escaped!(none
 
 // literal array
 
-named!(array_element<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array | numerical)));
+named!(array_literal_elements<Input<'_>, Vec<Literal<'_>>>, ws!(separated_list_complete!(char!(','), literal)));
 
-named!(array<Input<'_>, Literal<'_>>, map!(ws!(delimited!(char!('['), separated_list_complete!(char!(','), array_element), char!(']'))), |m| {
-    Literal {
-        value: LiteralValue::Array(Array {
-            elements: m,
-        }),
-        type_name: None,
-        binding_id: None,
-    }
+named!(array_literal<Input<'_>, Literal<'_>>, map!(ws!(delimited!(char!('['), array_literal_elements, char!(']'))), |m| Literal {
+    value: LiteralValue::Array(ArrayLiteral {
+        elements: m,
+    }),
+    type_name: None,
+    binding_id: None,
 }));
 
-// assignment (expression)
+// general literal
+
+named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_literal | numerical)));
+
+// assignment
 
 named!(assignment_operator<Input<'_>, BinaryOperator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
     BinaryOperator::from_string(*o)
 }));
 
-named!(assignment<Input<'_>, Expression<'_>>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| {
-    Expression::Assignment(Box::new(Assignment {
+named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| {
+    Assignment {
         op      : m.1,
         left    : Variable { path: m.0, binding_id: None },
         right   : m.2,
-    }))
+    }
 }));
 
 // expression
@@ -207,11 +206,11 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require c
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
     | map!(block, |m| Expression::Block(Box::new(m)))
     | parens
-    | unary
+    | unary // todo: unary, suffix and prefix could be changed to UnaryOp and then mapped here like bool, string, ...
     | suffix
     | prefix
     | map!(numerical, |m| Expression::Literal(m))
-    | call
+    | map!(call, |m| Expression::Call(m))
     | map!(ident_path, |m| Expression::Variable(Variable { path: m, binding_id: None }))
 )));
 
@@ -286,23 +285,20 @@ named!(prec0<Input<'_>, Expression<'_>>, ws!(do_parse!(
 )));
 
 named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
-    assignment
+    map!(assignment, |m| Expression::Assignment(Box::new(m)))
+    | map!(array_literal, |m| Expression::Literal(m))
     | prec0
 )));
 
 // let
 
-// todo: add array_expression to wrap array literal, then change expression to alt!(expression | array_expression)
-
-named!(array_expression<Input<'_>, Expression<'_>>, map!(array, |m| Expression::Literal(m)));
-
 named!(binding<Input<'_>, Statement<'_>>, map!(
     preceded!(ws!(tag!("let")), return_error!(
         ErrorKind::Custom(ParseError::SyntaxLet as u32),
-        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), alt!(array_expression | expression))), char!(';')))
+        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
     )),
     |m| Statement::Binding(Binding {
-        name        : *m.1,
+        name        : m.1,
         mutable     : m.0.is_some(),
         expr        : m.3,
         type_name   : m.2.map(|t| TypeName::unknown(t)),
@@ -310,19 +306,19 @@ named!(binding<Input<'_>, Statement<'_>>, map!(
     })
 ));
 
-// structure
+// struct definition
 
-named!(structure_item<Input<'_>, (Input<'_>, TypeName<'_>)>, map!(
+named!(struct_item<Input<'_>, (&str, TypeName<'_>)>, map!(
     ws!(tuple!(ident, char!(':'), ident_path)),
     |tuple| (tuple.0, TypeName::unknown(tuple.2))
 ));
 
-named!(structure_items<Input<'_>, HashMap<&str, TypeName<'_>>>, map!(ws!(separated_list_complete!(char!(','), structure_item)), |list| {
-    list.into_iter().map(|item| (*item.0, item.1)).collect()
+named!(struct_fields<Input<'_>, Vec<(&str, TypeName<'_>)>>, map!(ws!(separated_list_complete!(char!(','), struct_item)), |list| {
+    list.into_iter().map(|item| (item.0, item.1)).collect()
 }));
 
-named!(structure<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), structure_items, char!('}'))), |tuple| Statement::Structure(Structure {
-    name    : *tuple.1,
+named!(struct_<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
+    name    : tuple.1,
     fields  : tuple.3,
     type_id : None,
 })));
@@ -330,7 +326,7 @@ named!(structure<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), iden
 // function
 
 named!(signature_argument<Input<'_>, Binding<'_>>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Binding {
-    name        : *tuple.1,
+    name        : tuple.1,
     expr        : None,
     mutable     : tuple.0.is_some(),
     type_name   : Some(TypeName::unknown(tuple.3)),
@@ -346,7 +342,7 @@ named!(signature<Input<'_>, Signature<'_>>, map!(
         ErrorKind::Custom(ParseError::SyntaxFn as u32),
         ws!(tuple!(ident, signature_argument_list, opt!(signature_return_part)))
     )), |sig| Signature {
-    name    : *sig.0,
+    name    : sig.0,
     args    : sig.1,
     ret     : if let Some(sig_ty) = sig.2 { Some(TypeName::unknown(sig_ty)) } else { None },
 }));
@@ -386,7 +382,7 @@ named!(for_loop_range<Input<'_>, Expression<'_>>, map!(ws!(tuple!(expression, ta
 
 named!(for_loop<Input<'_>, ForLoop<'_>>, map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
     iter: Binding {
-        name        : *m.1,
+        name        : m.1,
         mutable     : true,
         expr        : None,
         type_name   : None,
@@ -420,7 +416,7 @@ named!(statement<Input<'_>, Statement<'_>>, alt!(
     binding
     | map!(if_block, |m| Statement::IfBlock(m))
     | function
-    | structure
+    | struct_
     | map!(for_loop, |m| Statement::ForLoop(m))
     | map!(while_loop, |m| Statement::WhileLoop(m))
     | map!(terminated!(expression, char!(';')), |m| Statement::Expression(m))

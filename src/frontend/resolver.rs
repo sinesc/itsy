@@ -126,7 +126,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
             if self.scopes.binding_id(self.scope_id, name).is_some() {
-                //unimplemented!("cannot shadow {}", name); // fixme: disabled for array stuff todo: support shadowing
+                unimplemented!("cannot shadow {}", name); // todo: support shadowing
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, Some(name), None);
             *item.binding_id_mut() = Some(binding_id);
@@ -641,7 +641,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
     fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>, expected_type: Option<TypeId>) {
         use self::ast::LiteralValue as LV;
-        if let Some(type_name) = &mut item.type_name {
+
+        if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
+            self.set_bindingtype_id(item, self.primitives.bool);
+        } else if let LV::String(_) = item.value {
+            self.set_bindingtype_id(item, self.primitives.string);
+        } else if let LV::Array(_/*ref mut array*/) = item.value { // bck fail
+            let binding_id = self.try_create_anon_binding(item);
+            self.resolve_literal_array(item.value.as_array_mut().unwrap(), binding_id);
+        } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name) {
                 self.set_bindingtype_id(item, explicit_type_id);
@@ -649,13 +657,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     panic!("type mismatch");
                 }
             }
-        } else if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
-            self.set_bindingtype_id(item, self.primitives.bool);
-        } else if let LV::String(_) = item.value {
-            self.set_bindingtype_id(item, self.primitives.string);
-        } else if let LV::Array(_/*ref mut array*/) = item.value { // bck fail
-            let binding_id = self.try_create_anon_binding(item);
-            self.resolve_literal_array(item.value.as_array_mut().unwrap(), binding_id);
         } else if let (LV::Numeric(_), Some(expected_type)) = (&item.value, expected_type) {
             self.set_bindingtype_id(item, expected_type);
         } else if self.infer_literals {
@@ -685,7 +686,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an array literal and creates the required array types.
-    fn resolve_literal_array(self: &mut Self, array: &mut ast::Array<'a>, binding_id: BindingId) {
+    fn resolve_literal_array(self: &mut Self, array: &mut ast::ArrayLiteral<'a>, binding_id: BindingId) {
 
         // apply the same binding id to all elements
         let element_binding_id = self.try_create_anon_binding(array.elements.first_mut().unwrap());
