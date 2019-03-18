@@ -4,6 +4,7 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::verbose_errors::Context;
 use nom::*;
+use std::collections::HashMap;
 use crate::util::Numeric;
 use crate::frontend::ast::*;
 
@@ -151,9 +152,27 @@ named!(array_literal<Input<'_>, Literal<'_>>, map!(ws!(delimited!(char!('['), ar
     binding_id: None,
 }));
 
+// struct literal
+
+named!(struct_literal_field<Input<'_>, (&str, Literal<'_>)>, map!(ws!(tuple!(ident, char!(':'), literal)),
+    |tuple| (tuple.0, tuple.2)
+));
+
+named!(struct_literal_fields<Input<'_>, HashMap<&str, Literal<'_>>>, map!(ws!(separated_list_complete!(char!(','), struct_literal_field)), |list| {
+    list.into_iter().map(|item| (item.0, item.1)).collect()
+}));
+
+named!(struct_literal<Input<'_>, Literal<'_>>, map!(ws!(tuple!(path, char!('{'), struct_literal_fields, opt!(char!(',')), char!('}'))), |m| Literal {
+    value: LiteralValue::Struct(StructLiteral {
+        fields: m.2,
+    }),
+    type_name: Some(TypeName::unknown(m.0)),
+    binding_id: None,
+}));
+
 // general literal
 
-named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_literal | numerical)));
+named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_literal | struct_literal | numerical)));
 
 // assignment
 
@@ -284,6 +303,7 @@ named!(prec0<Input<'_>, Expression<'_>>, ws!(do_parse!(
 named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
     map!(assignment, |m| Expression::Assignment(Box::new(m)))
     | map!(array_literal, |m| Expression::Literal(m))
+    | map!(struct_literal, |m| Expression::Literal(m))
     | prec0
 )));
 

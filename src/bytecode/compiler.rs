@@ -124,7 +124,9 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     len as u32 * self.type_size(self.get_type(array.type_id))
                 }
             }
-            Type::Struct(_) => unimplemented!("struct"),
+            Type::Struct(struct_) => {
+                struct_.fields.iter().map(|&(_, type_id)| { self.type_size(self.get_type(type_id)) }).sum()
+            }
             Type::Enum(_) => unimplemented!("enum"),
             _ => ty.size() as u32
         }
@@ -401,6 +403,16 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected array literal type: {:?}", lit_type)
                 };
             },
+            LiteralValue::Struct(_) => {
+                match lit_type {
+                    Type::Struct(_) => {
+                        let pos = self.store_literal(item);
+                        self.writer.consto(pos as u8);  // struct heap index
+                        self.writer.lit0();             //  offset into the struct
+                    },
+                    _ => panic!("Unexpected struct literal type: {:?}", lit_type)
+                };
+            }
         }
     }
 
@@ -559,6 +571,13 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 self.store_literal_data(item);
                 pos
             },
+            LiteralValue::Struct(_) => {
+                let ty = self.bindingtype(item);
+                let size = self.type_size(ty);
+                let pos = self.writer.store_const(size);
+                self.store_literal_data(item);
+                pos
+            },
         }
     }
     /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
@@ -571,6 +590,13 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     for item in &array.elements {
                         self.store_literal_data(item);
                     }
+                }
+            }
+            LiteralValue::Struct(struct_) => {
+                let ty = self.bindingtype(item).clone(); // todo: sucks
+                for (name, _) in ty.as_struct().unwrap().fields.iter() {
+                    let literal = &struct_.fields[&name[..]];
+                    self.store_literal_data(literal);
                 }
             }
             _ => {

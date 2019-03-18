@@ -6,7 +6,7 @@ mod repository;
 
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable};
-use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array};
+use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct};
 use crate::{VMFunc, Standalone};
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -194,7 +194,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function),
-            S::Structure(_structure)     => { }, // todo: handle structures
+            S::Structure(structure)     => self.resolve_structure(structure),
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block),
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
@@ -361,6 +361,26 @@ impl<'a, 'b> Resolver<'a, 'b> {
             self.resolve_block(&mut item.block, function_type.ret_type);
         }
         self.scope_id = parent_scope_id;
+    }
+
+    /// Resolves a struct definition.
+    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'a>) {
+
+        for (_, field) in &mut item.fields {
+            self.resolve_type(field);
+        }
+
+        if item.type_id.is_none() {
+
+            let mut fields = Vec::new();
+
+            for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
+                fields.push((field_name.to_string(), field_type.type_id));
+            }
+
+            let ty = Type::Struct(Struct { fields });
+            item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.name), ty));
+        }
     }
 
     /// Resolves a return statement.
@@ -649,6 +669,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else if let LV::Array(_/*ref mut array*/) = item.value { // bck fail
             let binding_id = self.try_create_anon_binding(item);
             self.resolve_literal_array(item.value.as_array_mut().unwrap(), binding_id);
+        } else if let LV::Struct(_) = item.value {
+            self.resolve_literal_struct(item);
         } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name) {
@@ -683,6 +705,28 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
             self.set_bindingtype_id(item);
         } */
+    }
+
+    /// Resolves an struct literal and creates the required field types.
+    fn resolve_literal_struct(self: &mut Self, item: &mut ast::Literal<'a>) {
+
+        self.try_create_anon_binding(item);
+
+        // resolve type from name
+
+        let type_name = item.type_name.as_mut().unwrap();
+        self.resolve_type(type_name);
+
+        // resolve fields from field definition
+
+        if let Some(type_id) = type_name.type_id {
+            let struct_def = self.scopes.type_ref(type_id).as_struct().unwrap().clone(); // todo: this sucks
+            let struct_ = item.value.as_struct_mut().unwrap();
+            for (name, field) in &mut struct_.fields {
+                self.try_create_anon_binding(field);
+                self.resolve_literal(field, struct_def.type_id(name));
+            }
+        }
     }
 
     /// Resolves an array literal and creates the required array types.

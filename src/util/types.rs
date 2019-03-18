@@ -45,7 +45,14 @@ pub struct Enum {
 /// Information about a struct in a resolved program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Struct {
-    pub fields: HashMap<usize, Type>
+    pub fields: Vec<(String, Option<TypeId>)>,
+}
+
+impl Struct {
+    /// Returns the TypeId for given field name.
+    pub fn type_id(self: &Self, field: &str) -> Option<TypeId> {
+        self.fields.iter().find(|f| &f.0 == field).map(|f| &f.1).and_then(|o| *o) // todo: this lumps "not found" and "unresolved" together
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -155,6 +162,20 @@ impl Type {
     pub fn as_array(self: &Self) -> Option<&Array> {
         match self {
             Type::Array(array) => Some(array),
+            _ => None
+        }
+    }
+    /// Whether the type is a struct.
+    pub fn is_struct(self: &Self) -> bool {
+        match self {
+            Type::Struct(_) => true,
+            _ => false
+        }
+    }
+    /// Returns the type as a struct.
+    pub fn as_struct(self: &Self) -> Option<&Struct> {
+        match self {
+            Type::Struct(struct_) => Some(struct_),
             _ => None
         }
     }
