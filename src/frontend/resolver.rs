@@ -387,7 +387,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         // locate function definition
         if item.function_id.is_none() {
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
+            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.name);
         }
 
         // found a function, resolve return type and arguments
@@ -409,7 +409,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 if actual_type.is_none() {
                     self.set_bindingtype_id(&mut item.args[index], expected_type);
                 } else if actual_type.is_some() && actual_type.unwrap() != expected_type  {
-                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.path.0[0], index + 1, self.scopes.type_ref(expected_type), self.scopes.type_ref(actual_type.unwrap()));
+                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.name, index + 1, self.scopes.type_ref(expected_type), self.scopes.type_ref(actual_type.unwrap()));
                 }
             }
 
@@ -423,11 +423,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &Self, item: &mut ast::TypeName<'a>) -> Option<TypeId> {
         if item.type_id.is_none() {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.name.0[0]) { // fixme: handle path segments
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path[0]) { // fixme: handle path segments
                 item.type_id = Some(new_type_id);
             }
         } else if let Some(type_id) = item.type_id {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.name.0[0]) {
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path[0]) { // fixme: handle path segments
                 if type_id != new_type_id {
                     panic!("type resolution result changed, aka 'this should never happen'"); // todo: remove this whole else branch
                 }
@@ -440,9 +440,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
         // resolve binding
         if item.binding_id.is_none() {
-            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.path.0[0]);      // fixme: need full path here
+            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.name);
             if item.binding_id.is_none() {
-                panic!("unknown binding {:?} in scope {:?}", item.path.0, self.scope_id); // todo: error handling
+                panic!("unknown binding {:?} in scope {:?}", item.name, self.scope_id); // todo: error handling
             }
         }
     }

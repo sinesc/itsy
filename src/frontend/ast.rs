@@ -123,15 +123,15 @@ impl<'a> Signature<'a> {
 
 #[derive(Debug)]
 pub struct TypeName<'a> {
-    pub name    : IdentPath<'a>,
+    pub path    : Vec<&'a str>,
     pub type_id : Option<TypeId>,
 }
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
-    pub fn unknown(name: IdentPath<'a>) -> Self {
+    pub fn unknown(name: Vec<&'a str>) -> Self {
         TypeName {
-            name    : name,
+            path    : name,
             type_id : None,
         }
     }
@@ -352,14 +352,14 @@ pub struct ArrayLiteral<'a> {
 
 #[derive(Debug)]
 pub struct Variable<'a> {
-    pub path        : IdentPath<'a>,
+    pub name        : &'a str,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Variable);
 
 #[derive(Debug)]
 pub struct Call<'a> {
-    pub path        : IdentPath<'a>,
+    pub name        : &'a str,
     pub args        : Vec<Expression<'a>>,
     pub function_id : Option<FunctionId>,
     pub rust_fn_index: Option<u16>,
@@ -399,20 +399,6 @@ pub struct UnaryOp<'a> {
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(UnaryOp);
-
-pub struct IdentPath<'a>(pub Vec<&'a str>);
-
-impl<'a> IdentPath<'a> {
-    pub fn root(root: &'a str) -> Self {
-        IdentPath(vec![ root ])
-    }
-}
-
-impl<'a> Debug for IdentPath<'a> {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "IdentPath({})", self.0.join("."))
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOperator {

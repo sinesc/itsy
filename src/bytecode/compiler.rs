@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use crate::util::{Numeric, BindingId, FunctionId, Type, Array, TypeId, TypeKind};
+use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::VMFunc;
@@ -251,7 +251,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         } else {
 
             // normal function: identify call target or write dummy
-            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.path.0[0]));
+            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.name));
             let call_position = self.writer.position();
 
             let target = if let Some(&target) = self.functions.get(&function_id) {

@@ -4,7 +4,6 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::verbose_errors::Context;
 use nom::*;
-use std::collections::HashMap;
 use crate::util::Numeric;
 use crate::frontend::ast::*;
 
@@ -22,11 +21,9 @@ pub enum ParseError {
 
 named!(ident(Input<'_>) -> &str, map!(recognize!(tuple!(take_while1!(|m| is_alphabetic(m as u8) || m == '_'), take_while!(|m| is_alphanumeric(m as u8) || m == '_'))), |s| *s));
 
-// identifier path
+// path
 
-named!(ident_path(Input<'_>) -> IdentPath<'_>, map!(ws!(separated_nonempty_list!(char!('.'), ident)), |m| IdentPath(
-    m.into_iter().collect()
-)));
+named!(path(Input<'_>) -> Vec<&'_ str>, map!(ws!(separated_nonempty_list!(tag!("::"), ident)), |m| m.into_iter().collect() ));
 
 // block
 
@@ -48,8 +45,8 @@ named!(block(Input<'_>) -> Block<'_>, map!(ws!(tuple!(char!('{'), block_items, o
 
 named!(call_argument_list<Input<'_>, Vec<Expression<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
 
-named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident_path, call_argument_list)), |m| Call {
-    path        : m.0,
+named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
+    name        : m.0,
     args        : m.1,
     function_id : None,
     rust_fn_index: None,
@@ -93,7 +90,7 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
             //println!("f {} {:?}", float, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
-                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
+                type_name   : type_name.map(|ty| TypeName { path: vec![ ty ], type_id: None }),
                 binding_id  : None,
             }))
         }
@@ -102,7 +99,7 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
             //println!("i {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Signed(integer)),
-                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
+                type_name   : type_name.map(|ty| TypeName { path: vec![ ty ], type_id: None }),
                 binding_id  : None,
             }))
         }
@@ -111,7 +108,7 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
             //println!("u {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
-                type_name   : type_name.map(|ty| TypeName { name: IdentPath::root(ty), type_id: None }),
+                type_name   : type_name.map(|ty| TypeName { path: vec![ ty ], type_id: None }),
                 binding_id  : None,
             }))
         }
@@ -164,10 +161,10 @@ named!(assignment_operator<Input<'_>, BinaryOperator>, map!(alt!(tag!("=") | tag
     BinaryOperator::from_string(*o)
 }));
 
-named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident_path, assignment_operator, expression)), |m| {
+named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident, assignment_operator, expression)), |m| {
     Assignment {
         op      : m.1,
-        left    : Variable { path: m.0, binding_id: None },
+        left    : Variable { name: m.0, binding_id: None },
         right   : m.2,
     }
 }));
@@ -184,18 +181,18 @@ named!(unary<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!")), express
     }))
 }));
 
-named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident_path)), |m| {
+named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::prefix_from_string(*m.0),
-        expr        : Expression::Variable(Variable { path: m.1, binding_id: None }),
+        expr        : Expression::Variable(Variable { name: m.1, binding_id: None }),
         binding_id  : None,
     }))
 }));
 
-named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident_path, alt!(tag!("++") | tag!("--")))), |m| {
+named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::suffix_from_string(*m.1),
-        expr        : Expression::Variable(Variable { path: m.0, binding_id: None }),
+        expr        : Expression::Variable(Variable { name: m.0, binding_id: None }),
         binding_id  : None,
     }))
 }));
@@ -211,7 +208,7 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require c
     | prefix
     | map!(numerical, |m| Expression::Literal(m))
     | map!(call, |m| Expression::Call(m))
-    | map!(ident_path, |m| Expression::Variable(Variable { path: m, binding_id: None }))
+    | map!(ident, |m| Expression::Variable(Variable { name: m, binding_id: None }))
 )));
 
 named!(prec6<Input<'_>, Expression<'_>>, ws!(do_parse!(
@@ -295,7 +292,7 @@ named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
 named!(binding<Input<'_>, Statement<'_>>, map!(
     preceded!(ws!(tag!("let")), return_error!(
         ErrorKind::Custom(ParseError::SyntaxLet as u32),
-        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), ident_path)), opt!(preceded!(char!('='), expression)), char!(';')))
+        ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), path)), opt!(preceded!(char!('='), expression)), char!(';')))
     )),
     |m| Statement::Binding(Binding {
         name        : m.1,
@@ -308,8 +305,7 @@ named!(binding<Input<'_>, Statement<'_>>, map!(
 
 // struct definition
 
-named!(struct_item<Input<'_>, (&str, TypeName<'_>)>, map!(
-    ws!(tuple!(ident, char!(':'), ident_path)),
+named!(struct_item<Input<'_>, (&str, TypeName<'_>)>, map!(ws!(tuple!(ident, char!(':'), path)),
     |tuple| (tuple.0, TypeName::unknown(tuple.2))
 ));
 
@@ -325,7 +321,7 @@ named!(struct_<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), ident,
 
 // function
 
-named!(signature_argument<Input<'_>, Binding<'_>>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), ident_path)), |tuple| Binding {
+named!(signature_argument<Input<'_>, Binding<'_>>, map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), path)), |tuple| Binding {
     name        : tuple.1,
     expr        : None,
     mutable     : tuple.0.is_some(),
@@ -335,7 +331,7 @@ named!(signature_argument<Input<'_>, Binding<'_>>, map!(ws!(tuple!(opt!(tag!("mu
 
 named!(signature_argument_list<Input<'_>, Vec<Binding<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
-named!(signature_return_part<Input<'_>, IdentPath<'_>>, ws!(preceded!(tag!("->"), ident_path)));
+named!(signature_return_part<Input<'_>, Vec<&'_ str>>, ws!(preceded!(tag!("->"), path)));
 
 named!(signature<Input<'_>, Signature<'_>>, map!(
     preceded!(ws!(tag!("fn")), return_error!(
