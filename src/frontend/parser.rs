@@ -192,15 +192,15 @@ named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident, assignment_
 
 named!(parens<Input<'_>, Expression<'_>>, ws!(delimited!(char!('('), expression, char!(')'))));
 
-named!(unary<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!")), expression)), |m| {
+named!(unary<Input<'_>, Expression<'_>>, map!(ws!(preceded!(tag!("!"), expression)), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
-        op          : UnaryOperator::prefix_from_string(*m.0),
-        expr        : m.1,
+        op          : UnaryOperator::Not,
+        expr        : m,
         binding_id  : None,
     }))
 }));
 
-named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| {
+named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::prefix_from_string(*m.0),
         expr        : Expression::Variable(Variable { name: m.1, binding_id: None }),
@@ -208,7 +208,7 @@ named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("
     }))
 }));
 
-named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {
+named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::suffix_from_string(*m.1),
         expr        : Expression::Variable(Variable { name: m.0, binding_id: None }),
@@ -233,9 +233,12 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require c
 named!(prec6<Input<'_>, Expression<'_>>, ws!(do_parse!(
     init: operand >>
     res: fold_many0!(
-        delimited!(tag!("["), expression, tag!("]")),
+        alt!(
+            map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::Index, e))
+            | map!(preceded!(tag!("."), ident), |n| (BinaryOperator::Access, Expression::Member(Member { name: n, binding_id: None, index: None })))
+        ),
         init,
-        |acc, val| Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::Index, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));

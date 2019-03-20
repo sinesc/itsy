@@ -105,37 +105,6 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     fn into_program(self: Self) -> Program<T> {
         self.writer.into_program()
     }
-
-    /// Returns the type of the given binding.
-    fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
-        let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
-        let type_id = self.bindingtype_ids[binding_id];
-        &self.types[Into::<usize>::into(type_id)]
-    }
-
-    /// Computes the size of a type in bytes.
-    fn type_size(self: &Self, ty: &Type) -> u32 {
-        match ty {
-            Type::Array(array) => {
-                let len = array.len.unwrap();
-                if len == 0 {
-                    0
-                } else {
-                    len as u32 * self.type_size(self.get_type(array.type_id))
-                }
-            }
-            Type::Struct(struct_) => {
-                struct_.fields.iter().map(|&(_, type_id)| { self.type_size(self.get_type(type_id)) }).sum()
-            }
-            Type::Enum(_) => unimplemented!("enum"),
-            _ => ty.size() as u32
-        }
-    }
-
-    /// Returns type for given type_id.
-    fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
-        &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
-    }
 }
 
 /// Methods for compiling individual code structures.
@@ -163,6 +132,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
             E::Variable(variable)       => self.compile_variable(variable),
+            E::Member(_)                => { /* nothing to do here */ }
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
@@ -486,13 +456,24 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::Index => {
                 // todo need to handle both constpool (a byte array) and heap (arrays of byte arrays)
                 //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
-                if result_type.is_array() {
+                if result_type.is_primitive() {
+                    self.write_hindexr(result_type.size());
+                } else {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.type_size(&result_type);
                     self.write_index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                     // stack now <heap_index> <new_heap_offset>
+                }
+            },
+            BO::Access => {
+                if result_type.is_primitive() {
+                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                    self.write_haccessr(result_type.size(), offset);
                 } else {
-                    self.write_hgetr(result_type.size());
+                    // stack: <heap_index> <heap_offset>
+                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                    self.write_member_offset(offset); // push additional offset, pop both offsets, write computed offset
+                    // stack now <heap_index> <new_heap_offset>
                 }
             },
             // others are handled elsewhere
@@ -502,6 +483,17 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 }
 
 impl<'a, T> Compiler<T> where T: VMFunc<T> {
+    /// Returns the type of the given binding.
+    fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
+        let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
+        let type_id = self.bindingtype_ids[binding_id];
+        &self.types[Into::<usize>::into(type_id)]
+    }
+
+    /// Returns type for given type_id.
+    fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
+        &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
+    }
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
         if let Some(targets) = self.unresolved.remove(&function_id) {
@@ -604,6 +596,60 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
+    /// Computes the size of a type in bytes.
+    fn type_size(self: &Self, ty: &Type) -> u32 {
+        match ty {
+            Type::Array(array) => {
+                let len = array.len.unwrap();
+                if len == 0 {
+                    0
+                } else {
+                    len as u32 * self.type_size(self.get_type(array.type_id))
+                }
+            }
+            Type::Struct(struct_) => {
+                struct_.fields.iter().map(|&(_, type_id)| { self.type_size(self.get_type(type_id)) }).sum()
+            }
+            Type::Enum(_) => unimplemented!("enum"),
+            _ => ty.size() as u32
+        }
+    }
+    /// Computes struct member offset in bytes.
+    fn member_offset(self: &Self, ty: &Type, member_index: u32) -> u32 {
+        let struct_ = ty.as_struct().unwrap();
+        let mut offset = 0;
+        for index in 0 .. member_index {
+            offset += self.type_size(self.get_type(struct_.fields[index as usize].1));
+        }
+        offset
+    }
+    fn write_member_offset(self: &mut Self, offset: u32) {
+        if offset == 0 {
+            // nothing to do
+        } else if offset == 1 {
+            self.writer.lit1();
+            self.writer.addi();
+        } else if offset == 2 {
+            self.writer.lit2();
+            self.writer.addi();
+        } else if offset <= 255 {
+            self.writer.litu(offset as u8);
+            self.writer.addi();
+        } else {
+            let const_id = self.writer.store_const(offset);
+            self.writer.constr32(const_id as u8); // todo: handle id > 255
+            self.writer.addi();
+        }
+    }
+    fn write_haccessr(self: &mut Self, result_size: u8, offset: u32) {
+        match result_size {
+            1 => { self.writer.haccessr8(offset); },
+            2 => { self.writer.haccessr16(offset); },
+            4 => { self.writer.haccessr32(offset); },
+            8 => { self.writer.haccessr64(offset); },
+            _ => panic!("Invalid result size {} for hindexr", result_size)
+        }
+    }
     fn write_index(self: &mut Self, element_size: u32) {
         if element_size < (1 << 8) {
             self.writer.index(element_size as u8);
@@ -613,13 +659,13 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.index_32(element_size);
         }
     }
-    fn write_hgetr(self: &mut Self, element_size: u8) {
+    fn write_hindexr(self: &mut Self, element_size: u8) {
         match element_size {
-            1 => { self.writer.hgetr8(); },
-            2 => { self.writer.hgetr16(); },
-            4 => { self.writer.hgetr32(); },
-            8 => { self.writer.hgetr64(); },
-            _ => panic!("Invalid element size {} for hgetr", element_size)
+            1 => { self.writer.hindexr8(); },
+            2 => { self.writer.hindexr16(); },
+            4 => { self.writer.hindexr32(); },
+            8 => { self.writer.hindexr64(); },
+            _ => panic!("Invalid element size {} for hindexr", element_size)
         }
     }
     fn write_preinc(self: &mut Self, index: i32, ty: &Type) {

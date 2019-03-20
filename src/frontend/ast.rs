@@ -210,6 +210,7 @@ pub enum Expression<'a> {
     Literal(Literal<'a>),
     Variable(Variable<'a>),
     Call(Call<'a>),
+    Member(Member<'a>),
     Assignment(Box<Assignment<'a>>),
     BinaryOp(Box<BinaryOp<'a>>),
     UnaryOp(Box<UnaryOp<'a>>),
@@ -242,6 +243,18 @@ impl<'a> Expression<'a> {
             _ => None,
         }
     }
+    pub fn as_member(self: &Self) -> Option<&Member<'a>> {
+        match self {
+            Expression::Member(member) => Some(member),
+            _ => None,
+        }
+    }
+    pub fn as_member_mut(self: &mut Self) -> Option<&mut Member<'a>> {
+        match self {
+            Expression::Member(member) => Some(member),
+            _ => None,
+        }
+    }
 }
 
 impl<'a> Bindable for Expression<'a> {
@@ -250,6 +263,7 @@ impl<'a> Bindable for Expression<'a> {
             Expression::Literal(literal)        => literal.binding_id_mut(),
             Expression::Variable(variable)      => variable.binding_id_mut(),
             Expression::Call(call)              => call.binding_id_mut(),
+            Expression::Member(member)          => member.binding_id_mut(),
             Expression::Assignment(assignment)  => assignment.binding_id_mut(),
             Expression::BinaryOp(binary_op)     => binary_op.binding_id_mut(),
             Expression::UnaryOp(unary_op)       => unary_op.binding_id_mut(),
@@ -262,6 +276,7 @@ impl<'a> Bindable for Expression<'a> {
             Expression::Literal(literal)        => literal.binding_id(),
             Expression::Variable(variable)      => variable.binding_id(),
             Expression::Call(call)              => call.binding_id(),
+            Expression::Member(member)          => member.binding_id(),
             Expression::Assignment(assignment)  => assignment.binding_id(),
             Expression::BinaryOp(binary_op)     => binary_op.binding_id(),
             Expression::UnaryOp(unary_op)       => unary_op.binding_id(),
@@ -277,6 +292,7 @@ impl<'a> Debug for Expression<'a> {
             Expression::Literal(literal)        => write!(f, "{:#?}", literal),
             Expression::Variable(variable)      => write!(f, "{:#?}", variable),
             Expression::Call(call)              => write!(f, "{:#?}", call),
+            Expression::Member(member)          => write!(f, "{:#?}", member),
             Expression::Assignment(assignment)  => write!(f, "{:#?}", assignment),
             Expression::BinaryOp(binary_op)     => write!(f, "{:#?}", binary_op),
             Expression::UnaryOp(unary_op)       => write!(f, "{:#?}", unary_op),
@@ -371,6 +387,14 @@ pub struct Variable<'a> {
 impl_bindable!(Variable);
 
 #[derive(Debug)]
+pub struct Member<'a> {
+    pub name        : &'a str,
+    pub binding_id  : Option<BindingId>,
+    pub index       : Option<u32>,
+}
+impl_bindable!(Member);
+
+#[derive(Debug)]
 pub struct Call<'a> {
     pub name        : &'a str,
     pub args        : Vec<Expression<'a>>,
@@ -451,7 +475,7 @@ pub enum BinaryOperator {
     // boolean
     And, Or,
     // special
-    Range, Index
+    Range, Index, Access
 }
 
 impl BinaryOperator {
@@ -482,6 +506,7 @@ impl BinaryOperator {
             "%=" => BinaryOperator::RemAssign,
 
             ".." => BinaryOperator::Range,
+            "." => BinaryOperator::Access,
 
             _ => panic!(format!("parser yielded invalid binary operator \"{}\"", op)),
         }

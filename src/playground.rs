@@ -54,25 +54,18 @@ extern_rust!(MyFns, u32, {
 #[allow(unused_variables)]
 fn main() {
     let source = "
-        fn main() {
-            let x = \"Hello World!\";
-            prints_ref(x);
-            prints_val(x);
+        struct Test {
+            first: u8,
+            second: u16,
+            third: u32,
+            fourth: u64,
         }
-    ";
-    let source = "
         fn main() {
-            let x = [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ];
-            printi16(x[0][0]);
-        }
-    ";
-    let source = "
-        fn main() {
-            let x = [ [ [ 6 ] ] ];
-            let y = x[0];
-            let z = y[0];
-            let u = z[0];
-            printi8(u);
+            let x: Test = Test { first: 1, second: 2, third: 3, fourth: 4 };
+            printu8(x.second);
+            printu16(x.second);
+            printu32(x.third);
+            printu64(x.fourth);
         }
     ";
     println!("{}", source);

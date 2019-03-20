@@ -212,6 +212,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
             E::Variable(variable)       => self.resolve_variable(variable),
             E::Call(call)               => self.resolve_call(call),
+            E::Member(_)                => { /* nothing to do here */ },
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
             E::BinaryOp(binary_op)      => { // fixme: disabled for now
                 //if binary_op.left.is_literal() && binary_op.right.is_literal() {
@@ -566,19 +567,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.set_bindingtype_id(&mut item.left, common_type_id);
                     self.set_bindingtype_id(&mut item.right, common_type_id);
                 }
-            },
+            }
             O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
                     self.set_bindingtype_id(item, common_type_id);
                     self.set_bindingtype_id(&mut item.left, common_type_id);
                     self.set_bindingtype_id(&mut item.right, common_type_id);
                 }
-            },
-            O::Range => {
-                unimplemented!("range");
-            },
+            }
             O::Index => {
-
                 // left[right] : item
                 self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2].type_id); // u32
                 self.try_create_anon_binding(item);
@@ -596,9 +593,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.set_bindingtype_id(item, element_type_id);
                 }
             }
+            O::Access => {
+                // left.right : item
+                if let Some(ty) = self.bindingtype(&item.left) {
+                    let struct_ = ty.as_struct().expect("Member access on a non-struct");
+                    let field = item.right.as_member_mut().expect("Internal error: Member access using a non-field");
+                    if field.index.is_none() {
+                        field.index = Some(struct_.fields.iter().position(|f| f.0 == field.name).expect("Unknown struct member") as u32);
+                    }
+                    if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
+                        self.set_bindingtype_id(&mut item.right, type_id);
+                    }
+                }
+            }
+            O::Range => {
+                unimplemented!("range");
+            }
             O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
                 unimplemented!("assignments");
-            },
+            }
         }
     }
 

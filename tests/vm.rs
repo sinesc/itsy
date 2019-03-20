@@ -236,6 +236,52 @@ fn array_inference2() {
 }
 
 #[test]
+fn struct_access() {
+    let result = run("
+        struct Test {
+            ia: i8,
+            ib: i16,
+            ic: i32,
+            id: i64,
+            ua: u8,
+            ub: u16,
+            uc: u32,
+            ud: u64,
+            fa: f32,
+            fb: f64,
+        }
+        fn main() {
+            let x: Test = Test {
+                ia: -1, ib: 2, ic: -3, id: 4,
+                ua: 1, ub: 2, uc: 3, ud: 4,
+                fa: 0.01, fb: 0.001
+            };
+            ret_i8(x.ia);
+            ret_i16(x.ib);
+            ret_i32(x.ic);
+            ret_i64(x.id);
+            ret_u8(x.ua);
+            ret_u16(x.ub);
+            ret_u32(x.uc);
+            ret_u64(x.ud);
+            ret_f32(x.fa);
+            ret_f64(x.fb);
+        }
+    ");
+    assert(&result[0], -1i8);
+    assert(&result[1], 2i16);
+    assert(&result[2], -3i32);
+    assert(&result[3], 4i64);
+    assert(&result[4], 1u8);
+    assert(&result[5], 2u16);
+    assert(&result[6], 3u32);
+    assert(&result[7], 4u64);
+    assert(&result[8], 0.01f32);
+    assert(&result[9], 0.001f64);
+}
+
+
+#[test]
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";

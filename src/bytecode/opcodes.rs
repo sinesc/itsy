@@ -108,23 +108,52 @@ impl_vm!{
         self.stack.store_fp(offset, local);
     }
 
-    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
     fn index(self: &mut Self, element_size: u8) {
         self.index_32(element_size as u32);
     }
-    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
     fn index_16(self: &mut Self, element_size: u16) {
         self.index_32(element_size as u32);
     }
-    /// Pop an element index and heap offset and push the resulting heap offset onto the stack.
+    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
     fn index_32(self: &mut Self, element_size: u32) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         self.stack.push(current_heap_offset + (element_index as u32 * element_size));
     }
 
-    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
-    fn hgetr8(self: &mut Self) {
+    /// Pop a heap object and push the heap value at its current index onto the stack.
+    fn haccessr8(self: &mut Self, offset: u32) {
+        let heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let data = self.heap.read8(heap_index, heap_offset + offset);
+        self.stack.push(data);
+    }
+    /// Pop a heap object and push the heap value at its current index onto the stack.
+    fn haccessr16(self: &mut Self, offset: u32) {
+        let heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let data = self.heap.read16(heap_index, heap_offset + offset);
+        self.stack.push(data);
+    }
+    /// Pop a heap object and push the heap value at its current index onto the stack.
+    fn haccessr32(self: &mut Self, offset: u32) {
+        let heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let data = self.heap.read32(heap_index, heap_offset + offset);
+        self.stack.push(data);
+    }
+    /// Pop a heap object and push the heap value at its current index onto the stack.
+    fn haccessr64(self: &mut Self, offset: u32) {
+        let heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let data = self.heap.read64(heap_index, heap_offset + offset);
+        self.stack.push(data);
+    }
+
+    /// Pop an element index and heap object and push the heap value at element index onto the stack.
+    fn hindexr8(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -132,8 +161,8 @@ impl_vm!{
         let data = self.heap.read8(heap_index, heap_offset);
         self.stack.push(data);
     }
-    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
-    fn hgetr16(self: &mut Self) {
+    /// Pop an element index and heap object and push the heap value at element index * 2 onto the stack.
+    fn hindexr16(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -141,8 +170,8 @@ impl_vm!{
         let data = self.heap.read16(heap_index, heap_offset);
         self.stack.push(data);
     }
-    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
-    fn hgetr32(self: &mut Self) {
+    /// Pop an element index and heap object and push the heap value at element index * 4 onto the stack.
+    fn hindexr32(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -150,8 +179,8 @@ impl_vm!{
         let data = self.heap.read32(heap_index, heap_offset);
         self.stack.push(data);
     }
-    /// Pop an element index and heap object and push the retrieved heap value onto the stack.
-    fn hgetr64(self: &mut Self) {
+    /// Pop an element index and heap object and push the heap value at element index * 8 onto the stack.
+    fn hindexr64(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
