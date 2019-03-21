@@ -602,6 +602,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         field.index = Some(struct_.fields.iter().position(|f| f.0 == field.name).expect("Unknown struct member") as u32);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
+                        self.set_bindingtype_id(item, type_id);
                         self.set_bindingtype_id(&mut item.right, type_id);
                     }
                 }
@@ -728,15 +729,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
         // resolve type from name
 
         let type_name = item.type_name.as_mut().unwrap();
-        self.resolve_type(type_name);
+        let type_id = self.resolve_type(type_name);
 
         // resolve fields from field definition
 
-        if let Some(type_id) = type_name.type_id {
+        if let Some(type_id) = type_id {
+            self.set_bindingtype_id(item, type_id);
             let struct_def = self.scopes.type_ref(type_id).as_struct().unwrap().clone(); // todo: this sucks
             let struct_ = item.value.as_struct_mut().unwrap();
             for (name, field) in &mut struct_.fields {
-                self.try_create_anon_binding(field);
                 self.resolve_literal(field, struct_def.type_id(name));
             }
         }

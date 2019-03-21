@@ -280,6 +280,43 @@ fn struct_access() {
     assert(&result[9], 0.001f64);
 }
 
+#[test]
+fn struct_nesting() {
+    let result = run("
+        struct MoreInner {
+            one: i8,
+            two: i16,
+            three: i32,
+        }
+        struct Inner {
+            a: f32,
+            b: i64,
+            c: MoreInner,
+        }
+        struct Outer {
+            first: u8,
+            second: u16,
+            third: Inner,
+        }
+        fn main() {
+            let x: Outer = Outer { first: 3, second: 345, third: Inner { a: 3.1415, b: -23, c: MoreInner { one: -1, two: -378, three: -123 } } };
+            ret_u8(x.first);
+            ret_u16(x.second);
+            ret_f32(x.third.a);
+            ret_i64(x.third.b);
+            ret_i8(x.third.c.one);
+            ret_i16(x.third.c.two);
+            ret_i32(x.third.c.three);
+        }
+    ");
+    assert(&result[0], 3u8);
+    assert(&result[1], 345u16);
+    assert(&result[2], 3.1415f32);
+    assert(&result[3], -23i64);
+    assert(&result[4], -1i8);
+    assert(&result[5], -378i16);
+    assert(&result[6], -123i32);
+}
 
 #[test]
 fn string_literal() {
