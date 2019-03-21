@@ -546,7 +546,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Bool(v) =>  {
                 match lit_type {
-                    Type::bool => self.writer.store_const(if v { 1 } else { 0 }),
+                    Type::bool => self.writer.store_const(if v { 1u8 } else { 0u8 }),
                     _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
                 }
             },

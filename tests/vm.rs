@@ -239,6 +239,8 @@ fn array_inference2() {
 fn struct_access() {
     let result = run("
         struct Test {
+            ba: bool,
+            bb: bool,
             ia: i8,
             ib: i16,
             ic: i32,
@@ -252,6 +254,7 @@ fn struct_access() {
         }
         fn main() {
             let x: Test = Test {
+                ba: true, bb: false,
                 ia: -1, ib: 2, ic: -3, id: 4,
                 ua: 1, ub: 2, uc: 3, ud: 4,
                 fa: 0.01, fb: 0.001
@@ -266,6 +269,8 @@ fn struct_access() {
             ret_u64(x.ud);
             ret_f32(x.fa);
             ret_f64(x.fb);
+            ret_bool(x.ba);
+            ret_bool(x.bb);
         }
     ");
     assert(&result[0], -1i8);
@@ -278,6 +283,8 @@ fn struct_access() {
     assert(&result[7], 4u64);
     assert(&result[8], 0.01f32);
     assert(&result[9], 0.001f64);
+    assert(&result[10], true);
+    assert(&result[11], false);
 }
 
 #[test]
