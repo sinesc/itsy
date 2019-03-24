@@ -226,9 +226,8 @@ impl Scopes {
 impl Into<(Vec<TypeId>, Vec<Type>)> for Scopes {
     /// convert scopes into type vector
     fn into(self: Self) -> (Vec<TypeId>, Vec<Type>) {
-        let x: Vec<Type> = self.types.into();
-        //println!("bindingtypes: {:?}", self.bindings.values().map(|type_id| type_id.map(|type_id| x[Into::<usize>::into(type_id)].clone())).enumerate().collect::<Vec<(usize, Option<Type>)>>());
+        let types: Vec<Type> = self.types.into();
         let type_map = self.bindings.values().map(|type_id| type_id.expect("Unresolved binding type while creating type map")).collect();
-        (type_map, x)
+        (type_map, types)
     }
 }

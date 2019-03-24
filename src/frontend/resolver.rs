@@ -364,11 +364,36 @@ impl<'a, 'b> Resolver<'a, 'b> {
         self.scope_id = parent_scope_id;
     }
 
+    // Resolves an inline type definition.
+    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'a>) -> Option<TypeId> {
+        use ast::InlineType as IT;
+        match item {
+            IT::TypeName(type_name) => self.resolve_type(type_name),
+            IT::Array(array) => self.resolve_array(array),
+        }
+    }
+
+    /// Resolves an array definition
+    fn resolve_array(self: &mut Self, item: &mut ast::Array<'a>) -> Option<TypeId> {
+
+        let inner_type_id = self.resolve_inline_type(&mut item.element_type);
+
+        if item.type_id.is_none() {
+            let ty = Type::Array(Array {
+                len     : Some(item.len),
+                type_id : inner_type_id,
+            });
+            item.type_id = Some(self.scopes.insert_type(self.scope_id, None, ty));
+        }
+
+        item.type_id
+    }
+
     /// Resolves a struct definition.
     fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'a>) {
 
         for (_, field) in &mut item.fields {
-            self.resolve_type(field);
+            self.resolve_inline_type(field);
         }
 
         if item.type_id.is_none() {
@@ -376,7 +401,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             let mut fields = Vec::new();
 
             for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
-                fields.push((field_name.to_string(), field_type.type_id));
+                fields.push((field_name.to_string(), field_type.type_id()));
             }
 
             let ty = Type::Struct(Struct { fields });
@@ -680,11 +705,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
             self.set_bindingtype_id(item, self.primitives.bool);
         } else if let LV::String(_) = item.value {
             self.set_bindingtype_id(item, self.primitives.string);
-        } else if let LV::Array(_/*ref mut array*/) = item.value { // bck fail
-            let binding_id = self.try_create_anon_binding(item);
-            self.resolve_literal_array(item.value.as_array_mut().unwrap(), binding_id);
+        } else if let LV::Array(_) = item.value {
+            self.resolve_array_literal(item, expected_type);
         } else if let LV::Struct(_) = item.value {
-            self.resolve_literal_struct(item);
+            self.resolve_struct_literal(item);
         } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name) {
@@ -722,7 +746,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an struct literal and creates the required field types.
-    fn resolve_literal_struct(self: &mut Self, item: &mut ast::Literal<'a>) {
+    fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal<'a>) {
 
         self.try_create_anon_binding(item);
 
@@ -744,7 +768,16 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an array literal and creates the required array types.
-    fn resolve_literal_array(self: &mut Self, array: &mut ast::ArrayLiteral<'a>, binding_id: BindingId) {
+    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'a>, expected_type: Option<TypeId>) {
+
+        let binding_id = self.try_create_anon_binding(item);
+
+        // apply expected type if known
+        if let Some(expected_type) = expected_type {
+            self.set_bindingtype_id(item, expected_type);
+        }
+
+        let array = item.value.as_array_mut().unwrap();
 
         // apply the same binding id to all elements
         let element_binding_id = self.try_create_anon_binding(array.elements.first_mut().unwrap());
@@ -763,7 +796,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         // create this level's type based on the inner type
         if self.scopes.binding_type_id(binding_id).is_none() {
             let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                len     : Some(array.elements.len()),
+                len     : Some(array.elements.len() as u32),
                 type_id : element_type_id,
             }));
             *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);

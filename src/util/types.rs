@@ -55,12 +55,12 @@ impl Struct {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Array {
-    pub len: Option<usize>,
+    pub len: Option<u32>,
     pub type_id: Option<TypeId>,
 }
-
+/*
 impl Debug for Array {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(len) = self.len {
@@ -70,6 +70,7 @@ impl Debug for Array {
         }
     }
 }
+*/
 /// Information about a primitive type in a resolved program.
 #[allow(non_camel_case_types)]
 #[derive(Clone, PartialEq)]

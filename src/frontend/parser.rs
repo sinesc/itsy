@@ -26,34 +26,6 @@ named!(ident(Input<'_>) -> &str, map!(recognize!(tuple!(take_while1!(|m| is_alph
 
 named!(path(Input<'_>) -> Vec<&'_ str>, map!(ws!(separated_nonempty_list!(tag!("::"), ident)), |m| m.into_iter().collect() ));
 
-// block
-
-named!(block_items(Input<'_>) -> Vec<Statement<'_>>, ws!(many0!(statement)));
-
-named!(block(Input<'_>) -> Block<'_>, map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |mut m| {
-    // move last block item into result if it could be an expression and no result was matched
-    if m.2.is_none() && m.1.last().map_or(false, |l| l.is_expressable()) {
-        m.2 = m.1.pop().map(|s| s.into_expression());
-    }
-    Block {
-        statements  : m.1,
-        result      : m.2,
-        scope_id    : None,
-    }
-}));
-
-// function call
-
-named!(call_argument_list<Input<'_>, Vec<Expression<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
-
-named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
-    name        : m.0,
-    args        : m.1,
-    function_id : None,
-    rust_fn_index: None,
-    binding_id  : None,
-}));
-
 // literal numerical
 
 named!(opt_sign<Input<'_>, Option<Input<'_>>>, opt!(recognize!(one_of!("+-"))));
@@ -119,6 +91,8 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
 }
 
 named!(numerical<Input<'_>, Literal<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), parse_numerical));
+
+named!(static_size<Input<'_>, u32>, map!(recognize!(digit1), |digits| str::parse::<u32>(*digits).unwrap()));
 
 // literal boolean
 
@@ -186,6 +160,52 @@ named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident, assignment_
         left    : Variable { name: m.0, binding_id: None },
         right   : m.2,
     }
+}));
+
+// call
+
+named!(call_argument_list<Input<'_>, Vec<Expression<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
+
+named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
+    name        : m.0,
+    args        : m.1,
+    function_id : None,
+    rust_fn_index: None,
+    binding_id  : None,
+}));
+
+// block
+
+named!(block_items(Input<'_>) -> Vec<Statement<'_>>, ws!(many0!(statement)));
+
+named!(block(Input<'_>) -> Block<'_>, map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |mut m| {
+    // move last block item into result if it could be an expression and no result was matched
+    if m.2.is_none() && m.1.last().map_or(false, |l| l.is_expressable()) {
+        m.2 = m.1.pop().map(|s| s.into_expression());
+    }
+    Block {
+        statements  : m.1,
+        result      : m.2,
+        scope_id    : None,
+    }
+}));
+
+// if
+
+named!(block_or_if<Input<'_>, Block<'_>>, ws!(alt!(
+    map!(if_block, |m| Block {
+        statements  : Vec::new(),
+        result      : Some(Expression::IfBlock(Box::new(m))),
+        scope_id    : None,
+    })
+    | block
+)));
+
+named!(if_block<Input<'_>, IfBlock<'_>>, map!(ws!(tuple!(tag!("if"), expression, block, opt!(preceded!(tag!("else"), block_or_if)))), |m| IfBlock {
+    cond        : m.1,
+    if_block    : m.2,
+    else_block  : m.3,
+    scope_id    : None,
 }));
 
 // expression
@@ -326,13 +346,20 @@ named!(binding<Input<'_>, Statement<'_>>, map!(
     })
 ));
 
-// struct definition
-
-named!(struct_item<Input<'_>, (&str, TypeName<'_>)>, map!(ws!(tuple!(ident, char!(':'), path)),
-    |tuple| (tuple.0, TypeName::unknown(tuple.2))
+// inline type
+// todo: everything using TypeName needs to be switched to this
+named!(inline_type<Input<'_>, InlineType<'_>>, alt!(
+    map!(path, |t| InlineType::TypeName(TypeName::unknown(t)))
+    | map!(array, |a| InlineType::Array(Box::new(a)))
 ));
 
-named!(struct_fields<Input<'_>, Vec<(&str, TypeName<'_>)>>, map!(ws!(separated_list_complete!(char!(','), struct_item)), |list| {
+// struct definition
+
+named!(struct_field<Input<'_>, (&str, InlineType<'_>)>, map!(ws!(tuple!(ident, char!(':'), inline_type)),
+    |tuple| (tuple.0, tuple.2)
+));
+
+named!(struct_fields<Input<'_>, Vec<(&str, InlineType<'_>)>>, map!(ws!(separated_list_complete!(char!(','), struct_field)), |list| {
     list.into_iter().map(|item| (item.0, item.1)).collect()
 }));
 
@@ -341,6 +368,14 @@ named!(struct_<Input<'_>, Statement<'_>>, map!(ws!(tuple!(tag!("struct"), ident,
     fields  : tuple.3,
     type_id : None,
 })));
+
+// array definition
+
+named!(array<Input<'_>, Array<'_>>, map!(ws!(delimited!(char!('['), tuple!(inline_type, char!(';'), static_size), char!(']'))), |tuple| Array {
+    element_type: tuple.0,
+    len         : tuple.2,
+    type_id     : None,
+}));
 
 // function
 
@@ -372,24 +407,6 @@ named!(function<Input<'_>, Statement<'_>>, map!(ws!(tuple!(signature, block)), |
     function_id : None,
     scope_id    : None,
 })));
-
-// if
-
-named!(block_or_if<Input<'_>, Block<'_>>, ws!(alt!(
-    map!(if_block, |m| Block {
-        statements  : Vec::new(),
-        result      : Some(Expression::IfBlock(Box::new(m))),
-        scope_id    : None,
-    })
-    | block
-)));
-
-named!(if_block<Input<'_>, IfBlock<'_>>, map!(ws!(tuple!(tag!("if"), expression, block, opt!(preceded!(tag!("else"), block_or_if)))), |m| IfBlock {
-    cond        : m.1,
-    if_block    : m.2,
-    else_block  : m.3,
-    scope_id    : None,
-}));
 
 // for
 

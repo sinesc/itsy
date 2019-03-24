@@ -326,6 +326,40 @@ fn struct_nesting() {
 }
 
 #[test]
+fn struct_array() {
+    let result = run("
+        struct Inner {
+            ia: u8,
+            ib: [ u64; 3 ],
+        }
+        struct Outer {
+            oa: i16,
+            ob: Inner,
+        }
+        fn main() {
+            let x: Outer = Outer {
+                oa: -369,
+                ob: Inner {
+                    ia: 8,
+                    ib: [ 3, 333, 333333 ],
+                }
+            };
+            ret_i16(x.oa);
+            ret_u8(x.ob.ia);
+            ret_u64(x.ob.ib[0]);
+            ret_u64(x.ob.ib[1]);
+            ret_u64(x.ob.ib[2]);
+
+        }
+    ");
+    assert(&result[0], -369i16);
+    assert(&result[1], 8u8);
+    assert(&result[2], 3u64);
+    assert(&result[3], 333u64);
+    assert(&result[4], 333333u64);
+}
+
+#[test]
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";

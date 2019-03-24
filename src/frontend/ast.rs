@@ -138,9 +138,31 @@ impl<'a> TypeName<'a> {
 }
 
 #[derive(Debug)]
+pub enum InlineType<'a> {
+    TypeName(TypeName<'a>),
+    Array(Box<Array<'a>>),
+}
+
+impl<'a> InlineType<'a> {
+    pub fn type_id(self: &Self) -> Option<TypeId> {
+        match self {
+            InlineType::TypeName(type_name) => type_name.type_id,
+            InlineType::Array(array) => array.type_id,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Array<'a> {
+    pub element_type: InlineType<'a>,
+    pub len         : u32,
+    pub type_id     : Option<TypeId>,
+}
+
+#[derive(Debug)]
 pub struct Struct<'a> {
     pub name    : &'a str,
-    pub fields  : Vec<(&'a str, TypeName<'a>)>,
+    pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub type_id : Option<TypeId>,
 }
 

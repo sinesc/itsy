@@ -54,18 +54,17 @@ extern_rust!(MyFns, u32, {
 #[allow(unused_variables)]
 fn main() {
     let source = "
-        struct Test {
-            first: u8,
-            second: u16,
-            third: u32,
-            fourth: u64,
+        struct Inner {
+            ia: u8,
+            ib: [ u8; 3 ],
+        }
+        struct Outer {
+            oa: u8,
+            ob: Inner,
         }
         fn main() {
-            let x: Test = Test { first: 1, second: 2, third: 3, fourth: 4 };
-            printu8(x.second);
-            printu16(x.second);
-            printu32(x.third);
-            printu64(x.fourth);
+            let x: Outer = Outer { oa: 1, ob: Inner { ia: 8, ib: [ 1, 2, 3 ] } };
+            printu8(x.ob.ib[1]);
         }
     ";
     println!("{}", source);
