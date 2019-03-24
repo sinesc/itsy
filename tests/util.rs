@@ -1,11 +1,14 @@
-pub use itsy::*;
+pub use itsy::{vm, frontend::parse};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
 pub type ContextElement = Box<Any>;
 pub type Context = Vec<ContextElement>;
 
+use itsy::extern_rust;
+
 /// Compare a ContextElement with given value.
+#[allow(dead_code)]
 pub fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+'static {
     if let Some(result) = result.downcast_ref::<T>() {
         assert!(result == &expected, "Result <{:?}> did not match expected <{:?}>", result, &expected);
@@ -15,6 +18,7 @@ pub fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+
 }
 
 /// Compare Context with given values.
+#[allow(dead_code)]
 pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+'static {
     for index in 0..expected.len() {
         if let Some(result) = result[index].downcast_ref::<T>() {
@@ -70,6 +74,7 @@ extern_rust!(TestFns, Context, {
 });
 
 /// Run a bit of itsy code and return the vm's custom field (populated by the code).
+#[allow(dead_code)]
 pub fn run(code: &str) -> Context {
     let mut vm = if code.find("fn main()").is_some() {
         vm::<TestFns, Context>(code)

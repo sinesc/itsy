@@ -18,6 +18,39 @@ pub enum ParseError {
     // TODO: figure out nom error handling
 }
 
+// comment whitespace handling
+
+#[inline]
+pub fn is_whitespace(chr: char) -> bool {
+    chr == ' ' || chr == '\t' || chr == '\r' || chr == '\n'
+}
+
+#[inline]
+pub fn not_eol(chr: char) -> bool {
+    chr != '\r' && chr != '\n'
+}
+
+named!(space(Input<'_>) -> Input<'_>, recognize!(many1!(alt!(
+    preceded!(tag!("//"), take_while!(not_eol))
+    | preceded!(tag!("/*"), take_until_and_consume!("*/"))
+    | take_while!(is_whitespace)
+))));
+
+macro_rules! ws (
+    ($i:expr, $($args:tt)*) => ({
+        use nom::{Convert, Err};
+        match sep!($i, space, $($args)*) {
+            Err(e) => Err(e),
+            Ok((i1,o)) => {
+                match space(i1) {
+                    Err(e) => Err(Err::convert(e)),
+                    Ok((i2,_)) => Ok((i2, o))
+                }
+            }
+        }
+    })
+);
+
 // identifier [a-z_][a-z0-9_]*
 
 named!(ident(Input<'_>) -> &str, map!(recognize!(tuple!(take_while1!(|m| is_alphabetic(m as u8) || m == '_'), take_while!(|m| is_alphanumeric(m as u8) || m == '_'))), |s| *s));
