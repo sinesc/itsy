@@ -2,20 +2,55 @@
 
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
-use nom::verbose_errors::Context;
 use nom::*;
 use std::collections::HashMap;
 use crate::util::Numeric;
 use crate::frontend::ast::*;
 
-/// Represents the various possible parser errors.
+/// Represents the various possible parser error-kinds.
 #[repr(u32)]
-pub enum ParseError {
-    SyntaxError = 1,
-    SyntaxLet = 2,
-    SyntaxFn = 3,
-    InvalidNumerical = 4,
-    // TODO: figure out nom error handling
+#[derive(Copy, Clone, Debug)]
+pub enum ParseErrorKind {
+    UnexpectedEOF = 1,
+    SyntaxError = 2,
+    SyntaxLet = 3,
+    SyntaxFn = 4,
+    InvalidNumerical = 5,
+    // TODO: add error handling to all parsers where it make sense
+}
+
+/// A parser error including information about the kind of error and position.
+#[derive(Copy, Clone, Debug)]
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub line: u32,
+    pub column: u32,
+    pub position: u32,
+}
+
+impl ParseError {
+    pub fn new(kind: ParseErrorKind, position: usize, input: &str) -> ParseError {
+        let (line, column) = Self::compute(input, position);
+        Self { kind, line, column, position: position as u32 }
+    }
+    fn compute(input: &str, position: usize) -> (u32, u32) {
+        let mut parsed = &input[0..position];
+        let mut line = 1;
+        while { // can't use let parsed.lines() here as a line-break at the end is ignored
+            let mut break_char = '\0';
+            if let Some(nl) = parsed.find(|c| if c == '\n' || c == '\r' { break_char = c; true } else { false }) {
+                parsed = &parsed[nl+1..];
+                if break_char == '\r' && parsed.starts_with('\n') { // skip \n after \r on windows
+                    parsed = &parsed[1..];
+                }
+                line += 1;
+                true
+            } else {
+                false
+            }
+        } {}
+        (line as u32, parsed.len() as u32 + 1)
+    }
 }
 
 // comment whitespace handling
@@ -120,7 +155,7 @@ fn parse_numerical(n: Input<'_>) -> IResult<Input<'_>, Literal<'_>> {
         }
     }
 
-    Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseError::InvalidNumerical as u32))))
+    Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as u32))))
 }
 
 named!(numerical<Input<'_>, Literal<'_>>, flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), parse_numerical));
@@ -366,8 +401,8 @@ named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
 // let
 
 named!(binding<Input<'_>, Statement<'_>>, map!(
-    preceded!(ws!(tag!("let")), return_error!(
-        ErrorKind::Custom(ParseError::SyntaxLet as u32),
+    preceded!(tag!("let"), return_error!(
+        ErrorKind::Custom(ParseErrorKind::SyntaxLet as u32),
         ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), path)), opt!(preceded!(char!('='), expression)), char!(';')))
     )),
     |m| Statement::Binding(Binding {
@@ -425,8 +460,8 @@ named!(signature_argument_list<Input<'_>, Vec<Binding<'_>>>, ws!(delimited!(char
 named!(signature_return_part<Input<'_>, Vec<&'_ str>>, ws!(preceded!(tag!("->"), path)));
 
 named!(signature<Input<'_>, Signature<'_>>, map!(
-    preceded!(ws!(tag!("fn")), return_error!(
-        ErrorKind::Custom(ParseError::SyntaxFn as u32),
+    preceded!(tag!("fn"), return_error!(
+        ErrorKind::Custom(ParseErrorKind::SyntaxFn as u32),
         ws!(tuple!(ident, signature_argument_list, opt!(signature_return_part)))
     )), |sig| Signature {
     name    : sig.0,
@@ -495,34 +530,44 @@ named!(statement<Input<'_>, Statement<'_>>, alt!(
 
 // root
 
-named!(root(Input<'_>) -> Vec<Statement<'_>>, return_error!(
-    ErrorKind::Custom(ParseError::SyntaxError as u32),
-    ws!(many0!(statement))
-));
+named!(root(Input<'_>) -> Vec<Statement<'_>>, ws!(many0!(statement)));
 
 /// Parsed program AST.
 #[derive(Debug)]
 pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(input: &str) -> Result<ParsedProgram<'_>, u32> {
+pub fn parse(input: &str) -> Result<ParsedProgram<'_>, ParseError> {
+    use std::mem::transmute;
     // todo: error handling!
     let result = root(Input(input));
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
                 println!("result: {:#?}", result);
-                Err(4) // todo: not sure what this case it. just getting the entire input back, no error
+                Err(ParseError { kind: ParseErrorKind::UnexpectedEOF, line: 0, column: 0, position: 0 }) // todo: not sure what this case it. just getting the entire input back, no error
             } else {
                 Ok(ParsedProgram(result.1))
             }
         },
         Err(error) => {
-            println!("error: {:#?}", error);
             Err(match error {
-                Error::Incomplete(_) => 1,
-                Error::Error(_) => 2,
-                Error::Failure(_) => 3,
+                Error::Incomplete(e) => panic!("Incomplete({:?})", e),
+                Error::Error(e) => panic!("Error({:?})", e),
+                Error::Failure(failure) => {
+                    #[allow(unreachable_patterns)]
+                    match failure {
+                        Context::Code(remainder, error_kind) => {
+                            match error_kind {
+                                ErrorKind::Custom(custom) => {
+                                    ParseError::new(unsafe { transmute(custom) }, input.len() - remainder.len(), input)
+                                }
+                                _ => panic!("Unexpected parser error: {:?}", error_kind)
+                            }
+                        }
+                        _ => panic!("Incompatible Nom configuration. Another library uses Nom with verbose errors.")
+                    }
+                }
             })
         }
     }
