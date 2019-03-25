@@ -11,11 +11,14 @@ use crate::frontend::ast::*;
 #[repr(u32)]
 #[derive(Copy, Clone, Debug)]
 pub enum ParseErrorKind {
-    UnexpectedEOF = 1,
-    SyntaxError = 2,
-    SyntaxLet = 3,
-    SyntaxFn = 4,
-    InvalidNumerical = 5,
+    Unknown = 1,
+    UnexpectedEOF = 2,
+    SyntaxError = 3,
+    SyntaxLet = 4,
+    SyntaxFn = 5,
+    SyntaxIf = 6,
+    SyntaxElse = 7,
+    InvalidNumerical = 8,
     // TODO: add error handling to all parsers where it make sense
 }
 
@@ -269,12 +272,21 @@ named!(block_or_if<Input<'_>, Block<'_>>, ws!(alt!(
     | block
 )));
 
-named!(if_block<Input<'_>, IfBlock<'_>>, map!(ws!(tuple!(tag!("if"), expression, block, opt!(preceded!(tag!("else"), block_or_if)))), |m| IfBlock {
-    cond        : m.1,
-    if_block    : m.2,
-    else_block  : m.3,
-    scope_id    : None,
-}));
+named!(if_else<Input<'_>, Block<'_>>, preceded!(tag!("else"), return_error!(
+    ErrorKind::Custom(ParseErrorKind::SyntaxElse as u32),
+    block_or_if
+)));
+
+named!(if_block<Input<'_>, IfBlock<'_>>, preceded!(tag!("if"), map!(return_error!(
+        ErrorKind::Custom(ParseErrorKind::SyntaxIf as u32),
+        tuple!(expression, block, opt!(if_else))
+    ), |m| IfBlock {
+        cond        : m.0,
+        if_block    : m.1,
+        else_block  : m.2,
+        scope_id    : None,
+    }
+)));
 
 // expression
 
@@ -536,36 +548,46 @@ named!(root(Input<'_>) -> Vec<Statement<'_>>, ws!(many0!(statement)));
 #[derive(Debug)]
 pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
+/// Attempt to return the innermost custom error, otherwise the innermost error.
+fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseError {
+    use std::mem::transmute;
+
+    let err = list.iter().find(|(_, error_kind)| match error_kind {
+        ErrorKind::Custom(_) => true,
+        _ => false,
+    }).or(list.last());
+
+    let (remainder, error_kind) = err.unwrap();
+    match error_kind {
+        ErrorKind::Custom(custom) => {
+            ParseError::new(unsafe { transmute(*custom) }, input.len() - remainder.len(), input)
+        }
+        _ => {
+            ParseError::new(ParseErrorKind::Unknown, input.len() - remainder.len(), input)
+        }
+    }
+}
+
 /// Parses an Itsy source file into a program AST structure.
 pub fn parse(input: &str) -> Result<ParsedProgram<'_>, ParseError> {
-    use std::mem::transmute;
-    // todo: error handling!
     let result = root(Input(input));
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
-                println!("result: {:#?}", result);
-                Err(ParseError { kind: ParseErrorKind::UnexpectedEOF, line: 0, column: 0, position: 0 }) // todo: not sure what this case it. just getting the entire input back, no error
+                Err(ParseError::new(ParseErrorKind::UnexpectedEOF, input.len(), input))
             } else {
                 Ok(ParsedProgram(result.1))
             }
         },
         Err(error) => {
             Err(match error {
-                Error::Incomplete(e) => panic!("Incomplete({:?})", e),
-                Error::Error(e) => panic!("Error({:?})", e),
+                Error::Incomplete(incomplete) => panic!("Unexpected Nom Incomplete({:?})", incomplete),
+                Error::Error(error) => panic!("Unexpected Nom Error({:?})", error),
                 Error::Failure(failure) => {
                     #[allow(unreachable_patterns)]
                     match failure {
-                        Context::Code(remainder, error_kind) => {
-                            match error_kind {
-                                ErrorKind::Custom(custom) => {
-                                    ParseError::new(unsafe { transmute(custom) }, input.len() - remainder.len(), input)
-                                }
-                                _ => panic!("Unexpected parser error: {:?}", error_kind)
-                            }
-                        }
-                        _ => panic!("Incompatible Nom configuration. Another library uses Nom with verbose errors.")
+                        Context::List(list) => innermost_custom(input, &list[..]),
+                        _ => panic!("Incompatible Nom configuration. Verbose errors need to be enabled")
                     }
                 }
             })

@@ -232,10 +232,10 @@ pub trait VMData<T, U> where T: VMFunc<T> {
 /// game state first run: MyGameState { lives: 2 }
 /// game state second run: MyGameState { lives: 1 }
 /// ```
-pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U> {
+pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U> { // todo: Result
     use crate::{frontend::{parse, resolve}, bytecode::{compile, VM}};
-    let parsed = parse(program).unwrap();
-    let resolved = resolve::<T>(parsed, "main");
-    let program = compile(resolved);
+    let parsed = parse(program).unwrap(); // todo: forward error
+    let resolved = resolve::<T>(parsed, "main"); // todo: resolve needs error handling. then forward error
+    let program = compile(resolved); // todo: compiler needs error handling. then forward error
     VM::new(program)
 }

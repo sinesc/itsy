@@ -11,7 +11,7 @@ readme = "README.md"
 keywords = [ "language", "scripting" ]
 
 [dependencies]
-nom = { version = "4.2" }
+nom = { version = "4.2", features = [ "verbose-errors" ] }
 byteorder = "1.2.6"
 
 [lib]
