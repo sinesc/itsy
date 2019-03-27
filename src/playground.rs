@@ -1,4 +1,4 @@
-use itsy::extern_rust;
+use itsy::*;
 
 extern_rust!(MyFns, u32, {
     fn printi8(&mut context, value: i8) {
@@ -68,7 +68,8 @@ fn main() {
         }
     ";
     println!("{}", source);
-    let mut vm = itsy::vm::<MyFns, u32>(source);
+    println!("{:#?}", parse(source));
+    let mut vm = vm::<MyFns, u32>(source);
     println!("{:}", vm.dump_program());
     let vm_start = std::time::Instant::now();
     let mut result = 0;

@@ -1,6 +1,8 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use crate::{util::{array2, array4, array8}, bytecode::{Value, Value64, StackOp, StackOpFp, HeapOp}};
+#[macro_use]
+mod helper;
+use crate::{util::{array2, array4, array8}, runtime::{Value, Value64, StackOp, StackOpFp, HeapOp}};
 
 impl_vm!{
 
@@ -686,10 +688,10 @@ impl_vm!{
 
     /// Yield program execution.
     fn yld(self: &mut Self) {
-        self.state = crate::bytecode::VMState::Yield;
+        self.state = crate::runtime::VMState::Yield;
     }
     /// Terminate program execution.
     fn exit(self: &mut Self) {
-        self.state = crate::bytecode::VMState::Terminate;
+        self.state = crate::runtime::VMState::Terminate;
     }
 }

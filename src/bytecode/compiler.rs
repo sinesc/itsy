@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
-use crate::VMFunc;
+use crate::runtime::VMFunc;
 
 /// Maps bindings and arguments to indices relative to the stackframe.
 struct Locals {

@@ -2,9 +2,9 @@
 
 use std::{io::{self, Write, Seek, SeekFrom}, mem::transmute};
 use crate::bytecode::Program;
-use crate::VMFunc;
+use crate::runtime::VMFunc;
 
-/// Bytecode buffer and writer. Extended from opcodes.rs with the individual opcodes that can be written.
+/// Bytecode buffer and writer.
 #[derive(Debug)]
 pub struct Writer<T> where T: VMFunc<T> {
     pub(crate) program: Program<T>,

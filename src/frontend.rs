@@ -1,4 +1,4 @@
-//! Compiler frontend. Generates a type-checked and resolved AST.
+//! Type resolution and AST generation.
 
 pub mod ast;
 

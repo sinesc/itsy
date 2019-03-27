@@ -4,37 +4,68 @@
 //! Look at the [`vm` Examples](fn.vm.html#examples) to get started.
 
 pub mod frontend;
+pub mod runtime;
 #[macro_use]
 pub mod bytecode;
-pub(crate)mod util;
+mod util;
 
-use std::fmt::Debug;
-use std::collections::HashMap;
+pub use {frontend::{parse, resolve}, bytecode::compile};
 
-/// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
+/// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
+/// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
 /// The VM is generic over `VMFunc` and `VMData`. Parser and Resolver are generic over `VMFunc`.
 ///
 /// `extern_rust!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
 /// # Examples
 ///
-/// The following code makes the two Rust functions `print(i32)` and `hello_world()` available to Itsy code compiled with `vm::<MyFns>(...)`.
-/// The resulting type will be `pub` within the module.
+/// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
 ///
 /// ```
-/// # #[macro_use] extern crate itsy; fn main() {
-/// extern_rust!(pub MyFns, (), {
-///     /// prints given i32 value
-///     fn print(&mut context, value: i32) {
-///         println!("print:{}", value);
+/// use itsy::*;
+///
+/// struct MyGameState {
+///     lives: i32,
+///     // ...
+/// }
+///
+/// extern_rust!(MyFns, MyGameState, {
+///     // Retrieve some game state.
+///     fn get_lives(&mut context) -> i32 {
+///         context.lives
 ///     }
-///     /// prints hello world!
-///     fn hello_world(&mut context) {
-///         println!("hello world!");
+///     // Set some game state.
+///     fn set_lives(&mut context, value: i32) {
+///         context.lives = value;
 ///     }
 /// });
-/// # }
+///
+/// fn main() {
+///     // Create a VM for the given context and set of rust functions
+///     // and compile the given source code.
+///     let mut vm = vm::<MyFns, MyGameState>("
+///         fn main() {
+///             let lives = get_lives();
+///             set_lives(lives - 1);
+///         }
+///     ");
+///
+///     // Create some application state and run the VM a few times on it.
+///     let mut state = MyGameState { lives: 3 };
+///     println!("lives started with: {:?}", state.lives);
+///     vm.run(&mut state);
+///     println!("lives after first run: {:?}", state.lives);
+///     vm.run(&mut state);
+///     println!("lives after second run: {:?}", state.lives);
+/// }
+/// ```
+///
+/// Output:
+/// ```text
+/// lives started with: 3
+/// lives after first run: 2
+/// lives after second run: 1
 /// ```
 #[macro_export]
 macro_rules! extern_rust {
@@ -93,7 +124,7 @@ macro_rules! extern_rust {
         $vm.heap.clone(heap_index)
     } };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
-        impl $crate::VMFunc<$type_name> for $type_name {
+        impl $crate::runtime::VMFunc<$type_name> for $type_name {
             fn to_u16(self: Self) -> u16 {
                 unsafe { ::std::mem::transmute(self) }
             }
@@ -109,11 +140,11 @@ macro_rules! extern_rust {
                 map
             }
         }
-        impl $crate::VMData<$type_name, $context_type> for $type_name {
+        impl $crate::runtime::VMData<$type_name, $context_type> for $type_name {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
-            fn exec(self: Self, vm: &mut $crate::bytecode::VM<$type_name, $context_type>, context: &mut $context_type) {
-                use $crate::bytecode::{StackOp, HeapOp};
+            fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
+                use $crate::runtime::{StackOp, HeapOp};
                 match self {
                     $(
                         $type_name::$name => {
@@ -149,91 +180,38 @@ macro_rules! extern_rust {
     };
 }
 
-/// A default implementation of VMFunc that maps no functions.
-#[allow(non_camel_case_types)]
-#[repr(u16)]
-#[derive(Copy, Clone, Debug)]
-pub enum Standalone {
-    #[doc(hidden)]
-    _dummy
-}
-extern_rust!(@trait Standalone, ());
-
-/// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
-/// Use the `extern_rust!` macro to generate a type implementing `VMData` and `VMFunc`.
-pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
-    #[doc(hidden)]
-    fn from_u16(index: u16) -> Self;
-    #[doc(hidden)]
-    fn to_u16(self: Self) -> u16;
-    #[doc(hidden)]
-    fn call_info() -> HashMap<&'static str, (u16, &'static str, Vec<&'static str>)>;
-}
-
-/// An internal trait used to make VM generic over a user-defined data context.
-/// Use the `extern_rust!` macro to generate a type implementing `VMData` and `VMFunc`.
-pub trait VMData<T, U> where T: VMFunc<T> {
-    #[doc(hidden)]
-    fn exec(self: Self, vm: &mut bytecode::VM<T, U>, context: &mut U);
-}
-
-/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a VM for it.
-/// Program execution starts from the "main" function.
+/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a `VM` for it.
+/// Program execution starts from the `main` function.
 ///
 /// Call `run` on the returned `VM` struct to execute the program.
 ///
 /// # Examples
 ///
-/// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
+/// The following code calls the Rust function `print` from Itsy code. It uses an empty tuple as context.
+/// For an example on how to share more useful data with Itsy code, have a look at the [`extern_rust!`](macro.extern_rust.html) documentation.
 ///
 /// ```
 /// use itsy::*;
 ///
-/// #[derive(Debug)]
-/// struct MyGameState {
-///     lives: i32,
-///     // ...
-/// }
-///
-/// extern_rust!(MyFns, MyGameState, {
-///     // Retrieve some game state.
-///     fn get_lives(&mut context) -> i32 {
-///         context.lives
-///     }
-///     // Set some game state.
-///     fn set_lives(&mut context, value: i32) {
-///         context.lives = value;
+/// extern_rust!(MyFns, (), {
+///     /// prints given string
+///     fn print(&mut context, value: &str) {
+///         println!("print:{}", value);
 ///     }
 /// });
 ///
 /// fn main() {
-///     // Create a VM for the given context and set of rust functions
-///     // and compile the given source code.
-///     let mut vm = vm::<MyFns, MyGameState>("
+///     let mut vm = vm::<MyFns, ()>("
 ///         fn main() {
-///             let lives = get_lives();
-///             set_lives(lives - 1);
+///             print(\"Hello from Itsy!\");
 ///         }
 ///     ");
 ///
-///     // Create some application state and run the VM a few times on it.
-///     let mut state = MyGameState { lives: 3 };
-///     println!("game state before: {:?}", state);
-///     vm.run(&mut state);
-///     println!("game state first run: {:?}", state);
-///     vm.run(&mut state);
-///     println!("game state second run: {:?}", state);
+///     vm.run(&mut ());
 /// }
 /// ```
-///
-/// Output:
-/// ```text
-/// game state before: MyGameState { lives: 3 }
-/// game state first run: MyGameState { lives: 2 }
-/// game state second run: MyGameState { lives: 1 }
-/// ```
-pub fn vm<T, U>(program: &str) -> bytecode::VM<T, U> where T: VMFunc<T>+VMData<T, U> { // todo: Result
-    use crate::{frontend::{parse, resolve}, bytecode::{compile, VM}};
+pub fn vm<T, U>(program: &str) -> runtime::VM<T, U> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> { // todo: Result
+    use crate::{frontend::{parse, resolve}, bytecode::compile, runtime::VM};
     let parsed = parse(program).unwrap(); // todo: forward error
     let resolved = resolve::<T>(parsed, "main"); // todo: resolve needs error handling. then forward error
     let program = compile(resolved); // todo: compiler needs error handling. then forward error

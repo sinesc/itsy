@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 use std::mem::transmute;
-use crate::bytecode::Value;
+use crate::runtime::Value;
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]

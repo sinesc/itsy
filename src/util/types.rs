@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::{util::TypeId, bytecode::Value};
+use crate::{util::TypeId, runtime::Value};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
