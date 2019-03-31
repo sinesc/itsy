@@ -297,12 +297,12 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a while loop.
     fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
-        let start_target = self.writer.position;
+        let start_target = self.writer.position();
         self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.block);
         self.writer.jmp(start_target);
-        let exit_target = self.writer.position;
+        let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
     }
 

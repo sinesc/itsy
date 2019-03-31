@@ -81,7 +81,7 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
-                pub fn $name(self: &mut Self, $($op_name: impl_vm!(map_writer_type $op_type)),* ) -> u32 {
+                pub fn $name(self: &Self, $($op_name: impl_vm!(map_writer_type $op_type)),* ) -> u32 {
                     let insert_pos = self.position();
                     impl_vm!(write u8, ByteCode::$name.into_u8(), self);
                     $( impl_vm!(write $op_type, $op_name, self); )*
