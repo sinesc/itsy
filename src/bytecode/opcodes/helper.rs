@@ -72,7 +72,7 @@ macro_rules! impl_vm {
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         impl<T> crate::bytecode::Writer<T> where T: crate::runtime::VMFunc<T> {
             /// Calls the given Rust function.
-            pub fn rustcall(self: &mut Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
+            pub fn rustcall(self: &Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
                 let insert_pos = self.position();
                 impl_vm!(write u8, ByteCode::rustcall.into_u8(), self);
                 impl_vm!(write RustFn, func, self);

@@ -1,7 +1,6 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug, cell::RefCell};
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
@@ -25,20 +24,20 @@ impl Locals {
 }
 
 /// A stack Locals mappings for nested structures.
-struct LocalsStack(Vec<Locals>);
+struct LocalsStack(RefCell<Vec<Locals>>);
 
 impl LocalsStack {
     fn new() -> Self {
-        LocalsStack(Vec::new())
+        LocalsStack(RefCell::new(Vec::new()))
     }
-    fn push(self: &mut Self, frame: Locals) {
-        self.0.push(frame);
+    fn push(self: &Self, frame: Locals) {
+        self.0.borrow_mut().push(frame);
     }
-    fn pop(self: &mut Self) -> Locals {
-        self.0.pop().expect("Attempted to pop empty LocalsStack")
+    fn pop(self: &Self) -> Locals {
+        self.0.borrow_mut().pop().expect("Attempted to pop empty LocalsStack")
     }
     fn lookup(self: &Self, binding: &BindingId) -> Option<i32> {
-        self.0.last().expect("Attempted to lookup stack item without LocalsStack").map.get(binding).map(|b| *b)
+        self.0.borrow().last().expect("Attempted to lookup stack item without LocalsStack").map.get(binding).map(|b| *b)
     }
 }
 
@@ -52,9 +51,9 @@ pub struct Compiler<T> where T: VMFunc<T> {
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
     // Maps functions to their call index.
-    functions       : HashMap<FunctionId, u32>,
+    functions       : RefCell<HashMap<FunctionId, u32>>,
     /// List of unresolved calls for each function.
-    unresolved      : HashMap<FunctionId, Vec<u32>>,
+    unresolved      : RefCell<HashMap<FunctionId, Vec<u32>>>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -74,8 +73,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             types           : Vec::new(),
             bindingtype_ids : Vec::new(),
             locals          : LocalsStack::new(),
-            functions       : HashMap::new(),
-            unresolved      : HashMap::new(),
+            functions       : RefCell::new(HashMap::new()),
+            unresolved      : RefCell::new(HashMap::new()),
         }
     }
 
@@ -97,7 +96,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
 
         // overwrite placeholder with actual entry position
-        let &entry_fn_pos = self.functions.get(&entry_fn).expect("Failed to locate entry function in generated code.");
+        let &entry_fn_pos = self.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
         self.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos, 0));
     }
 
@@ -111,11 +110,11 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 impl<'a, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
-    fn compile_statement(self: &mut Self, item: &ast::Statement<'a>) {
+    fn compile_statement(self: &Self, item: &ast::Statement<'a>) {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.compile_function(function),
-            S::Structure(_structure)     => { }, // todo: handle
+            S::Structure(_)             => { /* nothing to do here */ },
             S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => self.compile_if_block(if_block),
             S::ForLoop(_for_loop)        => { }, // todo: handle
@@ -127,7 +126,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given expression.
-    fn compile_expression(self: &mut Self, item: &ast::Expression<'a>) {
+    fn compile_expression(self: &Self, item: &ast::Expression<'a>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
@@ -143,20 +142,19 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    fn compile_assignment(self: &mut Self, item: &ast::Assignment<'a>) {
+    fn compile_assignment(self: &Self, item: &ast::Assignment<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id.unwrap();
-        let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
+        let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right);
-                let ty = self.bindingtype(&item.left).clone(); // todo sucks
-                self.write_store(index, &ty);
+                self.write_store(index, self.bindingtype(&item.left));
             },
             compound_assign @ _ => {
                 self.compile_expression(&item.right);
-                let ty = self.bindingtype(&item.left).clone();  // todo sucks
-                self.write_load(index, &ty);
+                let ty = self.bindingtype(&item.left);
+                self.write_load(index, ty);
                 match compound_assign {
                     BO::AddAssign => { self.write_add(&ty); },
                     BO::SubAssign => { self.write_sub(&ty); },
@@ -165,19 +163,19 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => unimplemented!("remassign"),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
-                self.write_store(index, &ty);
+                self.write_store(index, ty);
             },
         };
     }
 
     /// Compiles the given function.
-    fn compile_function(self: &mut Self, item: &ast::Function<'a>) {
+    fn compile_function(self: &Self, item: &ast::Function<'a>) {
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
         let function_id = item.function_id.unwrap();
         let num_args = item.sig.args.len() as u8;
-        self.functions.insert(function_id, position);
+        self.functions.borrow_mut().insert(function_id, position);
         self.fix_targets(function_id, position, num_args);
 
         // create local environment
@@ -208,7 +206,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given call.
-    fn compile_call(self: &mut Self, item: &ast::Call<'a>) {
+    fn compile_call(self: &Self, item: &ast::Call<'a>) {
 
         // put args on stack
         for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
@@ -226,10 +224,10 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
             let call_position = self.writer.position();
 
-            let target = if let Some(&target) = self.functions.get(&function_id) {
+            let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
                 target
             } else {
-                self.unresolved.entry(function_id).or_insert(Vec::new()).push(call_position);
+                self.unresolved.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
                 123
             };
 
@@ -238,27 +236,25 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &mut Self, item: &ast::Binding<'a>) {
+    fn compile_binding(self: &Self, item: &ast::Binding<'a>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
-            let binding_id = item.binding_id.unwrap();
-            let index = self.locals.lookup(&binding_id).expect("Unresolved binding encountered");
-            let ty = self.bindingtype(item).clone();  // todo sucks
-            self.write_store(index, &ty);
+            let binding_id = item.binding_id.expect("Unresolved binding encountered");
+            let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
+            self.write_store(index, self.bindingtype(item));
         }
     }
 
     /// Compiles the given variable.
-    fn compile_variable(self: &mut Self, item: &ast::Variable<'a>) {
+    fn compile_variable(self: &Self, item: &ast::Variable<'a>) {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
         };
-        let var_type = self.bindingtype(item).clone();  // todo sucks
-        self.write_load(load_index, &var_type);
+        self.write_load(load_index, self.bindingtype(item));
     }
 
-    fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock<'a>) {
+    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'a>) {
 
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.if_block);
@@ -266,7 +262,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
     }
 
-    fn compile_if_else_block(self: &mut Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>) {
+    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>) {
 
         let else_jump = self.writer.j0(123);
         self.compile_block(if_block);
@@ -283,7 +279,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given if block.
-    fn compile_if_block(self: &mut Self, item: &ast::IfBlock<'a>) {
+    fn compile_if_block(self: &Self, item: &ast::IfBlock<'a>) {
 
         // compile condition and jump placeholder
         self.compile_expression(&item.cond);
@@ -296,7 +292,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a while loop.
-    fn compile_while_loop(self: &mut Self, item: &ast::WhileLoop<'a>) {
+    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'a>) {
         let start_target = self.writer.position();
         self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
@@ -307,7 +303,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a return statement
-    fn compile_return(self: &mut Self, item: &ast::Return<'a>) {
+    fn compile_return(self: &Self, item: &ast::Return<'a>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
         } else {
@@ -317,7 +313,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given block.
-    fn compile_block(self: &mut Self, item: &ast::Block<'a>) {
+    fn compile_block(self: &Self, item: &ast::Block<'a>) {
 
         for statement in item.statements.iter() {
             self.compile_statement(statement);
@@ -329,7 +325,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given literal
-    fn compile_literal(self: &mut Self, item: &ast::Literal<'a>) {
+    fn compile_literal(self: &Self, item: &ast::Literal<'a>) {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
@@ -387,10 +383,10 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given unary operation.
-    fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp<'a>) {
+    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'a>) {
         use crate::frontend::ast::UnaryOperator as UO;
 
-        let exp_type = self.bindingtype(&item.expr).clone();  // todo sucks
+        let exp_type = self.bindingtype(&item.expr);
 
         match item.op {
             // logical
@@ -420,7 +416,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given binary operation.
-    fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp<'a>) {
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index {
@@ -433,8 +429,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(&item.left);
         }
 
-        let result_type = self.bindingtype(item).clone();
-        let compare_type = self.bindingtype(&item.left).clone();
+        let result_type = self.bindingtype(item);
+        let compare_type = self.bindingtype(&item.left);
 
         match item.op {
             // arithmetic
@@ -495,8 +491,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
     /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &mut Self, function_id: FunctionId, position: u32, num_args: u8) {
-        if let Some(targets) = self.unresolved.remove(&function_id) {
+    fn fix_targets(self: &Self, function_id: FunctionId, position: u32, num_args: u8) {
+        if let Some(targets) = self.unresolved.borrow_mut().remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
@@ -506,7 +502,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Stores given literal on the const pool.
-    fn store_literal(self: &mut Self, item: &ast::Literal<'a>) -> u32 {
+    fn store_literal(self: &Self, item: &ast::Literal<'a>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
@@ -573,7 +569,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
-    fn store_literal_data(self: &mut Self, item: &ast::Literal<'a>) {
+    fn store_literal_data(self: &Self, item: &ast::Literal<'a>) {
         use crate::frontend::ast::LiteralValue;
 
         match &item.value {
@@ -585,7 +581,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 }
             }
             LiteralValue::Struct(struct_) => {
-                let ty = self.bindingtype(item).clone(); // todo: sucks
+                let ty = self.bindingtype(item);
                 for (name, _) in ty.as_struct().unwrap().fields.iter() {
                     let literal = &struct_.fields[&name[..]];
                     self.store_literal_data(literal);
@@ -623,7 +619,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
         offset
     }
-    fn write_member_offset(self: &mut Self, offset: u32) {
+    fn write_member_offset(self: &Self, offset: u32) {
         if offset == 0 {
             // nothing to do
         } else if offset == 1 {
@@ -641,7 +637,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.addi();
         }
     }
-    fn write_haccessr(self: &mut Self, result_size: u8, offset: u32) {
+    fn write_haccessr(self: &Self, result_size: u8, offset: u32) {
         match result_size {
             1 => { self.writer.haccessr8(offset); },
             2 => { self.writer.haccessr16(offset); },
@@ -650,7 +646,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid result size {} for hindexr", result_size)
         }
     }
-    fn write_index(self: &mut Self, element_size: u32) {
+    fn write_index(self: &Self, element_size: u32) {
         if element_size < (1 << 8) {
             self.writer.index(element_size as u8);
         } else if element_size < (1 << 16) {
@@ -659,7 +655,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.index_32(element_size);
         }
     }
-    fn write_hindexr(self: &mut Self, element_size: u8) {
+    fn write_hindexr(self: &Self, element_size: u8) {
         match element_size {
             1 => { self.writer.hindexr8(); },
             2 => { self.writer.hindexr16(); },
@@ -668,35 +664,35 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid element size {} for hindexr", element_size)
         }
     }
-    fn write_preinc(self: &mut Self, index: i32, ty: &Type) {
+    fn write_preinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.preinci64(index),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.preinci(index),
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
-    fn write_predec(self: &mut Self, index: i32, ty: &Type) {
+    fn write_predec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.predeci(index),
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
-    fn write_postinc(self: &mut Self, index: i32, ty: &Type) {
+    fn write_postinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postinci64(index),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postinci(index),
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
-    fn write_postdec(self: &mut Self, index: i32, ty: &Type) {
+    fn write_postdec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postdeci(index),
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
-    fn write_sub(self: &mut Self, ty: &Type) {
+    fn write_sub(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.subf64(),
             Type::i64 | Type::u64 => self.writer.subi64(),
@@ -705,7 +701,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Sub operand {:?}", ty),
         };
     }
-    fn write_add(self: &mut Self, ty: &Type) {
+    fn write_add(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.addf64(),
             Type::i64 | Type::u64 => self.writer.addi64(),
@@ -714,7 +710,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Add operand {:?}", ty),
         };
     }
-    fn write_mul(self: &mut Self, ty: &Type) {
+    fn write_mul(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.mulf64(),
             Type::i64 | Type::u64 => self.writer.muli64(),
@@ -723,7 +719,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
         };
     }
-    fn write_div(self: &mut Self, ty: &Type) {
+    fn write_div(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.divf64(),
             Type::i64 | Type::u64 => self.writer.divi64(),
@@ -732,21 +728,21 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Div operand {:?}", ty),
         };
     }
-    fn write_eq(self: &mut Self, ty: &Type) {
+    fn write_eq(self: &Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => self.writer.ceqr32(),
             8 => self.writer.ceqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
-    fn write_neq(self: &mut Self, ty: &Type) {
+    fn write_neq(self: &Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => self.writer.cneqr32(),
             8 => self.writer.cneqr64(),
             _ => panic!("Unsupported type size"),
         };
     }
-    fn write_lt(self: &mut Self, ty: &Type) {
+    fn write_lt(self: &Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.clts32(),
@@ -763,7 +759,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("unsupported type size"),
         };
     }
-    fn write_lte(self: &mut Self, ty: &Type) {
+    fn write_lte(self: &Self, ty: &Type) {
         match ty.size() {
             1 | 2 | 4 => match ty.kind() {
                 TypeKind::Signed => self.writer.cltes32(),
@@ -781,7 +777,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         };
     }
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &mut Self, index: i32, ty: &Type) {
+    fn write_store(self: &Self, index: i32, ty: &Type) {
         let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
@@ -795,7 +791,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &mut Self, index: i32, ty: &Type) {
+    fn write_load(self: &Self, index: i32, ty: &Type) {
         let size = ty.size();
         let kind = ty.kind();
         if kind == TypeKind::String || kind == TypeKind::Array {
