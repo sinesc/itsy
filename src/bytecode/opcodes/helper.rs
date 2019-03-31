@@ -2,41 +2,35 @@
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_vm {
 
-    // slightly faster reader // todo: look into 1.32's new .from/to_le_bytes api
-    (fastread $ty:tt $size:tt $from:ident) => ( {
-        let mut dest: $ty;
-        unsafe {
-            dest = ::std::mem::uninitialized();
-            ::std::ptr::copy_nonoverlapping(&$from.program.instructions[$from.pc as usize], &mut dest as *mut $ty as *mut u8, $size)
-        };
+    // convert slices to arrays for from_le_bytes
+    (to_array 1 $slice:ident) => ( array1($slice) );
+    (to_array 2 $slice:ident) => ( array2($slice) );
+    (to_array 4 $slice:ident) => ( array4($slice) );
+    (to_array 8 $slice:ident) => ( array8($slice) );
+
+    // perform read from slice
+    (do_read $ty:tt $size:tt $from:ident) => ( {
+        let slice = &$from.program.instructions[$from.pc as usize..];
+        let dest: $ty = $ty::from_le_bytes( impl_vm!(to_array $size slice) );
         $from.pc += $size;
         dest
     });
 
     // wrappers for readers and writers
-    (read u8, $from:ident) => ( impl_vm!(fastread u8 1 $from) ); // todo: no fixed endianness on these, writer needs to do the same or stuff will break
-    (read u16, $from:ident) => ( impl_vm!(fastread u16 2 $from) );
-    (read u32, $from:ident) => ( impl_vm!(fastread u32 4 $from) );
-    (read u64, $from:ident) => ( impl_vm!(fastread u64 8 $from) );
-    (read i8,  $from:ident) => ( impl_vm!(fastread i8 1 $from) );
-    (read i16, $from:ident) => ( impl_vm!(fastread i16 2 $from) );
-    (read i32, $from:ident) => ( impl_vm!(fastread i32 4 $from) );
-    (read i64, $from:ident) => ( impl_vm!(fastread i64 8 $from) );
-    (read f32, $from:ident) => ( impl_vm!(fastread f32 4 $from) );
-    (read f64, $from:ident) => ( impl_vm!(fastread f64 8 $from) );
-    (read RustFn, $from:ident) => ( impl_vm!(fastread u16 2 $from) );
+    (read RustFn, $from:ident) => ( impl_vm!(do_read u16 2 $from) );
+    (read u8, $from:ident) => ( impl_vm!(do_read u8 1 $from) );
+    (read u16, $from:ident) => ( impl_vm!(do_read u16 2 $from) );
+    (read u32, $from:ident) => ( impl_vm!(do_read u32 4 $from) );
+    (read u64, $from:ident) => ( impl_vm!(do_read u64 8 $from) );
+    (read i8,  $from:ident) => ( impl_vm!(do_read i8 1 $from) );
+    (read i16, $from:ident) => ( impl_vm!(do_read i16 2 $from) );
+    (read i32, $from:ident) => ( impl_vm!(do_read i32 4 $from) );
+    (read i64, $from:ident) => ( impl_vm!(do_read i64 8 $from) );
+    (read f32, $from:ident) => ( impl_vm!(do_read f32 4 $from) );
+    (read f64, $from:ident) => ( impl_vm!(do_read f64 8 $from) );
 
-    (write u8,  $value:expr, $to:ident) => ( $to.write_u8($value).unwrap() );   // todo: see above
-    (write u16, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value).unwrap() );
-    (write u32, $value:expr, $to:ident) => ( $to.write_u32::<LittleEndian>($value).unwrap() );
-    (write u64, $value:expr, $to:ident) => ( $to.write_u64::<LittleEndian>($value).unwrap() );
-    (write i8,  $value:expr, $to:ident) => ( $to.write_i8($value).unwrap() );
-    (write i16, $value:expr, $to:ident) => ( $to.write_i16::<LittleEndian>($value).unwrap() );
-    (write i32, $value:expr, $to:ident) => ( $to.write_i32::<LittleEndian>($value).unwrap() );
-    (write i64, $value:expr, $to:ident) => ( $to.write_i64::<LittleEndian>($value).unwrap() );
-    (write f32, $value:expr, $to:ident) => ( $to.write_f32::<LittleEndian>($value).unwrap() );
-    (write f64, $value:expr, $to:ident) => ( $to.write_f64::<LittleEndian>($value).unwrap() );
-    (write RustFn, $value:expr, $to:ident) => ( $to.write_u16::<LittleEndian>($value.to_u16()).unwrap() );
+    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_u16().to_le_bytes()[..]) );
+    (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
 
     (map_writer_type RustFn) => ( T );
     (map_writer_type $ty:tt) => ( $ty );
@@ -64,12 +58,12 @@ macro_rules! impl_vm {
 
         impl ByteCode {
             /// Converts bytecode to u8.
-            #[inline(always)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn into_u8(self: Self) -> u8 {
                 unsafe { ::std::mem::transmute(self) }
             }
             /// Converts u8 to bytecode.
-            #[inline(always)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn from_u8(bytecode: u8) -> Self {
                 unsafe { ::std::mem::transmute(bytecode) }
             }
@@ -79,8 +73,7 @@ macro_rules! impl_vm {
         impl<T> crate::bytecode::Writer<T> where T: crate::runtime::VMFunc<T> {
             /// Calls the given Rust function.
             pub fn rustcall(self: &mut Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
-                use byteorder::{LittleEndian, WriteBytesExt};
-                let insert_pos = self.position;
+                let insert_pos = self.position();
                 impl_vm!(write u8, ByteCode::rustcall.into_u8(), self);
                 impl_vm!(write RustFn, func, self);
                 insert_pos as u32
@@ -89,8 +82,7 @@ macro_rules! impl_vm {
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
                 pub fn $name(self: &mut Self, $($op_name: impl_vm!(map_writer_type $op_type)),* ) -> u32 {
-                    use byteorder::{LittleEndian, WriteBytesExt};
-                    let insert_pos = self.position;
+                    let insert_pos = self.position();
                     impl_vm!(write u8, ByteCode::$name.into_u8(), self);
                     $( impl_vm!(write $op_type, $op_name, self); )*
                     insert_pos as u32
@@ -114,9 +106,9 @@ macro_rules! impl_vm {
             #[allow(unused_imports)]
             #[allow(unused_mut)]
             pub(crate) fn format_instruction(self: &mut Self) -> Option<String> {
-                use byteorder::{LittleEndian, ReadBytesExt};
                 let position = self.pc;
-                if let Ok(instruction) = self.read_u8() {
+                if position < self.program.instructions.len() as u32 {
+                    let instruction = impl_vm!(read u8, self);
                     match ByteCode::from_u8(instruction) {
                         // todo: rustcall specialcase is required since normal opcodes don't receive the context
                         // considering refactoring this so that all opcodes receive the context if it turns out that
@@ -145,7 +137,6 @@ macro_rules! impl_vm {
             #[allow(unused_imports)]
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
-                use byteorder::{LittleEndian, ReadBytesExt};
                 let instruction = impl_vm!(read u8, self);
                 match ByteCode::from_u8(instruction) {
                     ByteCode::rustcall => {

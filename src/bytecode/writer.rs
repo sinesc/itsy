@@ -1,6 +1,6 @@
 //! Bytecode buffer and writer.
 
-use std::{io::{self, Write, Seek, SeekFrom}, mem::transmute};
+use std::mem::transmute;
 use crate::bytecode::Program;
 use crate::runtime::VMFunc;
 
@@ -45,41 +45,18 @@ impl<T> Writer<T> where T: VMFunc<T> {
         self.position = original_position;
         result
     }
-}
-
-/// Implement Write trait for program instructions.
-impl<T> Write for Writer<T> where T: VMFunc<T> {
-    fn write(self: &mut Self, buf: &[u8]) -> io::Result<usize> {
+    pub(crate) fn write(self: &mut Self, buf: &[u8]) {
         let buf_len = buf.len() as u32;
-        if self.position == self.len() {
+        if self.position() == self.len() {
             // append
             self.program.instructions.extend_from_slice(buf);
         } else {
             // overwrite
-            let end = ::std::cmp::min(self.position + buf_len, self.len());
-            self.program.instructions.splice(self.position as usize .. end as usize, buf.iter().cloned());
+            let position = self.position();
+            let end = ::std::cmp::min(position + buf_len, self.len());
+            self.program.instructions.splice(position as usize .. end as usize, buf.iter().cloned());
         }
         self.position += buf_len;
-        Ok(buf.len())
-    }
-    fn write_all(self: &mut Self, buf: &[u8]) -> io::Result<()> {
-        self.write(buf).unwrap();
-        Ok(())
-    }
-    fn flush(self: &mut Self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Implement Seek trait for program instructions.
-impl<T> Seek for Writer<T> where T: VMFunc<T> {
-    fn seek(self: &mut Self, pos: SeekFrom) -> io::Result<u64> {
-        self.position = match pos {
-            SeekFrom::Start(pos) => pos as u32,
-            SeekFrom::End(pos) => (self.program.instructions.len() as i64 + pos) as u32,
-            SeekFrom::Current(pos) => (self.position as i64 + pos) as u32,
-        };
-        Ok(self.position as u64)
     }
 }
 

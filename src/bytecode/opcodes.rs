@@ -2,7 +2,7 @@
 
 #[macro_use]
 mod helper;
-use crate::{util::{array2, array4, array8}, runtime::{Value, Value64, StackOp, StackOpFp, HeapOp}};
+use crate::{util::{array1, array2, array4, array8}, runtime::{Value, Value64, StackOp, StackOpFp, HeapOp}};
 
 impl_vm!{
 
