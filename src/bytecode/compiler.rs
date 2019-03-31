@@ -223,7 +223,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         } else {
 
             // normal function: identify call target or write dummy
-            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.name));
+            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
             let call_position = self.writer.position();
 
             let target = if let Some(&target) = self.functions.get(&function_id) {

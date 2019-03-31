@@ -351,7 +351,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         if item.function_id.is_none() && item.sig.ret_resolved() && item.sig.args_resolved() {
             let result_type_id = item.sig.ret_type_id();
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids().iter().map(|arg| arg.unwrap()).collect();
-            let function_id = self.scopes.insert_function(parent_scope_id, item.sig.name, result_type_id, arg_type_ids);
+            let function_id = self.scopes.insert_function(parent_scope_id, item.sig.ident.name, result_type_id, arg_type_ids);
 
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
@@ -405,7 +405,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
 
             let ty = Type::Struct(Struct { fields });
-            item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.name), ty));
+            item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
         }
     }
 
@@ -433,7 +433,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
         // locate function definition
         if item.function_id.is_none() {
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.name);
+            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.ident.name);
         }
 
         // found a function, resolve return type and arguments
@@ -455,7 +455,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 if actual_type.is_none() {
                     self.set_bindingtype_id(&mut item.args[index], expected_type);
                 } else if actual_type.is_some() && actual_type.unwrap() != expected_type  {
-                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.name, index + 1, self.scopes.type_ref(expected_type), self.scopes.type_ref(actual_type.unwrap()));
+                    panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.ident.name, index + 1, self.scopes.type_ref(expected_type), self.scopes.type_ref(actual_type.unwrap()));
                 }
             }
 
@@ -469,11 +469,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &Self, item: &mut ast::TypeName<'a>) -> Option<TypeId> {
         if item.type_id.is_none() {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path[0]) { // fixme: handle path segments
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.name[0]) { // fixme: handle path segments
                 item.type_id = Some(new_type_id);
             }
         } else if let Some(type_id) = item.type_id {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path[0]) { // fixme: handle path segments
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.name[0]) { // fixme: handle path segments
                 if type_id != new_type_id {
                     panic!("type resolution result changed, aka 'this should never happen'"); // todo: remove this whole else branch
                 }
@@ -486,9 +486,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
         // resolve binding
         if item.binding_id.is_none() {
-            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.name);
+            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.ident.name);
             if item.binding_id.is_none() {
-                panic!("unknown binding {:?} in scope {:?}", item.name, self.scope_id); // todo: error handling
+                panic!("unknown binding {:?} in scope {:?}", item.ident, self.scope_id); // todo: error handling
             }
         }
     }
@@ -520,8 +520,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
             let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
             // create binding and set type to range type
-            if self.scopes.binding_id(self.scope_id, item.iter.name).is_none() {
-                self.scopes.insert_binding(self.scope_id, Some(item.iter.name), Some(type_id));
+            if self.scopes.binding_id(self.scope_id, item.iter.ident.name).is_none() {
+                self.scopes.insert_binding(self.scope_id, Some(item.iter.ident.name), Some(type_id));
             }
 
             //self.set_type_from_id(&mut item.iter.type_id, type_id);
@@ -624,7 +624,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     let struct_ = ty.as_struct().expect("Member access on a non-struct");
                     let field = item.right.as_member_mut().expect("Internal error: Member access using a non-field");
                     if field.index.is_none() {
-                        field.index = Some(struct_.fields.iter().position(|f| f.0 == field.name).expect("Unknown struct member") as u32);
+                        field.index = Some(struct_.fields.iter().position(|f| f.0 == field.ident.name).expect("Unknown struct member") as u32);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
                         self.set_bindingtype_id(item, type_id);
@@ -653,7 +653,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
 
         // create binding id if we don't have one yet
-        let binding_id = self.try_create_binding(item, item.name);
+        let binding_id = self.try_create_binding(item, item.ident.name);
 
         // apply explicit type if we got one
         if let Some(explicit) = explicit {

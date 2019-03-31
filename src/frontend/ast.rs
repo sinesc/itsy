@@ -34,6 +34,18 @@ macro_rules! impl_bindable {
     };
 }
 
+#[derive(Debug)]
+pub struct Ident<'a> {
+    pub position: u32,
+    pub name: &'a str,
+}
+
+#[derive(Debug)]
+pub struct Path<'a> {
+    pub position: u32,
+    pub name: Vec<&'a str>,
+}
+
 pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
@@ -83,7 +95,8 @@ impl<'a> Debug for Statement<'a> {
 
 #[derive(Debug)]
 pub struct Binding<'a> {
-    pub name        : &'a str,
+    pub position    : u32,
+    pub ident       : Ident<'a>,
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
     pub type_name   : Option<TypeName<'a>>,
@@ -93,6 +106,7 @@ impl_bindable!(Binding);
 
 #[derive(Debug)]
 pub struct Function<'a> {
+    pub position    : u32,
     pub sig         : Signature<'a>,
     pub block       : Block<'a>,
     pub function_id : Option<FunctionId>,
@@ -101,7 +115,7 @@ pub struct Function<'a> {
 
 #[derive(Debug)]
 pub struct Signature<'a> {
-    pub name    : &'a str,
+    pub ident   : Ident<'a>,
     pub args    : Vec<Binding<'a>>,
     pub ret     : Option<TypeName<'a>>,
 }
@@ -123,15 +137,21 @@ impl<'a> Signature<'a> {
 
 #[derive(Debug)]
 pub struct TypeName<'a> {
-    pub path    : Vec<&'a str>,
+    pub path    : Path<'a>,
     pub type_id : Option<TypeId>,
 }
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
-    pub fn unknown(name: Vec<&'a str>) -> Self {
+    pub fn from_path(path: Path<'a>) -> Self {
         TypeName {
-            path    : name,
+            path    : path,
+            type_id : None,
+        }
+    }
+    pub fn from_str(name: &'a str, position: u32) -> Self {
+        TypeName {
+            path    : Path { name: vec! [ name ], position: position },
             type_id : None,
         }
     }
@@ -154,6 +174,7 @@ impl<'a> InlineType<'a> {
 
 #[derive(Debug)]
 pub struct Array<'a> {
+    pub position    : u32,
     pub element_type: InlineType<'a>,
     pub len         : u32,
     pub type_id     : Option<TypeId>,
@@ -161,13 +182,15 @@ pub struct Array<'a> {
 
 #[derive(Debug)]
 pub struct Struct<'a> {
-    pub name    : &'a str,
+    pub position: u32,
+    pub ident   : Ident<'a>,
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub type_id : Option<TypeId>,
 }
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
+    pub position: u32,
     pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
     pub block   : Block<'a>,
@@ -176,6 +199,7 @@ pub struct ForLoop<'a> {
 
 #[derive(Debug)]
 pub struct WhileLoop<'a> {
+    pub position: u32,
     pub expr    : Expression<'a>,
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
@@ -183,12 +207,14 @@ pub struct WhileLoop<'a> {
 
 #[derive(Debug)]
 pub struct Return<'a> {
+    pub position        : u32,
     pub expr            : Option<Expression<'a>>,
     pub fn_ret_type_id  : Option<TypeId>,
 }
 
 #[derive(Debug)]
 pub struct IfBlock<'a> {
+    pub position    : u32,
     pub cond        : Expression<'a>,
     pub if_block    : Block<'a>,
     pub else_block  : Option<Block<'a>>,
@@ -210,6 +236,7 @@ impl<'a> Bindable for IfBlock<'a> {
 
 #[derive(Debug)]
 pub struct Block<'a> {
+    pub position    : u32,
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
     pub scope_id    : Option<ScopeId>,
@@ -326,6 +353,7 @@ impl<'a> Debug for Expression<'a> {
 
 #[derive(Debug)]
 pub struct Literal<'a> {
+    pub position    : u32,
     pub value       : LiteralValue<'a>,
     pub type_name   : Option<TypeName<'a>>, // used in e.g. 1i8, 3.1415f32
     pub binding_id  : Option<BindingId>,
@@ -403,14 +431,14 @@ pub struct StructLiteral<'a> {
 
 #[derive(Debug)]
 pub struct Variable<'a> {
-    pub name        : &'a str,
+    pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Variable);
 
 #[derive(Debug)]
 pub struct Member<'a> {
-    pub name        : &'a str,
+    pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
     pub index       : Option<u32>,
 }
@@ -418,11 +446,11 @@ impl_bindable!(Member);
 
 #[derive(Debug)]
 pub struct Call<'a> {
-    pub name        : &'a str,
-    pub args        : Vec<Expression<'a>>,
-    pub function_id : Option<FunctionId>,
-    pub rust_fn_index: Option<u16>,
-    pub binding_id  : Option<BindingId>,
+    pub ident           : Ident<'a>,
+    pub args            : Vec<Expression<'a>>,
+    pub function_id     : Option<FunctionId>,
+    pub rust_fn_index   : Option<u16>,
+    pub binding_id      : Option<BindingId>,
 }
 impl_bindable!(Call);
 
@@ -453,8 +481,8 @@ impl_bindable!(BinaryOp);
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
-    pub op      : UnaryOperator,
-    pub expr    : Expression<'a>,
+    pub op          : UnaryOperator,
+    pub expr        : Expression<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(UnaryOp);
