@@ -218,7 +218,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 //if binary_op.left.is_literal() && binary_op.right.is_literal() {
                 //    self.precompute_expression_binary_op(item);
                 //} else {
-                    self.resolve_binary_op(binary_op);
+                    self.resolve_binary_op(binary_op, expected_result);
                 //}
             }
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
@@ -495,6 +495,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // resolve condition and block
         self.resolve_expression(&mut item.cond, None); // todo: pass in expected type
         self.resolve_block(&mut item.if_block, None);
@@ -507,46 +508,40 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
         }
+        self.scope_id = parent_scope_id;
     }
 
     /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
-
-        // resolve the range type
-        self.resolve_expression(&mut item.range, None);
-
-        if let Some(type_id) = self.bindingtype_id(&mut item.range) {
-
-            let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-
-            // create binding and set type to range type
-            if self.scopes.binding_id(self.scope_id, item.iter.ident.name).is_none() {
-                self.scopes.insert_binding(self.scope_id, Some(item.iter.ident.name), Some(type_id));
-            }
-
-            //self.set_type_from_id(&mut item.iter.type_id, type_id);
-
-            // handle block
-            self.resolve_block(&mut item.block, None);
-
-            self.scope_id = parent_scope_id;
-        }
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        // create binding for the iterator variable
+        self.resolve_binding(&mut item.iter);
+        // resolve the range type using the type of the iterator variable, if possible
+        let type_id = self.bindingtype_id(&mut item.iter);
+        self.resolve_expression(&mut item.range, type_id);
+        // handle block
+        self.resolve_block(&mut item.block, None);
+        self.scope_id = parent_scope_id;
     }
 
     /// Resolves a while loop.
     fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'a>) {
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None);
         self.resolve_block(&mut item.block, None);
+        self.scope_id = parent_scope_id;
     }
 
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>, expected_result: Option<TypeId>) {
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         for mut statement in item.statements.iter_mut() {
             self.resolve_statement(&mut statement);
         }
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, expected_result);
         }
+        self.scope_id = parent_scope_id;
     }
 
     /// Resolves an assignment expression.
@@ -561,16 +556,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a binary operation.
-    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>) {
+    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, expected_result: Option<TypeId>) {
 
         use crate::frontend::ast::BinaryOperator as O;
-
-        self.resolve_expression(&mut item.left, None); // todo: set expected type
-        self.resolve_expression(&mut item.right, None);
-
-        let type_id = self.bindingtype_id(item);
-        let left_type_id = self.bindingtype_id(&mut item.left);
-        let right_type_id = self.bindingtype_id(&mut item.right);
 
         // todo: enable again, but not for index
         /*if left_type_id.is_some() && right_type_id.is_some() && left_type_id != right_type_id {
@@ -582,11 +570,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 /*if left_type_id != right_type_id || left_type_id.unwrap() != self.primitives.bool {
                     panic!("Logical {:?} expects both operands to be boolean, got {:?} and {:?}", item.op, self.format_type(left_type_id), self.format_type(right_type_id));
                 }*/
+                self.resolve_expression(&mut item.left, Some(self.primitives.bool));
+                self.resolve_expression(&mut item.right, Some(self.primitives.bool));
                 self.set_bindingtype_id(item, self.primitives.bool);
-                self.set_bindingtype_id(&mut item.left, self.primitives.bool);
-                self.set_bindingtype_id(&mut item.right, self.primitives.bool);
+                //self.set_bindingtype_id(&mut item.left, self.primitives.bool);
+                //self.set_bindingtype_id(&mut item.right, self.primitives.bool);
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
+                self.resolve_expression(&mut item.left, None);
+                self.resolve_expression(&mut item.right, None);
+                let left_type_id = self.bindingtype_id(&mut item.left);
+                let right_type_id = self.bindingtype_id(&mut item.right);
                 self.set_bindingtype_id(item, self.primitives.bool);
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_bindingtype_id(&mut item.left, common_type_id);
@@ -594,6 +588,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
             O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
+                self.resolve_expression(&mut item.left, expected_result);
+                self.resolve_expression(&mut item.right, expected_result);
+                let type_id = self.bindingtype_id(item);
+                let left_type_id = self.bindingtype_id(&mut item.left);
+                let right_type_id = self.bindingtype_id(&mut item.right);
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
                     self.set_bindingtype_id(item, common_type_id);
                     self.set_bindingtype_id(&mut item.left, common_type_id);
@@ -601,6 +600,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
             O::Index => {
+                self.resolve_expression(&mut item.left, None);
+                self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2].type_id)); // u32
+
                 // left[right] : item
                 self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2].type_id); // u32
                 self.try_create_anon_binding(item);
@@ -619,6 +621,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
             O::Access => {
+                self.resolve_expression(&mut item.left, None);
+                self.resolve_expression(&mut item.right, None);
                 // left.right : item
                 if let Some(ty) = self.bindingtype(&item.left) {
                     let struct_ = ty.as_struct().expect("Member access on a non-struct");
@@ -632,11 +636,22 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     }
                 }
             }
-            O::Range => {
-                unimplemented!("range");
+            O::Range | O::RangeInclusive => {
+                // ensure we create bindings regardless of expected_result availability, otherwise resolution will not notice unresolved bindings
+                self.try_create_anon_binding(&mut item.left);
+                self.try_create_anon_binding(&mut item.right);
+                // once an expected type is known though inference, resolve range
+                // todo: add reverse resolution from explit types on range literals
+                if let Some(expected_result) = expected_result {
+                    self.resolve_expression(&mut item.left, Some(expected_result));
+                    self.resolve_expression(&mut item.right, Some(expected_result));
+                    self.set_bindingtype_id(&mut item.left, expected_result);
+                    self.set_bindingtype_id(&mut item.right, expected_result);
+                    self.set_bindingtype_id(item, expected_result);
+                }
             }
             O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
-                unimplemented!("assignments");
+                panic!("this operator should not be handled here");
             }
         }
     }
@@ -653,16 +668,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
 
         // create binding id if we don't have one yet
-        let binding_id = self.try_create_binding(item, item.ident.name);
+        self.try_create_binding(item, item.ident.name);
 
         // apply explicit type if we got one
         if let Some(explicit) = explicit {
             self.set_bindingtype_id(item, explicit);
         }
 
-        // resolve right hand side, link bindings
+        // resolve right hand side
         if let Some(expr) = &mut item.expr {
-            *expr.binding_id_mut() = Some(binding_id);
             self.resolve_expression(expr, explicit);
         }
 
@@ -702,8 +716,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         use self::ast::LiteralValue as LV;
 
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
+            if expected_type.is_some() && expected_type.unwrap() != self.primitives.bool {
+                panic!("type mismatch");
+            }
             self.set_bindingtype_id(item, self.primitives.bool);
         } else if let LV::String(_) = item.value {
+            if expected_type.is_some() && expected_type.unwrap() != self.primitives.string {
+                panic!("type mismatch");
+            }
             self.set_bindingtype_id(item, self.primitives.string);
         } else if let LV::Array(_) = item.value {
             self.resolve_array_literal(item, expected_type);
@@ -717,7 +737,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     panic!("type mismatch");
                 }
             }
-        } else if let (LV::Numeric(_), Some(expected_type)) = (&item.value, expected_type) {
+        } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
+            if !self.primitives.is_compatible_numeric(numeric, expected_type) {
+                panic!("incompatible numeric literal");
+            }
             self.set_bindingtype_id(item, expected_type);
         } else if self.infer_literals {
             // numerics, once normal resolution has failed

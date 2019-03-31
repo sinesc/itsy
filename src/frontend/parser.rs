@@ -570,10 +570,10 @@ named!(function<Input<'_>, Statement<'_>>, do_parse!(
 
 // for
 
-// TODO: simply accept "for ident in expression" and make .. an operator?
+// TODO: accept "for ident in expression" and make .. an operator. implement iterators.
 
-named!(for_loop_range<Input<'_>, Expression<'_>>, map!(ws!(tuple!(expression, tag!(".."), expression)), |m| {
-    Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::Range, left: m.0, right: m.2, binding_id: None }))
+named!(for_loop_range<Input<'_>, Expression<'_>>, map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
+    Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::from_string(*m.1), left: m.0, right: m.2, binding_id: None }))
 }));
 
 named!(for_loop<Input<'_>, ForLoop<'_>>, do_parse!(
@@ -656,7 +656,7 @@ fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseErro
     let (remainder, error_kind) = err.unwrap();
     match error_kind {
         ErrorKind::Custom(custom) => {
-            ParseError::new(unsafe { transmute(*custom) }, input.len() - remainder.len(), input)
+            ParseError::new(unsafe { transmute(*custom) }, input.len() - remainder.len(), input) // todo: figure out how to specify custom error type
         }
         _ => {
             ParseError::new(ParseErrorKind::Unknown, input.len() - remainder.len(), input)

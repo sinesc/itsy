@@ -117,7 +117,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             S::Structure(_)             => { /* nothing to do here */ },
             S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => self.compile_if_block(if_block),
-            S::ForLoop(_for_loop)        => { }, // todo: handle
+            S::ForLoop(for_loop)        => self.compile_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
             S::Block(block)             => self.compile_block(block),
             S::Return(ret)              => self.compile_return(ret),
@@ -187,13 +187,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             frame.next_arg -= 1;
         }
 
-        for statement in item.block.statements.iter() {
-            if let ast::Statement::Binding(binding) = statement {
-                let next_var = frame.next_var;
-                frame.map.insert(binding.binding_id.unwrap(), next_var);
-                frame.next_var += self.bindingtype(binding).quadsize() as i32;
-            }
-        }
+        self.create_stack_frame_block(&item.block, &mut frame);
 
         if frame.next_var > 0 {
             self.writer.reserve(frame.next_var as u8);
@@ -300,6 +294,52 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         self.writer.jmp(start_target);
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+    }
+
+    /// Compiles a for - in loop
+    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'a>) {
+        if let Some(binary_op) = item.range.as_binary_op() {
+
+            if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
+                // todo: refactor this mess
+                let (var_index, var_type) = self.range_info(item);
+                // store lower range bound in iter variable
+                self.compile_expression(&binary_op.left);
+                self.write_store(var_index, var_type);
+                // push upper range bound
+                self.compile_expression(&binary_op.right);
+                // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
+                self.write_clone(var_type);
+                self.write_load(var_index, var_type);
+                if binary_op.op == ast::BinaryOperator::Range {
+                    self.write_lt(var_type);
+                } else {
+                    self.write_lte(var_type);
+                }
+                let exit_jump = self.writer.position();
+                self.writer.j0(123);
+                // compile block
+                let start_target = self.writer.position();
+                self.compile_block(&item.block);
+                // load bounds, increment and compare
+                self.write_clone(var_type);
+                self.write_preinc(var_index, var_type);
+                if binary_op.op == ast::BinaryOperator::Range {
+                    self.write_lt(var_type);
+                } else {
+                    self.write_lte(var_type);
+                }
+                self.writer.jn0(start_target);
+                // exit position
+                let exit_target = self.writer.position();
+                self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+            } else {
+                unimplemented!();
+            }
+
+        } else {
+            panic!("expected binary op");
+        }
     }
 
     /// Compiles a return statement
@@ -485,7 +525,6 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         let type_id = self.bindingtype_ids[binding_id];
         &self.types[Into::<usize>::into(type_id)]
     }
-
     /// Returns type for given type_id.
     fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
@@ -499,6 +538,77 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 self.writer.call(position, num_args); // todo: may have to handle multiple call types
             }
             self.writer.set_position(backup_position);
+        }
+    }
+    /// Retrieve for-in loop range variable index/type
+    fn range_info(self: &Self, item: &ast::ForLoop<'a>) -> (i32, &Type) {
+        let var_index = {
+            let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
+            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+        };
+        let var_type = self.bindingtype(&item.iter);
+        (var_index, var_type)
+    }
+    /// Creates stack frame variables for expressions.
+    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'a>, frame: &mut Locals) {
+        if let ast::Expression::Block(block) = expression {
+            self.create_stack_frame_block(block, frame);
+        } else if let ast::Expression::Call(call) = expression {
+            for arg in &call.args {
+                if let ast::Expression::Block(block) = arg {
+                    self.create_stack_frame_block(block, frame);
+                }
+            }
+        } else if let ast::Expression::Assignment(assignment) = expression {
+            if let ast::Expression::Block(block) = &assignment.right {
+                self.create_stack_frame_block(block, frame);
+            }
+        } else if let ast::Expression::BinaryOp(binary_op) = expression {
+            if let ast::Expression::Block(block) = &binary_op.left {
+                self.create_stack_frame_block(block, frame);
+            }
+            if let ast::Expression::Block(block) = &binary_op.right {
+                self.create_stack_frame_block(block, frame);
+            }
+        } else if let ast::Expression::UnaryOp(unary_op) = expression {
+            if let ast::Expression::Block(block) = &unary_op.expr {
+                self.create_stack_frame_block(block, frame);
+            }
+        } else if let ast::Expression::IfBlock(if_block) = expression {
+            self.create_stack_frame_block(&if_block.if_block, frame);
+            if let Some(block) = &if_block.else_block {
+                self.create_stack_frame_block(block, frame);
+            }
+        }
+    }
+    /// Creates stack frame variables for blocks.
+    fn create_stack_frame_block(self: &Self, item: &ast::Block<'a>, frame: &mut Locals) {
+        // todo: this is pretty bad. need to come up with better solution. trait on ast?
+        for statement in item.statements.iter() {
+            if let ast::Statement::Binding(binding) = statement {
+                let next_var = frame.next_var;
+                frame.map.insert(binding.binding_id.unwrap(), next_var);
+                frame.next_var += self.bindingtype(binding).quadsize() as i32;
+                if let Some(expression) = &binding.expr {
+                    self.create_stack_frame_exp(expression, frame);
+                }
+            } else if let ast::Statement::ForLoop(for_loop) = statement {
+                let next_var = frame.next_var;
+                frame.map.insert(for_loop.iter.binding_id.unwrap(), next_var);
+                frame.next_var += self.bindingtype(&for_loop.iter).quadsize() as i32;
+                self.create_stack_frame_block(&for_loop.block, frame);
+            } else if let ast::Statement::WhileLoop(while_loop) = statement {
+                self.create_stack_frame_block(&while_loop.block, frame);
+            } else if let ast::Statement::Block(block) = statement {
+                self.create_stack_frame_block(block, frame);
+            } else if let ast::Statement::IfBlock(if_block) = statement {
+                self.create_stack_frame_block(&if_block.if_block, frame);
+                if let Some(block) = &if_block.else_block {
+                    self.create_stack_frame_block(block, frame);
+                }
+            } else if let ast::Statement::Expression(expression) = statement {
+                self.create_stack_frame_exp(expression, frame);
+            }
         }
     }
     /// Stores given literal on the const pool.
@@ -808,5 +918,12 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         } else {
             panic!("Unsupported type {:?} for load operation", ty);
         }
+    }
+    fn write_clone(self: &Self, ty: &Type) {
+        match ty.size() {
+            1 | 2 | 4 => self.writer.clone32(),
+            8 => self.writer.clone64(),
+            _ => panic!("unsupported type size"),
+        };
     }
 }

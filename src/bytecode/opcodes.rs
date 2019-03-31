@@ -206,6 +206,16 @@ impl_vm!{
         let local: Value = self.stack.load_fp(-6);
         self.stack.push(local);
     }
+    /// Clones the top stack value and pushes it.
+    fn clone32(self: &mut Self) {
+        let data: Value = self.stack.top();
+        self.stack.push(data);
+    }
+    /// Clones the top stack value and pushes it.
+    fn clone64(self: &mut Self) {
+        let data: Value64 = self.stack.top();
+        self.stack.push(data);
+    }
 /*
     /// Calls the given Rust function.
     fn rustcall(self: &mut Self, func: RustFn) {
@@ -371,10 +381,17 @@ impl_vm!{
     fn jmp(self: &mut Self, addr: u32) {
         self.pc = addr;
     }
-    /// Pops one values and jumps to given address if it is 0.
+    /// Pops one values and jumps to given address if the value is 0.
     fn j0(self: &mut Self, addr: u32) {
         let a: Value = self.stack.pop();
         if a == 0 {
+            self.pc = addr;
+        }
+    }
+    /// Pops one values and jumps to given address if the value is not 0.
+    fn jn0(self: &mut Self, addr: u32) {
+        let a: Value = self.stack.pop();
+        if a != 0 {
             self.pc = addr;
         }
     }

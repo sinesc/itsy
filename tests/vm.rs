@@ -349,7 +349,6 @@ fn struct_array() {
             ret_u64(x.ob.ib[0]);
             ret_u64(x.ob.ib[1]);
             ret_u64(x.ob.ib[2]);
-
         }
     ");
     assert(&result[0], -369i16);
@@ -367,6 +366,77 @@ fn string_literal() {
         ret_string(hello);
     ");
     assert_all(&result, &[ "Hello World!".to_string(), "Hello World!".to_string() ]);
+}
+
+#[test]
+fn for_in_negative() {
+    let result = run("
+        for i in -3..3 {
+            ret_i32(i);
+        }
+    ");
+    assert_all(&result, &[ -3i32, -2, -1, 0, 1, 2 ]);
+}
+
+#[test]
+fn for_in_none() {
+    let result = run("
+        for i in 1..1 {
+            ret_u16(i);
+        }
+    ");
+    assert!(result.len() == 0);
+}
+
+#[test]
+fn for_in_dec() {
+    let result = run("
+        for i in 1..0 {
+            ret_i8(i);
+        }
+    ");
+    assert!(result.len() == 0);
+}
+
+#[test]
+fn for_in_negative_inclusive() {
+    let result = run("
+        for i in -3..=3 {
+            ret_i8(i);
+        }
+    ");
+    assert_all(&result, &[ -3i8, -2, -1, 0, 1, 2, 3 ]);
+}
+
+#[test]
+fn for_in_equal_inclusive() {
+    let result = run("
+        for i in 1..=1 {
+            ret_u16(i);
+        }
+    ");
+    assert_all(&result, &[ 1u16 ]);
+}
+
+#[test]
+fn for_in_dec_inclusive() {
+    let result = run("
+        for i in 1..=0 {
+            ret_i8(i);
+        }
+    ");
+    assert!(result.len() == 0);
+}
+
+#[test]
+fn for_in_inference() {
+    let result = run("
+        for x in 1..4 {
+            let y = x * 2;
+            ret_u8(y);
+        }
+    ");
+    assert_all(&result, &[ 2u8, 4, 6 ]);
 }
 
 #[test]

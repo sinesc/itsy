@@ -288,7 +288,7 @@ impl<'a> Expression<'a> {
     }
     pub fn as_binary_op(self: &Self) -> Option<&BinaryOp<'a>> {
         match self {
-            Expression::BinaryOp(literal) => Some(literal),
+            Expression::BinaryOp(binary_op) => Some(binary_op),
             _ => None,
         }
     }
@@ -524,8 +524,10 @@ pub enum BinaryOperator {
     Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
     // boolean
     And, Or,
-    // special
-    Range, Index, Access
+    // iterator
+    Range, RangeInclusive,
+    // data offsets
+    Index, Access
 }
 
 impl BinaryOperator {
@@ -556,6 +558,7 @@ impl BinaryOperator {
             "%=" => BinaryOperator::RemAssign,
 
             ".." => BinaryOperator::Range,
+            "..=" => BinaryOperator::RangeInclusive,
             "." => BinaryOperator::Access,
 
             _ => panic!(format!("parser yielded invalid binary operator \"{}\"", op)),
