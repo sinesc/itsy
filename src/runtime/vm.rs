@@ -1,6 +1,5 @@
 //! A virtual machine for running Itsy bytecode.
 
-use std::io::{self, Read};
 use crate::bytecode::Program;
 use crate::runtime::*;
 
@@ -95,21 +94,5 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     /// Returns the current VM state.
     pub fn state(self: &Self) -> VMState {
         self.state
-    }
-}
-
-impl<T, U> Read for VM<T, U> where T: crate::runtime::VMFunc<T> {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = Read::read(&mut &self.program.instructions[self.pc as usize..], buf)?;
-        self.pc += n as u32;
-        Ok(n)
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
-        let n = buf.len();
-        Read::read_exact(&mut &self.program.instructions[self.pc as usize..], buf)?;
-        self.pc += n as u32;
-        Ok(())
     }
 }
