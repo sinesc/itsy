@@ -429,7 +429,7 @@ fn for_in_dec_inclusive() {
 }
 
 #[test]
-fn for_in_inference() {
+fn for_in_inference_let() {
     let result = run("
         for x in 1..4 {
             let y = x * 2;
@@ -437,6 +437,19 @@ fn for_in_inference() {
         }
     ");
     assert_all(&result, &[ 2u8, 4, 6 ]);
+}
+
+#[test]
+fn for_in_inference_assign() {
+    let result = run("
+        let y;
+        for x in 1..4 {
+            y = x * 2;
+            ret_u8(y);
+        }
+        ret_u8(y);
+    ");
+    assert_all(&result, &[ 2u8, 4, 6, 6 ]);
 }
 
 #[test]

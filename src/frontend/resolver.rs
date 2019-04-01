@@ -210,7 +210,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
-            E::Variable(variable)       => self.resolve_variable(variable),
+            E::Variable(variable)       => self.resolve_variable(variable, expected_result),
             E::Call(call)               => self.resolve_call(call),
             E::Member(_)                => { /* nothing to do here */ },
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
@@ -483,13 +483,17 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an occurance of a variable.
-    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>) {
+    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>, expected_result: Option<TypeId>) {
         // resolve binding
         if item.binding_id.is_none() {
             item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.ident.name);
             if item.binding_id.is_none() {
                 panic!("unknown binding {:?} in scope {:?}", item.ident, self.scope_id); // todo: error handling
             }
+        }
+        // set expected type, if any
+        if let Some(expected_result) = expected_result {
+            self.set_bindingtype_id(item, expected_result);
         }
     }
 
@@ -546,13 +550,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
-        self.resolve_variable(&mut item.left);
+        let right_type_id = self.bindingtype_id(&mut item.right);
+        self.resolve_variable(&mut item.left, right_type_id);
         let left_type_id = self.bindingtype_id(&mut item.left);
         self.resolve_expression(&mut item.right, left_type_id);
-        if item.left.binding_id.is_some() && self.bindingtype_id(&mut item.left).is_none() && self.bindingtype_id(&mut item.right).is_some() {
-            let right_type_id = self.bindingtype_id(&mut item.right).unwrap();
-            self.set_bindingtype_id(&mut item.left, right_type_id);
-        }
     }
 
     /// Resolves a binary operation.
