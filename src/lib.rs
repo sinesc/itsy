@@ -126,7 +126,7 @@ macro_rules! extern_rust {
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
             fn to_u16(self: Self) -> u16 {
-                unsafe { ::std::mem::transmute(self) }
+                self as u16
             }
             fn from_u16(index: u16) -> Self {
                 unsafe { ::std::mem::transmute(index) }

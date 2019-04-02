@@ -60,7 +60,7 @@ macro_rules! impl_vm {
             /// Converts bytecode to u8.
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn into_u8(self: Self) -> u8 {
-                unsafe { ::std::mem::transmute(self) }
+                self as u8
             }
             /// Converts u8 to bytecode.
             #[cfg_attr(not(debug_assertions), inline(always))]
