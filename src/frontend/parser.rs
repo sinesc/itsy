@@ -112,9 +112,9 @@ named!(path(Input<'_>) -> Path, do_parse!(
 
 // literal numerical
 
-named!(opt_sign<Input<'_>, Option<Input<'_>>>, opt!(recognize!(one_of!("+-"))));
-named!(opt_fract<Input<'_>, Option<Input<'_>>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
-named!(opt_type<Input<'_>, Option<Input<'_>>>, opt!(recognize!(tuple!(one_of!("iuf"), alt!(tag!("8") | tag!("16") | tag!("32") | tag!("64"))))));
+named!(opt_sign(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(one_of!("+-"))));
+named!(opt_fract(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
+named!(opt_type(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(tuple!(one_of!("iuf"), alt!(tag!("8") | tag!("16") | tag!("32") | tag!("64"))))));
 
 fn parse_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
     // todo: there must be something in std to simplify this
@@ -177,17 +177,17 @@ fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_
     Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as u32))))
 }
 
-named!(numerical<Input<'_>, Literal<'_>>, do_parse!(
+named!(numerical(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), |input| parse_numerical(input, position as u32)) >>
     (result)
 ));
 
-named!(static_size<Input<'_>, u32>, map!(recognize!(digit1), |digits| str::parse::<u32>(*digits).unwrap()));
+named!(static_size(Input<'_>) -> u32, map!(recognize!(digit1), |digits| str::parse::<u32>(*digits).unwrap()));
 
 // literal boolean
 
-named!(boolean<Input<'_>, Literal<'_>>, do_parse!(
+named!(boolean(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(alt!(tag!("true") | tag!("false")), |m| {
         Literal {
@@ -202,7 +202,7 @@ named!(boolean<Input<'_>, Literal<'_>>, do_parse!(
 
 // literal string
 
-named!(string<Input<'_>, Literal<'_>>, do_parse!(
+named!(string(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(delimited!(char!('"'), escaped!(none_of!("\\\""), '\\', one_of!("\"n\\")), char!('"')), |m| {
         Literal {
@@ -217,9 +217,9 @@ named!(string<Input<'_>, Literal<'_>>, do_parse!(
 
 // literal array
 
-named!(array_literal_elements<Input<'_>, Vec<Literal<'_>>>, ws!(separated_list_complete!(char!(','), literal)));
+named!(array_literal_elements(Input<'_>) -> Vec<Literal<'_>>, ws!(separated_list_complete!(char!(','), literal)));
 
-named!(array_literal<Input<'_>, Literal<'_>>, do_parse!(
+named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(delimited!(char!('['), array_literal_elements, char!(']'))), |m| Literal {
         position: position as u32,
@@ -234,15 +234,15 @@ named!(array_literal<Input<'_>, Literal<'_>>, do_parse!(
 
 // struct literal
 
-named!(struct_literal_field<Input<'_>, (&str, Literal<'_>)>, map!(ws!(tuple!(label, char!(':'), literal)),
+named!(struct_literal_field(Input<'_>) -> (&str, Literal<'_>), map!(ws!(tuple!(label, char!(':'), literal)),
     |tuple| (tuple.0, tuple.2)
 ));
 
-named!(struct_literal_fields<Input<'_>, HashMap<&str, Literal<'_>>>, map!(ws!(separated_list_complete!(char!(','), struct_literal_field)), |list| {
+named!(struct_literal_fields(Input<'_>) -> HashMap<&str, Literal<'_>>, map!(ws!(separated_list_complete!(char!(','), struct_literal_field)), |list| {
     list.into_iter().map(|item| (item.0, item.1)).collect()
 }));
 
-named!(struct_literal<Input<'_>, Literal<'_>>, do_parse!(
+named!(struct_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(path, char!('{'), struct_literal_fields, opt!(char!(',')), char!('}'))), |m| Literal {
         position: position as u32,
@@ -261,11 +261,11 @@ named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_litera
 
 // assignment
 
-named!(assignment_operator<Input<'_>, BinaryOperator>, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
+named!(assignment_operator(Input<'_>) -> BinaryOperator, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
     BinaryOperator::from_string(*o)
 }));
 
-named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident, assignment_operator, expression)), |m| {
+named!(assignment(Input<'_>) -> Assignment<'_>, map!(ws!(tuple!(ident, assignment_operator, expression)), |m| {
     Assignment {
         op      : m.1,
         left    : Variable { ident: m.0, binding_id: None },
@@ -275,9 +275,9 @@ named!(assignment<Input<'_>, Assignment<'_>>, map!(ws!(tuple!(ident, assignment_
 
 // call
 
-named!(call_argument_list<Input<'_>, Vec<Expression<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
+named!(call_argument_list(Input<'_>) -> Vec<Expression<'_>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
 
-named!(call<Input<'_>, Call<'_>>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
+named!(call(Input<'_>) -> Call<'_>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
     ident       : m.0,
     args        : m.1,
     function_id : None,
@@ -308,7 +308,7 @@ named!(block(Input<'_>) -> Block<'_>, do_parse!(
 
 // if
 
-named!(block_or_if<Input<'_>, Block<'_>>, do_parse!(
+named!(block_or_if(Input<'_>) -> Block<'_>, do_parse!(
     position: rest_len >>
     result: ws!(alt!(
         map!(if_block, |m| Block {
@@ -322,12 +322,12 @@ named!(block_or_if<Input<'_>, Block<'_>>, do_parse!(
     (result)
 ));
 
-named!(if_else<Input<'_>, Block<'_>>, preceded!(tag!("else"), return_error!(
+named!(if_else(Input<'_>) -> Block<'_>, preceded!(tag!("else"), return_error!(
     ErrorKind::Custom(ParseErrorKind::SyntaxElse as u32),
     block_or_if
 )));
 
-named!(if_block<Input<'_>, IfBlock<'_>>, do_parse!(
+named!(if_block(Input<'_>) -> IfBlock<'_>, do_parse!(
     position: rest_len >>
     result: preceded!(tag!("if"), map!(return_error!(
             ErrorKind::Custom(ParseErrorKind::SyntaxIf as u32),
@@ -345,9 +345,9 @@ named!(if_block<Input<'_>, IfBlock<'_>>, do_parse!(
 
 // expression
 
-named!(parens<Input<'_>, Expression<'_>>, ws!(delimited!(char!('('), expression, char!(')'))));
+named!(parens(Input<'_>) -> Expression<'_>, ws!(delimited!(char!('('), expression, char!(')'))));
 
-named!(unary<Input<'_>, Expression<'_>>, map!(ws!(preceded!(tag!("!"), expression)), |m| {
+named!(unary(Input<'_>) -> Expression<'_>, map!(ws!(preceded!(tag!("!"), expression)), |m| {
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::Not,
         expr        : m,
@@ -355,7 +355,7 @@ named!(unary<Input<'_>, Expression<'_>>, map!(ws!(preceded!(tag!("!"), expressio
     }))
 }));
 
-named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
+named!(prefix(Input<'_>) -> Expression<'_>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::prefix_from_string(*m.0),
         expr        : Expression::Variable(Variable { ident: m.1, binding_id: None }),
@@ -363,7 +363,7 @@ named!(prefix<Input<'_>, Expression<'_>>, map!(ws!(pair!(alt!(tag!("!") | tag!("
     }))
 }));
 
-named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
+named!(suffix(Input<'_>) -> Expression<'_>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
     Expression::UnaryOp(Box::new(UnaryOp {
         op          : UnaryOperator::suffix_from_string(*m.1),
         expr        : Expression::Variable(Variable { ident: m.0, binding_id: None }),
@@ -371,7 +371,7 @@ named!(suffix<Input<'_>, Expression<'_>>, map!(ws!(pair!(ident, alt!(tag!("++") 
     }))
 }));
 
-named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
+named!(operand(Input<'_>) -> Expression<'_>, ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
     map!(boolean, |m| Expression::Literal(m))
     | map!(string, |m| Expression::Literal(m))
     | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
@@ -385,7 +385,7 @@ named!(operand<Input<'_>, Expression<'_>>, ws!(alt!( // todo: this may require c
     | map!(ident, |m| Expression::Variable(Variable { ident: m, binding_id: None }))
 )));
 
-named!(prec6<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec6(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: operand >>
     res: fold_many0!(
         alt!(
@@ -398,7 +398,7 @@ named!(prec6<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec5<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec5(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec6 >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
@@ -408,7 +408,7 @@ named!(prec5<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec4<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec4(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec5 >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("+") | tag!("-")), |o| BinaryOperator::from_string(*o)), prec5),
@@ -418,7 +418,7 @@ named!(prec4<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec3<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec3(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec4 >>
     res: fold_many0!( // todo: does this work? see comment on "operand"
         pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| BinaryOperator::from_string(*o)), prec4),
@@ -428,7 +428,7 @@ named!(prec3<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec2<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec2(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec3 >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("!=") | tag!("==")), |o| BinaryOperator::from_string(*o)), prec3),
@@ -438,7 +438,7 @@ named!(prec2<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec1<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec1(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec2 >>
     res: fold_many0!(
         pair!(map!(tag!("&&"), |o| BinaryOperator::from_string(*o)), prec2),
@@ -448,7 +448,7 @@ named!(prec1<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec0<Input<'_>, Expression<'_>>, ws!(do_parse!(
+named!(prec0(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec1 >>
     res: fold_many0!(
         pair!(map!(tag!("||"), |o| BinaryOperator::from_string(*o)), prec1),
@@ -458,7 +458,7 @@ named!(prec0<Input<'_>, Expression<'_>>, ws!(do_parse!(
     (res)
 )));
 
-named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
+named!(expression(Input<'_>) -> Expression<'_>, ws!(alt!(
     map!(assignment, |m| Expression::Assignment(Box::new(m)))
     | map!(array_literal, |m| Expression::Literal(m))
     | map!(struct_literal, |m| Expression::Literal(m))
@@ -467,7 +467,7 @@ named!(expression<Input<'_>, Expression<'_>>, ws!(alt!(
 
 // let
 
-named!(binding<Input<'_>, Statement<'_>>, do_parse!(
+named!(binding(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(
         preceded!(tag!("let"), return_error!(
@@ -488,22 +488,22 @@ named!(binding<Input<'_>, Statement<'_>>, do_parse!(
 
 // inline type
 // todo: everything using TypeName needs to be switched to this
-named!(inline_type<Input<'_>, InlineType<'_>>, alt!(
+named!(inline_type(Input<'_>) -> InlineType<'_>, alt!(
     map!(path, |t| InlineType::TypeName(TypeName::from_path(t)))
     | map!(array, |a| InlineType::Array(Box::new(a)))
 ));
 
 // struct definition
 
-named!(struct_field<Input<'_>, (&str, InlineType<'_>)>, map!(ws!(tuple!(label, char!(':'), inline_type)),
+named!(struct_field(Input<'_>) -> (&str, InlineType<'_>), map!(ws!(tuple!(label, char!(':'), inline_type)),
     |tuple| (tuple.0, tuple.2)
 ));
 
-named!(struct_fields<Input<'_>, Vec<(&str, InlineType<'_>)>>, map!(ws!(separated_list_complete!(char!(','), struct_field)), |list| {
+named!(struct_fields(Input<'_>) -> Vec<(&str, InlineType<'_>)>, map!(ws!(separated_list_complete!(char!(','), struct_field)), |list| {
     list.into_iter().map(|item| (item.0, item.1)).collect()
 }));
 
-named!(struct_<Input<'_>, Statement<'_>>, do_parse!(
+named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
         position: position as u32,
@@ -516,7 +516,7 @@ named!(struct_<Input<'_>, Statement<'_>>, do_parse!(
 
 // array definition
 
-named!(array<Input<'_>, Array<'_>>, do_parse!(
+named!(array(Input<'_>) -> Array<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(delimited!(char!('['), tuple!(inline_type, char!(';'), static_size), char!(']'))), |tuple| Array {
         position    : position as u32,
@@ -529,7 +529,7 @@ named!(array<Input<'_>, Array<'_>>, do_parse!(
 
 // function
 
-named!(signature_argument<Input<'_>, Binding<'_>>, do_parse!(
+named!(signature_argument(Input<'_>) -> Binding<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), path)), |tuple| Binding {
         position    : position as u32,
@@ -542,11 +542,11 @@ named!(signature_argument<Input<'_>, Binding<'_>>, do_parse!(
     (result)
 ));
 
-named!(signature_argument_list<Input<'_>, Vec<Binding<'_>>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
+named!(signature_argument_list(Input<'_>) -> Vec<Binding<'_>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
-named!(signature_return_part<Input<'_>, Path>, ws!(preceded!(tag!("->"), path)));
+named!(signature_return_part(Input<'_>) -> Path, ws!(preceded!(tag!("->"), path)));
 
-named!(signature<Input<'_>, Signature<'_>>, map!(
+named!(signature(Input<'_>) -> Signature<'_>, map!(
     preceded!(tag!("fn"), return_error!(
         ErrorKind::Custom(ParseErrorKind::SyntaxFn as u32),
         ws!(tuple!(ident, signature_argument_list, opt!(signature_return_part)))
@@ -556,7 +556,7 @@ named!(signature<Input<'_>, Signature<'_>>, map!(
     ret     : if let Some(sig_ty) = sig.2 { Some(TypeName::from_path(sig_ty)) } else { None },
 }));
 
-named!(function<Input<'_>, Statement<'_>>, do_parse!(
+named!(function(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
         position    : position as u32,
@@ -572,11 +572,11 @@ named!(function<Input<'_>, Statement<'_>>, do_parse!(
 
 // TODO: accept "for ident in expression" and make .. an operator. implement iterators.
 
-named!(for_loop_range<Input<'_>, Expression<'_>>, map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
+named!(for_loop_range(Input<'_>) -> Expression<'_>, map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
     Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::from_string(*m.1), left: m.0, right: m.2, binding_id: None }))
 }));
 
-named!(for_loop<Input<'_>, ForLoop<'_>>, do_parse!(
+named!(for_loop(Input<'_>) -> ForLoop<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
         position: position as u32,
@@ -597,7 +597,7 @@ named!(for_loop<Input<'_>, ForLoop<'_>>, do_parse!(
 
 // while loop
 
-named!(while_loop<Input<'_>, WhileLoop<'_>>, do_parse!(
+named!(while_loop(Input<'_>) -> WhileLoop<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(preceded!(tag!("while"), tuple!(expression, block))), |m| WhileLoop {
         position: position as u32,
@@ -610,7 +610,7 @@ named!(while_loop<Input<'_>, WhileLoop<'_>>, do_parse!(
 
 // return
 
-named!(return_statement<Input<'_>, Statement<'_>>, do_parse!(
+named!(return_statement(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(preceded!(tag!("return"), terminated!(opt!(expression), char!(';')))),
         |m| Statement::Return(Return {
@@ -624,7 +624,7 @@ named!(return_statement<Input<'_>, Statement<'_>>, do_parse!(
 
 // statement
 
-named!(statement<Input<'_>, Statement<'_>>, alt!(
+named!(statement(Input<'_>) -> Statement<'_>, alt!(
     binding
     | map!(if_block, |m| Statement::IfBlock(m))
     | function
