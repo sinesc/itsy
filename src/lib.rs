@@ -125,7 +125,7 @@ macro_rules! extern_rust {
     } };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
-            fn to_u16(self: Self) -> u16 {
+            fn into_u16(self: Self) -> u16 {
                 self as u16
             }
             fn from_u16(index: u16) -> Self {
@@ -135,7 +135,7 @@ macro_rules! extern_rust {
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($type_name::$name.to_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
+                    map.insert(stringify!($name), ($type_name::$name.into_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
                 )*
                 map
             }

@@ -29,7 +29,7 @@ macro_rules! impl_vm {
     (read f32, $from:ident) => ( impl_vm!(do_read f32 4 $from) );
     (read f64, $from:ident) => ( impl_vm!(do_read f64 8 $from) );
 
-    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_u16().to_le_bytes()[..]) );
+    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_u16().to_le_bytes()[..]) );
     (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
 
     (map_writer_type RustFn) => ( T );

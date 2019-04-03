@@ -8,7 +8,7 @@ pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
     #[doc(hidden)]
     fn from_u16(index: u16) -> Self;
     #[doc(hidden)]
-    fn to_u16(self: Self) -> u16;
+    fn into_u16(self: Self) -> u16;
     #[doc(hidden)]
     fn call_info() -> HashMap<&'static str, (u16, &'static str, Vec<&'static str>)>;
 }
