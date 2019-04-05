@@ -739,7 +739,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
         } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
-            if !self.primitives.is_compatible_numeric(numeric, expected_type) {
+            let ty = self.scopes.type_ref(expected_type);
+            if !ty.is_compatible_numeric(numeric) {
                 panic!("incompatible numeric literal");
             }
             self.set_bindingtype_id(item, expected_type);
@@ -754,19 +755,6 @@ impl<'a, 'b> Resolver<'a, 'b> {
         } else {
             self.try_create_anon_binding(item);
         }
-
-
-        // todo: typehint
-        /* else if let Some(type_hint) = type_hint {
-            // we got a type hint, try to match it
-            match item.value {
-                LV::Bool(_) => if type_hint != self.primitives.bool { panic!("Inferred type is incompatible to this boolean literal") },
-                LV::Numeric(n) => if !self.primitives.is_compatible_numeric(n) { panic!("Inferred type is incompatible to this numeric literal") },
-                LV::String(_) => if type_hint != self.primitives.string { panic!("Inferred type is incompatible to this string literal") }
-                LV::Array(ref n) => unimplemented!("Array literal {:?}", n) // todo: how to approach this?
-            }
-            self.set_bindingtype_id(item);
-        } */
     }
 
     /// Resolves an struct literal and creates the required field types.

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::{util::TypeId, runtime::Value};
+use crate::{util::{TypeId, Numeric}, runtime::Value};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -152,6 +152,29 @@ impl Type {
             Type::Array(_) => TypeKind::Array,
         }
     }
+    /// Whether the given numeric is compatible with this type.
+    pub fn is_compatible_numeric(self: &Self, value: Numeric) -> bool {
+        use std::{u8, u16, u32, u64, i8, i16, i32, i64};
+        use crate::util::{Signed, Unsigned};
+        if value.is_float() && self.is_float() {
+            true
+        } else if value.is_integer() && self.is_integer() {
+            let range = match self {
+                Type::u8    => (Numeric::Unsigned(u8::MIN as Unsigned), Numeric::Unsigned(u8::MAX as Unsigned)),
+                Type::u16   => (Numeric::Unsigned(u16::MIN as Unsigned), Numeric::Unsigned(u16::MAX as Unsigned)),
+                Type::u32   => (Numeric::Unsigned(u32::MIN as Unsigned), Numeric::Unsigned(u32::MAX as Unsigned)),
+                Type::u64   => (Numeric::Unsigned(u64::MIN as Unsigned), Numeric::Unsigned(u64::MAX as Unsigned)),
+                Type::i8    => (Numeric::Signed(i8::MIN as Signed), Numeric::Signed(i8::MAX as Signed)),
+                Type::i16   => (Numeric::Signed(i16::MIN as Signed), Numeric::Signed(i16::MAX as Signed)),
+                Type::i32   => (Numeric::Signed(i32::MIN as Signed), Numeric::Signed(i32::MAX as Signed)),
+                Type::i64   => (Numeric::Signed(i64::MIN as Signed), Numeric::Signed(i64::MAX as Signed)),
+                _ => unreachable!(),
+            };
+            range.0 <= value && range.1 >= value
+        } else {
+            false
+        }
+    }
     /// Whether the type is an array.
     pub fn is_array(self: &Self) -> bool {
         match self.kind() {
@@ -183,7 +206,7 @@ impl Type {
     /// Whether the type is a primitive.
     pub fn is_primitive(self: &Self) -> bool {
         match self.kind() {
-            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool | TypeKind::String => true,
+            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool => true,
             _ => false
         }
     }

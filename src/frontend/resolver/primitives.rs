@@ -1,40 +1,34 @@
 use crate::util::{Type, TypeId, ScopeId, Numeric, Signed, Unsigned};
 use crate::frontend::resolver::scopes::Scopes;
 
-pub struct IntegerRange {
+pub struct IntegerRange { // todo: try to remove this (range stuff now on Type)
     pub type_id: TypeId,
     pub min: Numeric,
     pub max: Numeric,
 }
 
-// todo: remove
-#[allow(dead_code)]
 /// Utility structure to handle primitive type information and casting.
-pub(crate) struct Primitives {
-    /// Void type
-    void        : TypeId,
+pub(crate) struct Primitives { // todo: try to move back into resolver
     /// Boolean type
-    pub bool    : TypeId,           // todo: temp pub
+    pub bool    : TypeId,
+    /// Unsigned types ordered by bit count.
+    pub unsigned: [ IntegerRange; 4 ],  // [ TypeId; 4 ] or maybe 4 individual fields
+    /// Signed types ordered by bit count.
+    pub signed  : [ IntegerRange; 4 ],  // see above
+    /// Floating point types ordered by bit count.
+    pub float   : [ TypeId; 2 ],
     /// String type
     pub string  : TypeId,
-    /// Unsigned types ordered by bit count.
-    pub unsigned: [ IntegerRange; 4 ],
-    /// Signed types ordered by bit count.
-    signed      : [ IntegerRange; 4 ],
-    /// Floating point types ordered by bit count.
-    pub float   : [ TypeId; 2 ],        // todo: temp pub
 }
 
-#[allow(dead_code)]
 impl Primitives {
 
     /// Create new instance.
     pub fn new(scopes: &mut Scopes, root_scope_id: ScopeId) -> Self {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
+        scopes.insert_type(root_scope_id, None, Type::void);
         Primitives {
-            void: scopes.insert_type(root_scope_id, None, Type::void), // FIXME: don't actually want void here
             bool: scopes.insert_type(root_scope_id, Some("bool"), Type::bool),
-            string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
             unsigned: [
                 IntegerRange {
                     type_id: scopes.insert_type(root_scope_id, Some("u8"), Type::u8),
@@ -83,9 +77,11 @@ impl Primitives {
                 scopes.insert_type(root_scope_id, Some("f32"), Type::f32),
                 scopes.insert_type(root_scope_id, Some("f64"), Type::f64),
             ],
+            string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
         }
     }
 
+/*
     /// Check if the given type is unsigned.
     pub fn is_unsigned(self: &Self, type_id: TypeId) -> bool {
         type_id >= self.unsigned.first().unwrap().type_id && type_id <= self.unsigned.last().unwrap().type_id
@@ -104,32 +100,6 @@ impl Primitives {
     /// Check if the given type is a float.
     pub fn is_float(self: &Self, type_id: TypeId) -> bool {
         type_id >= *self.float.first().unwrap() && type_id <= *self.float.last().unwrap()
-    }
-
-    /// Check if it is possible to represent source as target-type.
-    pub fn is_compatible(self: &Self, source_type_id: TypeId, target_type_id: TypeId) -> bool {
-        if source_type_id == target_type_id {
-            true
-        } else if self.is_unsigned(source_type_id) {
-            if self.is_unsigned(target_type_id) && source_type_id <= target_type_id {
-                // unsigned -> unsigned: valid if target has equal or more bits (primitive type_ids are ordered)
-                true
-            } else if self.is_signed(target_type_id) {
-                // unsigned -> signed: valid if target has more bits (compare index within group of signed / unsigned types)
-                Self::group_index(source_type_id, &self.unsigned) < Self::group_index(target_type_id, &self.signed)
-            } else {
-                // unsigned -> everything else: invalid
-                false
-            }
-        } else if self.is_signed(source_type_id) && self.is_signed(target_type_id) && source_type_id <= target_type_id {
-            // signed -> signed: valid if target has equal or more bits (primitive type_ids are ordered)
-            true
-        } else if self.is_float(source_type_id) && self.is_float(target_type_id) && source_type_id <= target_type_id {
-            true
-        } else {
-            // everything else: invalid
-            false
-        }
     }
 
     /// Check if it is possible to store given numeric using given target type.
@@ -167,24 +137,32 @@ impl Primitives {
         index
     }
 
+    /// Check if it is possible to represent source as target-type.
+    pub fn is_compatible(self: &Self, source_type_id: TypeId, target_type_id: TypeId) -> bool {
+        if source_type_id == target_type_id {
+            true
+        } else if self.is_unsigned(source_type_id) {
+            if self.is_unsigned(target_type_id) && source_type_id <= target_type_id {
+                // unsigned -> unsigned: valid if target has equal or more bits (primitive type_ids are ordered)
+                true
+            } else if self.is_signed(target_type_id) {
+                // unsigned -> signed: valid if target has more bits (compare index within group of signed / unsigned types)
+                Self::group_index(source_type_id, &self.unsigned) < Self::group_index(target_type_id, &self.signed)
+            } else {
+                // unsigned -> everything else: invalid
+                false
+            }
+        } else if self.is_signed(source_type_id) && self.is_signed(target_type_id) && source_type_id <= target_type_id {
+            // signed -> signed: valid if target has equal or more bits (primitive type_ids are ordered)
+            true
+        } else if self.is_float(source_type_id) && self.is_float(target_type_id) && source_type_id <= target_type_id {
+            true
+        } else {
+            // everything else: invalid
+            false
+        }
+    }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
     /// Tries to find a type capable of holding both given types.
     pub fn cast(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> Option<TypeId> {
         if self.is_compatible(type_id_a, type_id_b) {
@@ -197,7 +175,7 @@ impl Primitives {
             None
         }
     }
-*/
+
     pub fn classify_numeric(self: &Self, value: Numeric) -> Option<TypeId> {
         if value.is_integer() {
             let allowed_types = [ &self.signed[2], &self.signed[3], &self.unsigned[3] ];
@@ -210,7 +188,7 @@ impl Primitives {
             None
         }
     }
-/*
+
     /// Tries to find a type capable of holding both given literals.
     pub fn cast_literal(self: &Self, literal_a: &ast::Literal<'_>, literal_b: &ast::Literal<'_>) -> Option<TypeId> {
 
