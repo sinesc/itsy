@@ -46,9 +46,24 @@ macro_rules! impl_vm {
     ) => {
 
         /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_vm!` macro.
+        /// # Naming
+        ///
+        /// `<op><suffix1>_<suffix2>`
+        ///
+        /// `suffix1` refers to stack inputs\
+        /// `suffix2` refers to bytecode (compiletime) arguments
+        ///
+        /// `f`/`s`/`u`/`i`/`r`   float/signed/unsigned/any integer/raw, default: `i` for stack input, `u` for arguments\
+        /// `8`/`16`/`32`/`64`  size, default: `32` for stack input, `8` for arguments
+        ///
+        /// # Examples
+        /// `addi`        add two 32 bit integer\
+        /// `addf64`      add two 64 bit floats\
+        /// `constr_16`   load 32 bit from constpool at given 16 bit address
         #[allow(non_camel_case_types)]
         #[repr(u8)]
-        pub(crate) enum ByteCode {
+        pub enum OpCode {
+            /// Calls the given Rust function.
             rustcall,
             $(
                 $( #[ $attr ] )*
@@ -56,7 +71,7 @@ macro_rules! impl_vm {
             ),+
         }
 
-        impl ByteCode {
+        impl OpCode {
             /// Converts bytecode to u8.
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn into_u8(self: Self) -> u8 {
@@ -74,7 +89,7 @@ macro_rules! impl_vm {
             /// Calls the given Rust function.
             pub fn rustcall(self: &Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
                 let insert_pos = self.position();
-                impl_vm!(write u8, ByteCode::rustcall.into_u8(), self);
+                impl_vm!(write u8, OpCode::rustcall.into_u8(), self);
                 impl_vm!(write RustFn, func, self);
                 insert_pos as u32
             }
@@ -83,7 +98,7 @@ macro_rules! impl_vm {
                 #[allow(unused_imports)]
                 pub fn $name(self: &Self, $($op_name: impl_vm!(map_writer_type $op_type)),* ) -> u32 {
                     let insert_pos = self.position();
-                    impl_vm!(write u8, ByteCode::$name.into_u8(), self);
+                    impl_vm!(write u8, OpCode::$name.into_u8(), self);
                     $( impl_vm!(write $op_type, $op_name, self); )*
                     insert_pos as u32
                 }
@@ -109,17 +124,17 @@ macro_rules! impl_vm {
                 let position = self.pc;
                 if position < self.program.instructions.len() as u32 {
                     let instruction = impl_vm!(read u8, self);
-                    match ByteCode::from_u8(instruction) {
+                    match OpCode::from_u8(instruction) {
                         // todo: rustcall specialcase is required since normal opcodes don't receive the context
                         // considering refactoring this so that all opcodes receive the context if it turns out that
                         // additional opcodes require it
-                        ByteCode::rustcall => {
+                        OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
                             result.push_str(&format!("{:?} ", impl_vm!(read RustFn, self) ));
                             Some(result)
                         }
                         $(
-                            ByteCode::$name => {
+                            OpCode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
                                 $(
                                     result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self) ));
@@ -138,12 +153,12 @@ macro_rules! impl_vm {
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 let instruction = impl_vm!(read u8, self);
-                match ByteCode::from_u8(instruction) {
-                    ByteCode::rustcall => {
+                match OpCode::from_u8(instruction) {
+                    OpCode::rustcall => {
                         T::from_u16(impl_vm!(read RustFn, self)).exec(self, context);
                     },
                     $(
-                        ByteCode::$name => {
+                        OpCode::$name => {
                             let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self) ),* );
                             self.$name( $( $op_name ),* );
                         }

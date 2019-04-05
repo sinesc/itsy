@@ -29,11 +29,11 @@ impl_vm!{
     }
 
     /// Load 4 byte from constant pool onto stack.
-    fn constr32(self: &mut Self, const_id: u8) {
-        self.constr32_16(const_id as u16);
+    fn constr(self: &mut Self, const_id: u8) {
+        self.constr_16(const_id as u16);
     }
     /// Load 4 byte from constant pool onto stack.
-    fn constr32_16(self: &mut Self, const_id: u16) {
+    fn constr_16(self: &mut Self, const_id: u16) {
         let const_id = const_id as usize;
         let tmp: u32 = u32::from_le_bytes(array4(&self.program.consts[const_id..const_id +4]));
         self.stack.push(tmp);
@@ -88,25 +88,73 @@ impl_vm!{
         self.stack.push(-1i32);
     }
 
+    /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
+    fn load_arg1(self: &mut Self) {
+        let local: Value = self.stack.load_fp(-4);
+        self.stack.push(local);
+    }
+    /// Load function argument 2 and push it onto the stack. Equivalent to load -5.
+    fn load_arg2(self: &mut Self) {
+        let local: Value = self.stack.load_fp(-5);
+        self.stack.push(local);
+    }
+    /// Load function argument 3 and push it onto the stack. Equivalent to load -6.
+    fn load_arg3(self: &mut Self) {
+        let local: Value = self.stack.load_fp(-6);
+        self.stack.push(local);
+    }
+
     /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
-    fn loadr32(self: &mut Self, offset: i32) {
+    fn loadr_s8(self: &mut Self, offset: i8) {
+        self.loadr_s32(offset as i32);
+    }
+    /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
+    fn loadr_s16(self: &mut Self, offset: i16) {
+        self.loadr_s32(offset as i32);
+    }
+    /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
+    fn loadr_s32(self: &mut Self, offset: i32) {
         let local: Value = self.stack.load_fp(offset);
         self.stack.push(local);
     }
     /// Pop stackvalue and store it at the given offset (relative to the stackframe).
-    fn storer32(self: &mut Self, offset: i32) {
+    fn storer_s8(self: &mut Self, offset: i8) {
+        self.storer_s32(offset as i32);
+    }
+    /// Pop stackvalue and store it at the given offset (relative to the stackframe).
+    fn storer_s16(self: &mut Self, offset: i16) {
+        self.storer_s32(offset as i32);
+    }
+    /// Pop stackvalue and store it at the given offset (relative to the stackframe).
+    fn storer_s32(self: &mut Self, offset: i32) {
         let local: Value = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
     /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
-    fn loadr64(self: &mut Self, offset: i32) {
-        let local: i64 = self.stack.load_fp(offset);
+    fn loadr64_s8(self: &mut Self, offset: i8) {
+        self.loadr64_s32(offset as i32);
+    }
+    /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
+    fn loadr64_s16(self: &mut Self, offset: i16) {
+        self.loadr64_s32(offset as i32);
+    }
+    /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
+    fn loadr64_s32(self: &mut Self, offset: i32) {
+        let local: Value64 = self.stack.load_fp(offset);
         self.stack.push(local);
     }
     /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
-    fn storer64(self: &mut Self, offset: i32) {
-        let local: i64 = self.stack.pop();
+    fn storer64_s8(self: &mut Self, offset: i8) {
+        self.storer64_s32(offset as i32);
+    }
+    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
+    fn storer64_s16(self: &mut Self, offset: i16) {
+        self.storer64_s32(offset as i32);
+    }
+    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
+    fn storer64_s32(self: &mut Self, offset: i32) {
+        let local: Value64 = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
@@ -191,21 +239,6 @@ impl_vm!{
         self.stack.push(data);
     }
 
-    /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
-    fn load_arg1(self: &mut Self) {
-        let local: Value = self.stack.load_fp(-4);
-        self.stack.push(local);
-    }
-    /// Load function argument 2 and push it onto the stack. Equivalent to load -5.
-    fn load_arg2(self: &mut Self) {
-        let local: Value = self.stack.load_fp(-5);
-        self.stack.push(local);
-    }
-    /// Load function argument 3 and push it onto the stack. Equivalent to load -6.
-    fn load_arg3(self: &mut Self) {
-        let local: Value = self.stack.load_fp(-6);
-        self.stack.push(local);
-    }
     /// Clones the top stack value and pushes it.
     fn clone32(self: &mut Self) {
         let data: Value = self.stack.top();

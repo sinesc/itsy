@@ -7,6 +7,7 @@ mod compiler;
 use std::marker::PhantomData;
 pub use self::writer::*;
 pub use self::compiler::compile;
+pub use self::opcodes::OpCode;
 
 /// An Itsy bytecode program.
 #[derive(Debug)]

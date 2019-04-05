@@ -378,7 +378,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
                     Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
                     Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.constr16(pos as u8); } // todo: handle pos > 255
-                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr32(pos as u8); } // todo: handle pos > 255
+                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr(pos as u8); } // todo: handle pos > 255
                     Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.constr64(pos as u8); } // todo: handle pos > 255
                     _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
                 }
@@ -743,7 +743,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.addi();
         } else {
             let const_id = self.writer.store_const(offset);
-            self.writer.constr32(const_id as u8); // todo: handle id > 255
+            self.writer.constr(const_id as u8); // todo: handle id > 255
             self.writer.addi();
         }
     }
@@ -888,33 +888,55 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, index: i32, ty: &Type) {
+        use std::{i8, i16, i32};
         let size = ty.size();
         let kind = ty.kind();
-        if kind == TypeKind::String || kind == TypeKind::Array {
-            self.writer.storer64(index);
+        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.storer64_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.storer64_s16(index as i16);
+            } else {
+                self.writer.storer64_s32(index);
+            }
         } else if size <= 4 {
-            self.writer.storer32(index);
-        } else if size == 8 {
-            self.writer.storer64(index);
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.storer_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.storer_s16(index as i16);
+            } else {
+                self.writer.storer_s32(index);
+            }
         } else {
             panic!("Unsupported type {:?} for store operation", ty);
         }
     }
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, index: i32, ty: &Type) {
+        use std::{i8, i16, i32};
         let size = ty.size();
         let kind = ty.kind();
-        if kind == TypeKind::String || kind == TypeKind::Array {
-            self.writer.loadr64(index);
+        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.loadr64_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.loadr64_s16(index as i16);
+            } else {
+                self.writer.loadr64_s32(index);
+            }
         } else if size <= 4 {
             match index {
                 -4 => self.writer.load_arg1(),
                 -5 => self.writer.load_arg2(),
                 -6 => self.writer.load_arg3(),
-                _ => self.writer.loadr32(index),
+                _ => if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                    self.writer.loadr_s8(index as i8)
+                } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                    self.writer.loadr_s16(index as i16)
+                } else {
+                    self.writer.loadr_s32(index)
+                }
             };
-        } else if size == 8 {
-            self.writer.loadr64(index);
         } else {
             panic!("Unsupported type {:?} for load operation", ty);
         }

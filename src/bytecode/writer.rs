@@ -48,6 +48,7 @@ impl<T> Writer<T> where T: VMFunc<T> {
         self.position.set(original_position);
         result
     }
+    /// Write to the current position.
     pub(crate) fn write(self: &Self, buf: &[u8]) {
         let buf_len = buf.len() as u32;
         if self.position() == self.len() {
