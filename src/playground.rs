@@ -70,7 +70,7 @@ fn main() {
     println!("{}", source);
     println!("{:#?}", parse(source));
     let mut vm = vm::<MyFns, u32>(source);
-    println!("{:}", vm.dump_program());
+    println!("{:}", vm.format_program());
     let vm_start = std::time::Instant::now();
     let mut result = 0;
     vm.run(&mut result);

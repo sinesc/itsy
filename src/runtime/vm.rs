@@ -50,33 +50,29 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     }
 
     /// Disassembles the bytecode and returns it as a string.
-    pub fn dump_program(self: &mut Self) -> String { // todo: should not have to require mut
-        let pc = self.pc;
-        self.pc = 0;
+    pub fn format_program(self: &Self) -> String {
+        let mut position = 0;
         let mut result = "".to_string();
-        while let Some(instruction) = self.format_instruction() {
+        while let Some((instruction, next_position)) = self.parse_instruction(position) {
             result.push_str(&instruction);
             result.push_str("\n");
+            position = next_position;
         }
-        self.pc = pc;
         return result;
     }
 
     /// Disassembles the current bytecode instruction and returns it as a string.
-    pub fn dump_instruction(self: &mut Self) -> Option<String> {// todo: should not have to require mut
-        let pc = self.pc;
-        let result = self.format_instruction();
-        self.pc = pc;
-        result
+    pub fn format_instruction(self: &Self) -> Option<String> {
+        self.parse_instruction(self.pc).map(|result| result.0)
     }
 
     /// Returns the current stack as a string.
-    pub fn dump_stack(self: &Self) -> String {
+    pub fn format_stack(self: &Self) -> String {
         format!("{:?}", self.stack)
     }
 
     /// Returns the current stack-frame as a string.
-    pub fn dump_frame(self: &Self) -> String {
+    pub fn format_frame(self: &Self) -> String {
         format!("{:?}", &self.stack.frame())
     }
 

@@ -9,25 +9,25 @@ macro_rules! impl_vm {
     (to_array 8 $slice:ident) => ( array8($slice) );
 
     // perform read from slice
-    (do_read $ty:tt $size:tt $from:ident) => ( {
-        let slice = &$from.program.instructions[$from.pc as usize..];
+    (do_read $ty:tt, $size:tt, $from:ident, $counter:expr) => ( {
+        let slice = &$from.program.instructions[$counter as usize..];
         let dest: $ty = $ty::from_le_bytes( impl_vm!(to_array $size slice) );
-        $from.pc += $size;
+        $counter += $size;
         dest
     });
 
     // wrappers for readers and writers
-    (read RustFn, $from:ident) => ( impl_vm!(do_read u16 2 $from) );
-    (read u8, $from:ident) => ( impl_vm!(do_read u8 1 $from) );
-    (read u16, $from:ident) => ( impl_vm!(do_read u16 2 $from) );
-    (read u32, $from:ident) => ( impl_vm!(do_read u32 4 $from) );
-    (read u64, $from:ident) => ( impl_vm!(do_read u64 8 $from) );
-    (read i8,  $from:ident) => ( impl_vm!(do_read i8 1 $from) );
-    (read i16, $from:ident) => ( impl_vm!(do_read i16 2 $from) );
-    (read i32, $from:ident) => ( impl_vm!(do_read i32 4 $from) );
-    (read i64, $from:ident) => ( impl_vm!(do_read i64 8 $from) );
-    (read f32, $from:ident) => ( impl_vm!(do_read f32 4 $from) );
-    (read f64, $from:ident) => ( impl_vm!(do_read f64 8 $from) );
+    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, 2, $from, $counter) );
+    (read u8, $from:ident, $counter:expr) => ( impl_vm!(do_read u8, 1, $from, $counter) );
+    (read u16, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, 2, $from, $counter) );
+    (read u32, $from:ident, $counter:expr) => ( impl_vm!(do_read u32, 4, $from, $counter) );
+    (read u64, $from:ident, $counter:expr) => ( impl_vm!(do_read u64, 8, $from, $counter) );
+    (read i8,  $from:ident, $counter:expr) => ( impl_vm!(do_read i8, 1, $from, $counter) );
+    (read i16, $from:ident, $counter:expr) => ( impl_vm!(do_read i16, 2, $from, $counter) );
+    (read i32, $from:ident, $counter:expr) => ( impl_vm!(do_read i32, 4, $from, $counter) );
+    (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, 8, $from, $counter) );
+    (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, 4, $from, $counter) );
+    (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, 8, $from, $counter) );
 
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_u16().to_le_bytes()[..]) );
     (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
@@ -117,29 +117,29 @@ macro_rules! impl_vm {
                 }
             )+
 
-            /// Formats the given VMs bytecode data as human readable output.
+            /// Returns disassembled opcode at given position along with the next opcode position.
             #[allow(unused_imports)]
             #[allow(unused_mut)]
-            pub(crate) fn format_instruction(self: &mut Self) -> Option<String> {
-                let position = self.pc;
+            pub(crate) fn parse_instruction(self: &Self, position: u32) -> Option<(String, u32)> {
+                let mut position = position;
                 if position < self.program.instructions.len() as u32 {
-                    let instruction = impl_vm!(read u8, self);
+                    let instruction = impl_vm!(read u8, self, position);
                     match OpCode::from_u8(instruction) {
                         // todo: rustcall specialcase is required since normal opcodes don't receive the context
                         // considering refactoring this so that all opcodes receive the context if it turns out that
                         // additional opcodes require it
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", impl_vm!(read RustFn, self) ));
-                            Some(result)
+                            result.push_str(&format!("{:?} ", impl_vm!(read RustFn, self, position) ));
+                            Some((result, position))
                         }
                         $(
                             OpCode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
                                 $(
-                                    result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self) ));
+                                    result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self, position) ));
                                 )*
-                                Some(result)
+                                Some((result, position))
                             }
                         ),+,
                     }
@@ -152,14 +152,14 @@ macro_rules! impl_vm {
             #[allow(unused_imports)]
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
-                let instruction = impl_vm!(read u8, self);
+                let instruction = impl_vm!(read u8, self, self.pc);
                 match OpCode::from_u8(instruction) {
                     OpCode::rustcall => {
-                        T::from_u16(impl_vm!(read RustFn, self)).exec(self, context);
+                        T::from_u16(impl_vm!(read RustFn, self, self.pc)).exec(self, context);
                     },
                     $(
                         OpCode::$name => {
-                            let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self) ),* );
+                            let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self, self.pc) ),* );
                             self.$name( $( $op_name ),* );
                         }
                     ),+
