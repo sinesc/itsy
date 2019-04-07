@@ -130,7 +130,7 @@ macro_rules! impl_vm {
                         // additional opcodes require it
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", impl_vm!(read RustFn, self, position) ));
+                            result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, position) )));
                             Some((result, position))
                         }
                         $(
