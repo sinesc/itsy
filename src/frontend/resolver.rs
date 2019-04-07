@@ -222,6 +222,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 //}
             }
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
+            E::Cast(cast)               => self.resolve_cast(cast),
             E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block),
         };
@@ -554,6 +555,23 @@ impl<'a, 'b> Resolver<'a, 'b> {
         self.resolve_variable(&mut item.left, right_type_id);
         let left_type_id = self.bindingtype_id(&mut item.left);
         self.resolve_expression(&mut item.right, left_type_id);
+    }
+
+    /// Resolves an assignment expression.
+    fn resolve_cast(self: &mut Self, item: &mut ast::Cast<'a>) {
+        self.resolve_type(&mut item.ty);
+        self.resolve_expression(&mut item.expr, None);
+        if let Some(type_id) = item.ty.type_id {
+            self.set_bindingtype_id(item, type_id);
+            if !self.scopes.type_ref(type_id).is_primitive() {
+                panic!("non primitive cast");
+            }
+        }
+        if let Some(ty) = self.bindingtype(&mut item.expr) {
+            if !ty.is_primitive() {
+                panic!("non primitive cast");
+            }
+        }
     }
 
     /// Resolves a binary operation.

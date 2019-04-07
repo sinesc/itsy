@@ -136,7 +136,8 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             E::Assignment(assignment)   => self.compile_assignment(assignment),
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
             E::UnaryOp(unary_op)        => self.compile_unary_op(unary_op),
-            E::Block(_block)             => { }, // todo: handle,
+            E::Cast(cast)               => self.compile_cast(cast),
+            E::Block(_block)            => { }, // todo: handle,
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
         };
     }
@@ -514,6 +515,78 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             },
             // others are handled elsewhere
             _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
+        }
+    }
+
+    /// Compiles a variable binding and optional assignment.
+    fn compile_cast(self: &Self, item: &ast::Cast<'a>) {
+
+        self.compile_expression(&item.expr);
+
+        let mut from = self.bindingtype(&item.expr);
+        let mut to = self.get_type(item.ty.type_id);
+        let orig_to = to;
+
+        // float to integer: convert fxx to i64, then convert that to the correct integer type
+        if from.is_float() && !to.is_float() {
+            if from.size() == 4 {
+                self.writer.f32toi64();
+                from = &Type::i64;
+            } else if from.size() == 8 {
+                self.writer.f64toi64();
+                from = &Type::i64;
+            }
+        }
+
+        // integer to float: cast input to i64 first, then convert that to the correct float type
+        if !from.is_float() && to.is_float() {
+            to = &Type::i64;
+        }
+
+        // convert float to float, integer to integer
+        if from.is_float() && to.is_float() {
+            if from.size() == 8 && to.size() == 4 {
+                self.writer.f64tof32();
+            } else if from.size() == 4 && to.size() == 8 {
+                self.writer.f32tof64();
+            }
+        } else if from.is_unsigned() {
+            if from.size() > to.size() {
+                if from.size() == 8 {
+                    self.writer.trunc64(to.size() * 8);
+                } else if from.size() <= 4 {
+                    self.writer.trunc(to.size() * 8);
+                } else {
+                    panic!("invalid type size")
+                }
+            }
+        } else if from.is_signed() {
+            if from.size() > to.size() {
+                if from.size() == 8 {
+                    self.writer.trunc64(to.size() * 8);
+                } else if from.size() <= 4 {
+                    self.writer.trunc(to.size() * 8);
+                } else {
+                    panic!("invalid type size")
+                }
+            } else if from.size() < to.size() {
+                if to.size() == 8 {
+                    self.writer.extends64((to.size() - from.size()) * 8);
+                } else if to.size() <= 4 {
+                    self.writer.extends((to.size() - from.size()) * 8);
+                } else {
+                    panic!("invalid type size")
+                }
+            }
+        }
+
+        // integer to float: was cast to i64, now convert that to the correct float type
+        if !from.is_float() && orig_to.is_float() {
+            if orig_to.size() == 4 {
+                self.writer.i64tof32();
+            } else if orig_to.size() == 8 {
+                self.writer.i64tof64();
+            }
         }
     }
 }

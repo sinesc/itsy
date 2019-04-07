@@ -263,6 +263,7 @@ pub enum Expression<'a> {
     Assignment(Box<Assignment<'a>>),
     BinaryOp(Box<BinaryOp<'a>>),
     UnaryOp(Box<UnaryOp<'a>>),
+    Cast(Box<Cast<'a>>),
     Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
 }
@@ -316,6 +317,7 @@ impl<'a> Bindable for Expression<'a> {
             Expression::Assignment(assignment)  => assignment.binding_id_mut(),
             Expression::BinaryOp(binary_op)     => binary_op.binding_id_mut(),
             Expression::UnaryOp(unary_op)       => unary_op.binding_id_mut(),
+            Expression::Cast(cast)              => cast.binding_id_mut(),
             Expression::Block(block)            => block.binding_id_mut(),
             Expression::IfBlock(if_block)       => if_block.binding_id_mut(),
         }
@@ -329,6 +331,7 @@ impl<'a> Bindable for Expression<'a> {
             Expression::Assignment(assignment)  => assignment.binding_id(),
             Expression::BinaryOp(binary_op)     => binary_op.binding_id(),
             Expression::UnaryOp(unary_op)       => unary_op.binding_id(),
+            Expression::Cast(cast)              => cast.binding_id(),
             Expression::Block(block)            => block.binding_id(),
             Expression::IfBlock(if_block)       => if_block.binding_id(),
         }
@@ -345,6 +348,7 @@ impl<'a> Debug for Expression<'a> {
             Expression::Assignment(assignment)  => write!(f, "{:#?}", assignment),
             Expression::BinaryOp(binary_op)     => write!(f, "{:#?}", binary_op),
             Expression::UnaryOp(unary_op)       => write!(f, "{:#?}", unary_op),
+            Expression::Cast(cast)              => write!(f, "{:#?}", cast),
             Expression::Block(block)            => write!(f, "{:#?}", block),
             Expression::IfBlock(if_block)       => write!(f, "{:#?}", if_block),
         }
@@ -469,6 +473,14 @@ impl<'a> Bindable for Assignment<'a> {
         self.left.binding_id()
     }
 }
+
+#[derive(Debug)]
+pub struct Cast<'a> {
+    pub expr        : Expression<'a>,
+    pub ty          : TypeName<'a>,
+    pub binding_id  : Option<BindingId>,
+}
+impl_bindable!(Cast);
 
 #[derive(Debug)]
 pub struct BinaryOp<'a> {

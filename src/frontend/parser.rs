@@ -458,11 +458,21 @@ named!(prec0(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     (res)
 )));
 
+named!(precn(Input<'_>) -> Expression<'_>, ws!(do_parse!(
+    init: prec0 >>
+    res: fold_many0!(
+        preceded!(tag!("as"), path),
+        init,
+        |acc, val| Expression::Cast(Box::new(Cast { expr: acc, ty: TypeName::from_path(val), binding_id: None }))
+    ) >>
+    (res)
+)));
+
 named!(expression(Input<'_>) -> Expression<'_>, ws!(alt!(
     map!(assignment, |m| Expression::Assignment(Box::new(m)))
     | map!(array_literal, |m| Expression::Literal(m))
     | map!(struct_literal, |m| Expression::Literal(m))
-    | prec0
+    | precn
 )));
 
 // let

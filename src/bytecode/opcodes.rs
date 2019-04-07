@@ -292,6 +292,64 @@ impl_vm!{
         self.pc = prev_pc;
     }
 
+    /// Pops value off the stack, truncates it to the given number of bits and pushes the result.
+    /// Allowed values for size are 8 and 16.
+    fn trunc(self: &mut Self, size: u8) { // todo: might as well make 2 opcodes
+        let value: Value = self.stack.pop();
+        self.stack.push(value & ((1 << size as u32) - 1));
+    }
+    /// Pops a 64 bit value off the stack, truncates it to the given number of bits and pushes the 32 bit result.
+    /// Allowed values for size are 8, 16 and 32.
+    fn trunc64(self: &mut Self, size: u8) {
+        let value: Value64 = self.stack.pop();
+        self.stack.push((value & ((1 << size as u64) - 1)) as u32);
+    }
+
+    /// Pops a value off the stack, sign-extends it *by* the given number of bits up to a maximum of 32 and pushes the result.
+    fn extends(self: &mut Self, num_bits: u8) {
+        let value: Value = self.stack.pop();
+        self.stack.push(value.wrapping_shl(num_bits as u32).wrapping_shr(num_bits as u32));
+    }
+    /// Pops a max 32 bit value off the stack, sign-extends it *by* the given number of bits up to a maximum of 64 and pushes the 64 bit result.
+    fn extends64(self: &mut Self, num_bits: u8) { // todo: naming shouldn't be 64 since its popping 32 bits. we don't have a convention for output size though
+        let value: Value = self.stack.pop();
+        let value = value as i64;
+        self.stack.push(value.wrapping_shl(num_bits as u32).wrapping_shr(num_bits as u32));
+    }
+
+    /// Pops an i64 and pushes its f32 representation.
+    fn i64tof32(self: &mut Self) {
+        let value: Value64 = self.stack.pop();
+        self.stack.push(value as f32);
+    }
+    /// Pops an i64 and pushes its f64 representation.
+    fn i64tof64(self: &mut Self) {
+        let value: Value64 = self.stack.pop();
+        self.stack.push(value as f64);
+    }
+
+    /// Pops an f32 and pushes its i64 representation.
+    fn f32toi64(self: &mut Self) {
+        let value: f32 = self.stack.pop();
+        self.stack.push(value as i64);
+    }
+    /// Pops an f64 and pushes its i64 representation.
+    fn f64toi64(self: &mut Self) {
+        let value: f64 = self.stack.pop();
+        self.stack.push(value as i64);
+    }
+
+    /// Pops an f32 and pushes its f64 representation.
+    fn f32tof64(self: &mut Self) {
+        let value: f32 = self.stack.pop();
+        self.stack.push(value as f64);
+    }
+    /// Pops an f64 and pushes its f32 representation.
+    fn f64tof32(self: &mut Self) {
+        let value: f64 = self.stack.pop();
+        self.stack.push(value as f32);
+    }
+
     /// Pops 2 values from the stack and pushes their logical conjunction.
     fn and(self: &mut Self) {
         let a: bool = self.stack.pop();
