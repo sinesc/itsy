@@ -11,10 +11,11 @@ use crate::runtime::VMFunc;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
 #[derive(Debug)]
-pub struct ResolvedProgram<'a, T> where T: VMFunc<T> {
+pub struct ResolvedProgram<'ast, T> where T: VMFunc<T> {
+    /// Programs are generic over their Rust API
     ty: PhantomData<T>,
     /// Program AST with resolved `BindingId`s.
-    pub ast: super::ParsedProgram<'a>,
+    pub ast: super::ParsedProgram<'ast>,
     /// Mapping from `BindingId` (vector index) to `TypeId`.
     pub bindingtype_ids: Vec<TypeId>,
     /// Mapping from `TypeId` (vector index) to primitive type.
@@ -23,22 +24,21 @@ pub struct ResolvedProgram<'a, T> where T: VMFunc<T> {
     pub entry_fn: FunctionId,
 }
 
-/// Internal state during program type/binding resolution.
-struct Resolver<'a, 'b> where 'a: 'b {
-    stop_bugging_me_about_this_lifetime_every_fkn_refactoring: PhantomData<&'a bool>,
+/// Temporary internal state during program type/binding resolution.
+struct Resolver<'ctx> {
     /// Scope id this state operates in.
     scope_id        : ScopeId,
     /// Repository of all scopes.
-    scopes          : &'b mut scopes::Scopes,
+    scopes          : &'ctx mut scopes::Scopes,
     /// Grouped primitive types.
-    primitives      : &'b primitives::Primitives,
+    primitives      : &'ctx primitives::Primitives,
     /// Set to true once resolution cannot proceed any further, causes numeric literals to be set to their default types.
     infer_literals  : bool,
 }
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'a, T>(mut program: super::ParsedProgram<'a>, entry: &str) -> ResolvedProgram<'a, T> where T: VMFunc<T> {
+pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) -> ResolvedProgram<'ast, T> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -74,7 +74,6 @@ pub fn resolve<'a, T>(mut program: super::ParsedProgram<'a>, entry: &str) -> Res
 
         for mut statement in program.0.iter_mut() {
             let mut resolver = Resolver {
-                stop_bugging_me_about_this_lifetime_every_fkn_refactoring: PhantomData,
                 scope_id        : root_scope_id,
                 scopes          : &mut scopes,
                 primitives      : &primitives,
@@ -105,7 +104,7 @@ pub fn resolve<'a, T>(mut program: super::ParsedProgram<'a>, entry: &str) -> Res
 }
 
 /// Utility methods to update a typeslot with a resolved type and increase the resolution counter.
-impl<'a, 'b> Resolver<'a, 'b> {
+impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Creates new or enters existing scope and returns the original/parent scope id.
     fn try_create_scope(self: &mut Self, scope_id: &mut Option<ScopeId>) -> ScopeId {
@@ -175,22 +174,13 @@ impl<'a, 'b> Resolver<'a, 'b> {
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_mut(type_id))
     }
-
-    /* /// Format a type-name for debug output
-    fn format_type(self: &Self, type_id: Option<TypeId>) -> String {
-        if let Some(type_id) = type_id {
-            format!("{:?}", self.scopes.type_ref(type_id))
-        } else {
-            "???".to_string()
-        }
-    } */
 }
 
 /// Methods to resolve individual AST structures.
-impl<'a, 'b> Resolver<'a, 'b> {
+impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves types and bindings used in a statement.
-    fn resolve_statement(self: &mut Self, item: &mut ast::Statement<'a>) {
+    fn resolve_statement(self: &mut Self, item: &mut ast::Statement<'ast>) {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function),
@@ -206,7 +196,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves types and bindings used in an expression.
-    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'a>, expected_result: Option<TypeId>) {
+    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'ast>, expected_result: Option<TypeId>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
@@ -230,7 +220,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     /*
     /// Computes the result of a literal x literal binary expression and alters the item variant to literal.
-    fn precompute_expression_binary_op(self: &mut Self, item: &mut ast::Expression<'a>) {
+    fn precompute_expression_binary_op(self: &mut Self, item: &mut ast::Expression<'ast>) {
 
         use crate::frontend::ast::BinaryOperator as O;
 
@@ -333,7 +323,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     */
 
     /// Resolves a function signature.
-    fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'a>) {
+    fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'ast>) {
         // resolve arguments
         for arg in item.args.iter_mut() {
             self.resolve_binding(arg);
@@ -345,7 +335,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function<'a>) {
+    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_signature(&mut item.sig);
         //let signature_scope_id = self.try_create_scope(&mut item.scope_id); // todo: put body into separate scope so signature can't access body
@@ -366,7 +356,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     // Resolves an inline type definition.
-    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'a>) -> Option<TypeId> {
+    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Option<TypeId> {
         use ast::InlineType as IT;
         match item {
             IT::TypeName(type_name) => self.resolve_type(type_name),
@@ -375,7 +365,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an array definition
-    fn resolve_array(self: &mut Self, item: &mut ast::Array<'a>) -> Option<TypeId> {
+    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Option<TypeId> {
 
         let inner_type_id = self.resolve_inline_type(&mut item.element_type);
 
@@ -391,7 +381,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a struct definition.
-    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'a>) {
+    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'ast>) {
 
         for (_, field) in &mut item.fields {
             self.resolve_inline_type(field);
@@ -411,7 +401,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a return statement.
-    fn resolve_return(self: &mut Self, item: &mut ast::Return<'a>) {
+    fn resolve_return(self: &mut Self, item: &mut ast::Return<'ast>) {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).expect("Encountered return outside of function");
         let ret_type_id = self.scopes.function_type(function_id).ret_type;
         if ret_type_id.is_some() && item.expr.is_none() {
@@ -430,7 +420,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an occurance of a function call.
-    fn resolve_call(self: &mut Self, item: &mut ast::Call<'a>) {
+    fn resolve_call(self: &mut Self, item: &mut ast::Call<'ast>) {
 
         // locate function definition
         if item.function_id.is_none() {
@@ -468,7 +458,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a type (name) to a type_id.
-    fn resolve_type(self: &Self, item: &mut ast::TypeName<'a>) -> Option<TypeId> {
+    fn resolve_type(self: &Self, item: &mut ast::TypeName<'ast>) -> Option<TypeId> {
         if item.type_id.is_none() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.name[0]) { // fixme: handle path segments
                 item.type_id = Some(new_type_id);
@@ -484,7 +474,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an occurance of a variable.
-    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'a>, expected_result: Option<TypeId>) {
+    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'ast>, expected_result: Option<TypeId>) {
         // resolve binding
         if item.binding_id.is_none() {
             item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.ident.name);
@@ -499,7 +489,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an if block.
-    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'a>) {
+    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'ast>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // resolve condition and block
         self.resolve_expression(&mut item.cond, None); // todo: pass in expected type
@@ -517,7 +507,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a for loop.
-    fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'a>) {
+    fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'ast>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
         self.resolve_binding(&mut item.iter);
@@ -530,7 +520,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a while loop.
-    fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'a>) {
+    fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'ast>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None);
         self.resolve_block(&mut item.block, None);
@@ -538,7 +528,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a block.
-    fn resolve_block(self: &mut Self, item: &mut ast::Block<'a>, expected_result: Option<TypeId>) {
+    fn resolve_block(self: &mut Self, item: &mut ast::Block<'ast>, expected_result: Option<TypeId>) {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         for mut statement in item.statements.iter_mut() {
             self.resolve_statement(&mut statement);
@@ -550,7 +540,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
+    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'ast>) {
         let right_type_id = self.bindingtype_id(&mut item.right);
         self.resolve_expression(&mut item.left, right_type_id);
         let left_type_id = self.bindingtype_id(&mut item.left);
@@ -558,7 +548,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_cast(self: &mut Self, item: &mut ast::Cast<'a>) {
+    fn resolve_cast(self: &mut Self, item: &mut ast::Cast<'ast>) {
         self.resolve_type(&mut item.ty);
         self.resolve_expression(&mut item.expr, None);
         if let Some(type_id) = item.ty.type_id {
@@ -575,7 +565,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a binary operation.
-    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'a>, expected_result: Option<TypeId>) {
+    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'ast>, expected_result: Option<TypeId>) {
 
         use crate::frontend::ast::BinaryOperator as O;
 
@@ -676,7 +666,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a binding created by let, for or a signature.
-    fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'a>) {
+    fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'ast>) {
 
         // check if a type is specified
         let explicit = match item.type_name {
@@ -715,7 +705,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a unary operation.
-    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'a>) {
+    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'ast>) {
         use crate::frontend::ast::UnaryOperator as UO;
         self.resolve_expression(&mut item.expr, None);
         match item.op {
@@ -731,7 +721,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
-    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'a>, expected_type: Option<TypeId>) {
+    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type: Option<TypeId>) {
         use self::ast::LiteralValue as LV;
 
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
@@ -776,7 +766,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an struct literal and creates the required field types.
-    fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal<'a>) {
+    fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal<'ast>) {
 
         self.try_create_anon_binding(item);
 
@@ -798,7 +788,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     /// Resolves an array literal and creates the required array types.
-    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'a>, expected_type: Option<TypeId>) {
+    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type: Option<TypeId>) {
 
         let binding_id = self.try_create_anon_binding(item);
 
