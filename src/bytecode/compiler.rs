@@ -378,9 +378,9 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
                     Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
-                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.constr16(pos as u8); } // todo: handle pos > 255
-                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.constr(pos as u8); } // todo: handle pos > 255
-                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.constr64(pos as u8); } // todo: handle pos > 255
+                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.const_fetch16(pos as u8); } // todo: handle pos > 255
+                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.const_fetch(pos as u8); } // todo: handle pos > 255
+                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.const_fetch64(pos as u8); } // todo: handle pos > 255
                     _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
                 }
             }
@@ -394,7 +394,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::String => {
                         let pos = self.store_literal(item);
-                        self.writer.consto(pos as u8);  // string heap index
+                        self.writer.const_fetch_object(pos as u8);  // string heap index
                         self.writer.lit0();             //  offset into the string
                     },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
@@ -404,7 +404,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Array(_) => {
                         let pos = self.store_literal(item);
-                        self.writer.consto(pos as u8);  // array heap index
+                        self.writer.const_fetch_object(pos as u8);  // array heap index
                         self.writer.lit0();             //  offset into the array
                     },
                     _ => panic!("Unexpected array literal type: {:?}", lit_type)
@@ -414,7 +414,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Struct(_) => {
                         let pos = self.store_literal(item);
-                        self.writer.consto(pos as u8);  // struct heap index
+                        self.writer.const_fetch_object(pos as u8);  // struct heap index
                         self.writer.lit0();             //  offset into the struct
                     },
                     _ => panic!("Unexpected struct literal type: {:?}", lit_type)
@@ -494,18 +494,18 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 // todo need to handle both constpool (a byte array) and heap (arrays of byte arrays)
                 //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
                 if result_type.is_primitive() {
-                    self.write_hindexr(result_type.size());
+                    self.write_heap_fetch_element(result_type.size());
                 } else {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.type_size(&result_type);
-                    self.write_index(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
+                    self.write_element_offset(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                     // stack now <heap_index> <new_heap_offset>
                 }
             },
             BO::Access => {
                 if result_type.is_primitive() {
                     let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                    self.write_haccessr(result_type.size(), offset);
+                    self.write_heap_fetch_member(result_type.size(), offset);
                 } else {
                     // stack: <heap_index> <heap_offset>
                     let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
@@ -751,7 +751,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             },
         }
     }
-    /// Stores array data in constpool. Note: when read with consto() array size needs to be written first!
+    /// Stores array data in constpool. Note: when read with const_fetch_object() array size needs to be written first!
     fn store_literal_data(self: &Self, item: &ast::Literal<'a>) {
         use crate::frontend::ast::LiteralValue;
 
@@ -816,20 +816,11 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.addi();
         } else {
             let const_id = self.writer.store_const(offset);
-            self.writer.constr(const_id as u8); // todo: handle id > 255
+            self.writer.const_fetch(const_id as u8); // todo: handle id > 255
             self.writer.addi();
         }
     }
-    fn write_haccessr(self: &Self, result_size: u8, offset: u32) {
-        match result_size {
-            1 => { self.writer.haccessr8(offset); },
-            2 => { self.writer.haccessr16(offset); },
-            4 => { self.writer.haccessr32(offset); },
-            8 => { self.writer.haccessr64(offset); },
-            _ => panic!("Invalid result size {} for hindexr", result_size)
-        }
-    }
-    fn write_index(self: &Self, element_size: u32) {
+    fn write_element_offset(self: &Self, element_size: u32) {
         if element_size < (1 << 8) {
             self.writer.index(element_size as u8);
         } else if element_size < (1 << 16) {
@@ -838,13 +829,22 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             self.writer.index_32(element_size);
         }
     }
-    fn write_hindexr(self: &Self, element_size: u8) {
+    fn write_heap_fetch_member(self: &Self, result_size: u8, offset: u32) {
+        match result_size {
+            1 => { self.writer.heap_fetch_member8(offset); },
+            2 => { self.writer.heap_fetch_member16(offset); },
+            4 => { self.writer.heap_fetch_member32(offset); },
+            8 => { self.writer.heap_fetch_member64(offset); },
+            _ => panic!("Invalid result size {} for heap_fetch_member", result_size)
+        }
+    }
+    fn write_heap_fetch_element(self: &Self, element_size: u8) {
         match element_size {
-            1 => { self.writer.hindexr8(); },
-            2 => { self.writer.hindexr16(); },
-            4 => { self.writer.hindexr32(); },
-            8 => { self.writer.hindexr64(); },
-            _ => panic!("Invalid element size {} for hindexr", element_size)
+            1 => { self.writer.heap_fetch_element8(); },
+            2 => { self.writer.heap_fetch_element16(); },
+            4 => { self.writer.heap_fetch_element32(); },
+            8 => { self.writer.heap_fetch_element64(); },
+            _ => panic!("Invalid element size {} for heap_fetch_element", element_size)
         }
     }
     fn write_preinc(self: &Self, index: i32, ty: &Type) {

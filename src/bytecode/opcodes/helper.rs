@@ -28,11 +28,22 @@ macro_rules! impl_vm {
     (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, 8, $from, $counter) );
     (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, 4, $from, $counter) );
     (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, 8, $from, $counter) );
+    (read String, $from:ident, $counter:expr) => ( {
+        let len = impl_vm!(do_read u32, 4, $from, $counter);
+        let slice = &$from.program.instructions[$counter as usize..($counter + len) as usize];
+        $counter += len;
+        ::std::str::from_utf8(slice).unwrap().to_string()
+    });
 
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_u16().to_le_bytes()[..]) );
+    (write String, $value:expr, $to:ident) => (
+        $to.write(&($value.len() as u32).to_le_bytes()[..]);
+        $to.write(&$value.as_bytes()[..]);
+    );
     (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
 
     (map_writer_type RustFn) => ( T );
+    (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
     (map_reader_type RustFn) => ( u16 );
     (map_reader_type $ty:tt) => ( $ty );
@@ -53,13 +64,13 @@ macro_rules! impl_vm {
         /// `suffix1` refers to stack inputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
         ///
-        /// `f`/`s`/`u`/`i`/`r`   float/signed/unsigned/any integer/raw, default: `i` for stack input, `u` for arguments\
+        /// `f`/`s`/`u`/`i`/`r`   float/signed/unsigned/any integer/raw, default: `r` for stack input, `u` for arguments\
         /// `8`/`16`/`32`/`64`  size, default: `32` for stack input, `8` for arguments
         ///
         /// # Examples
         /// `addi`        add two 32 bit integer\
         /// `addf64`      add two 64 bit floats\
-        /// `constr_16`   load 32 bit from constpool at given 16 bit address
+        /// `const_fetch_16`   load 32 bit from constpool at given 16 bit address
         #[allow(non_camel_case_types)]
         #[repr(u8)]
         pub enum OpCode {
@@ -121,25 +132,25 @@ macro_rules! impl_vm {
             #[allow(unused_imports)]
             #[allow(unused_mut)]
             pub(crate) fn parse_instruction(self: &Self, position: u32) -> Option<(String, u32)> {
-                let mut position = position;
-                if position < self.program.instructions.len() as u32 {
-                    let instruction = impl_vm!(read u8, self, position);
+                let mut pc = position;
+                if pc < self.program.instructions.len() as u32 {
+                    let instruction = impl_vm!(read u8, self, pc);
                     match OpCode::from_u8(instruction) {
                         // todo: rustcall specialcase is required since normal opcodes don't receive the context
                         // considering refactoring this so that all opcodes receive the context if it turns out that
                         // additional opcodes require it
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, position) )));
-                            Some((result, position))
+                            result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, pc) )));
+                            Some((result, pc))
                         }
                         $(
                             OpCode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
                                 $(
-                                    result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self, position) ));
+                                    result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self, pc) ));
                                 )*
-                                Some((result, position))
+                                Some((result, pc))
                             }
                         ),+,
                     }

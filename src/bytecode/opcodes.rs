@@ -6,9 +6,8 @@ use crate::{util::{array1, array2, array4, array8}, runtime::{Value, Value64, St
 
 impl_vm!{
 
-    /// Does nothing. Used as label when debugging.
-    #[allow(unused_variables)]
-    fn debug(self: &mut Self, label: u32) { }
+    /// Does nothing.
+    fn noop(self: &mut Self) { }
 
     /// Moves the stack pointer by given number of items (32bit words) to make room for local variables.
     fn reserve(self: &mut Self, num_items: u8) {
@@ -18,44 +17,44 @@ impl_vm!{
     }
 
     /// Load 2 byte from constant pool onto stack.
-    fn constr16(self: &mut Self, const_id: u8) {
-        self.constr16_16(const_id as u16);
+    fn const_fetch16(self: &mut Self, const_id: u8) {
+        self.const_fetch16_16(const_id as u16);
     }
     /// Load 2 byte from constant pool onto stack.
-    fn constr16_16(self: &mut Self, const_id: u16) {
+    fn const_fetch16_16(self: &mut Self, const_id: u16) {
         let const_id = const_id as usize;
         let tmp: u16 = u16::from_le_bytes(array2(&self.program.consts[const_id..const_id +2]));
         self.stack.push(tmp);
     }
 
     /// Load 4 byte from constant pool onto stack.
-    fn constr(self: &mut Self, const_id: u8) {
-        self.constr_16(const_id as u16);
+    fn const_fetch(self: &mut Self, const_id: u8) {
+        self.const_fetch_16(const_id as u16);
     }
     /// Load 4 byte from constant pool onto stack.
-    fn constr_16(self: &mut Self, const_id: u16) {
+    fn const_fetch_16(self: &mut Self, const_id: u16) {
         let const_id = const_id as usize;
         let tmp: u32 = u32::from_le_bytes(array4(&self.program.consts[const_id..const_id +4]));
         self.stack.push(tmp);
     }
 
     /// Load 8 byte from constant pool onto stack.
-    fn constr64(self: &mut Self, const_id: u8) {
-        self.constr64_16(const_id as u16);
+    fn const_fetch64(self: &mut Self, const_id: u8) {
+        self.const_fetch64_16(const_id as u16);
     }
     /// Load 8 byte from constant pool onto stack.
-    fn constr64_16(self: &mut Self, const_id: u16) {
+    fn const_fetch64_16(self: &mut Self, const_id: u16) {
         let const_id = const_id as usize;
         let tmp: u64 = u64::from_le_bytes(array8(&self.program.consts[const_id..const_id +8]));
         self.stack.push(tmp);
     }
 
     /// Load object from constant pool onto stack+heap.
-    fn consto(self: &mut Self, const_id: u8) {
-        self.consto_16(const_id as u16);
+    fn const_fetch_object(self: &mut Self, const_id: u8) {
+        self.const_fetch_object_16(const_id as u16);
     }
     /// Load object from constant pool onto stack+heap.
-    fn consto_16(self: &mut Self, const_id: u16) {
+    fn const_fetch_object_16(self: &mut Self, const_id: u16) {
         let pos = const_id as usize;
         let len = u32::from_le_bytes(array4(&self.program.consts[pos .. pos + 4])) as usize;
         let data = self.program.consts[pos + 4 .. pos + 4 + len].to_vec();
@@ -69,7 +68,7 @@ impl_vm!{
     }
     /// Push value onto stack.
     fn lits(self: &mut Self, value: i8) {
-        self.stack.push(value);
+        self.stack.push(value); // note to future self: litu/lits are required because the i8 needs to be sign extended on the (32 bit) stack
     }
     /// Push 0 onto stack.
     fn lit0(self: &mut Self) {
@@ -158,44 +157,44 @@ impl_vm!{
         self.stack.store_fp(offset, local);
     }
 
-    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
+    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack.
     fn index(self: &mut Self, element_size: u8) {
         self.index_32(element_size as u32);
     }
-    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
+    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack.
     fn index_16(self: &mut Self, element_size: u16) {
         self.index_32(element_size as u32);
     }
-    /// Pop an element index and heap offset and push the resulting heap offset + element index * element_size onto the stack.
+    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack.
     fn index_32(self: &mut Self, element_size: u32) {
         let element_index: u32 = self.stack.pop();
-        let current_heap_offset: u32 = self.stack.pop();
-        self.stack.push(current_heap_offset + (element_index as u32 * element_size));
+        let current_offset: u32 = self.stack.pop();
+        self.stack.push(current_offset + (element_index as u32 * element_size));
     }
 
-    /// Pop a heap object and push the heap value at its current index onto the stack.
-    fn haccessr8(self: &mut Self, offset: u32) {
+    /// Pop a heap object and push the heap value at its current index+offset onto the stack.
+    fn heap_fetch_member8(self: &mut Self, offset: u32) {
         let heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
         let data = self.heap.read8(heap_index, heap_offset + offset);
         self.stack.push(data);
     }
-    /// Pop a heap object and push the heap value at its current index onto the stack.
-    fn haccessr16(self: &mut Self, offset: u32) {
+    /// Pop a heap object and push the heap value at its current index+offset onto the stack.
+    fn heap_fetch_member16(self: &mut Self, offset: u32) {
         let heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
         let data = self.heap.read16(heap_index, heap_offset + offset);
         self.stack.push(data);
     }
-    /// Pop a heap object and push the heap value at its current index onto the stack.
-    fn haccessr32(self: &mut Self, offset: u32) {
+    /// Pop a heap object and push the heap value at its current index+offset onto the stack.
+    fn heap_fetch_member32(self: &mut Self, offset: u32) {
         let heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
         let data = self.heap.read32(heap_index, heap_offset + offset);
         self.stack.push(data);
     }
-    /// Pop a heap object and push the heap value at its current index onto the stack.
-    fn haccessr64(self: &mut Self, offset: u32) {
+    /// Pop a heap object and push the heap value at its current index+offset onto the stack.
+    fn heap_fetch_member64(self: &mut Self, offset: u32) {
         let heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
         let data = self.heap.read64(heap_index, heap_offset + offset);
@@ -203,16 +202,16 @@ impl_vm!{
     }
 
     /// Pop an element index and heap object and push the heap value at element index onto the stack.
-    fn hindexr8(self: &mut Self) {
+    fn heap_fetch_element8(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
-        let heap_offset = current_heap_offset + (element_index as u32);
+        let heap_offset = current_heap_offset + (1 * element_index as u32);
         let data = self.heap.read8(heap_index, heap_offset);
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 2 onto the stack.
-    fn hindexr16(self: &mut Self) {
+    fn heap_fetch_element16(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -221,7 +220,7 @@ impl_vm!{
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 4 onto the stack.
-    fn hindexr32(self: &mut Self) {
+    fn heap_fetch_element32(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -230,7 +229,7 @@ impl_vm!{
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 8 onto the stack.
-    fn hindexr64(self: &mut Self) {
+    fn heap_fetch_element64(self: &mut Self) {
         let element_index: u32 = self.stack.pop();
         let current_heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
@@ -802,4 +801,8 @@ impl_vm!{
     fn exit(self: &mut Self) {
         self.state = crate::runtime::VMState::Terminate;
     }
+
+    /// Does nothing. Written as comment into the opcode stream.
+    #[allow(unused_variables)]
+    fn comment(self: &mut Self, text: String) { }
 }
