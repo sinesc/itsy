@@ -143,9 +143,9 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    fn compile_assignment(self: &Self, item: &ast::Assignment<'a>) {
+    fn compile_stack_assignment(self: &Self, item: &ast::Assignment<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
-        let binding_id = item.left.binding_id.unwrap();
+        let binding_id = item.left.binding_id().unwrap();
         let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
         match item.op {
             BO::Assign => {
@@ -167,6 +167,21 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 self.write_store(index, ty);
             },
         };
+    }
+
+    /// Compiles the assignment operation.
+    fn compile_heap_assignment(self: &Self, item: &ast::Assignment<'a>) {
+        self.compile_expression(&item.right);
+        self.compile_expression(&item.left);
+    }
+
+    /// Compiles the assignment operation.
+    fn compile_assignment(self: &Self, item: &ast::Assignment<'a>) {
+        match item.left {
+            ast::Expression::Variable(_) => self.compile_stack_assignment(item),
+            ast::Expression::BinaryOp(_) => self.compile_heap_assignment(item),
+            _ => panic!("invalid assignable"),
+        }
     }
 
     /// Compiles the given function.
@@ -460,7 +475,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
-        if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index {
+        if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index || item.op == BO::IndexWrite {
             // implement these via Less/LessOrEq + swapping arguments
             // fixme: this fails if values change within those expressions (e.g. via ++ op)
             self.compile_expression(&item.left);
@@ -490,11 +505,15 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::Or => { self.writer.or(); },
             // special
             BO::Range => unimplemented!("range"),
-            BO::Index => {
+            BO::Index | BO::IndexWrite => {
                 // todo need to handle both constpool (a byte array) and heap (arrays of byte arrays)
                 //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
                 if result_type.is_primitive() {
-                    self.write_heap_fetch_element(result_type.size());
+                    if item.op == BO::Index {
+                        self.write_heap_fetch_element(result_type.size());
+                    } else {
+                        self.write_heap_put_element(result_type.size());
+                    }
                 } else {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.type_size(&result_type);
@@ -502,10 +521,15 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                     // stack now <heap_index> <new_heap_offset>
                 }
             },
-            BO::Access => {
+            BO::Access | BO::AccessWrite => {
                 if result_type.is_primitive() {
-                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                    self.write_heap_fetch_member(result_type.size(), offset);
+                    if item.op == BO::Access {
+                        let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                        self.write_heap_fetch_member(result_type.size(), offset);
+                    } else {
+                        let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                        self.write_heap_put_member(result_type.size(), offset);
+                    }
                 } else {
                     // stack: <heap_index> <heap_offset>
                     let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
@@ -845,6 +869,24 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             4 => { self.writer.heap_fetch_element32(); },
             8 => { self.writer.heap_fetch_element64(); },
             _ => panic!("Invalid element size {} for heap_fetch_element", element_size)
+        }
+    }
+    fn write_heap_put_member(self: &Self, result_size: u8, offset: u32) {
+        match result_size {
+            1 => { self.writer.heap_put_member8(offset); },
+            2 => { self.writer.heap_put_member16(offset); },
+            4 => { self.writer.heap_put_member32(offset); },
+            8 => { self.writer.heap_put_member64(offset); },
+            _ => panic!("Invalid result size {} for heap_put_member", result_size)
+        }
+    }
+    fn write_heap_put_element(self: &Self, element_size: u8) {
+        match element_size {
+            1 => { self.writer.heap_put_element8(); },
+            2 => { self.writer.heap_put_element16(); },
+            4 => { self.writer.heap_put_element32(); },
+            8 => { self.writer.heap_put_element64(); },
+            _ => panic!("Invalid element size {} for heap_put_element", element_size)
         }
     }
     fn write_preinc(self: &Self, index: i32, ty: &Type) {

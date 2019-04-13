@@ -261,14 +261,27 @@ named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_litera
 
 // assignment
 
+named!(assignable(Input<'_>) -> Expression<'_>, ws!(do_parse!(
+    init: map!(ident, |m| Expression::Variable(Variable { ident: m, binding_id: None })) >>
+    res: fold_many0!(
+        alt!(
+            map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::IndexWrite, e))
+            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { ident: i, binding_id: None, index: None })))
+        ),
+        init,
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+    ) >>
+    (res)
+)));
+
 named!(assignment_operator(Input<'_>) -> BinaryOperator, map!(alt!(tag!("=") | tag!("+=") | tag!("-=") | tag!("*=") | tag!("/=")| tag!("%=")), |o| {
     BinaryOperator::from_string(*o)
 }));
 
-named!(assignment(Input<'_>) -> Assignment<'_>, map!(ws!(tuple!(ident, assignment_operator, expression)), |m| {
+named!(assignment(Input<'_>) -> Assignment<'_>, map!(ws!(tuple!(assignable, assignment_operator, expression)), |m| {
     Assignment {
         op      : m.1,
-        left    : Variable { ident: m.0, binding_id: None },
+        left    : m.0,
         right   : m.2,
     }
 }));

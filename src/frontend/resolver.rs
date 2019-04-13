@@ -552,7 +552,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'a>) {
         let right_type_id = self.bindingtype_id(&mut item.right);
-        self.resolve_variable(&mut item.left, right_type_id);
+        self.resolve_expression(&mut item.left, right_type_id);
         let left_type_id = self.bindingtype_id(&mut item.left);
         self.resolve_expression(&mut item.right, left_type_id);
     }
@@ -618,7 +618,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.set_bindingtype_id(&mut item.right, common_type_id);
                 }
             }
-            O::Index => {
+            O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None);
                 self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2].type_id)); // u32
 
@@ -639,7 +639,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.set_bindingtype_id(item, element_type_id);
                 }
             }
-            O::Access => {
+            O::Access | O::AccessWrite => {
                 self.resolve_expression(&mut item.left, None);
                 self.resolve_expression(&mut item.right, None);
                 // left.right : item

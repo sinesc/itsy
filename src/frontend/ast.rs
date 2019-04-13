@@ -461,7 +461,7 @@ impl_bindable!(Call);
 #[derive(Debug)]
 pub struct Assignment<'a> {
     pub op      : BinaryOperator,
-    pub left    : Variable<'a>,
+    pub left    : Expression<'a>,
     pub right   : Expression<'a>,
 }
 
@@ -539,7 +539,7 @@ pub enum BinaryOperator {
     // iterator
     Range, RangeInclusive,
     // data offsets
-    Index, Access
+    Index, IndexWrite, Access, AccessWrite,
 }
 
 impl BinaryOperator {

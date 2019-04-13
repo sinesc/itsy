@@ -546,6 +546,76 @@ fn struct_array() {
 }
 
 #[test]
+fn member_assign_primitive() {
+    let result = run("
+        struct Inner {
+            ia: u8,
+            ib: [ u64; 3 ],
+        }
+        struct Outer {
+            oa: i16,
+            ob: Inner,
+        }
+        fn main() {
+            let x: Outer = Outer {
+                oa: 0,
+                ob: Inner {
+                    ia: 0,
+                    ib: [ 0, 0, 0 ],
+                }
+            };
+            x.oa = -369;
+            x.ob.ia = 8;
+            ret_i16(x.oa);
+            ret_u8(x.ob.ia);
+        }
+    ");
+    assert(&result[0], -369i16);
+    assert(&result[1], 8u8);
+}
+
+#[test]
+fn index_assign_primitive() {
+    let result = run("
+        struct Inner {
+            ia: u8,
+            ib: [ u64; 3 ],
+        }
+        struct Outer {
+            oa: [ u8; 3 ],
+            ob: Inner,
+        }
+        fn main() {
+            let x: Outer = Outer {
+                oa: [ 0, 0, 0 ],
+                ob: Inner {
+                    ia: 0,
+                    ib: [ 0, 0, 0 ],
+                }
+            };
+            x.oa[0] = 13;
+            x.oa[1] = 133;
+            x.oa[2] = 255;
+            x.ob.ib[0] = 12345678901;
+            x.ob.ib[1] = 12345678902;
+            x.ob.ib[2] = 12345678903;
+            ret_u8(x.oa[0]);
+            ret_u8(x.oa[1]);
+            ret_u8(x.oa[2]);
+            ret_u64(x.ob.ib[0]);
+            ret_u64(x.ob.ib[1]);
+            ret_u64(x.ob.ib[2]);
+        }
+    ");
+    assert(&result[0], 13u8);
+    assert(&result[1], 133u8);
+    assert(&result[2], 255u8);
+    assert(&result[3], 12345678901u64);
+    assert(&result[4], 12345678902u64);
+    assert(&result[5], 12345678903u64);
+}
+
+#[test]
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";
