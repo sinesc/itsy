@@ -20,7 +20,7 @@ pub(crate) trait Bindable {
     }
 }
 
-/// Implements the bindable trait for given structure.
+/// Implements the Bindable trait for given structure.
 macro_rules! impl_bindable {
     ($struct_name:ident) => {
         impl<'a> Bindable for $struct_name<'a> {
@@ -34,17 +34,36 @@ macro_rules! impl_bindable {
     };
 }
 
+/// A trait for ast structures with a source code position
+pub(crate) trait Positioned {
+    /// Returns the structure's position.
+    fn position(self: &Self) -> u32;
+}
+
+/// Implements the Position trait for given structure.
+macro_rules! impl_positioned {
+    ($struct_name:ident) => {
+        impl<'a> Positioned for $struct_name<'a> {
+            fn position(self: &Self) -> u32 {
+                self.position
+            }
+        }
+    };
+}
+
 #[derive(Debug)]
 pub struct Ident<'a> {
     pub position: u32,
     pub name: &'a str,
 }
+impl_positioned!(Ident);
 
 #[derive(Debug)]
 pub struct Path<'a> {
     pub position: u32,
     pub name: Vec<&'a str>,
 }
+impl_positioned!(Path);
 
 pub enum Statement<'a> {
     Binding(Binding<'a>),
@@ -77,6 +96,22 @@ impl<'a> Statement<'a> {
     }
 }
 
+impl<'a> Positioned for Statement<'a> {
+    fn position(self: &Self) -> u32 {
+        match self {
+            Statement::Binding(v)   => v.position(),
+            Statement::Function(v)  => v.position(),
+            Statement::Structure(v) => v.position(),
+            Statement::ForLoop(v)   => v.position(),
+            Statement::WhileLoop(v) => v.position(),
+            Statement::IfBlock(v)   => v.position(),
+            Statement::Block(v)     => v.position(),
+            Statement::Return(v)    => v.position(),
+            Statement::Expression(v)=> v.position(),
+        }
+    }
+}
+
 impl<'a> Debug for Statement<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -103,6 +138,7 @@ pub struct Binding<'a> {
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Binding);
+impl_positioned!(Binding);
 
 #[derive(Debug)]
 pub struct Function<'a> {
@@ -112,6 +148,7 @@ pub struct Function<'a> {
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
 }
+impl_positioned!(Function);
 
 #[derive(Debug)]
 pub struct Signature<'a> {
@@ -179,6 +216,7 @@ pub struct Array<'a> {
     pub len         : u32,
     pub type_id     : Option<TypeId>,
 }
+impl_positioned!(Array);
 
 #[derive(Debug)]
 pub struct Struct<'a> {
@@ -187,6 +225,7 @@ pub struct Struct<'a> {
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub type_id : Option<TypeId>,
 }
+impl_positioned!(Struct);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -196,6 +235,7 @@ pub struct ForLoop<'a> {
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
 }
+impl_positioned!(ForLoop);
 
 #[derive(Debug)]
 pub struct WhileLoop<'a> {
@@ -204,6 +244,7 @@ pub struct WhileLoop<'a> {
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
 }
+impl_positioned!(WhileLoop);
 
 #[derive(Debug)]
 pub struct Return<'a> {
@@ -211,6 +252,7 @@ pub struct Return<'a> {
     pub expr            : Option<Expression<'a>>,
     pub fn_ret_type_id  : Option<TypeId>,
 }
+impl_positioned!(Return);
 
 #[derive(Debug)]
 pub struct IfBlock<'a> {
@@ -220,6 +262,7 @@ pub struct IfBlock<'a> {
     pub else_block  : Option<Block<'a>>,
     pub scope_id    : Option<ScopeId>,
 }
+impl_positioned!(IfBlock);
 
 impl<'a> Bindable for IfBlock<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
@@ -241,6 +284,7 @@ pub struct Block<'a> {
     pub result      : Option<Expression<'a>>,
     pub scope_id    : Option<ScopeId>,
 }
+impl_positioned!(Block);
 
 impl<'a> Bindable for Block<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
@@ -338,6 +382,23 @@ impl<'a> Bindable for Expression<'a> {
     }
 }
 
+impl<'a> Positioned for Expression<'a> {
+    fn position(self: &Self) -> u32 {
+        match self {
+            Expression::Literal(literal)        => literal.position(),
+            Expression::Variable(variable)      => variable.position(),
+            Expression::Call(call)              => call.position(),
+            Expression::Member(member)          => member.position(),
+            Expression::Assignment(assignment)  => assignment.position(),
+            Expression::BinaryOp(binary_op)     => binary_op.position(),
+            Expression::UnaryOp(unary_op)       => unary_op.position(),
+            Expression::Cast(cast)              => cast.position(),
+            Expression::Block(block)            => block.position(),
+            Expression::IfBlock(if_block)       => if_block.position(),
+        }
+    }
+}
+
 impl<'a> Debug for Expression<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -363,6 +424,7 @@ pub struct Literal<'a> {
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Literal);
+impl_positioned!(Literal);
 
 pub enum LiteralValue<'a> {
     Bool(bool),
@@ -435,21 +497,26 @@ pub struct StructLiteral<'a> {
 
 #[derive(Debug)]
 pub struct Variable<'a> {
+    pub position    : u32,
     pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Variable);
+impl_positioned!(Variable);
 
 #[derive(Debug)]
 pub struct Member<'a> {
+    pub position    : u32,
     pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
     pub index       : Option<u32>,
 }
 impl_bindable!(Member);
+impl_positioned!(Member);
 
 #[derive(Debug)]
 pub struct Call<'a> {
+    pub position        : u32,
     pub ident           : Ident<'a>,
     pub args            : Vec<Expression<'a>>,
     pub function_id     : Option<FunctionId>,
@@ -457,14 +524,17 @@ pub struct Call<'a> {
     pub binding_id      : Option<BindingId>,
 }
 impl_bindable!(Call);
+impl_positioned!(Call);
 
 #[derive(Debug)]
 pub struct Assignment<'a> {
+    pub position: u32,
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
 }
 
+impl_positioned!(Assignment);
 impl<'a> Bindable for Assignment<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
         self.left.binding_id_mut()
@@ -476,28 +546,34 @@ impl<'a> Bindable for Assignment<'a> {
 
 #[derive(Debug)]
 pub struct Cast<'a> {
+    pub position    : u32,
     pub expr        : Expression<'a>,
     pub ty          : TypeName<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Cast);
+impl_positioned!(Cast);
 
 #[derive(Debug)]
 pub struct BinaryOp<'a> {
+    pub position    : u32,
     pub op          : BinaryOperator,
     pub left        : Expression<'a>,
     pub right       : Expression<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(BinaryOp);
+impl_positioned!(BinaryOp);
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
+    pub position    : u32,
     pub op          : UnaryOperator,
     pub expr        : Expression<'a>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(UnaryOp);
+impl_positioned!(UnaryOp);
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOperator {

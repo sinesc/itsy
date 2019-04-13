@@ -244,14 +244,16 @@ named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_litera
 // assignment
 
 named!(assignable(Input<'_>) -> Expression<'_>, ws!(do_parse!(
-    init: map!(ident, |m| Expression::Variable(Variable { ident: m, binding_id: None })) >>
+    var_position: rest_len >>
+    init: map!(ident, |m| Expression::Variable(Variable { position: var_position as u32, ident: m, binding_id: None })) >>
+    op_position: rest_len >>
     res: fold_many0!(
         alt!(
             map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::IndexWrite, e))
-            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { ident: i, binding_id: None, index: None })))
+            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as u32, ident: i, binding_id: None, index: None })))
         ),
-        init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        init,       // todo: one of the positions must be wrong ;)
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: op_position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -260,25 +262,35 @@ named!(assignment_operator(Input<'_>) -> BinaryOperator, map!(alt!(tag!("=") | t
     BinaryOperator::from_string(*o)
 }));
 
-named!(assignment(Input<'_>) -> Assignment<'_>, map!(ws!(tuple!(assignable, assignment_operator, expression)), |m| {
-    Assignment {
-        op      : m.1,
-        left    : m.0,
-        right   : m.2,
-    }
-}));
+named!(assignment(Input<'_>) -> Assignment<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(tuple!(assignable, assignment_operator, expression)), |m| {
+        Assignment {
+            position: position as u32,
+            op      : m.1,
+            left    : m.0,
+            right   : m.2,
+        }
+    }) >>
+    (result)
+));
 
 // call
 
 named!(call_argument_list(Input<'_>) -> Vec<Expression<'_>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), expression), char!(')'))));
 
-named!(call(Input<'_>) -> Call<'_>, map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
-    ident       : m.0,
-    args        : m.1,
-    function_id : None,
-    rust_fn_index: None,
-    binding_id  : None,
-}));
+named!(call(Input<'_>) -> Call<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
+        position        : position as u32,
+        ident           : m.0,
+        args            : m.1,
+        function_id     : None,
+        rust_fn_index   : None,
+        binding_id      : None,
+    }) >>
+    (result)
+));
 
 // block
 
@@ -342,123 +354,150 @@ named!(if_block(Input<'_>) -> IfBlock<'_>, do_parse!(
 
 named!(parens(Input<'_>) -> Expression<'_>, ws!(delimited!(char!('('), expression, char!(')'))));
 
-named!(unary(Input<'_>) -> Expression<'_>, map!(ws!(preceded!(tag!("!"), expression)), |m| {
-    Expression::UnaryOp(Box::new(UnaryOp {
-        op          : UnaryOperator::Not,
-        expr        : m,
-        binding_id  : None,
-    }))
-}));
+named!(unary(Input<'_>) -> Expression<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(preceded!(tag!("!"), expression)), |m| {
+        Expression::UnaryOp(Box::new(UnaryOp {
+            position    : position as u32,
+            op          : UnaryOperator::Not,
+            expr        : m,
+            binding_id  : None,
+        }))
+    }) >>
+    (result)
+));
 
-named!(prefix(Input<'_>) -> Expression<'_>, map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
-    Expression::UnaryOp(Box::new(UnaryOp {
-        op          : UnaryOperator::prefix_from_string(*m.0),
-        expr        : Expression::Variable(Variable { ident: m.1, binding_id: None }),
-        binding_id  : None,
-    }))
-}));
+named!(prefix(Input<'_>) -> Expression<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
+        Expression::UnaryOp(Box::new(UnaryOp {
+            position    : position as u32,
+            op          : UnaryOperator::prefix_from_string(*m.0),
+            expr        : Expression::Variable(Variable { position: position as u32, ident: m.1, binding_id: None }),
+            binding_id  : None,
+        }))
+    }) >>
+    (result)
+));
 
-named!(suffix(Input<'_>) -> Expression<'_>, map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
-    Expression::UnaryOp(Box::new(UnaryOp {
-        op          : UnaryOperator::suffix_from_string(*m.1),
-        expr        : Expression::Variable(Variable { ident: m.0, binding_id: None }),
-        binding_id  : None,
-    }))
-}));
+named!(suffix(Input<'_>) -> Expression<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
+        Expression::UnaryOp(Box::new(UnaryOp {
+            position    : position as u32,
+            op          : UnaryOperator::suffix_from_string(*m.1),
+            expr        : Expression::Variable(Variable { position: position as u32, ident: m.0, binding_id: None }),
+            binding_id  : None,
+        }))
+    }) >>
+    (result)
+));
 
-named!(operand(Input<'_>) -> Expression<'_>, ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
-    map!(boolean, |m| Expression::Literal(m))
-    | map!(string, |m| Expression::Literal(m))
-    | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
-    | map!(block, |m| Expression::Block(Box::new(m)))
-    | parens
-    | unary // todo: unary, suffix and prefix could be changed to UnaryOp and then mapped here like bool, string, ...
-    | suffix
-    | prefix
-    | map!(numerical, |m| Expression::Literal(m))
-    | map!(call, |m| Expression::Call(m))
-    | map!(ident, |m| Expression::Variable(Variable { ident: m, binding_id: None }))
-)));
+named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
+    position: rest_len >>
+    result: ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
+        map!(boolean, |m| Expression::Literal(m))
+        | map!(string, |m| Expression::Literal(m))
+        | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
+        | map!(block, |m| Expression::Block(Box::new(m)))
+        | parens
+        | unary // todo: unary, suffix and prefix could be changed to UnaryOp and then mapped here like bool, string, ...
+        | suffix
+        | prefix
+        | map!(numerical, |m| Expression::Literal(m))
+        | map!(call, |m| Expression::Call(m))
+        | map!(ident, |m| Expression::Variable(Variable { position: position as u32, ident: m, binding_id: None }))
+    )) >>
+    (result)
+));
 
 named!(prec6(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: operand >>
+    position: rest_len >>
     res: fold_many0!(
         alt!(
             map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::Index, e))
-            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::Access, Expression::Member(Member { ident: i, binding_id: None, index: None })))
+            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::Access, Expression::Member(Member { position: position as u32, ident: i, binding_id: None, index: None })))
         ),
-        init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        init, // todo: one of the position values must be wrong :)
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec5(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec6 >>
+    position: rest_len >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec4(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec5 >>
+    position: rest_len >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("+") | tag!("-")), |o| BinaryOperator::from_string(*o)), prec5),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec3(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec4 >>
+    position: rest_len >>
     res: fold_many0!( // todo: does this work? see comment on "operand"
         pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| BinaryOperator::from_string(*o)), prec4),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec2(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec3 >>
+    position: rest_len >>
     res: fold_many0!(
         pair!(map!(alt!(tag!("!=") | tag!("==")), |o| BinaryOperator::from_string(*o)), prec3),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec1(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec2 >>
+    position: rest_len >>
     res: fold_many0!(
         pair!(map!(tag!("&&"), |o| BinaryOperator::from_string(*o)), prec2),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(prec0(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec1 >>
+    position: rest_len >>
     res: fold_many0!(
         pair!(map!(tag!("||"), |o| BinaryOperator::from_string(*o)), prec1),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
 
 named!(precn(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: prec0 >>
+    position: rest_len >>
     res: fold_many0!(
         preceded!(tag!("as"), path),
         init,
-        |acc, val| Expression::Cast(Box::new(Cast { expr: acc, ty: TypeName::from_path(val), binding_id: None }))
+        |acc, val| Expression::Cast(Box::new(Cast { position: position as u32, expr: acc, ty: TypeName::from_path(val), binding_id: None }))
     ) >>
     (res)
 )));
@@ -577,9 +616,19 @@ named!(function(Input<'_>) -> Statement<'_>, do_parse!(
 
 // TODO: accept "for ident in expression" and make .. an operator. implement iterators.
 
-named!(for_loop_range(Input<'_>) -> Expression<'_>, map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
-    Expression::BinaryOp(Box::new(BinaryOp { op: BinaryOperator::from_string(*m.1), left: m.0, right: m.2, binding_id: None }))
-}));
+named!(for_loop_range(Input<'_>) -> Expression<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
+        Expression::BinaryOp(Box::new(BinaryOp {
+            position    : position as u32,
+            op          : BinaryOperator::from_string(*m.1),
+            left        : m.0,
+            right       : m.2,
+            binding_id  : None
+        }))
+    }) >>
+    (result)
+));
 
 named!(for_loop(Input<'_>) -> ForLoop<'_>, do_parse!(
     position: rest_len >>
