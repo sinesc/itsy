@@ -52,7 +52,7 @@ macro_rules! impl_vm {
     (
         $(
             $( #[ $attr:meta ] )*
-            fn $name:tt $( = $id:tt)* ( $self:ident : & mut Self $(, $op_name:ident : $op_type:tt )* ) $code:block
+            fn $name:tt $( = $id:tt)* ( & mut $self:ident $(, & mut $context:ident)? $(, $op_name:ident : $op_type:tt )* ) $code:block
         )+
     ) => {
 
@@ -74,8 +74,6 @@ macro_rules! impl_vm {
         #[allow(non_camel_case_types)]
         #[repr(u8)]
         pub enum OpCode {
-            /// Calls the given Rust function.
-            rustcall,
             $(
                 $( #[ $attr ] )*
                 $name $(= $id)*
@@ -97,13 +95,6 @@ macro_rules! impl_vm {
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         impl<T> crate::bytecode::Writer<T> where T: crate::runtime::VMFunc<T> {
-            /// Calls the given Rust function.
-            pub fn rustcall(self: &Self, func: impl_vm!(map_writer_type RustFn)) -> u32 {
-                let insert_pos = self.position();
-                impl_vm!(write u8, OpCode::rustcall.into_u8(), self);
-                impl_vm!(write RustFn, func, self);
-                insert_pos as u32
-            }
             $(
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
@@ -123,7 +114,7 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[cfg_attr(not(debug_assertions), inline(always))]
-                fn $name ( $self: &mut Self, $($op_name: impl_vm!(map_reader_type $op_type)),* ) {
+                fn $name ( $self: &mut Self, $($context: &mut U,)? $($op_name: impl_vm!(map_reader_type $op_type)),* ) {
                     $code
                 }
             )+
@@ -135,10 +126,10 @@ macro_rules! impl_vm {
                 let mut pc = position;
                 if pc < self.program.instructions.len() as u32 {
                     let instruction = impl_vm!(read u8, self, pc);
+                    #[allow(unreachable_patterns)]
                     match OpCode::from_u8(instruction) {
-                        // todo: rustcall specialcase is required since normal opcodes don't receive the context
-                        // considering refactoring this so that all opcodes receive the context if it turns out that
-                        // additional opcodes require it
+                        // implement special formatting for rustcalls (output the rust function name)
+                        // todo: write child macro to handle this for the general case? would also like to print comments more readable
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
                             result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, pc) )));
@@ -165,13 +156,11 @@ macro_rules! impl_vm {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 let instruction = impl_vm!(read u8, self, self.pc);
                 match OpCode::from_u8(instruction) {
-                    OpCode::rustcall => {
-                        T::from_u16(impl_vm!(read RustFn, self, self.pc)).exec(self, context);
-                    },
                     $(
                         OpCode::$name => {
                             let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self, self.pc) ),* );
-                            self.$name( $( $op_name ),* );
+                            $(let $context = context;)?
+                            self.$name( $($context,)? $( $op_name ),* );
                         }
                     ),+
                 }
