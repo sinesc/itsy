@@ -29,9 +29,9 @@ pub(crate) fn array8(s: &[u8]) -> [u8; 8] {
     [ s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7] ]
 }
 
-/// Compute line/column number from absolute position in string
-pub(crate) fn compute_position(input: &str, position: u32) -> (u32, u32) {
-    let mut parsed = &input[0..position as usize];
+/// Compute line/column number from absolute offset in string
+pub(crate) fn compute_loc(input: &str, offset: u32) -> (u32, u32) {
+    let mut parsed = &input[0..offset as usize];
     let mut line = 1;
     while { // can't use let parsed.lines() here as a line-break at the end is ignored
         let mut break_char = '\0';

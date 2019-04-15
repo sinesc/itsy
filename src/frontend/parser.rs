@@ -4,7 +4,7 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
 use std::collections::HashMap;
-use crate::util::{Numeric, compute_position};
+use crate::util::{Numeric, compute_loc};
 use crate::frontend::ast::*;
 
 /// Represents the various possible parser error-kinds.
@@ -26,15 +26,18 @@ pub enum ParseErrorKind {
 #[derive(Copy, Clone, Debug)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
-    pub line: u32,
-    pub column: u32,
-    pub position: u32,
+    line: u32,
+    column: u32,
 }
 
 impl ParseError {
-    pub fn new(kind: ParseErrorKind, position: u32, input: &str) -> ParseError {
-        let (line, column) = compute_position(input, position);
-        Self { kind, line, column, position }
+    fn new(kind: ParseErrorKind, offset: u32, input: &str) -> ParseError {
+        let (line, column) = compute_loc(input, offset);
+        Self { kind, line, column }
+    }
+    /// Returns the source code location of this error.
+    pub fn loc(self: &Self) -> (u32, u32) {
+        (self.line, self.column)
     }
 }
 
