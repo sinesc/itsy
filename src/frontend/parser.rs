@@ -357,39 +357,35 @@ named!(if_block(Input<'_>) -> IfBlock<'_>, do_parse!(
 
 named!(parens(Input<'_>) -> Expression<'_>, ws!(delimited!(char!('('), expression, char!(')'))));
 
+named!(prefix(Input<'_>) -> UnaryOp<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(pair!(alt!(tag!("++") | tag!("--")), assignable)), |m| UnaryOp {
+        position    : position as u32,
+        op          : UnaryOperator::prefix_from_string(*m.0),
+        expr        : m.1,
+        binding_id  : None,
+    }) >>
+    (result)
+));
+
+named!(suffix(Input<'_>) -> UnaryOp<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(pair!(assignable, alt!(tag!("++") | tag!("--")))), |m| UnaryOp {
+        position    : position as u32,
+        op          : UnaryOperator::suffix_from_string(*m.1),
+        expr        : m.0,
+        binding_id  : None,
+    }) >>
+    (result)
+));
+
 named!(unary(Input<'_>) -> Expression<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(preceded!(tag!("!"), expression)), |m| {
+    result: map!(ws!(preceded!(tag!("!"), prec6)), |m| {
         Expression::UnaryOp(Box::new(UnaryOp {
             position    : position as u32,
             op          : UnaryOperator::Not,
             expr        : m,
-            binding_id  : None,
-        }))
-    }) >>
-    (result)
-));
-
-named!(prefix(Input<'_>) -> Expression<'_>, do_parse!(
-    position: rest_len >>
-    result: map!(ws!(pair!(alt!(tag!("!") | tag!("++") | tag!("--")), ident)), |m| { // todo: need to allow expression, check assignability in resolver
-        Expression::UnaryOp(Box::new(UnaryOp {
-            position    : position as u32,
-            op          : UnaryOperator::prefix_from_string(*m.0),
-            expr        : Expression::Variable(Variable { position: position as u32, ident: m.1, binding_id: None }),
-            binding_id  : None,
-        }))
-    }) >>
-    (result)
-));
-
-named!(suffix(Input<'_>) -> Expression<'_>, do_parse!(
-    position: rest_len >>
-    result: map!(ws!(pair!(ident, alt!(tag!("++") | tag!("--")))), |m| {// todo: need to allow expression (e.g. a[b]), check assignability in resolver
-        Expression::UnaryOp(Box::new(UnaryOp {
-            position    : position as u32,
-            op          : UnaryOperator::suffix_from_string(*m.1),
-            expr        : Expression::Variable(Variable { position: position as u32, ident: m.0, binding_id: None }),
             binding_id  : None,
         }))
     }) >>
@@ -404,9 +400,8 @@ named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
         | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
         | map!(block, |m| Expression::Block(Box::new(m)))
         | parens
-        | unary // todo: unary, suffix and prefix could be changed to UnaryOp and then mapped here like bool, string, ...
-        | suffix
-        | prefix
+        | map!(suffix, |m| Expression::UnaryOp(Box::new(m)))
+        | map!(prefix, |m| Expression::UnaryOp(Box::new(m)))
         | map!(numerical, |m| Expression::Literal(m))
         | map!(call, |m| Expression::Call(m))
         | map!(ident, |m| Expression::Variable(Variable { position: position as u32, ident: m, binding_id: None }))
@@ -428,11 +423,13 @@ named!(prec6(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     (res)
 )));
 
+named!(prec5unary(Input<'_>) -> Expression<'_>, alt!(prec6 | unary));
+
 named!(prec5(Input<'_>) -> Expression<'_>, ws!(do_parse!(
-    init: prec6 >>
+    init: prec5unary >>
     position: rest_len >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
+        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec5unary),
         init,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>

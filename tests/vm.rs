@@ -2,6 +2,24 @@ mod util;
 use util::*;
 
 #[test]
+fn op_precedence() {
+    let result = run("
+        let a = true;
+        let b = false;
+        let c = true;
+        let d = false;
+
+        ret_bool((a || b && c) == (a || (b && c)));
+        ret_bool((a && b || c && d) == ((a && b) || (c && d)));
+        ret_bool((a && b && c || d) == (((a && b) && c) || d));
+        ret_bool((!a && b || c) == (((!a) && b) || c));
+
+        ret_bool((!a && b || c) == !(a && b || c));
+    ");
+    assert_all(&result, &[ true, true, true, true, false ]);
+}
+
+#[test]
 fn op_native_stack_value() {
     let result = run("
         ret_i32(1 + 4);
@@ -44,36 +62,6 @@ fn op_numerics() {
 
     assert(&result[8], 1234567.0f32 * 7654321.0);
     assert(&result[9], 123456789.0f64 * 987654321.0);
-}
-
-#[test]
-fn op_bool() {
-    let result = run("
-        ret_bool(true && true);
-        ret_bool(true && false);
-        ret_bool(false && true);
-        ret_bool(false && false);
-
-        ret_bool(true || true);
-        ret_bool(true || false);
-        ret_bool(false || true);
-        ret_bool(false || false);
-
-        ret_bool(!false);
-        ret_bool(!true);
-
-        ret_bool(true && !false);
-        ret_bool(!false && !false);
-        ret_bool(!true || false);
-    ");
-    assert_all(&result, &[
-        true, false, false, false,
-        true, true, true, false,
-        true, false,
-        true && !false,
-        !false && !false,
-        !true || false
-    ]);
 }
 
 #[test]
