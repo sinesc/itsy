@@ -42,6 +42,30 @@ fn expression_eval_order() {
 }
 
 #[test]
+fn expression_short_circuit() {
+    let result = run("
+        fn t() -> bool { ret_bool(true); true }
+        fn f() -> bool { ret_bool(false); false }
+        fn main() {
+            ret_bool(t() && f());
+            ret_bool(t() && f() || t());
+            ret_bool(f() && t() || t());
+            ret_bool(t() || f() && t());
+            ret_bool(t() && f() || t() && f());
+            ret_bool(f() && t() || f() && t());
+        }
+    ");
+    assert_all(&result, &[
+        true, false,                false,
+        true, false, true,          true,
+        false,       true,          true,
+        true,                       true,
+        true, false, true, false,   false,
+        false,       false,         false,
+    ]);
+}
+
+#[test]
 fn stack_value_expressions() {
     let result = run("
         ret_i32(1 + 4);

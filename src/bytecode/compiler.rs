@@ -475,14 +475,16 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
-        if item.op == BO::Less || item.op == BO::LessOrEq {
-            // implement these via Less/LessOrEq + swapping arguments
-            // fixme: this fails if values change within those expressions (e.g. via ++ op)
-            self.compile_expression(&item.right);
-            self.compile_expression(&item.left);
-        } else {
-            self.compile_expression(&item.left);
-            self.compile_expression(&item.right);
+        if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
+            if item.op == BO::Less || item.op == BO::LessOrEq {
+                // implement these via Less/LessOrEq + swapping arguments
+                // fixme: this fails if values change within those expressions (e.g. via ++ op)
+                self.compile_expression(&item.right);
+                self.compile_expression(&item.left);
+            } else {
+                self.compile_expression(&item.left);
+                self.compile_expression(&item.right);
+            }
         }
 
         let result_type = self.bindingtype(item);
@@ -501,8 +503,22 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
             BO::Equal => { self.write_eq(&compare_type); },
             BO::NotEqual => { self.write_neq(&compare_type); },
             // boolean
-            BO::And => { self.writer.and(); },
-            BO::Or => { self.writer.or(); },
+            BO::And => {
+                self.compile_expression(&item.left);
+                let exit_jump = self.writer.j0_top(123); // left is false, result cannot ever be true, skip right
+                self.compile_expression(&item.right);
+                self.writer.and();
+                let exit_target = self.writer.position();
+                self.writer.overwrite(exit_jump, |w| w.j0_top(exit_target));
+            },
+            BO::Or => {
+                self.compile_expression(&item.left);
+                let exit_jump = self.writer.jn0_top(123); // left is true, result cannot ever be false, skip right
+                self.compile_expression(&item.right);
+                self.writer.or();
+                let exit_target = self.writer.position();
+                self.writer.overwrite(exit_jump, |w| w.jn0_top(exit_target));
+            },
             // special
             BO::Range => unimplemented!("range"),
             BO::Index | BO::IndexWrite => {

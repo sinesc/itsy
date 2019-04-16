@@ -551,6 +551,20 @@ impl_vm!{
             self.pc = addr;
         }
     }
+    /// Jumps to given address if the 32bit stack-top is 0.
+    fn j0_top(&mut self, addr: u32) {
+        let a: Value = self.stack.top();
+        if a == 0 {
+            self.pc = addr;
+        }
+    }
+    /// Jumps to given address if the 32bit stack-top is not 0.
+    fn jn0_top(&mut self, addr: u32) {
+        let a: Value = self.stack.top();
+        if a != 0 {
+            self.pc = addr;
+        }
+    }
 
     // todo: comparisons need to be generated somehow, this is bound to contain copy&paste errors
 
