@@ -417,14 +417,14 @@ impl_vm!{
 
     /// Pops 2 values from the stack and pushes their logical conjunction.
     fn and(&mut self) {
-        let a: bool = self.stack.pop();
         let b: bool = self.stack.pop();
+        let a: bool = self.stack.pop();
         self.stack.push(a && b);
     }
     /// Pops 2 values from the stack and pushes their logical disjunction.
     fn or(&mut self) {
-        let a: bool = self.stack.pop();
         let b: bool = self.stack.pop();
+        let a: bool = self.stack.pop();
         self.stack.push(a || b);
     }
     /// Pops a values from the stack and pushes its logical negation.
@@ -435,101 +435,101 @@ impl_vm!{
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addi(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their difference.
     fn subi(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
     fn muli(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push(a * b);
     }
     /// Pops 2 values from the stack and pushes their quotient.
     fn divi(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push(a / b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their sum.
     fn subf(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
     fn mulf(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push(a * b);
     }
     /// Pops 2 values from the stack and pushes their quotient.
     fn divf(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push(a / b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addi64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their difference.
     fn subi64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
     fn muli64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push(a * b);
     }
     /// Pops 2 values from the stack and pushes their quotient.
     fn divi64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push(a / b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push(a + b);
     }
     /// Pops 2 values from the stack and pushes their sum.
     fn subf64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push(a - b);
     }
     /// Pops 2 values from the stack and pushes their product.
     fn mulf64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push(a * b);
     }
     /// Pops 2 values from the stack and pushes their quotient.
     fn divf64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push(a / b);
     }
 

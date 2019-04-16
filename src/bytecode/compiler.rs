@@ -153,9 +153,9 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 self.write_store(index, self.bindingtype(&item.left));
             },
             compound_assign @ _ => {
-                self.compile_expression(&item.right);
                 let ty = self.bindingtype(&item.left);
                 self.write_load(index, ty);
+                self.compile_expression(&item.right);
                 match compound_assign {
                     BO::AddAssign => { self.write_add(&ty); },
                     BO::SubAssign => { self.write_sub(&ty); },
@@ -172,7 +172,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the assignment operation.
     fn compile_heap_assignment(self: &Self, item: &ast::Assignment<'a>) {
         self.compile_expression(&item.right);
-        self.compile_expression(&item.left);
+        self.compile_expression(&item.left); // FIXME compound
     }
 
     /// Compiles the assignment operation.
@@ -465,7 +465,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else {
-                    panic!("Operator {:?} can only be used on variable bindings", item.op);
+                    panic!("Operator {:?} can only be used on variable bindings", item.op); // FIXME not true anymore
                 }
             },
         }
@@ -475,14 +475,14 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'a>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
-        if item.op == BO::Greater || item.op == BO::GreaterOrEq || item.op == BO::Index || item.op == BO::IndexWrite {
+        if item.op == BO::Less || item.op == BO::LessOrEq {
             // implement these via Less/LessOrEq + swapping arguments
             // fixme: this fails if values change within those expressions (e.g. via ++ op)
-            self.compile_expression(&item.left);
             self.compile_expression(&item.right);
+            self.compile_expression(&item.left);
         } else {
-            self.compile_expression(&item.right);
             self.compile_expression(&item.left);
+            self.compile_expression(&item.right);
         }
 
         let result_type = self.bindingtype(item);

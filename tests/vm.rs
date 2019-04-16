@@ -2,7 +2,7 @@ mod util;
 use util::*;
 
 #[test]
-fn op_precedence() {
+fn precedence() {
     let result = run("
         let a = true;
         let b = false;
@@ -20,7 +20,29 @@ fn op_precedence() {
 }
 
 #[test]
-fn op_native_stack_value() {
+fn expression_eval_order() {
+    let result = run("
+        fn one() -> i32 { ret_i32(1); 1 }
+        fn two() -> i32 { ret_i32(2); 2 }
+        fn main() {
+            ret_i32(one() + two());
+            ret_i32(one() - two() + one());
+            ret_i32(one() - (two() + one()));
+            ret_i32(one() - two() * two());
+            ret_i32((two() + two()) / two());
+        }
+    ");
+    assert_all(&result, &[
+        1i32, 2,    3,
+        1, 2, 1,    0,
+        1, 2, 1,    -2,
+        1, 2, 2,    -3,
+        2, 2, 2,    2,
+    ]);
+}
+
+#[test]
+fn stack_value_expressions() {
     let result = run("
         ret_i32(1 + 4);
         ret_i32(1 + 4 * 2);
@@ -34,7 +56,7 @@ fn op_native_stack_value() {
 }
 
 #[test]
-fn op_numerics() {
+fn numerics() {
     let result = run("
         ret_u8( 255 - 1 );
         ret_u16( 65535 - 2 );
