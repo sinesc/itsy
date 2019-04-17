@@ -90,7 +90,7 @@ impl<'a> Statement<'a> {
         match self {
             Statement::IfBlock(if_block)        => Expression::IfBlock(Box::new(if_block)),
             Statement::Block(block)             => Expression::Block(Box::new(block)),
-            Statement::Expression(expression)   => expression,
+            Statement::Expression(expression)   => expression, // todo: why is is inconsistent with the above?
             _                                   => panic!("invalid statement to expression conversion"),
         }
     }

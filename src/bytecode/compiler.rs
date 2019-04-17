@@ -57,14 +57,14 @@ pub struct Compiler<T> where T: VMFunc<T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'a, T>(program: ResolvedProgram<'a, T>) -> Program<T> where T: VMFunc<T>+Debug {
+pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T: VMFunc<T>+Debug {
     let mut compiler = Compiler::new();
     compiler.compile(program);
     compiler.into_program()
 }
 
 /// Basic compiler functionality.
-impl<'a, T> Compiler<T> where T: VMFunc<T> {
+impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Creates a new compiler.
     fn new() -> Self {
@@ -79,13 +79,12 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the current program.
-    fn compile(self: &mut Self, program: ResolvedProgram<'a, T>) {
+    fn compile(self: &mut Self, program: ResolvedProgram<'ast, T>) {
 
         let ResolvedProgram { ast: statements, bindingtype_ids, types, entry_fn, .. } = program;
 
         // write placeholder jump to program entry
-        let initial_pos = self.writer.position();
-        self.writer.call(123, 0);
+        let initial_pos = self.writer.call(123, 0);
         self.writer.exit();
 
         // compile program
@@ -107,10 +106,10 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
 }
 
 /// Methods for compiling individual code structures.
-impl<'a, T> Compiler<T> where T: VMFunc<T> {
+impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
-    fn compile_statement(self: &Self, item: &ast::Statement<'a>) {
+    fn compile_statement(self: &Self, item: &ast::Statement<'ast>) {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.compile_function(function),
@@ -126,7 +125,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given expression.
-    fn compile_expression(self: &Self, item: &ast::Expression<'a>) {
+    fn compile_expression(self: &Self, item: &ast::Expression<'ast>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
@@ -143,7 +142,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    fn compile_stack_assignment(self: &Self, item: &ast::Assignment<'a>) {
+    fn compile_stack_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id().unwrap();
         let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
@@ -170,13 +169,13 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    fn compile_heap_assignment(self: &Self, item: &ast::Assignment<'a>) {
+    fn compile_heap_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         self.compile_expression(&item.right);
         self.compile_expression(&item.left); // FIXME compound
     }
 
     /// Compiles the assignment operation.
-    fn compile_assignment(self: &Self, item: &ast::Assignment<'a>) {
+    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         match item.left {
             ast::Expression::Variable(_) => self.compile_stack_assignment(item),
             ast::Expression::BinaryOp(_) => self.compile_heap_assignment(item),
@@ -185,7 +184,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given function.
-    fn compile_function(self: &Self, item: &ast::Function<'a>) {
+    fn compile_function(self: &Self, item: &ast::Function<'ast>) {
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
@@ -216,7 +215,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given call.
-    fn compile_call(self: &Self, item: &ast::Call<'a>) {
+    fn compile_call(self: &Self, item: &ast::Call<'ast>) {
 
         // put args on stack
         for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
@@ -246,7 +245,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &Self, item: &ast::Binding<'a>) {
+    fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
@@ -256,7 +255,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given variable.
-    fn compile_variable(self: &Self, item: &ast::Variable<'a>) {
+    fn compile_variable(self: &Self, item: &ast::Variable<'ast>) {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
@@ -264,7 +263,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         self.write_load(load_index, self.bindingtype(item));
     }
 
-    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'a>) {
+    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) {
 
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.if_block);
@@ -272,7 +271,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
     }
 
-    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'a>, else_block: &ast::Block<'a>) {
+    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) {
 
         let else_jump = self.writer.j0(123);
         self.compile_block(if_block);
@@ -289,7 +288,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given if block.
-    fn compile_if_block(self: &Self, item: &ast::IfBlock<'a>) {
+    fn compile_if_block(self: &Self, item: &ast::IfBlock<'ast>) {
 
         // compile condition and jump placeholder
         self.compile_expression(&item.cond);
@@ -302,7 +301,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a while loop.
-    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'a>) {
+    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) {
         let start_target = self.writer.position();
         self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
@@ -313,7 +312,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a for - in loop
-    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'a>) {
+    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) {
         if let Some(binary_op) = item.range.as_binary_op() {
 
             if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
@@ -332,8 +331,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
                 } else {
                     self.write_lte(var_type);
                 }
-                let exit_jump = self.writer.position();
-                self.writer.j0(123);
+                let exit_jump = self.writer.j0(123);
                 // compile block
                 let start_target = self.writer.position();
                 self.compile_block(&item.block);
@@ -359,7 +357,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a return statement
-    fn compile_return(self: &Self, item: &ast::Return<'a>) {
+    fn compile_return(self: &Self, item: &ast::Return<'ast>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
         } else {
@@ -369,7 +367,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given block.
-    fn compile_block(self: &Self, item: &ast::Block<'a>) {
+    fn compile_block(self: &Self, item: &ast::Block<'ast>) {
 
         for statement in item.statements.iter() {
             self.compile_statement(statement);
@@ -381,7 +379,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given literal
-    fn compile_literal(self: &Self, item: &ast::Literal<'a>) {
+    fn compile_literal(self: &Self, item: &ast::Literal<'ast>) {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
@@ -439,7 +437,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given unary operation.
-    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'a>) {
+    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) {
         use crate::frontend::ast::UnaryOperator as UO;
 
         let exp_type = self.bindingtype(&item.expr);
@@ -472,7 +470,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given binary operation.
-    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'a>) {
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
@@ -559,7 +557,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_cast(self: &Self, item: &ast::Cast<'a>) {
+    fn compile_cast(self: &Self, item: &ast::Cast<'ast>) {
 
         self.compile_expression(&item.expr);
 
@@ -631,7 +629,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
     }
 }
 
-impl<'a, T> Compiler<T> where T: VMFunc<T> {
+impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Returns the type of the given binding.
     fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
         let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
@@ -654,7 +652,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Retrieve for-in loop range variable index/type
-    fn range_info(self: &Self, item: &ast::ForLoop<'a>) -> (i32, &Type) {
+    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (i32, &Type) {
         let var_index = {
             let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
@@ -663,7 +661,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         (var_index, var_type)
     }
     /// Creates stack frame variables for expressions.
-    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'a>, frame: &mut Locals) {
+    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut Locals) {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame);
         } else if let ast::Expression::Call(call) = expression {
@@ -695,7 +693,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Creates stack frame variables for blocks.
-    fn create_stack_frame_block(self: &Self, item: &ast::Block<'a>, frame: &mut Locals) {
+    fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut Locals) {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
@@ -725,7 +723,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Stores given literal on the const pool.
-    fn store_literal(self: &Self, item: &ast::Literal<'a>) -> u32 {
+    fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
@@ -792,7 +790,7 @@ impl<'a, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Stores array data in constpool. Note: when read with const_fetch_object() array size needs to be written first!
-    fn store_literal_data(self: &Self, item: &ast::Literal<'a>) {
+    fn store_literal_data(self: &Self, item: &ast::Literal<'ast>) {
         use crate::frontend::ast::LiteralValue;
 
         match &item.value {
