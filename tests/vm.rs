@@ -653,10 +653,16 @@ fn index_assign_primitive() {
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";
+        let echo = \"Hello Echo!\";
         ret_str(hello);
         ret_string(hello);
+        ret_str(echo);
+        ret_string(echo);
     ");
-    assert_all(&result, &[ "Hello World!".to_string(), "Hello World!".to_string() ]);
+    assert_all(&result, &[
+        "Hello World!".to_string(), "Hello World!".to_string() ,
+        "Hello Echo!".to_string(), "Hello Echo!".to_string() ,
+    ]);
 }
 
 #[test]
