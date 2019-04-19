@@ -1,79 +1,57 @@
 use itsy::*;
 
-extern_rust!(MyFns, u32, {
+extern_rust!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
-        println!("printi8:{}", value);
+        println!("{}i8", value);
     }
     fn printi16(&mut context, value: i16) {
-        println!("printi16:{}", value);
+        println!("{}i16", value);
     }
     fn printi32(&mut context, value: i32) {
-        println!("printi32:{}", value);
+        println!("{}i32", value);
     }
     fn printi64(&mut context, value: i64) {
-        println!("printi64:{}", value);
+        println!("{}i64", value);
     }
     fn printu8(&mut context, value: u8) {
-        println!("printu8:{}", value);
+        println!("{}u8", value);
     }
     fn printu16(&mut context, value: u16) {
-        println!("printu16:{}", value);
+        println!("{}u16", value);
     }
     fn printu32(&mut context, value: u32) {
-        println!("printu32:{}", value);
+        println!("{}u32", value);
     }
     fn printu64(&mut context, value: u64) {
-        println!("printu64:{}", value);
+        println!("{}u64", value);
     }
     fn printf32(&mut context, value: f32) {
-        println!("printf32:{}", value);
+        println!("{}f32", value);
     }
     fn printf64(&mut context, value: f64) {
-        println!("printf64:{}", value);
+        println!("{}f64", value);
     }
     fn printb(&mut context, value: bool) {
-        println!("printb:{}", value);
+        println!("{}", value);
     }
-    fn strlen(&mut context, value: &str) -> u32 {
-        value.len() as u32
-    }
-    fn prints_ref(&mut context, value: &str) {
-        println!("prints:{}", value);
-    }
-    fn prints_val(&mut context, value: String) {
-        println!("prints2:{}", &value);
-    }
-    fn hello(&mut context) -> String {
-        "Hello World, from Rust, with love".to_string()
-    }
-    fn ret(&mut context, val: u32) {
-        *context = val;
+    fn prints(&mut context, value: &str) {
+        println!("&\"{}\"", value);
     }
 });
 
 #[allow(unused_variables)]
 fn main() {
     let source = "
-        struct Inner {
-            ia: u8,
-            ib: [ u8; 3 ],
-        }
-        struct Outer {
-            oa: u8,
-            ob: Inner,
-        }
         fn main() {
-            let x: Outer = Outer { oa: 1, ob: Inner { ia: 8, ib: [ 1, 2, 3 ] } };
-            printu8(x.ob.ib[1]);
+            prints(\"Hello World\");
         }
     ";
-    println!("{}", source);
-    println!("{:#?}", parse(source));
-    let mut vm = vm::<MyFns, u32>(source);
-    println!("{:}", vm.format_program());
+    //println!("source:\n{}", source);
+    //println!("ast:\n{:#?}", parse(source));
+    //println!("highest opcode id: {}", bytecode::OpCode::comment as u8);
+    let mut vm = vm::<MyFns, ()>(source);
+    println!("bytecode:\n{:}", vm.format_program());
     let vm_start = std::time::Instant::now();
-    let mut result = 0;
-    vm.run(&mut result);
-    println!("result: {:}", result);
-    println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
+    vm.run(&mut ());
+    //println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
 }
