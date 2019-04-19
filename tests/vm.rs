@@ -650,6 +650,48 @@ fn index_assign_primitive() {
 }
 
 #[test]
+fn heap_compound_assign() {
+    let result = run("
+        fn left() -> u32 {
+            ret_u8(9);
+            0
+        }
+        fn right() -> u8 {
+            ret_u8(6);
+            1
+        }
+        fn main() {
+            let test = [ 0u8 ];
+            ret_u8(test[0]);
+            test[left()] += right();
+            ret_u8(test[0]);
+        }
+    ");
+    assert_all(&result, &[ 0u8, 6, 9, 1 ]);
+}
+
+#[test]
+fn heap_compound_assign64() {
+    let result = run("
+        fn left() -> u32 {
+            ret_u64(9);
+            0
+        }
+        fn right() -> u64 {
+            ret_u64(6);
+            1
+        }
+        fn main() {
+            let test = [ 0u64 ];
+            ret_u64(test[0]);
+            test[left()] += right();
+            ret_u64(test[0]);
+        }
+    ");
+    assert_all(&result, &[ 0u64, 6, 9, 1 ]);
+}
+
+#[test]
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";
