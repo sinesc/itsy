@@ -663,32 +663,32 @@ impl_vm!{
 
     /// Pops two values and jumps to given address it they equal.
     fn jeqr32(&mut self, addr: u32) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         if a == b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address it they equal.
     fn jeqr64(&mut self, addr: u32) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         if a == b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address it they are not equal.
     fn jneqr32(&mut self, addr: u32) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         if a != b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address it they are not equal.
     fn jneqr64(&mut self, addr: u32) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         if a != b {
             self.pc = addr;
         }
@@ -696,48 +696,48 @@ impl_vm!{
 
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jlts32(&mut self, addr: u32) {
-        let a: i32 = self.stack.pop();
         let b: i32 = self.stack.pop();
+        let a: i32 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jltu32(&mut self, addr: u32) {
-        let a: u32 = self.stack.pop();
         let b: u32 = self.stack.pop();
+        let a: u32 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jltf32(&mut self, addr: u32) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jlts64(&mut self, addr: u32) {
-        let a: i64 = self.stack.pop();
         let b: i64 = self.stack.pop();
+        let a: i64 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jltu64(&mut self, addr: u32) {
-        let a: u64 = self.stack.pop();
         let b: u64 = self.stack.pop();
+        let a: u64 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less than the second.
     fn jltf64(&mut self, addr: u32) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         if a < b {
             self.pc = addr;
         }
@@ -745,48 +745,48 @@ impl_vm!{
 
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jltes32(&mut self, addr: u32) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jlteu32(&mut self, addr: u32) {
-        let a: u32 = self.stack.pop();
         let b: u32 = self.stack.pop();
+        let a: u32 = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jltef32(&mut self, addr: u32) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jltes64(&mut self, addr: u32) {
-        let a: i64 = self.stack.pop();
         let b: i64 = self.stack.pop();
+        let a: i64 = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jlteu64(&mut self, addr: u32) {
-        let a: u64 = self.stack.pop();
         let b: u64 = self.stack.pop();
+        let a: u64 = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
     }
     /// Pops two values and jumps to given address if the first value is less/equal the second.
     fn jltef64(&mut self, addr: u32) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         if a <= b {
             self.pc = addr;
         }
@@ -794,100 +794,100 @@ impl_vm!{
 
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn ceqr32(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push((a == b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn ceqr64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push((a == b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value does not equal the second, otherwise a 0.
     fn cneqr32(&mut self) {
-        let a: Value = self.stack.pop();
         let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
         self.stack.push((a != b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value does not equal the second, otherwise a 0.
     fn cneqr64(&mut self) {
-        let a: Value64 = self.stack.pop();
         let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
         self.stack.push((a != b) as Value);
     }
 
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn clts32(&mut self) {
-        let a: i32 = self.stack.pop();
         let b: i32 = self.stack.pop();
+        let a: i32 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn cltu32(&mut self) {
-        let a: u32 = self.stack.pop();
         let b: u32 = self.stack.pop();
+        let a: u32 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn cltf32(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn clts64(&mut self) {
-        let a: i64 = self.stack.pop();
         let b: i64 = self.stack.pop();
+        let a: i64 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn cltu64(&mut self) {
-        let a: u64 = self.stack.pop();
         let b: u64 = self.stack.pop();
+        let a: u64 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn cltf64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push((a < b) as Value);
     }
 
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn cltes32(&mut self) {
-        let a: i32 = self.stack.pop();
         let b: i32 = self.stack.pop();
+        let a: i32 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn clteu32(&mut self) {
-        let a: u32 = self.stack.pop();
         let b: u32 = self.stack.pop();
+        let a: u32 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn cltef32(&mut self) {
-        let a: f32 = self.stack.pop();
         let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn cltes64(&mut self) {
-        let a: i64 = self.stack.pop();
         let b: i64 = self.stack.pop();
+        let a: i64 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn clteu64(&mut self) {
-        let a: u64 = self.stack.pop();
         let b: u64 = self.stack.pop();
+        let a: u64 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn cltef64(&mut self) {
-        let a: f64 = self.stack.pop();
         let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
         self.stack.push((a <= b) as Value);
     }
 

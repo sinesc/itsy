@@ -351,8 +351,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 // push upper range bound
                 self.compile_expression(&binary_op.right, false);
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
-                self.write_clone(var_type, 0);
                 self.write_load(var_index, var_type);
+                self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
                 } else {
@@ -363,8 +363,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let start_target = self.writer.position();
                 self.compile_block(&item.block);
                 // load bounds, increment and compare
-                self.write_clone(var_type, 0);
                 self.write_preinc(var_index, var_type);
+                self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
                 } else {
@@ -501,15 +501,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
-            if item.op == BO::Less || item.op == BO::LessOrEq {
-                // implement these via Less/LessOrEq + swapping arguments
-                // fixme: this fails if values change within those expressions (e.g. via ++ op)
-                self.compile_expression(&item.right, is_compound_assignment);
-                self.compile_expression(&item.left, is_compound_assignment);
-            } else {
-                self.compile_expression(&item.left, is_compound_assignment);
-                self.compile_expression(&item.right, is_compound_assignment);
-            }
+            self.compile_expression(&item.left, is_compound_assignment);
+            self.compile_expression(&item.right, is_compound_assignment);
         }
 
         let result_type = self.bindingtype(item);
@@ -523,8 +516,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::Div => { self.write_div(&result_type); },
             BO::Rem => unimplemented!("rem"),
             // comparison
-            BO::Less | BO::Greater => { self.write_lt(&compare_type); }, // Less/Greater, for Greater, arguments have been swapped above.
-            BO::LessOrEq | BO::GreaterOrEq => { self.write_lte(&compare_type); } //  swapped above for GreaterOrEqual
+            BO::Greater => { self.write_swap(compare_type, compare_type); self.write_lt(&compare_type); },
+            BO::GreaterOrEq => { self.write_swap(compare_type, compare_type); self.write_lte(&compare_type); }
+            BO::Less => { self.write_lt(&compare_type); },
+            BO::LessOrEq => { self.write_lte(&compare_type); }
             BO::Equal => { self.write_eq(&compare_type); },
             BO::NotEqual => { self.write_neq(&compare_type); },
             // boolean
@@ -946,6 +941,20 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             4 => { self.writer.heap_put_element32(); },
             8 => { self.writer.heap_put_element64(); },
             _ => panic!("Invalid element size {} for heap_put_element", element_size)
+        }
+    }
+    /// Swap 2 stack values, ty_a being topmost, ty_b next below.
+    fn write_swap(self: &Self, ty_a: &Type, ty_b: &Type) {
+        let size_a = ty_a.size();
+        let size_b = ty_b.size();
+        if size_a == 8 && size_b == 8 {
+            self.writer.swap64();
+        } else if size_a < 8 && size_b < 8 {
+            self.writer.swap32();
+        } else if size_a == 8 && size_b < 8 {
+            self.writer.swap64_32();
+        } else if size_a < 8 && size_b == 8 {
+            self.writer.swap32_64();
         }
     }
     fn write_preinc(self: &Self, index: i32, ty: &Type) {
