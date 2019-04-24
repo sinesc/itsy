@@ -206,6 +206,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    /// Convenience wrapper returning a TypeMismatch error.
     fn err_type_mismatch<T>(self: &Self, item: &T, a_type_id: TypeId, b_type_id: TypeId) -> ResolveError where T: Positioned {
         ResolveError::new(item, ResolveErrorKind::TypeMismatch(self.scopes.type_ref(a_type_id).clone(), self.scopes.type_ref(b_type_id).clone()))
     }
@@ -223,19 +224,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
-    // Returns TypeId for the given binding.
+    /// Returns TypeId for the given binding.
     fn bindingtype_id<T>(self: &Self, item: &mut T) -> Option<TypeId> where T: Bindable {
         item.binding_id().and_then(|binding_id| self.scopes.binding_type_id(binding_id))
     }
 
-    // Returns a mutable reference to the type of the given binding.
+    /// Returns a reference to the type of the given binding.
     fn bindingtype<T>(self: &mut Self, item: &T) -> Option<&Type> where T: Bindable {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_ref(type_id))
     }
 
-    // Returns a mutable reference to the type of the given binding.
+    /// Returns a mutable reference to the type of the given binding.
     fn bindingtype_mut<T>(self: &mut Self, item: &mut T) -> Option<&mut Type> where T: Bindable {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
@@ -288,123 +289,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             E::Call(call)               => self.resolve_call(call),
             E::Member(_)                => { Ok(()) /* nothing to do here */ },
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
-            E::BinaryOp(binary_op)      => { // fixme: disabled for now
-                //if binary_op.left.is_literal() && binary_op.right.is_literal() {
-                //    self.precompute_expression_binary_op(item);
-                //} else {
-                    self.resolve_binary_op(binary_op, expected_result)
-                //}
-            }
+            E::BinaryOp(binary_op)      => self.resolve_binary_op(binary_op, expected_result),
             E::UnaryOp(unary_op)        => self.resolve_unary_op(unary_op),
             E::Cast(cast)               => self.resolve_cast(cast),
             E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block),
         }
     }
-
-    /*
-    /// Computes the result of a literal x literal binary expression and alters the item variant to literal.
-    fn precompute_expression_binary_op(self: &mut Self, item: &mut ast::Expression<'ast>) {
-
-        use crate::frontend::ast::BinaryOperator as O;
-
-        let binary_op = item.as_binary_op().expect("precompute_expression_binary_op received non-literal expression");
-        let left_type_id = self.scopes.binding_type_id(binary_op.left.binding_id().expect("missing binding id"));
-        let right_type_id = self.scopes.binding_type_id(binary_op.right.binding_id().expect("missing binding id"));
-
-        match binary_op.op {
-            O::And | O::Or => {
-                if left_type_id != right_type_id || left_type_id.unwrap() != self.primitives.bool {
-                    panic!("Logical {:?} expects both operands to be boolean, got {:?} and {:?}", binary_op.op, self.format_type(left_type_id), self.format_type(right_type_id));
-                }
-                let lval = binary_op.left.as_literal().unwrap().value.as_bool().unwrap();
-                let rval = binary_op.right.as_literal().unwrap().value.as_bool().unwrap();
-                let result = if binary_op.op == O::And {
-                    lval && rval
-                } else {
-                    lval || rval
-                };
-                *item = ast::Expression::Literal(ast::Literal {
-                    value       : ast::LiteralValue::Bool(result),
-                    type_name   : None,
-                    binding_id  : None,
-                });
-                self.set_bindingtype_id(item, self.primitives.bool);
-            }
-            O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
-                let result;
-                if binary_op.left.as_literal().unwrap().value.as_bool().is_some() {
-                    let lval = binary_op.left.as_literal().unwrap().value.as_bool().unwrap();
-                    let rval = binary_op.right.as_literal().unwrap().value.as_bool().unwrap();
-                    result = match binary_op.op {
-                        O::Less         => lval < rval,
-                        O::Greater      => lval > rval,
-                        O::LessOrEq     => lval <= rval,
-                        O::GreaterOrEq  => lval >= rval,
-                        O::Equal        => lval == rval,
-                        O::NotEqual     => lval != rval,
-                        _ => unreachable!(),
-                    };
-                } else if binary_op.left.as_literal().unwrap().value.as_numeric().is_some() {
-                    let lval = binary_op.left.as_literal().unwrap().value.as_numeric().unwrap();
-                    let rval = binary_op.right.as_literal().unwrap().value.as_numeric().unwrap();
-                    result = match binary_op.op {
-                        O::Less         => lval < rval,
-                        O::Greater      => lval > rval,
-                        O::LessOrEq     => lval <= rval,
-                        O::GreaterOrEq  => lval >= rval,
-                        O::Equal        => lval == rval,
-                        O::NotEqual     => lval != rval,
-                        _ => unreachable!(),
-                    };
-                } else {
-                    let lval = binary_op.left.as_literal().unwrap().value.as_string().unwrap();
-                    let rval = binary_op.right.as_literal().unwrap().value.as_string().unwrap();
-                    result = match binary_op.op {
-                        O::Less         => lval < rval,
-                        O::Greater      => lval > rval,
-                        O::LessOrEq     => lval <= rval,
-                        O::GreaterOrEq  => lval >= rval,
-                        O::Equal        => lval == rval,
-                        O::NotEqual     => lval != rval,
-                        _ => unreachable!(),
-                    };
-                }
-                *item = ast::Expression::Literal(ast::Literal {
-                    value       : ast::LiteralValue::Bool(result),
-                    type_name   : None,
-                    binding_id  : None,
-                });
-                self.set_bindingtype_id(item, self.primitives.bool);
-            },
-            O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
-                if binary_op.left.as_literal().unwrap().value.as_numeric().is_some() {
-                    let lval = binary_op.left.as_literal().unwrap().value.as_numeric().unwrap();
-                    let rval = binary_op.right.as_literal().unwrap().value.as_numeric().unwrap();
-                    let result = match binary_op.op {
-                        O::Add  => lval + rval,
-                        O::Sub  => lval - rval,
-                        O::Mul  => lval * rval,
-                        O::Div  => lval / rval,
-                        O::Rem  => lval % rval,
-                        _ => unreachable!(),
-                    };
-                    *item = ast::Expression::Literal(ast::Literal {
-                        value       : ast::LiteralValue::Numeric(result),
-                        type_name   : None,
-                        binding_id  : None,
-                    });
-                }
-            },
-            O::Range | O::Index => {
-                unimplemented!("range/index");
-            },
-            O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
-                unimplemented!("assignments");
-            },
-        }
-    }
-    */
 
     /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'ast>) -> ResolveResult {
@@ -494,10 +385,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let ret_type_id = self.scopes.function_type(function_id).ret_type;
         if ret_type_id.is_some() && item.expr.is_none() {
             return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), TypeId::void()));
-            //panic!("Expected return value");
         } else if ret_type_id.is_none() && item.expr.is_some() {
             return Err(self.err_type_mismatch(item, TypeId::void(), ret_type_id.unwrap()));
-            //panic!("Unexpected return value");
         }
         if let Some(expr) = &mut item.expr {
             item.fn_ret_type_id = ret_type_id;
@@ -505,7 +394,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let expression_type_id = self.bindingtype_id(expr);
             if expression_type_id.is_some() && ret_type_id != expression_type_id {
                 return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), expression_type_id.unwrap()));
-                //panic!("Expected return type {:?}, got {:?}", self.scopes.type_ref(ret_type_id.unwrap()), self.scopes.type_ref(expression_type_id.unwrap()));
             }
         }
         Ok(())
@@ -539,7 +427,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_bindingtype_id(&mut item.args[index], expected_type)?;
                 } else if actual_type.is_some() && actual_type.unwrap() != expected_type  {
                     return Err(self.err_type_mismatch(&item.args[index], expected_type, actual_type.unwrap()));
-                    //panic!("Function {}, argument {}: Expected {:?}, got {:?}.", item.ident.name, index + 1, self.scopes.type_ref(expected_type), self.scopes.type_ref(actual_type.unwrap()));
                 }
             }
 
@@ -575,7 +462,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.ident.name);
             if item.binding_id.is_none() {
                 return Err(ResolveError::new(item, ResolveErrorKind::UnknownValue(item.ident.name.to_string())));
-                //panic!("unknown binding {:?} in scope {:?}", item.ident, self.scope_id); // todo: error handling
             }
         }
         // set expected type, if any
@@ -597,7 +483,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if let (Some(if_type_id), Some(else_type_id)) = (self.bindingtype_id(&mut item.if_block), self.bindingtype_id(else_block)) {
                 if if_type_id != else_type_id {
                     return Err(self.err_type_mismatch(item, if_type_id, else_type_id));
-                    //panic!("if/else return type mismatch {:?} vs {:?}", if_type_id, else_type_id); // TODO: error handling, attempt cast
                 }
             }
         }
@@ -659,13 +544,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let ty = self.scopes.type_ref(type_id);
             if !ty.is_primitive() {
                 return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(ty.clone())));
-                //panic!("non primitive cast");
             }
         }
         if let Some(ty) = self.bindingtype(&mut item.expr) {
             if !ty.is_primitive() {
                 return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(ty.clone())));
-                //panic!("non primitive cast");
             }
         }
         Ok(())
@@ -673,26 +556,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a binary operation.
     fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
-
         use crate::frontend::ast::BinaryOperator as O;
-
-        // todo: enable again, but not for index
-        /*if left_type_id.is_some() && right_type_id.is_some() && left_type_id != right_type_id {
-            panic!("Binary operator {:?} expects both operands to be of same type, got {:?} and {:?} on {:?}", item.op, self.format_type(left_type_id), self.format_type(right_type_id), item);
-        }*/
 
         match item.op {
             O::And | O::Or => {
                 self.resolve_expression(&mut item.left, Some(self.primitives.bool))?;
                 self.resolve_expression(&mut item.right, Some(self.primitives.bool))?;
                 self.set_bindingtype_id(item, self.primitives.bool)?;
-                //self.set_bindingtype_id(&mut item.left, self.primitives.bool);
-                //self.set_bindingtype_id(&mut item.right, self.primitives.bool);
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
                 self.resolve_expression(&mut item.left, None)?;
-                self.resolve_expression(&mut item.right, None)?;
                 let left_type_id = self.bindingtype_id(&mut item.left);
+                self.resolve_expression(&mut item.right, left_type_id)?;
                 let right_type_id = self.bindingtype_id(&mut item.right);
                 self.set_bindingtype_id(item, self.primitives.bool)?;
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
@@ -702,9 +577,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
                 self.resolve_expression(&mut item.left, expected_result)?;
-                self.resolve_expression(&mut item.right, expected_result)?;
-                let type_id = self.bindingtype_id(item);
                 let left_type_id = self.bindingtype_id(&mut item.left);
+                self.resolve_expression(&mut item.right, left_type_id)?;
+                let type_id = self.bindingtype_id(item);
                 let right_type_id = self.bindingtype_id(&mut item.right);
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
                     self.set_bindingtype_id(item, common_type_id)?;
@@ -715,11 +590,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None)?;
                 self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2]))?; // u32
-
                 // left[right] : item
                 self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2])?; // u32
                 self.try_create_anon_binding(item);
-
                 // if we know the result type, set the array element type to that
                 if let Some(result_type_id) = self.bindingtype_id(item) {
                     let ty = self.bindingtype_mut(&mut item.left);
@@ -727,7 +600,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         array.type_id = Some(result_type_id); // todo: check that array.type_id is either None or equals binding_type_id
                     }
                 }
-
                 // if we know the array element type, set the result type to that
                 if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.bindingtype(&item.left) {
                     self.set_bindingtype_id(item, element_type_id)?;
@@ -836,13 +708,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
             if expected_type.is_some() && expected_type.unwrap() != self.primitives.bool {
                 return Err(self.err_type_mismatch(item, expected_type.unwrap(), self.primitives.bool));
-                //panic!("type mismatch");
             }
             self.set_bindingtype_id(item, self.primitives.bool)?;
         } else if let LV::String(_) = item.value {
             if expected_type.is_some() && expected_type.unwrap() != self.primitives.string {
                 return Err(self.err_type_mismatch(item, expected_type.unwrap(), self.primitives.string));
-                //panic!("type mismatch");
             }
             self.set_bindingtype_id(item, self.primitives.string)?;
         } else if let LV::Array(_) = item.value {
@@ -855,14 +725,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.set_bindingtype_id(item, explicit_type_id)?;
                 if expected_type.is_some() && expected_type.unwrap() != explicit_type_id {
                     return Err(self.err_type_mismatch(item, expected_type.unwrap(), explicit_type_id));
-                    //panic!("type mismatch");
                 }
             }
         } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
             let ty = self.scopes.type_ref(expected_type);
             if !ty.is_compatible_numeric(numeric) {
                 return Err(ResolveError::new(item, ResolveErrorKind::IncompatibleNumeric(ty.clone(), numeric)));
-                //panic!("incompatible numeric literal");
             }
             self.set_bindingtype_id(item, expected_type)?;
         } else if self.infer_literals {
@@ -927,7 +795,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let this_type_id = self.bindingtype_id(element);
                 if this_type_id != None && elements_type_id != this_type_id {
                     return Err(self.err_type_mismatch(item, elements_type_id.unwrap(), this_type_id.unwrap()));
-                    //panic!("array element type mismatch {:?} - {:?}", self.scopes.type_ref(element_type_id.unwrap()), self.scopes.type_ref(self.bindingtype_id(element).unwrap()));
                 }
             }
         }

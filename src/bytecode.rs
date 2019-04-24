@@ -3,6 +3,7 @@
 mod writer;
 mod opcodes;
 mod compiler;
+mod optimizer;
 
 use std::marker::PhantomData;
 pub use self::writer::*;
