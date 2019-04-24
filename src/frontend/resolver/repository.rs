@@ -71,6 +71,10 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {
         self.data.iter().map(|item| &item.0)
     }
+    /// Returns the number of items in this Repository.
+    pub fn len(self: &Self) -> usize  {
+        self.data.len()
+    }
 }
 
 impl<I, V> Into<Vec<V>> for Repository<I, V> {

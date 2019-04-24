@@ -94,13 +94,11 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
         scopes.insert_rustfn(root_scope_id, *name, *index, ret_type, arg_type_id);
     }
 
-    let mut now_unresolved = 0;
+    let mut now_unresolved = (0, 0);
     let mut prev_unresolved;
     let mut infer_literals = false;
 
     loop {
-        prev_unresolved = now_unresolved;
-
         for mut statement in program.0.iter_mut() {
             let mut resolver = Resolver {
                 scope_id        : root_scope_id,
@@ -111,9 +109,10 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
             resolver.resolve_statement(&mut statement)?; // FIXME: want a vec of errors here
         }
 
-        now_unresolved = scopes.num_unresolved();
+        prev_unresolved = now_unresolved;
+        now_unresolved = scopes.state();
 
-        if now_unresolved == 0 || (now_unresolved == prev_unresolved && infer_literals) {
+        if now_unresolved.0 == 0 || (now_unresolved == prev_unresolved && infer_literals) {
             break;
         }
 

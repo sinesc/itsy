@@ -32,13 +32,18 @@ impl Scopes {
         }
     }
 
-    /// Returns the number of unresolved items in the Scopes.
-    pub fn num_unresolved(self: &Self) -> u32 {
-        self.bindings.values().fold(0, |acc, x| acc + if x.is_some() { 0 } else { 1 })
-        + self.types.values().fold(0, |acc, x| acc + match x {
-            Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
-            _ => 0,
-        }) // todo: consider functions as well
+    /// Returns the number of unresolved and total items in the Scopes.
+    pub fn state(self: &Self) -> (u32, u32) {
+        (
+            self.bindings.values().fold(0, |acc, x| acc + if x.is_some() { 0 } else { 1 })
+            + self.types.values().fold(0, |acc, x| acc + match x {
+                Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
+                _ => 0,
+            }), // todo: consider functions as well
+
+            self.bindings.len() as u32
+            + self.types.len() as u32,
+        )
     }
 
     /// Returns the root scope id.
