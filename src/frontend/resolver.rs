@@ -1,8 +1,6 @@
 //! AST type checker and resolver.
 
 mod scopes;
-mod primitives;
-mod repository;
 
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable, Positioned};
@@ -60,9 +58,23 @@ struct Resolver<'ctx> {
     /// Repository of all scopes.
     scopes          : &'ctx mut scopes::Scopes,
     /// Grouped primitive types.
-    primitives      : &'ctx primitives::Primitives,
+    primitives      : &'ctx Primitives,
     /// Set to true once resolution cannot proceed any further, causes numeric literals to be set to their default types.
     infer_literals  : bool,
+}
+
+/// Utility structure to handle primitive type information and casting.
+struct Primitives {
+    /// Boolean type
+    pub bool    : TypeId,
+    /// Unsigned types ordered by bit count.
+    pub unsigned: [ TypeId; 4 ],
+    /// Signed types ordered by bit count.
+    pub signed  : [ TypeId; 4 ],
+    /// Floating point types ordered by bit count.
+    pub float   : [ TypeId; 2 ],
+    /// String type
+    pub string  : TypeId,
 }
 
 /// Resolves types within the given program AST structure.
@@ -72,7 +84,29 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
     let root_scope_id = scopes::Scopes::root_id();
-    let primitives = primitives::Primitives::new(&mut scopes, root_scope_id);
+
+    scopes.insert_type(root_scope_id, None, Type::void);
+
+    let primitives = Primitives {
+        bool: scopes.insert_type(root_scope_id, Some("bool"), Type::bool),
+        unsigned: [
+            scopes.insert_type(root_scope_id, Some("u8"), Type::u8),
+            scopes.insert_type(root_scope_id, Some("u16"), Type::u16),
+            scopes.insert_type(root_scope_id, Some("u32"), Type::u32),
+            scopes.insert_type(root_scope_id, Some("u64"), Type::u64),
+        ],
+        signed: [
+            scopes.insert_type(root_scope_id, Some("i8"), Type::i8),
+            scopes.insert_type(root_scope_id, Some("i16"), Type::i16),
+            scopes.insert_type(root_scope_id, Some("i32"), Type::i32),
+            scopes.insert_type(root_scope_id, Some("i64"), Type::i64),
+        ],
+        float: [
+            scopes.insert_type(root_scope_id, Some("f32"), Type::f32),
+            scopes.insert_type(root_scope_id, Some("f64"), Type::f64),
+        ],
+        string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
+    };
 
     // insert rust functions into root scope
     for (name, info) in T::call_info().iter() {
@@ -206,6 +240,23 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_mut(type_id))
+    }
+
+    /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
+    pub fn classify_numeric(self: &Self, value: Numeric) -> Option<TypeId> {
+        if value.is_integer() {
+            if Type::i32.is_compatible_numeric(value) {
+                Some(self.primitives.signed[2])
+            } else if Type::i64.is_compatible_numeric(value) {
+                Some(self.primitives.signed[3])
+            } else {
+                None
+            }
+        } else if value.is_float() {
+            Some(self.primitives.float[1])
+        } else {
+            None
+        }
     }
 }
 
@@ -663,10 +714,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None)?;
-                self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2].type_id))?; // u32
+                self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2]))?; // u32
 
                 // left[right] : item
-                self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2].type_id)?; // u32
+                self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2])?; // u32
                 self.try_create_anon_binding(item);
 
                 // if we know the result type, set the array element type to that
@@ -816,12 +867,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.set_bindingtype_id(item, expected_type)?;
         } else if self.infer_literals {
             // numerics, once normal resolution has failed
-            // todo: re-enable
-            /*if let LV::Numeric(value) = item.value {
-                if let Some(type_id) = self.primitives.classify_numeric(value) {
-                    self.set_bindingtype_id(item, type_id);
+            if let LV::Numeric(value) = item.value {
+                if let Some(type_id) = self.classify_numeric(value) {
+                    self.set_bindingtype_id(item, type_id)?;
                 }
-            }*/
+            }
         } else {
             self.try_create_anon_binding(item);
         }

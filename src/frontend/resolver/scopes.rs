@@ -1,5 +1,7 @@
+mod repository;
+
 use std::{collections::HashMap, convert::Into};
-use crate::frontend::resolver::repository::Repository;
+use self::repository::Repository;
 use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
 
 // todo: move into resolver.rs, scrap struct or maybe just the impls on it (they have become trivial one-liners except for lookup_*)
