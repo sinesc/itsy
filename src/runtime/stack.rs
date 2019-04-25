@@ -22,6 +22,11 @@ impl Stack {
     pub fn sp(self: &Self) -> u32 {
         self.data.len() as u32
     }
+    /// Returns the current stack frame pointer.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub fn fp(self: &Self) -> u32 {
+        self.fp
+    }
     /// Resets the stack.
     pub fn reset(self: &mut Self) {
         self.fp = 0;

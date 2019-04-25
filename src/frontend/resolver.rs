@@ -283,7 +283,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves types and bindings used in an expression.
     fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
         use self::ast::Expression as E;
-        match item {
+        match item { // todo: these all need to check expected_result since the caller might depend on an error result on type mismatch
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
             E::Variable(variable)       => self.resolve_variable(variable, expected_result),
             E::Call(call)               => self.resolve_call(call),
@@ -295,6 +295,44 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block),
         }
+    }
+
+    // Resolves an inline type definition.
+    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Option<TypeId> {
+        use ast::InlineType as IT;
+        match item {
+            IT::TypeName(type_name) => self.resolve_type(type_name),
+            IT::Array(array) => self.resolve_array(array),
+        }
+    }
+
+    /// Resolves an array definition
+    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Option<TypeId> {
+        let inner_type_id = self.resolve_inline_type(&mut item.element_type);
+        if item.type_id.is_none() {
+            let ty = Type::Array(Array {
+                len     : Some(item.len),
+                type_id : inner_type_id,
+            });
+            item.type_id = Some(self.scopes.insert_type(self.scope_id, None, ty));
+        }
+        item.type_id
+    }
+
+    /// Resolves a struct definition.
+    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'ast>) -> ResolveResult {
+        for (_, field) in &mut item.fields {
+            self.resolve_inline_type(field);
+        }
+        if item.type_id.is_none() {
+            let mut fields = Vec::new();
+            for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
+                fields.push((field_name.to_string(), field_type.type_id()));
+            }
+            let ty = Type::Struct(Struct { fields });
+            item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
+        }
+        Ok(())
     }
 
     /// Resolves a function signature.
@@ -332,57 +370,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
-    // Resolves an inline type definition.
-    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Option<TypeId> {
-        use ast::InlineType as IT;
-        match item {
-            IT::TypeName(type_name) => self.resolve_type(type_name),
-            IT::Array(array) => self.resolve_array(array),
-        }
-    }
-
-    /// Resolves an array definition
-    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Option<TypeId> {
-
-        let inner_type_id = self.resolve_inline_type(&mut item.element_type);
-
-        if item.type_id.is_none() {
-            let ty = Type::Array(Array {
-                len     : Some(item.len),
-                type_id : inner_type_id,
-            });
-            item.type_id = Some(self.scopes.insert_type(self.scope_id, None, ty));
-        }
-
-        item.type_id
-    }
-
-    /// Resolves a struct definition.
-    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'ast>) -> ResolveResult {
-
-        for (_, field) in &mut item.fields {
-            self.resolve_inline_type(field);
-        }
-
-        if item.type_id.is_none() {
-
-            let mut fields = Vec::new();
-
-            for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
-                fields.push((field_name.to_string(), field_type.type_id()));
-            }
-
-            let ty = Type::Struct(Struct { fields });
-            item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
-        }
-
-        Ok(())
-    }
-
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return<'ast>) -> ResolveResult {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).expect("Encountered return outside of function");
         let ret_type_id = self.scopes.function_type(function_id).ret_type;
+        // check function returns/doesn't return a value
         if ret_type_id.is_some() && item.expr.is_none() {
             return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), TypeId::void()));
         } else if ret_type_id.is_none() && item.expr.is_some() {
@@ -391,6 +383,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(expr) = &mut item.expr {
             item.fn_ret_type_id = ret_type_id;
             self.resolve_expression(expr, ret_type_id)?;
+            // check return type matches function result type // todo: would be unnecessary if resolve_expression would always check expected_type
             let expression_type_id = self.bindingtype_id(expr);
             if expression_type_id.is_some() && ret_type_id != expression_type_id {
                 return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), expression_type_id.unwrap()));
