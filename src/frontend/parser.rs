@@ -409,7 +409,7 @@ named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
     (result)
 ));
 
-named!(prec6(Input<'_>) -> Expression<'_>, ws!(do_parse!(
+named!(prec7(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     init: operand >>
     position: rest_len >>
     res: fold_many0!(
@@ -423,13 +423,13 @@ named!(prec6(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     (res)
 )));
 
-named!(prec5unary(Input<'_>) -> Expression<'_>, alt!(prec6 | unary));
+named!(prec6(Input<'_>) -> Expression<'_>, alt!(prec7 | unary));
 
 named!(prec5(Input<'_>) -> Expression<'_>, ws!(do_parse!(
-    init: prec5unary >>
+    init: prec6 >>
     position: rest_len >>
     res: fold_many0!(
-        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec5unary),
+        pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
         init,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
     ) >>

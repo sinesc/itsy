@@ -810,3 +810,27 @@ fn recursion() {
     ");
     assert_all(&result, &[ 1i32, 1, 5, 13 ]);
 }
+
+#[test]
+fn unary_op() {
+    let result = run("
+        let val = true;
+        ret_bool(val);
+        ret_bool(!val);
+        ret_bool(!!val);
+        ret_bool(!!!val);
+    ");
+    assert_all(&result, &[ true, false, true, false ]);
+}
+
+#[test]
+fn postfix_suffix() {
+    let result = run("
+        let val = 0i8;
+        ret_i8(val++);
+        ret_i8(val--);
+        ret_i8(++val);
+        ret_i8(--val);
+    ");
+    assert_all(&result, &[ 0i8, 1, 1, 0 ]);
+}

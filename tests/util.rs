@@ -20,7 +20,7 @@ pub fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+
 /// Compare Context with given values.
 #[allow(dead_code)]
 pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debug+'static {
-    for index in 0..expected.len() {
+    for index in 0..expected.len().min(result.len()) {
         if let Some(result) = result[index].downcast_ref::<T>() {
             assert!(result == &expected[index], "Result <{:?}> did not match expected <{:?}> at index {}", result, &expected[index], index);
         } else {
