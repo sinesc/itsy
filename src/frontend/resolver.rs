@@ -3,7 +3,7 @@
 mod scopes;
 
 use std::marker::PhantomData;
-use crate::frontend::ast::{self, Bindable, Positioned};
+use crate::frontend::ast::{self, Bindable, Positioned, Returns};
 use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, compute_loc};
 use crate::runtime::VMFunc;
 
@@ -509,8 +509,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-        for mut statement in item.statements.iter_mut() {
+        let mut truncate_before = None;
+        let num_statements = item.statements.len();
+        for (index, mut statement) in item.statements.iter_mut().enumerate() {
             self.resolve_statement(&mut statement)?;
+            // check for unconditional returns, code below is unreachable, remove
+            if statement.returns() && index + 1 < num_statements {
+                truncate_before = Some(index + 1);
+                break;
+            }
+        }
+        // remove code after root level return (including the return, which was moved to item.result)
+        if let Some(truncate_before) = truncate_before {
+            item.statements.truncate(truncate_before);
+            item.result = Some(item.statements.pop().unwrap().into_expression());
+            item.explicit_return = true;
         }
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, expected_result)?;

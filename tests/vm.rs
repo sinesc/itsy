@@ -834,3 +834,31 @@ fn postfix_suffix() {
     ");
     assert_all(&result, &[ 0i8, 1, 1, 0 ]);
 }
+
+#[test]
+fn explicit_return() {
+    // todo: add bytecode test, check dead code was removed
+    let result = run("
+        fn test(x: i32) -> i32 {
+            ret_i32(0);
+            if x == 1 {
+                ret_i32(1);
+                return 1;
+                ret_i32(3);
+            } else {
+                ret_i32(2);
+                return 2;
+                ret_i32(4);
+            }
+            ret_i32(5);
+        }
+        fn main() {
+            ret_i32(test(1));
+            ret_i32(test(2));
+        }
+    ");
+    assert_all(&result, &[
+        0i32, 1, 1,
+        0i32, 2, 2,
+    ]);
+}

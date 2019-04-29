@@ -136,7 +136,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op, is_compound_assignment),
             E::UnaryOp(unary_op)        => self.compile_unary_op(unary_op),
             E::Cast(cast)               => self.compile_cast(cast),
-            E::Block(_block)            => { }, // todo: handle,
+            E::Block(block)             => self.compile_block(block),
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
         };
     }

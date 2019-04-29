@@ -3,7 +3,7 @@
 use std::{fmt::{self, Debug}, collections::HashMap};
 use crate::util::{BindingId, FunctionId, ScopeId, Numeric, TypeId};
 
-/// A trait for bindable ast structures.
+/// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {
     /// Returns a mutable reference to the binding_id.
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId>;
@@ -34,7 +34,7 @@ macro_rules! impl_bindable {
     };
 }
 
-/// A trait for ast structures with a source code position
+/// Source code position handling for AST structures associated with a position.
 pub(crate) trait Positioned {
     /// Returns the structure's position.
     fn position(self: &Self) -> u32;
@@ -51,6 +51,23 @@ macro_rules! impl_positioned {
     };
 }
 
+/// Provides information whether this AST structure causes an unconditional function return.
+pub(crate) trait Returns {
+    /// Returns true if this structure unconditionally causes the parent function to return.
+    fn returns(self: &Self) -> bool;
+}
+/*
+/// Implements the Returns trait for given structure.
+macro_rules! impl_no_return {
+    ($struct_name:ident) => {
+        impl<'a> Returns for $struct_name<'a> {
+            fn returns(self: &Self) -> bool {
+                false
+            }
+        }
+    };
+}
+*/
 #[derive(Debug)]
 pub struct Ident<'a> {
     pub position: u32,
@@ -90,8 +107,21 @@ impl<'a> Statement<'a> {
         match self {
             Statement::IfBlock(if_block)        => Expression::IfBlock(Box::new(if_block)),
             Statement::Block(block)             => Expression::Block(Box::new(block)),
-            Statement::Expression(expression)   => expression, // todo: why is is inconsistent with the above?
+            Statement::Expression(expression)   => expression,
+            Statement::Return(ret)              => ret.expr.unwrap(),
             _                                   => panic!("invalid statement to expression conversion"),
+        }
+    }
+}
+
+impl<'a> Returns for Statement<'a> {
+    fn returns(self: &Self) -> bool {
+        match self {
+            Statement::Return(_)    => true,
+            Statement::IfBlock(v)   => v.returns(),
+            Statement::Block(v)     => v.returns(),
+            Statement::Expression(v)=> v.returns(),
+            _                       => false,
         }
     }
 }
@@ -194,6 +224,12 @@ impl<'a> TypeName<'a> {
     }
 }
 
+impl<'a> Positioned for TypeName<'a> {
+    fn position(self: &Self) -> u32 {
+        self.path.position
+    }
+}
+
 #[derive(Debug)]
 pub enum InlineType<'a> {
     TypeName(TypeName<'a>),
@@ -264,6 +300,18 @@ pub struct IfBlock<'a> {
 }
 impl_positioned!(IfBlock);
 
+impl<'a> Returns for IfBlock<'a> {
+    fn returns(self: &Self) -> bool {
+        if self.cond.returns() {
+            true
+        } else if let Some(else_block) = &self.else_block {
+            self.if_block.returns() && else_block.returns()
+        } else {
+            false
+        }
+    }
+}
+
 impl<'a> Bindable for IfBlock<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
         if let Some(result) = &mut self.if_block.result {
@@ -283,8 +331,15 @@ pub struct Block<'a> {
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
     pub scope_id    : Option<ScopeId>,
+    pub explicit_return: bool,
 }
 impl_positioned!(Block);
+
+impl<'a> Returns for Block<'a> {
+    fn returns(self: &Self) -> bool {
+        self.explicit_return
+    }
+}
 
 impl<'a> Bindable for Block<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
@@ -310,6 +365,20 @@ pub enum Expression<'a> {
     Cast(Box<Cast<'a>>),
     Block(Box<Block<'a>>),
     IfBlock(Box<IfBlock<'a>>),
+}
+
+impl<'a> Returns for Expression<'a> {
+    fn returns(self: &Self) -> bool {
+        match self {
+            Expression::Assignment(v)   => v.returns(),
+            Expression::BinaryOp(v)     => v.returns(),
+            Expression::UnaryOp(v)      => v.returns(),
+            Expression::Cast(v)         => v.returns(),
+            Expression::Block(v)        => v.returns(),
+            Expression::IfBlock(v)      => v.returns(),
+            _                           => false,
+        }
+    }
 }
 
 impl<'a> Expression<'a> {
@@ -533,14 +602,20 @@ pub struct Assignment<'a> {
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
 }
-
 impl_positioned!(Assignment);
+
 impl<'a> Bindable for Assignment<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
         self.left.binding_id_mut()
     }
     fn binding_id(self: &Self) -> Option<BindingId> {
         self.left.binding_id()
+    }
+}
+
+impl<'a> Returns for Assignment<'a> {
+    fn returns(self: &Self) -> bool {
+        self.left.returns() || self.right.returns()
     }
 }
 
@@ -554,6 +629,12 @@ pub struct Cast<'a> {
 impl_bindable!(Cast);
 impl_positioned!(Cast);
 
+impl<'a> Returns for Cast<'a> {
+    fn returns(self: &Self) -> bool {
+        self.expr.returns()
+    }
+}
+
 #[derive(Debug)]
 pub struct BinaryOp<'a> {
     pub position    : u32,
@@ -565,6 +646,12 @@ pub struct BinaryOp<'a> {
 impl_bindable!(BinaryOp);
 impl_positioned!(BinaryOp);
 
+impl<'a> Returns for BinaryOp<'a> {
+    fn returns(self: &Self) -> bool {
+        self.left.returns() || self.right.returns()
+    }
+}
+
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
     pub position    : u32,
@@ -574,6 +661,12 @@ pub struct UnaryOp<'a> {
 }
 impl_bindable!(UnaryOp);
 impl_positioned!(UnaryOp);
+
+impl<'a> Returns for UnaryOp<'a> {
+    fn returns(self: &Self) -> bool {
+        self.expr.returns()
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOperator {

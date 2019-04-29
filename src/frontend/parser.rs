@@ -307,10 +307,11 @@ named!(block(Input<'_>) -> Block<'_>, do_parse!(
             m.2 = m.1.pop().map(|s| s.into_expression());
         }
         Block {
-            position    : position as u32,
-            statements  : m.1,
-            result      : m.2,
-            scope_id    : None,
+            position        : position as u32,
+            statements      : m.1,
+            result          : m.2,
+            scope_id        : None,
+            explicit_return : false,
         }
     }) >>
     (result)
@@ -322,10 +323,11 @@ named!(block_or_if(Input<'_>) -> Block<'_>, do_parse!(
     position: rest_len >>
     result: ws!(alt!(
         map!(if_block, |m| Block {
-            position    : position as u32,
-            statements  : Vec::new(),
-            result      : Some(Expression::IfBlock(Box::new(m))),
-            scope_id    : None,
+            position        : position as u32,
+            statements      : Vec::new(),
+            result          : Some(Expression::IfBlock(Box::new(m))),
+            scope_id        : None,
+            explicit_return : false,
         })
         | block
     )) >>
