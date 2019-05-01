@@ -11,7 +11,7 @@ pub use self::compiler::compile;
 pub use self::opcodes::OpCode;
 
 /// An Itsy bytecode program.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Program<T> where T: crate::runtime::VMFunc<T> {
     rust_fn: PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
