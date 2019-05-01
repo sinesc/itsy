@@ -374,12 +374,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_return(self: &mut Self, item: &mut ast::Return<'ast>) -> ResolveResult {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).expect("Encountered return outside of function");
         let ret_type_id = self.scopes.function_type(function_id).ret_type;
-        // check function returns/doesn't return a value
-        if ret_type_id.is_some() && item.expr.is_none() {
-            return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), TypeId::void()));
-        } else if ret_type_id.is_none() && item.expr.is_some() {
-            return Err(self.err_type_mismatch(item, TypeId::void(), ret_type_id.unwrap()));
-        }
         if let Some(expr) = &mut item.expr {
             item.fn_ret_type_id = ret_type_id;
             self.resolve_expression(expr, ret_type_id)?;
@@ -388,6 +382,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if expression_type_id.is_some() && ret_type_id != expression_type_id {
                 return Err(self.err_type_mismatch(item, ret_type_id.unwrap(), expression_type_id.unwrap()));
             }
+        } else if ret_type_id != Some(TypeId::void()) {
+            // no return expression, function result type must be void
+            return Err(self.err_type_mismatch(item, TypeId::void(), ret_type_id.unwrap()));
         }
         Ok(())
     }

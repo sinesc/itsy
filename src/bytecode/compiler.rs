@@ -391,8 +391,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_return(self: &Self, item: &ast::Return<'ast>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, false);
-        } else {
-            self.writer.lit0(); // todo: need to return something for now
         }
         self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.get_type(Some(ret)).quadsize()));
     }

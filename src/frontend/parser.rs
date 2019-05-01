@@ -687,9 +687,9 @@ named!(statement(Input<'_>) -> Statement<'_>, alt!(
     | struct_
     | map!(for_loop, |m| Statement::ForLoop(m))
     | map!(while_loop, |m| Statement::WhileLoop(m))
+    | return_statement
     | map!(terminated!(expression, char!(';')), |m| Statement::Expression(m))
     | map!(block, |m| Statement::Block(m))
-    | return_statement
 ));
 
 // root
