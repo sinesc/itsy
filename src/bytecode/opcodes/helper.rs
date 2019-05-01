@@ -128,11 +128,14 @@ macro_rules! impl_vm {
                     let instruction = impl_vm!(read u8, self, pc);
                     #[allow(unreachable_patterns)]
                     match OpCode::from_u8(instruction) {
-                        // implement special formatting for rustcalls (output the rust function name)
-                        // todo: write child macro to handle this for the general case? would also like to print comments more readable
+                        // implement special formatting for some opcodes
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
                             result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, pc) )));
+                            Some((result, pc))
+                        }
+                        OpCode::comment => {
+                            let result = format!("\n; {}", impl_vm!(read String, self, pc));
                             Some((result, pc))
                         }
                         $(
