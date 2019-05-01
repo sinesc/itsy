@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, cell::RefCell};
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
-use crate::frontend::{ast::{self, Bindable}, ResolvedProgram};
+use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::runtime::VMFunc;
 
@@ -219,25 +219,23 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         let num_args = item.sig.args.len() as u8;
         self.functions.borrow_mut().insert(function_id, position);
         self.fix_targets(function_id, position, num_args);
-
         // create local environment
         let mut frame = Locals::new();
-
         for arg in item.sig.args.iter() {
             frame.next_arg -= self.bindingtype(arg).quadsize() as i32 - 1;
             frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
             frame.next_arg -= 1;
         }
-
         self.create_stack_frame_block(&item.block, &mut frame);
-
         if frame.next_var > 0 {
             self.writer.reserve(frame.next_var as u8);
         }
-
         self.locals.push(frame);
+        // compile function block, add return only if block doesn't unconditionally return by itself
         self.compile_block(&item.block);
-        self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize())); // todo: skip if last statement was "return"
+        if !item.block.returns() {
+            self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()));
+        }
         self.locals.pop();
     }
 
@@ -302,7 +300,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         let else_jump = self.writer.j0(123);
         self.compile_block(if_block);
-        let exit_jump = self.writer.jmp(123);
+        let exit_jump = if !if_block.returns() {
+            Some(self.writer.jmp(123))
+        } else {
+            None
+        };
 
         let else_target = self.writer.position();
         self.compile_block(else_block);
@@ -311,7 +313,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         // go back and fix jump targets
         self.writer.overwrite(else_jump, |w| w.j0(else_target));
-        self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
+        if let Some(exit_jump) = exit_jump {
+            self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
+        }
     }
 
     /// Compiles the given if block.

@@ -482,6 +482,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     return Err(self.err_type_mismatch(item, if_type_id, else_type_id));
                 }
             }
+        } else if let Some(if_type_id) = self.bindingtype_id(&mut item.if_block) {
+            // if block with a non-void result but no else block
+            return Err(self.err_type_mismatch(item, if_type_id, TypeId::void())); // todo: need custom error message string support, then hint that the type mismatch happens because of the missing else branch
         }
         self.scope_id = parent_scope_id;
         Ok(())
@@ -518,17 +521,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for (index, mut statement) in item.statements.iter_mut().enumerate() {
             self.resolve_statement(&mut statement)?;
             // check for unconditional returns, code below is unreachable, remove
-            if statement.returns() && index + 1 < num_statements {
-                truncate_before = Some(index + 1);
+            if statement.returns() {
+                item.explicit_return = true;
+                if index + 1 < num_statements {
+                    truncate_before = Some(index + 1);
+                }
                 break;
             }
         }
         // remove code after root level return (including the return, which was moved to item.result)
         if let Some(truncate_before) = truncate_before {
             item.statements.truncate(truncate_before);
-            item.result = Some(item.statements.pop().unwrap().into_expression());
-            item.explicit_return = true;
+
         }
+        // resolve block result
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, expected_result)?;
         }

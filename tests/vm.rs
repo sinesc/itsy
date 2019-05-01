@@ -840,25 +840,96 @@ fn explicit_return() {
     // todo: add bytecode test, check dead code was removed
     let result = run("
         fn test(x: i32) -> i32 {
-            ret_i32(0);
+            ret_i32(x);
             if x == 1 {
                 ret_i32(1);
                 return 1;
-                ret_i32(3);
-            } else {
+                ret_i32(-1);
+            } else if x == 2 {
                 ret_i32(2);
-                return 2;
-                ret_i32(4);
+                // return from sub-block
+                {
+                    return 2;
+                }
+                ret_i32(-2);
+            } else {
+                if x == 3 {
+                    ret_i32(3);
+                    return 3;
+                    ret_i32(-3);
+                } else if x == 4 {
+                    ret_i32(4);
+                    return 4;
+                    ret_i32(-4);
+                }
+                // else fall through
+                ret_i32(5);
+                return 5;
+                ret_i32(-5);
             }
-            ret_i32(5);
+            ret_i32(-6);
         }
         fn main() {
             ret_i32(test(1));
             ret_i32(test(2));
+            ret_i32(test(3));
+            ret_i32(test(4));
+            ret_i32(test(5));
+            ret_i32(test(6));
         }
     ");
     assert_all(&result, &[
-        0i32, 1, 1,
-        0i32, 2, 2,
+        1i32,   1, 1,
+        2,      2, 2,
+        3,      3, 3,
+        4,      4, 4,
+        5,      5, 5,
+        6,      5, 5,
+    ]);
+}
+
+#[test]
+fn block_result() {
+    let result = run("
+        fn test(x: i32) -> i32 {
+            ret_i32(x);
+            if x == 1 {
+                ret_i32(1);
+                1
+            } else if x == 2 {
+                ret_i32(2);
+                // result from sub-block
+                {
+                    2
+                }
+            } else {
+                if x == 3 {
+                    ret_i32(3);
+                    return 3;
+                } else if x == 4 {
+                    ret_i32(4);
+                    return 4;
+                }
+                // if no explicit return happened above
+                ret_i32(5);
+                5
+            }
+        }
+        fn main() {
+            ret_i32(test(1));
+            ret_i32(test(2));
+            ret_i32(test(3));
+            ret_i32(test(4));
+            ret_i32(test(5));
+            ret_i32(test(6));
+        }
+    ");
+    assert_all(&result, &[
+        1i32,   1, 1,
+        2,      2, 2,
+        3,      3, 3,
+        4,      4, 4,
+        5,      5, 5,
+        6,      5, 5,
     ]);
 }
