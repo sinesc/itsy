@@ -2,7 +2,8 @@
 
 #[macro_use]
 mod helper;
-use crate::{util::{array1, array2, array4, array8}, runtime::{Value, Value64, StackOp, StackOpFp, HeapOp}};
+use crate::util::{array1, array2, array4, array8};
+use crate::runtime::{Value, Value64, StackOp, StackOpFp, HeapOp};
 
 impl_vm!{
 
@@ -550,6 +551,12 @@ impl_vm!{
         let a: Value = self.stack.pop();
         self.stack.push(a / b);
     }
+    /// Pops 2 values from the stack and pushes their remainder.
+    fn remi(&mut self) {
+        let b: Value = self.stack.pop();
+        let a: Value = self.stack.pop();
+        self.stack.push(a % b);
+    }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf(&mut self) {
@@ -574,6 +581,12 @@ impl_vm!{
         let b: f32 = self.stack.pop();
         let a: f32 = self.stack.pop();
         self.stack.push(a / b);
+    }
+    /// Pops 2 values from the stack and pushes their remainder.
+    fn remf(&mut self) {
+        let b: f32 = self.stack.pop();
+        let a: f32 = self.stack.pop();
+        self.stack.push(a % b);
     }
 
     /// Pops 2 values from the stack and pushes their sum.
@@ -600,6 +613,12 @@ impl_vm!{
         let a: Value64 = self.stack.pop();
         self.stack.push(a / b);
     }
+    /// Pops 2 values from the stack and pushes their remainder.
+    fn remi64(&mut self) {
+        let b: Value64 = self.stack.pop();
+        let a: Value64 = self.stack.pop();
+        self.stack.push(a % b);
+    }
 
     /// Pops 2 values from the stack and pushes their sum.
     fn addf64(&mut self) {
@@ -624,6 +643,12 @@ impl_vm!{
         let b: f64 = self.stack.pop();
         let a: f64 = self.stack.pop();
         self.stack.push(a / b);
+    }
+    /// Pops 2 values from the stack and pushes their remainder.
+    fn remf64(&mut self) {
+        let b: f64 = self.stack.pop();
+        let a: f64 = self.stack.pop();
+        self.stack.push(a % b);
     }
 
     /// Jumps unconditionally to the given address.

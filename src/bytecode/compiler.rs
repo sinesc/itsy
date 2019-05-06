@@ -156,11 +156,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.write_load(index, ty);
                 self.compile_expression(&item.right, false);
                 match item.op {
-                    BO::AddAssign => { self.write_add(&ty); },
-                    BO::SubAssign => { self.write_sub(&ty); },
-                    BO::MulAssign => { self.write_mul(&ty); },
-                    BO::DivAssign => { self.write_div(&ty) },
-                    BO::RemAssign => unimplemented!("remassign"),
+                    BO::AddAssign => self.write_add(&ty),
+                    BO::SubAssign => self.write_sub(&ty),
+                    BO::MulAssign => self.write_mul(&ty),
+                    BO::DivAssign => self.write_div(&ty),
+                    BO::RemAssign => self.write_rem(&ty),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
                 self.write_store(index, ty);
@@ -189,11 +189,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
                 self.write_heap_fetch(ty.size());
                 match item.op {
-                    BO::AddAssign => { self.write_add(&ty); },
-                    BO::SubAssign => { self.write_sub(&ty); },
-                    BO::MulAssign => { self.write_mul(&ty); },
-                    BO::DivAssign => { self.write_div(&ty) },
-                    BO::RemAssign => unimplemented!("remassign"),
+                    BO::AddAssign => self.write_add(&ty),
+                    BO::SubAssign => self.write_sub(&ty),
+                    BO::MulAssign => self.write_mul(&ty),
+                    BO::DivAssign => self.write_div(&ty),
+                    BO::RemAssign => self.write_rem(&ty),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
                 self.write_heap_put(ty.size());
@@ -512,18 +512,18 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         match item.op {
             // arithmetic
-            BO::Add => { self.write_add(&result_type); },
-            BO::Sub => { self.write_sub(&result_type); },
-            BO::Mul => { self.write_mul(&result_type); },
-            BO::Div => { self.write_div(&result_type); },
-            BO::Rem => unimplemented!("rem"),
+            BO::Add => self.write_add(&result_type),
+            BO::Sub => self.write_sub(&result_type),
+            BO::Mul => self.write_mul(&result_type),
+            BO::Div => self.write_div(&result_type),
+            BO::Rem => self.write_rem(&result_type),
             // comparison
-            BO::Greater => { self.write_swap(compare_type, compare_type); self.write_lt(&compare_type); },
-            BO::GreaterOrEq => { self.write_swap(compare_type, compare_type); self.write_lte(&compare_type); }
-            BO::Less => { self.write_lt(&compare_type); },
-            BO::LessOrEq => { self.write_lte(&compare_type); }
-            BO::Equal => { self.write_eq(&compare_type); },
-            BO::NotEqual => { self.write_neq(&compare_type); },
+            BO::Greater     => { self.write_swap(compare_type, compare_type); self.write_lt(&compare_type); },
+            BO::GreaterOrEq => { self.write_swap(compare_type, compare_type); self.write_lte(&compare_type); },
+            BO::Less        => self.write_lt(&compare_type),
+            BO::LessOrEq    => self.write_lte(&compare_type),
+            BO::Equal       => self.write_eq(&compare_type),
+            BO::NotEqual    => self.write_neq(&compare_type),
             // boolean
             BO::And => {
                 self.compile_expression(&item.left, is_compound_assignment);
@@ -1021,6 +1021,15 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             Type::f32 => self.writer.divf(),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.divi(),
             ty @ _ => panic!("Unsupported Div operand {:?}", ty),
+        };
+    }
+    fn write_rem(self: &Self, ty: &Type) {
+        match ty {
+            Type::f64 => self.writer.remf64(),
+            Type::i64 | Type::u64 => self.writer.remi64(),
+            Type::f32 => self.writer.remf(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.remi(),
+            ty @ _ => panic!("Unsupported Rem operand {:?}", ty),
         };
     }
     fn write_eq(self: &Self, ty: &Type) {
