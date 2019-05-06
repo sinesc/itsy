@@ -29,6 +29,7 @@ pub enum ResolveErrorKind {
     NonPrimitiveCast(Type),
     IncompatibleNumeric(Type, Numeric),
     UnknownValue(String),
+    NumberOfArguments(u32, u32),
 }
 
 /// A type resolution error.
@@ -415,6 +416,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
 
+            // argument count
+            if function_types.arg_type.len() != item.args.len() {
+                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_types.arg_type.len() as u32, item.args.len() as u32)));
+            }
+
             // arguments
             for (index, &expected_type) in function_types.arg_type.iter().enumerate() {
                 self.resolve_expression(&mut item.args[index], Some(expected_type))?;
@@ -492,9 +498,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
         self.resolve_binding(&mut item.iter)?;
-        // resolve the range type using the type of the iterator variable, if possible
+        // resolve the range type using the type of the iterator variable, if possible, then apply range type back to iter
         let type_id = self.bindingtype_id(&mut item.iter);
         self.resolve_expression(&mut item.range, type_id)?;
+        if let Some(type_id) = self.bindingtype_id(&mut item.range) {
+            self.set_bindingtype_id(&mut item.iter, type_id)?;
+        }
         // handle block
         self.resolve_block(&mut item.block, None)?;
         self.scope_id = parent_scope_id;
@@ -588,7 +597,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_bindingtype_id(&mut item.right, common_type_id)?;
                 }
             }
-            O::Add | O::Sub | O::Mul | O::Div | O::Rem => {
+            O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range | O::RangeInclusive => {
                 self.resolve_expression(&mut item.left, expected_result)?;
                 let left_type_id = self.bindingtype_id(&mut item.left);
                 self.resolve_expression(&mut item.right, left_type_id)?;
@@ -632,20 +641,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         self.set_bindingtype_id(item, type_id)?;
                         self.set_bindingtype_id(&mut item.right, type_id)?;
                     }
-                }
-            }
-            O::Range | O::RangeInclusive => {
-                // ensure we create bindings regardless of expected_result availability, otherwise resolution will not notice unresolved bindings
-                self.try_create_anon_binding(&mut item.left);
-                self.try_create_anon_binding(&mut item.right);
-                // once an expected type is known though inference, resolve range
-                // todo: add reverse resolution from explit types on range literals
-                if let Some(expected_result) = expected_result {
-                    self.resolve_expression(&mut item.left, Some(expected_result))?;
-                    self.resolve_expression(&mut item.right, Some(expected_result))?;
-                    self.set_bindingtype_id(&mut item.left, expected_result)?;
-                    self.set_bindingtype_id(&mut item.right, expected_result)?;
-                    self.set_bindingtype_id(item, expected_result)?;
                 }
             }
             O::Assign | O::AddAssign | O::SubAssign | O::MulAssign | O::DivAssign | O::RemAssign => {
