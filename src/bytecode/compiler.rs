@@ -6,9 +6,24 @@ use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program};
 use crate::runtime::VMFunc;
 
-/// Maps bindings and arguments to indices relative to the stackframe.
+/// Describes a single local variable of a stack frame
+#[derive(Copy,Clone)]
+struct Local {
+    /// The load-index for this variable.
+    index   : i32,
+    /// Whether this variable is currently in scope (stack frame does not equal scope!)
+    in_scope: bool,
+}
+
+impl Local {
+    fn new(index: i32) -> Self {
+        Local { index, in_scope: false }
+    }
+}
+
+/// Maps bindings and arguments to indices relative to the stack frame.
 struct Locals {
-    map     : HashMap<BindingId, i32>,
+    map     : HashMap<BindingId, Local>,
     next_arg: i32,
     next_var: i32,
 }
@@ -27,17 +42,35 @@ impl Locals {
 struct LocalsStack(RefCell<Vec<Locals>>);
 
 impl LocalsStack {
+    const NO_STACK: &'static str = "Attempted to access empty LocalsStack";
+    const UNKNOWN_BINDING: &'static str = "Unknown local binding";
+    /// Create new local stack frame descriptor stack.
     fn new() -> Self {
         LocalsStack(RefCell::new(Vec::new()))
     }
+    /// Push stack frame descriptor.
     fn push(self: &Self, frame: Locals) {
         self.0.borrow_mut().push(frame);
     }
+    /// Pop stack frame descriptor and return it.
     fn pop(self: &Self) -> Locals {
-        self.0.borrow_mut().pop().expect("Attempted to pop empty LocalsStack")
+        self.0.borrow_mut().pop().expect(Self::NO_STACK)
     }
-    fn lookup(self: &Self, binding: &BindingId) -> Option<i32> {
-        self.0.borrow().last().expect("Attempted to lookup stack item without LocalsStack").map.get(binding).map(|b| *b)
+    /// Borrow the top stack frame descriptor within given function.
+    fn borrow(self: &Self, func: impl FnOnce(&Locals)) {
+        let inner = self.0.borrow_mut();
+        let locals = inner.last().expect(Self::NO_STACK);
+        func(&locals);
+    }
+    /// Look up local variable descriptor for the given BindingId.
+    fn lookup(self: &Self, binding_id: BindingId) -> Local {
+        *self.0.borrow().last().expect(Self::NO_STACK).map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
+    }
+    /// Sets whether the given local variable is currently in scope.
+    fn set_active(self: &Self, binding_id: BindingId, active: bool) {
+        let mut inner = self.0.borrow_mut();
+        let locals = inner.last_mut().expect(Self::NO_STACK);
+        locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING).in_scope = active;
     }
 }
 
@@ -145,14 +178,19 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_stack_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id().unwrap();
-        let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
+        let index = self.locals.lookup(binding_id).index;
+        let ty = self.bindingtype(&item.left);
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right, false);
-                self.write_store(index, self.bindingtype(&item.left));
+                if ty.is_primitive() {
+                    self.write_store(index, ty);
+                } else {
+                    self.compile_expression(&item.left, false);
+                    self.writer.heap_ref();
+                }
             },
             _ => {
-                let ty = self.bindingtype(&item.left);
                 self.write_load(index, ty);
                 self.compile_expression(&item.right, false);
                 match item.op {
@@ -175,10 +213,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right, false);
                 self.compile_expression(&item.left, false);
+                self.writer.heap_ref();
             },
             _ => {
                 self.compile_expression(&item.right, false);
                 self.compile_expression(&item.left, true);
+                self.writer.heap_ref();
                 let ty = self.bindingtype(&item.left);
                 if ty.size() == 8 {
                     self.writer.swap64();
@@ -204,7 +244,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the assignment operation.
     fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         match item.left {
-            ast::Expression::Variable(_) => self.compile_stack_assignment(item),
+            ast::Expression::Variable(_) => self.compile_stack_assignment(item), // fixme: not sufficient, it might be a complete heap object
             ast::Expression::BinaryOp(_) => self.compile_heap_assignment(item),
             _ => panic!("invalid assignable"),
         }
@@ -212,6 +252,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given function.
     fn compile_function(self: &Self, item: &ast::Function<'ast>) {
+        self.writer.comment(item.sig.ident.name);
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
@@ -223,19 +264,22 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         let mut frame = Locals::new();
         for arg in item.sig.args.iter() {
             frame.next_arg -= self.bindingtype(arg).quadsize() as i32 - 1;
-            frame.map.insert(arg.binding_id.unwrap(), frame.next_arg);
+            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.next_arg));
             frame.next_arg -= 1;
         }
         self.create_stack_frame_block(&item.block, &mut frame);
+        // reserve space for local variables on the stack
         if frame.next_var > 0 {
             self.writer.reserve(frame.next_var as u8);
         }
+        // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
-        // compile function block, add return only if block doesn't unconditionally return by itself
         self.compile_block(&item.block);
         if !item.block.returns() {
+            self.write_heap_unref();
             self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()));
         }
+        // destroy local environment
         self.locals.pop();
     }
 
@@ -273,9 +317,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, false);
+            let ty = self.bindingtype(item);
+            if !ty.is_primitive() {
+                self.writer.heap_ref();
+            }
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            let index = self.locals.lookup(&binding_id).expect(&format!("Unknown local binding encountered, {:?}", binding_id));
+            let index = self.locals.lookup(binding_id).index;
             self.write_store(index, self.bindingtype(item));
+            self.locals.set_active(binding_id, true);
         }
     }
 
@@ -283,7 +332,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_variable(self: &Self, item: &ast::Variable<'ast>) {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+            self.locals.lookup(binding_id).index
         };
         self.write_load(load_index, self.bindingtype(item));
     }
@@ -392,6 +441,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, false);
         }
+        self.write_heap_unref();
         self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.get_type(Some(ret)).quadsize()));
     }
 
@@ -482,7 +532,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 if let ast::Expression::Variable(var) = &item.expr {
                     let load_index = {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
-                        self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+                        self.locals.lookup(binding_id).index
                     };
                     match item.op {
                         UO::IncBefore => self.write_preinc(load_index, &exp_type),
@@ -577,7 +627,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             // others are handled elsewhere
             _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
-        }
+        };
     }
 
     /// Compiles a variable binding and optional assignment.
@@ -679,7 +729,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (i32, &Type) {
         let var_index = {
             let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-            self.locals.lookup(&binding_id).expect("Failed to look up local variable index")
+            self.locals.lookup(binding_id).index
         };
         let var_type = self.bindingtype(&item.iter);
         (var_index, var_type)
@@ -722,14 +772,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
                 let next_var = frame.next_var;
-                frame.map.insert(binding.binding_id.unwrap(), next_var);
+                frame.map.insert(binding.binding_id.unwrap(), Local::new(next_var));
                 frame.next_var += self.bindingtype(binding).quadsize() as i32;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 let next_var = frame.next_var;
-                frame.map.insert(for_loop.iter.binding_id.unwrap(), next_var);
+                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(next_var));
                 frame.next_var += self.bindingtype(&for_loop.iter).quadsize() as i32;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -744,6 +794,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             } else if let ast::Statement::Expression(expression) = statement {
                 self.create_stack_frame_exp(expression, frame);
             }
+        }
+        if let Some(result) = &item.result {
+            self.create_stack_frame_exp(result, frame);
         }
     }
     /// Stores given literal on the const pool.
@@ -944,6 +997,19 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             8 => { self.writer.heap_put_element64(); },
             _ => panic!("Invalid element size {} for heap_put_element", element_size)
         }
+    }
+    /// Writes operations to unref local heap objects.
+    fn write_heap_unref(self: &Self) {
+        self.locals.borrow(|locals| {
+            for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
+                let type_id = self.bindingtype_ids[binding_id.into_usize()];
+                let ty = &self.types[type_id.into_usize()];
+                if !ty.is_primitive() {
+                    self.write_load(local.index, ty);
+                    self.writer.heap_unref();
+                }
+            }
+        });
     }
     /// Swap 2 stack values, ty_a being topmost, ty_b next below.
     fn write_swap(self: &Self, ty_a: &Type, ty_b: &Type) {

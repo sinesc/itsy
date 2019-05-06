@@ -74,13 +74,15 @@ pub trait StackOp<T> {
 }
 
 /// Trait for stack frame pointer.
-pub trait StackFp<T> {
+pub trait StackRel<T> {
     /// Offset given value by the current frame pointer
     fn offset_fp(self: &Self, offset: i32) -> u32;
+    /// Offset given value by the current stack pointer
+    fn offset_sp(self: &Self, offset: i32) -> u32;
 }
 
 /// Trait for generic stack operations relative to the frame pointer.
-pub trait StackOpFp<T>: StackFp<T> + StackOp<T> {
+pub trait StackOpRel<T>: StackRel<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
     fn store_fp(self: &mut Self, offset: i32, value: T) {
         let pos = self.offset_fp(offset);
@@ -91,16 +93,30 @@ pub trait StackOpFp<T>: StackFp<T> + StackOp<T> {
         let pos = self.offset_fp(offset);
         self.load(pos)
     }
+    /// Store given value in the stack relative to the stack pointer.
+    fn store_sp(self: &mut Self, offset: i32, value: T) {
+        let pos = self.offset_sp(offset);
+        self.store(pos, value);
+    }
+    /// Load a value from the stack relative to the stack pointer.
+    fn load_sp(self: &mut Self, offset: i32) -> T {
+        let pos = self.offset_sp(offset);
+        self.load(pos)
+    }
 }
 
-impl<T> StackFp<T> for Stack {
+impl<T> StackRel<T> for Stack {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn offset_fp(self: &Self, offset: i32) -> u32 {
         (self.fp as i64 + offset as i64) as u32
     }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn offset_sp(self: &Self, offset: i32) -> u32 {
+        (self.data.len() as i64 + offset as i64) as u32
+    }
 }
 
-impl<T> StackOpFp<T> for Stack where Stack: StackOp<T> + StackFp<T> { }
+impl<T> StackOpRel<T> for Stack where Stack: StackOp<T> + StackRel<T> { }
 
 /// Stack/Const conversions
 #[allow(unused_macros)]

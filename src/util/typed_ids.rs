@@ -8,6 +8,12 @@ macro_rules! impl_typed_id {
     ($name:ident) => {
         #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
         pub struct $name(NonZeroUsize);
+        impl $name {
+            /// Converts the typed id into a usize. Useful to avoid Into::<usize>::into(self) when inference fails.
+            pub fn into_usize(self: Self) -> usize {
+                self.into()
+            }
+        }
         impl From<$name> for usize {
             fn from(input: $name) -> usize {
                 Into::<usize>::into(input.0) - 1

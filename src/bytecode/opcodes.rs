@@ -3,7 +3,7 @@
 #[macro_use]
 mod helper;
 use crate::util::{array1, array2, array4, array8};
-use crate::runtime::{Value, Value64, StackOp, StackOpFp, HeapOp};
+use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp};
 
 impl_vm!{
 
@@ -104,55 +104,55 @@ impl_vm!{
         self.stack.push(local);
     }
 
-    /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr_s8(&mut self, offset: i8) {
         self.loadr_s32(offset as i32);
     }
-    /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr_s16(&mut self, offset: i16) {
         self.loadr_s32(offset as i32);
     }
-    /// Load stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr_s32(&mut self, offset: i32) {
         let local: Value = self.stack.load_fp(offset);
         self.stack.push(local);
     }
-    /// Pop stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop stackvalue and store it at the given offset (relative to the stack frame).
     fn storer_s8(&mut self, offset: i8) {
         self.storer_s32(offset as i32);
     }
-    /// Pop stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop stackvalue and store it at the given offset (relative to the stack frame).
     fn storer_s16(&mut self, offset: i16) {
         self.storer_s32(offset as i32);
     }
-    /// Pop stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop stackvalue and store it at the given offset (relative to the stack frame).
     fn storer_s32(&mut self, offset: i32) {
         let local: Value = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
-    /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr64_s8(&mut self, offset: i8) {
         self.loadr64_s32(offset as i32);
     }
-    /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr64_s16(&mut self, offset: i16) {
         self.loadr64_s32(offset as i32);
     }
-    /// Load 64 bit stackvalue from offset (relative to the stackframe) and push onto the stack.
+    /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
     fn loadr64_s32(&mut self, offset: i32) {
         let local: Value64 = self.stack.load_fp(offset);
         self.stack.push(local);
     }
-    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
     fn storer64_s8(&mut self, offset: i8) {
         self.storer64_s32(offset as i32);
     }
-    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
     fn storer64_s16(&mut self, offset: i16) {
         self.storer64_s32(offset as i32);
     }
-    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stackframe).
+    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
     fn storer64_s32(&mut self, offset: i32) {
         let local: Value64 = self.stack.pop();
         self.stack.store_fp(offset, local);
@@ -171,6 +171,18 @@ impl_vm!{
         let element_index: u32 = self.stack.pop();
         let current_offset: u32 = self.stack.pop();
         self.stack.push(current_offset + (element_index as u32 * element_size));
+    }
+
+    /// Increase reference count for the top heap object. Does not pop the object off the heap.
+    fn heap_ref(&mut self) {
+        let heap_index: u32 = self.stack.load_sp(-2);
+        self.heap.inc_ref(heap_index);
+    }
+    /// Pop a heap object from the stack and reduce its reference count by 1.
+    fn heap_unref(&mut self) {
+        let _heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        self.heap.dec_ref(heap_index);
     }
 
     /// Pop a heap object and push the heap value at its current index onto the stack.
@@ -937,28 +949,28 @@ impl_vm!{
         self.stack.push(a - 1);
     }
 
-    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn preinci(&mut self, offset: i32) {
         let mut local: Value = self.stack.load_fp(offset);
         local += 1;
         self.stack.store_fp(offset, local);
         self.stack.push(local);
     }
-    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn predeci(&mut self, offset: i32) {
         let mut local: Value = self.stack.load_fp(offset);
         local -= 1;
         self.stack.store_fp(offset, local);
         self.stack.push(local);
     }
-    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn preinci64(&mut self, offset: i32) {
         let mut local: Value64 = self.stack.load_fp(offset);
         local += 1;
         self.stack.store_fp(offset, local);
         self.stack.push(local);
     }
-    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the result onto the stack.
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn predeci64(&mut self, offset: i32) {
         let mut local: Value64 = self.stack.load_fp(offset);
         local -= 1;
@@ -966,25 +978,25 @@ impl_vm!{
         self.stack.push(local);
     }
 
-    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
     fn postinci(&mut self, offset: i32) {
         let local: Value = self.stack.load_fp(offset);
         self.stack.store_fp(offset, local + 1);
         self.stack.push(local);
     }
-    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
     fn postdeci(&mut self, offset: i32) {
         let local: Value = self.stack.load_fp(offset);
         self.stack.store_fp(offset, local - 1);
         self.stack.push(local);
     }
-    /// Increments the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
     fn postinci64(&mut self, offset: i32) {
         let local: Value64 = self.stack.load_fp(offset);
         self.stack.store_fp(offset, local + 1);
         self.stack.push(local);
     }
-    /// Decrements the stackvalue at given offset (relative to the stackframe) and pushes the previous value onto the stack.
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
     fn postdeci64(&mut self, offset: i32) {
         let local: Value64 = self.stack.load_fp(offset);
         self.stack.store_fp(offset, local - 1);
