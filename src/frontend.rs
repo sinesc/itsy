@@ -15,5 +15,5 @@ pub mod lookup {
 
 pub mod resolved {
     //! Resolved information to be used by the bytecode generator.
-    pub use crate::util::{Type, Struct, Enum};
+    pub use crate::util::{Type, Struct, Enum, Array, Numeric};
 }

@@ -55,6 +55,7 @@ impl Struct {
     }
 }
 
+/// Information about an array in a resolved program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Array {
     pub len: Option<u32>,
@@ -111,7 +112,7 @@ impl Debug for Type {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum TypeKind {
+pub(crate) enum TypeKind {
     Void,
     Unsigned,
     Signed,
@@ -140,7 +141,7 @@ impl Type {
         (self.size() + (std::mem::size_of::<Value>() as u8 - 1)) / std::mem::size_of::<Value>() as u8
     }
     /// Kind of the type, e.g. Signed or Array.
-    pub fn kind(self: &Self) -> TypeKind {
+    pub(crate) fn kind(self: &Self) -> TypeKind {
         match self {
             Type::void => TypeKind::Void,
             Type::u8 | Type::u16 | Type::u32 | Type::u64 => TypeKind::Unsigned,

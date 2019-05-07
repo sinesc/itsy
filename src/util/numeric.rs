@@ -6,15 +6,15 @@ use std::ops::{Add, Sub, Mul, Div, Rem};
 //use std::{i64, u64, f64};
 
 /// Signed integer value.
-pub type Signed = i64;
+pub(crate) type Signed = i64;
 
 /// Unsigned integer value.
-pub type Unsigned = u64;
+pub(crate) type Unsigned = u64;
 
 // A float value.
-pub type Float = f64;
+pub(crate) type Float = f64;
 
-/// A type supporting signed and unsigned integral values. Used in the AST to store literal values.
+/// Numeric type supporting signed and unsigned integers as well as float values. Used to represent literal values in the AST.
 #[derive(Clone, Copy)]
 pub enum Numeric {
     Signed(Signed),
