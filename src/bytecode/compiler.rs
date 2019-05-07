@@ -501,11 +501,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
             LiteralValue::Numeric(int) => {
                 match lit_type {
-                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); }
-                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); }
-                    Type::i16 | Type::u16 => { let pos = self.store_literal(item); self.writer.const_fetch16(pos as u8); } // todo: handle pos > 255
-                    Type::i32 | Type::u32 | Type::f32 => { let pos = self.store_literal(item); self.writer.const_fetch(pos as u8); } // todo: handle pos > 255
-                    Type::i64 | Type::u64 | Type::f64 => { let pos = self.store_literal(item); self.writer.const_fetch64(pos as u8); } // todo: handle pos > 255
+                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); },
+                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); },
+                    _ if lit_type.is_integer() || lit_type.is_float() => {
+                         let pos = self.store_literal(item); self.write_const_fetch(pos, lit_type);
+                    },
                     _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
                 }
             }
@@ -519,7 +519,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::String => {
                         let pos = self.store_literal(item);
-                        self.writer.const_fetch_object(pos as u8);  // string heap index
+                        self.write_const_fetch(pos, lit_type);  // string heap index
                         self.writer.lit0();             //  offset into the string
                     },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
@@ -529,7 +529,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Array(_) => {
                         let pos = self.store_literal(item);
-                        self.writer.const_fetch_object(pos as u8);  // array heap index
+                        self.write_const_fetch(pos, lit_type);  // array heap index
                         self.writer.lit0();             //  offset into the array
                     },
                     _ => panic!("Unexpected array literal type: {:?}", lit_type)
@@ -539,7 +539,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Struct(_) => {
                         let pos = self.store_literal(item);
-                        self.writer.const_fetch_object(pos as u8);  // struct heap index
+                        self.write_const_fetch(pos, lit_type);  // struct heap index
                         self.writer.lit0();             //  offset into the struct
                     },
                     _ => panic!("Unexpected struct literal type: {:?}", lit_type)
@@ -753,7 +753,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
-                self.writer.call(position); // todo: may have to handle multiple call types
+                self.writer.call(position);
             }
             self.writer.set_position(backup_position);
         }
@@ -841,7 +841,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match int {
                     Numeric::Signed(v) => {
                         match lit_type {
-                            Type::i8 => self.writer.store_const(v as i8), // todo: handle pos > 255
+                            Type::i8 => self.writer.store_const(v as i8),
                             Type::i16 => self.writer.store_const(v as i16),
                             Type::i32 => self.writer.store_const(v as i32),
                             Type::i64 => self.writer.store_const(v as i64),
@@ -964,7 +964,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.addi();
         } else {
             let const_id = self.writer.store_const(offset);
-            self.writer.const_fetch(const_id as u8); // todo: handle id > 255
+            self.write_const_fetch(const_id, &Type::u32);
             self.writer.addi();
         }
     }
@@ -1178,6 +1178,49 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             _ => panic!("unsupported type size"),
         };
+    }
+    fn write_const_fetch(self: &Self, index: u32, ty: &Type) {
+        use std::{u8, u16, u32};
+        match ty.size() {
+            2 => {
+                if index <= u8::MAX as u32 {
+                    self.writer.const_fetch16(index as u8);
+                } else if index <= u16::MAX as u32 {
+                    self.writer.const_fetch16_16(index as u16);
+                } else {
+                    self.writer.const_fetch16_32(index);
+                }
+            },
+            4 => {
+                if index <= u8::MAX as u32 {
+                    self.writer.const_fetch(index as u8);
+                } else if index <= u16::MAX as u32 {
+                    self.writer.const_fetch_16(index as u16);
+                } else {
+                    self.writer.const_fetch_32(index);
+                }
+            },
+            8 => {
+                if ty.is_primitive() {
+                    if index <= u8::MAX as u32 {
+                        self.writer.const_fetch64(index as u8);
+                    } else if index <= u16::MAX as u32 {
+                        self.writer.const_fetch64_16(index as u16);
+                    } else {
+                        self.writer.const_fetch64_32(index as u32);
+                    }
+                } else {
+                    if index <= u8::MAX as u32 {
+                        self.writer.const_fetch_object(index as u8);
+                    } else if index <= u16::MAX as u32 {
+                        self.writer.const_fetch_object_16(index as u16);
+                    } else {
+                        self.writer.const_fetch_object_32(index);
+                    }
+                }
+            },
+            _ => panic!("Unsupported type size"),
+        }
     }
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, index: i32, ty: &Type) {

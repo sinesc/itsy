@@ -25,10 +25,14 @@ impl_vm!{
 
     /// Load 2 byte from constant pool onto stack.
     fn const_fetch16(&mut self, const_id: u8) {
-        self.const_fetch16_16(const_id as u16);
+        self.const_fetch16_32(const_id as u32);
     }
     /// Load 2 byte from constant pool onto stack.
     fn const_fetch16_16(&mut self, const_id: u16) {
+        self.const_fetch16_32(const_id as u32);
+    }
+    /// Load 2 byte from constant pool onto stack.
+    fn const_fetch16_32(&mut self, const_id: u32) {
         let const_id = const_id as usize;
         let tmp: u16 = u16::from_le_bytes(array2(&self.program.consts[const_id..const_id +2]));
         self.stack.push(tmp);
@@ -36,10 +40,14 @@ impl_vm!{
 
     /// Load 4 byte from constant pool onto stack.
     fn const_fetch(&mut self, const_id: u8) {
-        self.const_fetch_16(const_id as u16);
+        self.const_fetch_32(const_id as u32);
     }
     /// Load 4 byte from constant pool onto stack.
     fn const_fetch_16(&mut self, const_id: u16) {
+        self.const_fetch_32(const_id as u32);
+    }
+    /// Load 4 byte from constant pool onto stack.
+    fn const_fetch_32(&mut self, const_id: u32) {
         let const_id = const_id as usize;
         let tmp: u32 = u32::from_le_bytes(array4(&self.program.consts[const_id..const_id +4]));
         self.stack.push(tmp);
@@ -47,10 +55,14 @@ impl_vm!{
 
     /// Load 8 byte from constant pool onto stack.
     fn const_fetch64(&mut self, const_id: u8) {
-        self.const_fetch64_16(const_id as u16);
+        self.const_fetch64_32(const_id as u32);
     }
     /// Load 8 byte from constant pool onto stack.
     fn const_fetch64_16(&mut self, const_id: u16) {
+        self.const_fetch64_32(const_id as u32);
+    }
+    /// Load 8 byte from constant pool onto stack.
+    fn const_fetch64_32(&mut self, const_id: u32) {
         let const_id = const_id as usize;
         let tmp: u64 = u64::from_le_bytes(array8(&self.program.consts[const_id..const_id +8]));
         self.stack.push(tmp);
@@ -58,10 +70,14 @@ impl_vm!{
 
     /// Load object from constant pool onto stack+heap.
     fn const_fetch_object(&mut self, const_id: u8) {
-        self.const_fetch_object_16(const_id as u16);
+        self.const_fetch_object_32(const_id as u32);
     }
     /// Load object from constant pool onto stack+heap.
     fn const_fetch_object_16(&mut self, const_id: u16) {
+        self.const_fetch_object_32(const_id as u32);
+    }
+    /// Load object from constant pool onto stack+heap.
+    fn const_fetch_object_32(&mut self, const_id: u32) {
         let pos = const_id as usize;
         let len = u32::from_le_bytes(array4(&self.program.consts[pos .. pos + 4])) as usize;
         let data = self.program.consts[pos + 4 .. pos + 4 + len].to_vec();
