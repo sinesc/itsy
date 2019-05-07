@@ -272,7 +272,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Function(function)       => self.resolve_function(function),
             S::Structure(structure)     => self.resolve_structure(structure),
             S::Binding(binding)         => self.resolve_binding(binding),
-            S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // todo: shouldn't None really be Some(Void) ?
+            S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.resolve_while_loop(while_loop),
             S::Block(block)             => self.resolve_block(block, None),
@@ -554,6 +554,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.left, right_type_id)?;
         let left_type_id = self.bindingtype_id(&mut item.left);
         self.resolve_expression(&mut item.right, left_type_id)?;
+        self.set_bindingtype_id(item, TypeId::void())?;
         Ok(())
     }
 

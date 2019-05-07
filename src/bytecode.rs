@@ -10,6 +10,10 @@ pub use self::writer::*;
 pub use self::compiler::compile;
 pub use self::opcodes::OpCode;
 
+const ARG1: i32 = -3;
+const ARG2: i32 = -4;
+const ARG3: i32 = -5;
+
 /// An Itsy bytecode program.
 #[derive(Clone, Debug)]
 pub struct Program<T> where T: crate::runtime::VMFunc<T> {

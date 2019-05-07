@@ -601,17 +601,10 @@ pub struct Assignment<'a> {
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
+    pub binding_id: Option<BindingId>,
 }
+impl_bindable!(Assignment);
 impl_positioned!(Assignment);
-
-impl<'a> Bindable for Assignment<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        self.left.binding_id_mut()
-    }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        self.left.binding_id()
-    }
-}
 
 impl<'a> Returns for Assignment<'a> {
     fn returns(self: &Self) -> bool {

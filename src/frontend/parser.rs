@@ -273,6 +273,7 @@ named!(assignment(Input<'_>) -> Assignment<'_>, do_parse!(
             op      : m.1,
             left    : m.0,
             right   : m.2,
+            binding_id: None,
         }
     }) >>
     (result)

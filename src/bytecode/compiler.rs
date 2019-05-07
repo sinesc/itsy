@@ -3,7 +3,7 @@
 use std::{collections::HashMap, fmt::Debug, cell::RefCell};
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
 use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
-use crate::bytecode::{Writer, WriteConst, Program};
+use crate::bytecode::{Writer, WriteConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::VMFunc;
 
 /// Describes a single local variable of a stack frame
@@ -26,14 +26,18 @@ struct Locals {
     map     : HashMap<BindingId, Local>,
     next_arg: i32,
     next_var: i32,
+    arg_size: u32,
+    ret_size: u32,
 }
 
 impl Locals {
     pub fn new() -> Self {
         Locals {
             map     : HashMap::new(),
-            next_arg: -4,
+            next_arg: ARG1,
             next_var: 0,
+            arg_size: 0,
+            ret_size: 0,
         }
     }
 }
@@ -61,6 +65,14 @@ impl LocalsStack {
         let inner = self.0.borrow_mut();
         let locals = inner.last().expect(Self::NO_STACK);
         func(&locals);
+    }
+    /// Returns the argument size in stack elements for the top stack frame descriptor.
+    fn arg_size(self: &Self) -> u32 {
+        self.0.borrow_mut().last().expect(Self::NO_STACK).arg_size
+    }
+    /// Returns the return value size in stack elements for the top stack frame descriptor.
+    fn ret_size(self: &Self) -> u32 {
+        self.0.borrow_mut().last().expect(Self::NO_STACK).ret_size
     }
     /// Look up local variable descriptor for the given BindingId.
     fn lookup(self: &Self, binding_id: BindingId) -> Local {
@@ -117,7 +129,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         let ResolvedProgram { ast: statements, bindingtype_ids, types, entry_fn, .. } = program;
 
         // write placeholder jump to program entry
-        let initial_pos = self.writer.call(123, 0);
+        let initial_pos = self.writer.call(123);
         self.writer.exit();
 
         // compile program
@@ -129,7 +141,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         // overwrite placeholder with actual entry position
         let &entry_fn_pos = self.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
-        self.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos, 0));
+        self.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos));
     }
 
     /// Returns compiled bytecode program.
@@ -148,12 +160,31 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             S::Function(function)       => self.compile_function(function),
             S::Structure(_)             => { /* nothing to do here */ },
             S::Binding(binding)         => self.compile_binding(binding),
-            S::IfBlock(if_block)        => self.compile_if_block(if_block),
+            S::IfBlock(if_block)        => {
+                self.compile_if_block(if_block);
+                if let Some(result) = &if_block.if_block.result {
+                    for _ in 0..self.bindingtype(result).quadsize() {
+                        self.writer.discard();
+                    }
+                }
+            }
             S::ForLoop(for_loop)        => self.compile_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
-            S::Block(block)             => self.compile_block(block),
+            S::Block(block)             => {
+                self.compile_block(block);
+                if let Some(result) = &block.result {
+                    for _ in 0..self.bindingtype(result).quadsize() {
+                        self.writer.discard();
+                    }
+                }
+            }
             S::Return(ret)              => self.compile_return(ret),
-            S::Expression(expression)   => self.compile_expression(expression, false),
+            S::Expression(expression)   => {
+                self.compile_expression(expression, false);
+                for _ in 0..self.bindingtype(expression).quadsize() {
+                    self.writer.discard();
+                }
+            }
         }
     }
 
@@ -257,15 +288,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
         let function_id = item.function_id.unwrap();
-        let num_args = item.sig.args.len() as u8;
         self.functions.borrow_mut().insert(function_id, position);
-        self.fix_targets(function_id, position, num_args);
+        self.fix_targets(function_id, position);
         // create local environment
         let mut frame = Locals::new();
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()) as u32;;
         for arg in item.sig.args.iter() {
-            frame.next_arg -= self.bindingtype(arg).quadsize() as i32 - 1;
+            let arg_size = self.bindingtype(arg).quadsize();
+            frame.next_arg -= arg_size as i32 - 1;
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.next_arg));
             frame.next_arg -= 1;
+            frame.arg_size += arg_size as u32;
         }
         self.create_stack_frame_block(&item.block, &mut frame);
         // reserve space for local variables on the stack
@@ -277,7 +310,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.compile_block(&item.block);
         if !item.block.returns() {
             self.write_heap_unref();
-            self.writer.ret(item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()));
+            self.write_ret();
         }
         // destroy local environment
         self.locals.pop();
@@ -287,7 +320,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_call(self: &Self, item: &ast::Call<'ast>) {
 
         // put args on stack
-        for arg in item.args.iter() { // todo: optional parameter? we need the exact signature
+        for arg in item.args.iter() {
             self.compile_expression(arg, false);
         }
 
@@ -309,7 +342,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 123
             };
 
-            self.writer.call(target, item.args.len() as u8);       // todo: get args from sig, not call (maybe?) should match once resolve does the checking
+            self.writer.call(target);
         }
     }
 
@@ -323,7 +356,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let index = self.locals.lookup(binding_id).index;
-            self.write_store(index, self.bindingtype(item));
+            self.write_store(index, ty);
             self.locals.set_active(binding_id, true);
         }
     }
@@ -428,7 +461,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
             } else {
-                unimplemented!();
+                unimplemented!("non-range binary op");
             }
 
         } else {
@@ -442,7 +475,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(expr, false);
         }
         self.write_heap_unref();
-        self.writer.ret(item.fn_ret_type_id.map_or(0, |ret| self.get_type(Some(ret)).quadsize()));
+        self.write_ret();
     }
 
     /// Compiles the given block.
@@ -715,12 +748,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
     /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &Self, function_id: FunctionId, position: u32, num_args: u8) {
+    fn fix_targets(self: &Self, function_id: FunctionId, position: u32) {
         if let Some(targets) = self.unresolved.borrow_mut().remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
-                self.writer.call(position, num_args); // todo: may have to handle multiple call types
+                self.writer.call(position); // todo: may have to handle multiple call types
             }
             self.writer.set_position(backup_position);
         }
@@ -1186,9 +1219,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         } else if size <= 4 {
             match index {
-                -4 => self.writer.load_arg1(),
-                -5 => self.writer.load_arg2(),
-                -6 => self.writer.load_arg3(),
+                ARG1 => self.writer.load_arg1(),
+                ARG2 => self.writer.load_arg2(),
+                ARG3 => self.writer.load_arg3(),
                 _ => if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
                     self.writer.loadr_s8(index as i8)
                 } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
@@ -1207,5 +1240,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             8 => self.writer.clone64(offset),
             _ => panic!("unsupported type size"),
         };
+    }
+    /// Writes a return instruction with the correct arguments for the current stack frame.
+    fn write_ret(self: &Self) {
+        self.writer.ret(self.locals.ret_size() as u8, self.locals.arg_size() as u8);
     }
 }

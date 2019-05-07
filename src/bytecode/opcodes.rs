@@ -2,6 +2,7 @@
 
 #[macro_use]
 mod helper;
+use crate::bytecode::{ARG1, ARG2, ARG3};
 use crate::util::{array1, array2, array4, array8};
 use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp};
 
@@ -15,6 +16,11 @@ impl_vm!{
         for _ in 0..num_items {
             self.stack.push(0);
         }
+    }
+
+    /// Discards the top 32 bit stack value.
+    fn discard(&mut self) {
+        let _value: Value = self.stack.pop();
     }
 
     /// Load 2 byte from constant pool onto stack.
@@ -88,19 +94,19 @@ impl_vm!{
         self.stack.push(-1i32);
     }
 
-    /// Load function argument 1 and push it onto the stack. Equivalent to load -4.
+    /// Load function argument 1 and push it onto the stack.
     fn load_arg1(&mut self) {
-        let local: Value = self.stack.load_fp(-4);
+        let local: Value = self.stack.load_fp(ARG1);
         self.stack.push(local);
     }
-    /// Load function argument 2 and push it onto the stack. Equivalent to load -5.
+    /// Load function argument 2 and push it onto the stack.
     fn load_arg2(&mut self) {
-        let local: Value = self.stack.load_fp(-5);
+        let local: Value = self.stack.load_fp(ARG2);
         self.stack.push(local);
     }
-    /// Load function argument 3 and push it onto the stack. Equivalent to load -6.
+    /// Load function argument 3 and push it onto the stack.
     fn load_arg3(&mut self) {
-        let local: Value = self.stack.load_fp(-6);
+        let local: Value = self.stack.load_fp(ARG3);
         self.stack.push(local);
     }
 
@@ -427,11 +433,10 @@ impl_vm!{
     }
 
     /// Function call. Saves state and sets programm counter to given addr. Expects
-    /// callee arguments on the stack and number of arguments (in 32 bit words) as num_args.
-    fn call(&mut self, addr: u32, num_args: u8) { // todo: move num_args to ret? avoids one push
+    /// callee arguments on the stack.
+    fn call(&mut self, addr: u32) {
         let next_pc = self.pc;
         let fp = self.stack.fp;
-        self.stack.push(num_args);          // save number of arguments
         self.stack.push(fp);                // save frame pointer
         self.stack.push(next_pc);           // save program counter as it would be after this instruction
         self.stack.fp = self.stack.sp();    // set new frame pointer
@@ -439,21 +444,28 @@ impl_vm!{
     }
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
-    fn ret(&mut self, num_ret: u8) {
+    fn ret(&mut self, num_ret: u8, num_args: u8) {
 
         let num_ret = num_ret as u32;
 
         // get previous state
         let prev_pc = self.stack.load_fp(-1);           // load program counter from before the call
         let prev_fp = self.stack.load_fp(-2);           // load old frame pointer
-        let prev_num_args: u8 = self.stack.load_fp(-3); // load number of arguments that were on the stack prior to call
 
         // truncate stack back down to the start of the callframe minus 3 (the above three states) minus the number
         // of arguments pushed by the caller prior to call (so that the caller doesn't have to clean them up).
-        let ret_pos = self.stack.fp - 3 - prev_num_args as u32;
+        let ret_pos = self.stack.fp - 2 - num_args as u32;
 
-        for i in 0..num_ret {   // todo: this could be avoided if caller were to clean up the stack (prev_pc/fp stuff)
-            self.stack[ret_pos + i] = self.stack[self.stack.sp() - num_ret + i];
+        // appears to be slightly faster than always looping, even for non-empty functions
+        if num_ret == 1 {
+            self.stack[ret_pos] = self.stack[self.stack.sp() - num_ret];
+        } else if num_ret == 2 {
+            self.stack[ret_pos] = self.stack[self.stack.sp() - num_ret];
+            self.stack[ret_pos + 1] = self.stack[self.stack.sp() - num_ret + 1];
+        } else if num_ret > 2 {
+            for i in 0..num_ret {
+                self.stack[ret_pos + i] = self.stack[self.stack.sp() - num_ret + i];
+            }
         }
 
         self.stack.truncate(ret_pos + num_ret);

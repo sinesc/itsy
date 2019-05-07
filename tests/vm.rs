@@ -956,3 +956,37 @@ fn block_result() {
         6,      5, 5,
     ]);
 }
+
+#[test]
+fn unused_result() {
+    let result = run("
+        fn test1(x: i32) -> i64 {
+            ret_i32(x);
+            return x as i64;
+        }
+        fn test2(x: i32) -> i64 {
+            ret_i32(x);
+            x as i64
+        }
+        fn test3(x: i32) -> i64 {
+            ret_i32(x);
+            { x as i64 }
+        }
+        fn main() {
+            for i in 0..7 {
+                test1(i);
+                test2(i);
+                test3(i);
+            }
+        }
+    ");
+    assert_all(&result, &[
+        0i32, 0, 0,
+        1, 1, 1,
+        2, 2, 2,
+        3, 3, 3,
+        4, 4, 4,
+        5, 5, 5,
+        6, 6, 6,
+    ]);
+}

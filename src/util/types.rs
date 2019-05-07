@@ -127,6 +127,7 @@ impl Type {
     /// Size of the type in bytes.
     pub fn size(self: &Self) -> u8 {
         match self {
+            Type::void                          => 0,
             Type::u8 | Type::i8 | Type::bool    => 1,
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
@@ -235,6 +236,13 @@ impl Type {
     pub fn is_float(self: &Self) -> bool {
         match self.kind() {
             TypeKind::Float => true,
+            _ => false
+        }
+    }
+    /// Whether the type is void.
+    pub fn is_void(self: &Self) -> bool {
+        match self {
+            Type::void => true,
             _ => false
         }
     }
