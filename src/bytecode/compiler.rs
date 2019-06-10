@@ -292,7 +292,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.fix_targets(function_id, position);
         // create local environment
         let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()) as u32;;
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()) as u32;
         for arg in item.sig.args.iter() {
             let arg_size = self.bindingtype(arg).quadsize();
             frame.next_arg -= arg_size as i32 - 1;
@@ -309,6 +309,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
         self.compile_block(&item.block);
         if !item.block.returns() {
+            if item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id).is_primitive()) {
+                self.writer.heap_ref(); // todo: this refs result again so that the following unref doesn't remove it. instead: "just" don't unref this one
+            }
             self.write_heap_unref();
             self.write_ret();
         }
@@ -473,6 +476,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_return(self: &Self, item: &ast::Return<'ast>) {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr, false);
+            let ty = self.bindingtype(expr);
+            if !ty.is_primitive() {
+                self.writer.heap_ref();// todo: this refs result again so that the following unref doesn't remove it. instead: "just" don't unref this one
+            }
         }
         self.write_heap_unref();
         self.write_ret();
@@ -1032,8 +1039,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Writes operations to unref local heap objects.
-    fn write_heap_unref(self: &Self) {
+    fn write_heap_unref(self: &Self/*, exclude: Option<BindingId>*/) {
         self.locals.borrow(|locals| {
+            // fixme: exclude returned binding
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let type_id = self.bindingtype_ids[binding_id.into_usize()];
                 let ty = &self.types[type_id.into_usize()];

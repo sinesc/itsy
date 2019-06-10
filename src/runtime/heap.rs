@@ -43,7 +43,7 @@ impl Heap {
     pub fn inc_ref(self: &mut Self, position: u32) {
         self.objects[position as usize].refs += 1;
     }
-    /// Decrease reference count for given heap object, free it if count is already at 0.
+    /// Decrease reference count for given heap object, free it if count is at 0.
     pub fn dec_ref(self: &mut Self, position: u32) {
         self.objects[position as usize].refs -= 1;
         if self.objects[position as usize].refs == 0 {

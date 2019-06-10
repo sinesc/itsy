@@ -990,3 +990,34 @@ fn unused_result() {
         6, 6, 6,
     ]);
 }
+
+#[test]
+fn heap_return() {
+    let result = run("
+        struct Inner {
+            c: u32,
+        }
+        struct Outer {
+            a: u32,
+            b: Inner,
+        }
+        fn test() -> Inner {
+            let x = Outer {
+                a: 11,
+                b: Inner {
+                    c: 13,
+                }
+            };
+            return x.b;
+        }
+        fn main() {
+            let y = test();
+            ret_u32(y.c);
+            y.c += 1;
+            ret_u32(y.c);
+        }
+    ");
+    assert_all(&result, &[
+        13u32, 14
+    ]);
+}
