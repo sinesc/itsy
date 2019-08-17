@@ -283,7 +283,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given function.
     fn compile_function(self: &Self, item: &ast::Function<'ast>) {
-        self.writer.comment(item.sig.ident.name);
+        self.writer.comment(&format!("\n{}", item.sig.ident.name));
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();

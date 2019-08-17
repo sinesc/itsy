@@ -35,7 +35,7 @@ macro_rules! impl_typed_id {
     };
 }
 
-/// Unique numeric id of a type.
+// Unique numeric id of a type.
 impl_typed_id!(TypeId);
 
 impl TypeId {
@@ -44,11 +44,11 @@ impl TypeId {
     }
 }
 
-/// Unique numeric id of a scope.
+// Unique numeric id of a scope.
 impl_typed_id!(ScopeId);
 
-/// Unique numeric id of a variable binding.
+// Unique numeric id of a variable binding.
 impl_typed_id!(BindingId);
 
-/// Unique numeric id of a function.
+// Unique numeric id of a function.
 impl_typed_id!(FunctionId);

@@ -135,7 +135,8 @@ macro_rules! impl_vm {
                             Some((result, pc))
                         }
                         OpCode::comment => {
-                            let result = format!("\n; {}", impl_vm!(read String, self, pc));
+                            let message = impl_vm!(read String, self, pc);
+                            let result = if &message[0..1] == "\n" { format!("\n; {}", &message[1..]) } else { format!("; {}", message) };
                             Some((result, pc))
                         }
                         $(

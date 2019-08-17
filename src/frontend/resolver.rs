@@ -358,14 +358,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let result_type_id = item.sig.ret_type_id();
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids().iter().map(|arg| arg.unwrap()).collect();
             let function_id = self.scopes.insert_function(parent_scope_id, item.sig.ident.name, result_type_id, arg_type_ids);
-
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
-            // todo: needs to check that block return type matches
         }
         if let Some(function_id) = item.function_id {
-            let function_type = self.scopes.function_type(function_id);
-            self.resolve_block(&mut item.block, function_type.ret_type)?;
+            let ret_type = self.scopes.function_type(function_id).ret_type;
+            self.resolve_block(&mut item.block, ret_type)?;
         }
         self.scope_id = parent_scope_id;
         Ok(())

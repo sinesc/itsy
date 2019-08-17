@@ -220,7 +220,7 @@ macro_rules! extern_rust {
 /// }
 /// ```
 pub fn vm<T, U>(program: &str) -> runtime::VM<T, U> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> { // todo: Result
-    use crate::{frontend::{parse, resolve}, bytecode::compile, runtime::VM};
+    use crate::runtime::VM;
     let parsed = parse(program).unwrap(); // todo: forward error
     let resolved = resolve::<T>(parsed, "main").unwrap(); // todo: forward error
     let program = compile(resolved); // todo: compiler needs error handling. then forward error
