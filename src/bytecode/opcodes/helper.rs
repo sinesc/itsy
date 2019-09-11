@@ -61,7 +61,7 @@ macro_rules! impl_vm {
         ///
         /// `<op><suffix1>_<suffix2>`
         ///
-        /// `suffix1` refers to stack inputs\
+        /// `suffix1` refers to stack inputs/outputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
         ///
         /// `f`/`s`/`u`/`i`/`r`   float/signed/unsigned/any integer/raw, default: `r` for stack input, `u` for arguments\

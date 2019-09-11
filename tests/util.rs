@@ -2,7 +2,7 @@ pub use itsy::{vm, frontend::parse};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
-pub type ContextElement = Box<Any>;
+pub type ContextElement = Box<dyn Any>;
 pub type Context = Vec<ContextElement>;
 
 use itsy::extern_rust;
@@ -30,7 +30,7 @@ pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debu
     assert!(result.len() == expected.len(), "Result length {} did not match expected length {}", result.len(), expected.len());
 }
 
-/// Implement some VM methods to write values of specific types to the VM context.
+// Implement some VM methods to write values of specific types to the VM context.
 extern_rust!(TestFns, Context, {
     fn ret_u8(&mut context, value: u8) {
         context.push(Box::new(value));

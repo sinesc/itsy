@@ -164,7 +164,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.compile_if_block(if_block);
                 if let Some(result) = &if_block.if_block.result {
                     for _ in 0..self.bindingtype(result).quadsize() {
-                        self.writer.discard();
+                        self.writer.discard32();
                     }
                 }
             }
@@ -174,7 +174,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.compile_block(block);
                 if let Some(result) = &block.result {
                     for _ in 0..self.bindingtype(result).quadsize() {
-                        self.writer.discard();
+                        self.writer.discard32();
                     }
                 }
             }
@@ -182,7 +182,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             S::Expression(expression)   => {
                 self.compile_expression(expression, false);
                 for _ in 0..self.bindingtype(expression).quadsize() {
-                    self.writer.discard();
+                    self.writer.discard32();
                 }
             }
         }
@@ -249,8 +249,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => {
                 self.compile_expression(&item.right, false);
                 self.compile_expression(&item.left, true);
+                // stack now <right value> <left heap object>
                 self.writer.heap_ref();
                 let ty = self.bindingtype(&item.left);
+                // swap right value (with left heap object) to top of stack, then push a copy of the heap object
                 if ty.size() == 8 {
                     self.writer.swap64();
                     self.writer.clone64(2);
@@ -258,7 +260,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     self.writer.swap64_32();
                     self.writer.clone64(1);
                 }
+                // stack now <left heap object> <right value> <left heap object>
+                // pop left heap object and push left value from heap
                 self.write_heap_fetch(ty.size());
+                // pop left and right value and push result
                 match item.op {
                     BO::AddAssign => self.write_add(&ty),
                     BO::SubAssign => self.write_sub(&ty),
@@ -267,6 +272,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(&ty),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
+                // write result back to heap (left heap object)
                 self.write_heap_put(ty.size());
             },
         }
@@ -1201,11 +1207,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             4 => {
                 if index <= u8::MAX as u32 {
-                    self.writer.const_fetch(index as u8);
+                    self.writer.const_fetch32(index as u8);
                 } else if index <= u16::MAX as u32 {
-                    self.writer.const_fetch_16(index as u16);
+                    self.writer.const_fetch32_16(index as u16);
                 } else {
-                    self.writer.const_fetch_32(index);
+                    self.writer.const_fetch32_32(index);
                 }
             },
             8 => {
@@ -1245,11 +1251,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         } else if size <= 4 {
             if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                self.writer.storer_s8(index as i8);
+                self.writer.storer32_s8(index as i8);
             } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                self.writer.storer_s16(index as i16);
+                self.writer.storer32_s16(index as i16);
             } else {
-                self.writer.storer_s32(index);
+                self.writer.storer32_s32(index);
             }
         } else {
             panic!("Unsupported type {:?} for store operation", ty);
@@ -1274,11 +1280,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 ARG2 => self.writer.load_arg2(),
                 ARG3 => self.writer.load_arg3(),
                 _ => if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                    self.writer.loadr_s8(index as i8)
+                    self.writer.loadr32_s8(index as i8)
                 } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                    self.writer.loadr_s16(index as i16)
+                    self.writer.loadr32_s16(index as i16)
                 } else {
-                    self.writer.loadr_s32(index)
+                    self.writer.loadr32_s32(index)
                 }
             };
         } else {
