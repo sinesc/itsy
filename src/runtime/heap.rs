@@ -1,4 +1,4 @@
-use crate::util::{array2, array4, array8};
+use crate::util::{array2, array4, array8, index_twice};
 
 /// A reference counted heap object.
 #[derive(Debug)]
@@ -40,28 +40,28 @@ impl Heap {
         })
     }
     /// Increase reference count for given heap object.
-    pub fn inc_ref(self: &mut Self, position: u32) {
-        self.objects[position as usize].refs += 1;
+    pub fn inc_ref(self: &mut Self, index: u32) {
+        self.objects[index as usize].refs += 1;
     }
     /// Decrease reference count for given heap object, free it if count is at 0.
-    pub fn dec_ref(self: &mut Self, position: u32) {
-        self.objects[position as usize].refs -= 1;
-        if self.objects[position as usize].refs == 0 {
-            self.free(position);
+    pub fn dec_ref(self: &mut Self, index: u32) {
+        self.objects[index as usize].refs -= 1;
+        if self.objects[index as usize].refs == 0 {
+            self.free(index);
         }
     }
     /// Free a chunk of memory.
-    pub fn free(self: &mut Self, position: u32) {
+    pub fn free(self: &mut Self, index: u32) {
         #[cfg(debug_assertions)]
-        self.assert_exists(position);
-        self.free.push(position);
+        self.assert_exists(index);
+        self.free.push(index);
     }
     /// Removes and returns a chunk of memory, freeing its slot on the heap.
-    pub fn remove(self: &mut Self, position: u32) -> Vec<u8> {
+    pub fn remove(self: &mut Self, index: u32) -> Vec<u8> {
         #[cfg(debug_assertions)]
-        self.assert_exists(position);
-        let object = ::std::mem::replace(&mut self.objects[position as usize], HeapObject::new());
-        self.free.push(position);
+        self.assert_exists(index);
+        let object = ::std::mem::replace(&mut self.objects[index as usize], HeapObject::new());
+        self.free.push(index);
         object.data
     }
     /// Deallocates freed chunks of memory.
@@ -81,48 +81,73 @@ impl Heap {
         self.free = Vec::with_capacity(16);
     }
     /// Asserts that the given heap object exists.
-    fn assert_exists(self: &Self, position: u32) {
-        if let Some(pos) = self.free.iter().find(|&&pos| pos == position) {
+    fn assert_exists(self: &Self, index: u32) {
+        if let Some(pos) = self.free.iter().find(|&&pos| pos == index) {
             panic!("HEAP: double free of object {}", pos);
         }
     }
 
-    pub fn read8(self: &Self, position: u32, offset: u32) -> u8 {
-        self.objects[position as usize].data[offset as usize]
+    pub fn read8(self: &Self, index: u32, offset: u32) -> u8 {
+        self.objects[index as usize].data[offset as usize]
     }
 
-    pub fn read16(self: &Self, position: u32, offset: u32) -> u16 {
+    pub fn read16(self: &Self, index: u32, offset: u32) -> u16 {
         let offset = offset as usize;
-        u16::from_ne_bytes(array2(&self.objects[position as usize].data[offset..offset + 2]))
+        u16::from_ne_bytes(array2(&self.objects[index as usize].data[offset..offset + 2]))
     }
 
-    pub fn read32(self: &Self, position: u32, offset: u32) -> u32 {
+    pub fn read32(self: &Self, index: u32, offset: u32) -> u32 {
         let offset = offset as usize;
-        u32::from_ne_bytes(array4(&self.objects[position as usize].data[offset..offset + 4]))
+        u32::from_ne_bytes(array4(&self.objects[index as usize].data[offset..offset + 4]))
     }
 
-    pub fn read64(self: &Self, position: u32, offset: u32) -> u64 {
+    pub fn read64(self: &Self, index: u32, offset: u32) -> u64 {
         let offset = offset as usize;
-        u64::from_ne_bytes(array8(&self.objects[position as usize].data[offset..offset + 8]))
+        u64::from_ne_bytes(array8(&self.objects[index as usize].data[offset..offset + 8]))
     }
 
-    pub fn write8(self: &mut Self, position: u32, offset: u32, value: u8) {
-        self.objects[position as usize].data[offset as usize] = value;
+    pub fn write8(self: &mut Self, index: u32, offset: u32, value: u8) {
+        self.objects[index as usize].data[offset as usize] = value;
     }
 
-    pub fn write16(self: &mut Self, position: u32, offset: u32, value: u16) {
+    pub fn write16(self: &mut Self, index: u32, offset: u32, value: u16) {
         let offset = offset as usize;
-        self.objects[position as usize].data[offset..offset+2].copy_from_slice(&value.to_ne_bytes());
+        self.objects[index as usize].data[offset..offset+2].copy_from_slice(&value.to_ne_bytes());
     }
 
-    pub fn write32(self: &mut Self, position: u32, offset: u32, value: u32) {
+    pub fn write32(self: &mut Self, index: u32, offset: u32, value: u32) {
         let offset = offset as usize;
-        self.objects[position as usize].data[offset..offset+4].copy_from_slice(&value.to_ne_bytes());
+        self.objects[index as usize].data[offset..offset+4].copy_from_slice(&value.to_ne_bytes());
     }
 
-    pub fn write64(self: &mut Self, position: u32, offset: u32, value: u64) {
+    pub fn write64(self: &mut Self, index: u32, offset: u32, value: u64) {
         let offset = offset as usize;
-        self.objects[position as usize].data[offset..offset+8].copy_from_slice(&value.to_ne_bytes());
+        self.objects[index as usize].data[offset..offset+8].copy_from_slice(&value.to_ne_bytes());
+    }
+
+    pub fn copy(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32) {
+
+        println!("{} bytes from {}:{} to {}:{} ", num, index_src, offset_src, index_dest, offset_dest);
+        let index_dest = index_dest as usize;
+        let index_src = index_src as usize;
+        let offset_dest = offset_dest as usize;
+        let offset_src = offset_src as usize;
+        let num_bytes = usize::min(num as usize, self.objects[index_src].data.len() - offset_src);
+        let copy_bytes = usize::min(num_bytes, self.objects[index_dest].data.len() - offset_dest);
+        let push_bytes = num_bytes - copy_bytes;
+        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+
+        if copy_bytes > 0 {
+            let slice_dest = &mut dest.data[offset_dest .. offset_dest + copy_bytes];
+            let slice_src = &mut src.data[offset_src .. offset_src + copy_bytes];
+            slice_dest.copy_from_slice(slice_src);
+        }
+
+        if push_bytes > 0 {
+            let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+            let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
+            dest.data.extend_from_slice(slice_src);
+        }
     }
 }
 

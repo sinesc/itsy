@@ -180,7 +180,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
             S::Return(ret)              => self.compile_return(ret),
             S::Expression(expression)   => {
-                self.compile_expression(expression, false);
+                self.compile_expression(expression);
                 for _ in 0..self.bindingtype(expression).quadsize() {
                     self.writer.discard32();
                 }
@@ -189,7 +189,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given expression.
-    fn compile_expression(self: &Self, item: &ast::Expression<'ast>, is_compound_assignment: bool) {
+    fn compile_expression(self: &Self, item: &ast::Expression<'ast>) {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
@@ -197,7 +197,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             E::Member(_)                => { /* nothing to do here */ }
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
-            E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op, is_compound_assignment),
+            E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
             E::UnaryOp(unary_op)        => self.compile_unary_op(unary_op),
             E::Cast(cast)               => self.compile_cast(cast),
             E::Block(block)             => self.compile_block(block),
@@ -205,25 +205,28 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         };
     }
 
-    /// Compiles the assignment operation.
-    fn compile_stack_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+    /// Compiles an assignment to a local variable.
+    fn compile_variable_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id().unwrap();
         let index = self.locals.lookup(binding_id).index;
         let ty = self.bindingtype(&item.left);
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right, false);
+                self.compile_expression(&item.right);
                 if ty.is_primitive() {
+                    // stack: [ ..., PRIM_SRC ], store directly to variable
                     self.write_store(index, ty);
                 } else {
-                    self.compile_expression(&item.left, false);
-                    self.writer.heap_ref();
+                    // stack: [ ..., OBJ_SRC ], load target variable for heap copy (consumes src+dest)
+                    self.write_load(index, ty); // [ ..., OBJ_SRC, OBJ_DEST ]
+                    self.writer.heap_copy_32(self.type_size(&ty));
                 }
             },
             _ => {
                 self.write_load(index, ty);
-                self.compile_expression(&item.right, false);
+                self.compile_expression(&item.right);
+                // stack: [ ..., PRIM_DEST, PRIM_SRC ]
                 match item.op {
                     BO::AddAssign => self.write_add(&ty),
                     BO::SubAssign => self.write_sub(&ty),
@@ -237,33 +240,36 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         };
     }
 
-    /// Compiles the assignment operation.
-    fn compile_heap_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+    /// Compiles an assignment to an index operation.
+    fn compile_index_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
+        let ty = self.bindingtype(&item.left);
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right, false);
-                self.compile_expression(&item.left, false);
-                self.writer.heap_ref();
+                self.compile_expression(&item.right);
+                self.compile_expression(&item.left);
+                if ty.is_primitive() {
+                    // stack: [ ..., PRIM_SRC, OBJ_DEST ], copy primitive to heap object, consumes both
+                    self.write_heap_put(ty.size());
+                } else {
+                    // stack: [ ..., OBJ_SRC, OBJ_DEST ], copy from object to object, consumes both
+                    self.writer.heap_copy_32(self.type_size(&ty));
+                }
             },
             _ => {
-                self.compile_expression(&item.right, false);
-                self.compile_expression(&item.left, true);
-                // stack now <right value> <left heap object>
-                self.writer.heap_ref();
-                let ty = self.bindingtype(&item.left);
-                // swap right value (with left heap object) to top of stack, then push a copy of the heap object
+                self.compile_expression(&item.right);
+                self.compile_expression(&item.left);
+                // stack: [ ..., X_SRC, OBJ_DEST ]
                 if ty.size() == 8 {
-                    self.writer.swap64();
-                    self.writer.clone64(2);
+                    self.writer.backflip64(ty.size());
                 } else {
-                    self.writer.swap64_32();
-                    self.writer.clone64(1);
+                    self.writer.backflip32(ty.size());
                 }
-                // stack now <left heap object> <right value> <left heap object>
-                // pop left heap object and push left value from heap
-                self.write_heap_fetch(ty.size());
-                // pop left and right value and push result
+                // stack: [ ..., OBJ_DEST, PRIM_DEST, X_SRC ]
+                if !ty.is_primitive() {
+                    self.write_heap_fetch(ty.size());
+                }
+                // stack: [ ..., OBJ_DEST, PRIM_DEST, PRIM_SRC ]
                 match item.op {
                     BO::AddAssign => self.write_add(&ty),
                     BO::SubAssign => self.write_sub(&ty),
@@ -272,7 +278,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(&ty),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
-                // write result back to heap (left heap object)
+                // stack: [ ..., OBJ_DEST, PRIM_RESULT ]
+                if ty.size() == 8 {
+                    self.writer.swap64();
+                } else {
+                    self.writer.swap32_64();
+                }
                 self.write_heap_put(ty.size());
             },
         }
@@ -281,9 +292,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the assignment operation.
     fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         match item.left {
-            ast::Expression::Variable(_) => self.compile_stack_assignment(item), // fixme: not sufficient, it might be a complete heap object
-            ast::Expression::BinaryOp(_) => self.compile_heap_assignment(item),
-            _ => panic!("invalid assignable"),
+            ast::Expression::Variable(_) => self.compile_variable_assignment(item),
+            ast::Expression::BinaryOp(_) => self.compile_index_assignment(item),
+            _ => panic!("cannot assign to left expression"),
         }
     }
 
@@ -330,7 +341,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         // put args on stack
         for arg in item.args.iter() {
-            self.compile_expression(arg, false);
+            self.compile_expression(arg);
         }
 
         if let Some(rust_fn_index) = item.rust_fn_index {
@@ -358,7 +369,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr, false);
+            self.compile_expression(expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
                 self.writer.heap_ref();
@@ -413,7 +424,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_if_block(self: &Self, item: &ast::IfBlock<'ast>) {
 
         // compile condition and jump placeholder
-        self.compile_expression(&item.cond, false);
+        self.compile_expression(&item.cond);
 
         if item.else_block.is_none() {
             self.compile_if_only_block(item);
@@ -425,7 +436,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a while loop.
     fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) {
         let start_target = self.writer.position();
-        self.compile_expression(&item.expr, false);
+        self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.block);
         self.writer.jmp(start_target);
@@ -441,10 +452,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 // todo: refactor this mess
                 let (var_index, var_type) = self.range_info(item);
                 // store lower range bound in iter variable
-                self.compile_expression(&binary_op.left, false);
+                self.compile_expression(&binary_op.left);
                 self.write_store(var_index, var_type);
                 // push upper range bound
-                self.compile_expression(&binary_op.right, false);
+                self.compile_expression(&binary_op.right);
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
                 self.write_load(var_index, var_type);
                 self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
@@ -481,7 +492,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a return statement
     fn compile_return(self: &Self, item: &ast::Return<'ast>) {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr, false);
+            self.compile_expression(expr);
             let ty = self.bindingtype(expr);
             if !ty.is_primitive() {
                 self.writer.heap_ref();// todo: this refs result again so that the following unref doesn't remove it. instead: "just" don't unref this one
@@ -499,7 +510,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
 
         if let Some(result) = &item.result {
-            self.compile_expression(result, false);
+            self.compile_expression(result);
         }
     }
 
@@ -570,7 +581,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         match item.op {
             // logical
             UO::Not => {
-                self.compile_expression(&item.expr, false);
+                self.compile_expression(&item.expr);
                 self.writer.not();
             }
             // arithmetic
@@ -595,12 +606,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given binary operation.
-    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>, is_compound_assignment: bool) {
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
-            self.compile_expression(&item.left, is_compound_assignment);
-            self.compile_expression(&item.right, is_compound_assignment);
+            self.compile_expression(&item.left);
+            self.compile_expression(&item.right);
         }
 
         let result_type = self.bindingtype(item);
@@ -622,17 +633,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::NotEqual    => self.write_neq(&compare_type),
             // boolean
             BO::And => {
-                self.compile_expression(&item.left, is_compound_assignment);
+                self.compile_expression(&item.left);
                 let exit_jump = self.writer.j0_top(123); // left is false, result cannot ever be true, skip right
-                self.compile_expression(&item.right, is_compound_assignment);
+                self.compile_expression(&item.right);
                 self.writer.and();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.j0_top(exit_target));
             },
             BO::Or => {
-                self.compile_expression(&item.left, is_compound_assignment);
+                self.compile_expression(&item.left);
                 let exit_jump = self.writer.jn0_top(123); // left is true, result cannot ever be false, skip right
-                self.compile_expression(&item.right, is_compound_assignment);
+                self.compile_expression(&item.right);
                 self.writer.or();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.jn0_top(exit_target));
@@ -640,14 +651,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // special
             BO::Range => unimplemented!("range"),
             BO::Index | BO::IndexWrite => {
-                // todo need to handle both constpool (a byte array) and heap (arrays of byte arrays)
-                //   use bitflag or simply negative numbers to indicate constpool items? simplifies copy-on-write
-                if result_type.is_primitive() && !is_compound_assignment {
-                    if item.op == BO::Index {
-                        self.write_heap_fetch_element(result_type.size());
-                    } else {
-                        self.write_heap_put_element(result_type.size());
-                    }
+                if item.op == BO::Index && result_type.is_primitive() {
+                    // fetch heap object value if the result of the index read is a primitive
+                    self.write_heap_fetch_element(result_type.size());
                 } else {
                     // stack: <heap_index> <heap_offset> <index_operand>
                     let size = self.type_size(&result_type);
@@ -656,14 +662,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             BO::Access | BO::AccessWrite => {
-                if result_type.is_primitive() && !is_compound_assignment {
-                    if item.op == BO::Access {
-                        let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                        self.write_heap_fetch_member(result_type.size(), offset);
-                    } else {
-                        let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                        self.write_heap_put_member(result_type.size(), offset);
-                    }
+                if item.op == BO::Access && result_type.is_primitive() {
+                    // fetch heap object value if the result of the member read is a primitive
+                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                    self.write_heap_fetch_member(result_type.size(), offset);
                 } else {
                     // stack: <heap_index> <heap_offset>
                     let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
@@ -679,7 +681,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_cast(self: &Self, item: &ast::Cast<'ast>) {
 
-        self.compile_expression(&item.expr, false);
+        self.compile_expression(&item.expr);
 
         let mut from = self.bindingtype(&item.expr);
         let mut to = self.get_type(item.ty.type_id);
@@ -1026,7 +1028,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid element size {} for heap_fetch_element", element_size)
         }
     }
-    fn write_heap_put_member(self: &Self, result_size: u8, offset: u32) {
+    /*fn write_heap_put_member(self: &Self, result_size: u8, offset: u32) {
         match result_size {
             1 => { self.writer.heap_put_member8(offset); },
             2 => { self.writer.heap_put_member16(offset); },
@@ -1043,7 +1045,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             8 => { self.writer.heap_put_element64(); },
             _ => panic!("Invalid element size {} for heap_put_element", element_size)
         }
-    }
+    }*/
     /// Writes operations to unref local heap objects.
     fn write_heap_unref(self: &Self/*, exclude: Option<BindingId>*/) {
         self.locals.borrow(|locals| {

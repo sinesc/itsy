@@ -715,6 +715,51 @@ fn heap_compound_assign64() {
 }
 
 #[test]
+fn assign_heap_index_target() {
+    let result = run("
+        let array = [ [ 0u8, 1 ] ];
+        array[0] = [ 2u8, 3 ];
+        ret_u8(array[0][1]);
+        array[0][1] = 4;
+        ret_u8(array[0][1]);
+        array[0][1] += 4;
+        ret_u8(array[0][1]);
+    ");
+    assert_all(&result, &[ 3u8, 4, 8 ]);
+}
+
+#[test]
+fn assign_heap_var_target() {
+    let result = run("
+        let values = [ 5u8, 6 ];
+        let morevalues = [ [ 15u8, 16 ], [ 12, 13 ] ];
+        values = [ 7u8, 8 ];
+        ret_u8(values[1]);
+        values = morevalues[1];
+        ret_u8(values[0]);
+        // compound ops not defined for arrays
+    ");
+    assert_all(&result, &[ 8u8, 12 ]);
+}
+
+#[test]
+fn assign_stack_target() {
+    let result = run("
+        let value = 1u8;
+        let values = [ 0u8, 10 ];
+        value = 2;
+        ret_u8(value);
+        value = values[1];
+        ret_u8(value);
+        value += 2;
+        ret_u8(value);
+        value += values[1];
+        ret_u8(value);
+    ");
+    assert_all(&result, &[ 2u8, 10, 12, 22 ]);
+}
+
+#[test]
 fn string_literal() {
     let result = run("
         let hello = \"Hello World!\";
