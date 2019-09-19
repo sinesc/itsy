@@ -4,7 +4,7 @@
 mod helper;
 use crate::bytecode::{ARG1, ARG2, ARG3};
 use crate::util::{array1, array2, array4, array8};
-use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp};
+use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp, HeapCmp};
 
 impl_vm!{
 
@@ -313,6 +313,26 @@ impl_vm!{
         let heap_index_src: u32 = self.stack.pop();
         self.heap.copy(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes);
     }
+
+    /// Pops 2 heap objects dest and src and compares num_bytes bytes.
+    fn heap_ceqr(&mut self, num_bytes: u32) {
+        let heap_offset_dest: u32 = self.stack.pop();
+        let heap_index_dest: u32 = self.stack.pop();
+        let heap_offset_src: u32 = self.stack.pop();
+        let heap_index_src: u32 = self.stack.pop();
+        let equals = self.heap.compare(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes, HeapCmp::Eq);
+        self.stack.push(equals as Value);
+    }
+    /// Pops 2 heap objects dest and src and compares num_bytes bytes.
+    fn heap_cneqr(&mut self, num_bytes: u32) {
+        let heap_offset_dest: u32 = self.stack.pop();
+        let heap_index_dest: u32 = self.stack.pop();
+        let heap_offset_src: u32 = self.stack.pop();
+        let heap_index_src: u32 = self.stack.pop();
+        let equals = self.heap.compare(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes, HeapCmp::Neq);
+        self.stack.push(equals as Value);
+    }
+
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch8(&mut self) {
         let heap_offset: u32 = self.stack.pop();

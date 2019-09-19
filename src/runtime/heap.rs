@@ -1,5 +1,14 @@
 use crate::util::{array2, array4, array8, index_twice};
 
+pub enum HeapCmp {
+    Eq,
+    Neq,
+    Lt,
+    Lte,
+    Gt,
+    Gte
+}
+
 /// A reference counted heap object.
 #[derive(Debug)]
 struct HeapObject {
@@ -129,16 +138,18 @@ impl Heap {
         self.objects[index as usize].data[offset..offset+8].copy_from_slice(&value.to_ne_bytes());
     }
 
+    // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
     pub fn copy(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32) {
 
         let index_dest = index_dest as usize;
         let index_src = index_src as usize;
+        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+
         let offset_dest = offset_dest as usize;
         let offset_src = offset_src as usize;
-        let num_bytes = usize::min(num as usize, self.objects[index_src].data.len() - offset_src);
-        let copy_bytes = usize::min(num_bytes, self.objects[index_dest].data.len() - offset_dest);
+        let num_bytes = usize::min(num as usize, src.data.len() - offset_src);
+        let copy_bytes = usize::min(num_bytes, dest.data.len() - offset_dest);
         let push_bytes = num_bytes - copy_bytes;
-        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
 
         if copy_bytes > 0 {
             let slice_dest = &mut dest.data[offset_dest .. offset_dest + copy_bytes];
@@ -150,6 +161,29 @@ impl Heap {
             let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
             let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
             dest.data.extend_from_slice(slice_src);
+        }
+    }
+
+    // Compares bytes in one heap object with another (starting at their respective current offset).
+    pub fn compare(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32, op: HeapCmp) -> bool {
+
+        let index_dest = index_dest as usize;
+        let index_src = index_src as usize;
+        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+
+        let offset_dest = offset_dest as usize;
+        let offset_src = offset_src as usize;
+        let num = num as usize;
+        let slice_dest = &mut dest.data[offset_dest .. offset_dest + num];
+        let slice_src = &mut src.data[offset_src .. offset_src + num];
+
+        match op {
+            HeapCmp::Eq => slice_dest == slice_src,
+            HeapCmp::Neq => slice_dest != slice_src,
+            HeapCmp::Lt => slice_dest < slice_src,
+            HeapCmp::Lte => slice_dest <= slice_src,
+            HeapCmp::Gt => slice_dest > slice_src,
+            HeapCmp::Gte => slice_dest >= slice_src,
         }
     }
 }

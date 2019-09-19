@@ -1066,3 +1066,24 @@ fn heap_return() {
         13u32, 14
     ]);
 }
+
+#[test]
+fn heap_compare() {
+    let result = run("
+        let array = [ 7u8, 7 ];
+
+        ret_bool(array != [ 7u8, 7 ]);
+        ret_bool(array == [ 7u8, 7 ]);
+
+        ret_bool(array != [ 8u8, 7 ]);
+        ret_bool(array == [ 8u8, 7 ]);
+
+        ret_bool(array != [ 7u8, 8 ]);
+        ret_bool(array == [ 7u8, 8 ]);
+    ");
+    assert_all(&result, &[
+        false, true,
+        true, false,
+        true, false,
+    ]);
+}

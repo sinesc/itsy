@@ -1287,52 +1287,68 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         };
     }
     fn write_eq(self: &Self, ty: &Type) {
-        match ty.size() {
-            1 | 2 | 4 => self.writer.ceqr32(),
-            8 => self.writer.ceqr64(),
-            _ => panic!("Unsupported type size"),
-        };
+        if ty.is_primitive() {
+            match ty.size() {
+                1 | 2 | 4 => self.writer.ceqr32(),
+                8 => self.writer.ceqr64(),
+                _ => panic!("Unsupported type size"),
+            };
+        } else {
+            self.writer.heap_ceqr(self.compute_type_size(ty));
+        }
     }
     fn write_neq(self: &Self, ty: &Type) {
-        match ty.size() {
-            1 | 2 | 4 => self.writer.cneqr32(),
-            8 => self.writer.cneqr64(),
-            _ => panic!("Unsupported type size"),
-        };
+        if ty.is_primitive() {
+            match ty.size() {
+                1 | 2 | 4 => self.writer.cneqr32(),
+                8 => self.writer.cneqr64(),
+                _ => panic!("Unsupported type size"),
+            };
+        } else {
+            self.writer.heap_cneqr(self.compute_type_size(ty));
+        }
     }
     fn write_lt(self: &Self, ty: &Type) {
-        match ty.size() {
-            1 | 2 | 4 => match ty.kind() {
-                TypeKind::Signed => self.writer.clts32(),
-                TypeKind::Unsigned => self.writer.cltu32(),
-                TypeKind::Float => self.writer.cltf32(),
-                _ => panic!("Unsupported type kind"),
-            },
-            8 => match ty.kind() {
-                TypeKind::Signed => self.writer.clts64(),
-                TypeKind::Unsigned => self.writer.cltu64(),
-                TypeKind::Float => self.writer.cltf64(),
-                _ => panic!("Unsupported type kind"),
-            },
-            _ => panic!("unsupported type size"),
-        };
+        if ty.is_primitive() {
+            match ty.size() {
+                1 | 2 | 4 => match ty.kind() {
+                    TypeKind::Signed => self.writer.clts32(),
+                    TypeKind::Unsigned => self.writer.cltu32(),
+                    TypeKind::Float => self.writer.cltf32(),
+                    _ => panic!("Unsupported type kind"),
+                },
+                8 => match ty.kind() {
+                    TypeKind::Signed => self.writer.clts64(),
+                    TypeKind::Unsigned => self.writer.cltu64(),
+                    TypeKind::Float => self.writer.cltf64(),
+                    _ => panic!("Unsupported type kind"),
+                },
+                _ => panic!("unsupported type size"),
+            };
+        } else {
+            panic!("unsupported type")
+        }
     }
     fn write_lte(self: &Self, ty: &Type) {
-        match ty.size() {
-            1 | 2 | 4 => match ty.kind() {
-                TypeKind::Signed => self.writer.cltes32(),
-                TypeKind::Unsigned => self.writer.clteu32(),
-                TypeKind::Float => self.writer.cltef32(),
-                _ => panic!("Unsupported type kind"),
-            },
-            8 => match ty.kind() {
-                TypeKind::Signed => self.writer.cltes64(),
-                TypeKind::Unsigned => self.writer.clteu64(),
-                TypeKind::Float => self.writer.cltef64(),
-                _ => panic!("Unsupported type kind"),
-            },
-            _ => panic!("unsupported type size"),
-        };
+        if ty.is_primitive() {
+            match ty.size() {
+                1 | 2 | 4 => match ty.kind() {
+                    TypeKind::Signed => self.writer.cltes32(),
+                    TypeKind::Unsigned => self.writer.clteu32(),
+                    TypeKind::Float => self.writer.cltef32(),
+                    _ => panic!("Unsupported type kind"),
+                },
+                8 => match ty.kind() {
+                    TypeKind::Signed => self.writer.cltes64(),
+                    TypeKind::Unsigned => self.writer.clteu64(),
+                    TypeKind::Float => self.writer.cltef64(),
+                    _ => panic!("Unsupported type kind"),
+                },
+                _ => panic!("unsupported type size"),
+            };
+        } else {
+            panic!("unsupported type")
+        }
     }
     /// Writes a return instruction with the correct arguments for the current stack frame.
     fn write_ret(self: &Self) {
