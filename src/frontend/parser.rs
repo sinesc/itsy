@@ -402,6 +402,8 @@ named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
         | map!(string, |m| Expression::Literal(m))
         | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
         | map!(block, |m| Expression::Block(Box::new(m)))
+        | map!(array_literal, |m| Expression::Literal(m))
+        | map!(struct_literal, |m| Expression::Literal(m))
         | parens
         | map!(suffix, |m| Expression::UnaryOp(Box::new(m)))
         | map!(prefix, |m| Expression::UnaryOp(Box::new(m)))
@@ -507,8 +509,6 @@ named!(precn(Input<'_>) -> Expression<'_>, ws!(do_parse!(
 
 named!(expression(Input<'_>) -> Expression<'_>, ws!(alt!(
     map!(assignment, |m| Expression::Assignment(Box::new(m)))
-    | map!(array_literal, |m| Expression::Literal(m))
-    | map!(struct_literal, |m| Expression::Literal(m))
     | precn
 )));
 
