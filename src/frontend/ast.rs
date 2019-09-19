@@ -394,6 +394,12 @@ impl<'a> Expression<'a> {
             _ => false,
         }
     }
+    pub fn is_call(self: &Self) -> bool {
+        match self {
+            Expression::Call(_) => true,
+            _ => false,
+        }
+    }
     pub fn as_literal(self: &Self) -> Option<&Literal<'a>> {
         match self {
             Expression::Literal(literal) => Some(literal),

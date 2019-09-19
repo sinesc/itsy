@@ -218,9 +218,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let type_id = self.scopes.binding_type_id_mut(binding_id);
         if type_id.is_none() {
             *type_id = Some(new_type_id);
-        } else if type_id.unwrap() != new_type_id {
-            let tmp_for_the_compiler = type_id.unwrap();
-            return Err(self.err_type_mismatch(item, tmp_for_the_compiler, new_type_id));
+        } else {
+            let type_id = type_id.unwrap();
+            if !self.types_match(type_id, new_type_id) {
+                return Err(self.err_type_mismatch(item, type_id, new_type_id));
+            }
         }
         Ok(())
     }
@@ -258,6 +260,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Some(self.primitives.float[1])
         } else {
             None
+        }
+    }
+
+    /// Returns whether the given type_ids refer to matching or fully compatible types.
+    pub fn types_match(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> bool {
+        if type_id_a == type_id_b {
+            true
+        } else {
+            let type_a = self.scopes.type_ref(type_id_a);
+            let type_b = self.scopes.type_ref(type_id_b);
+            match (type_a, type_b) {
+                (&Type::Array(Array { len: a_len, type_id: Some(a_type_id) }), &Type::Array(Array { len: b_len, type_id: Some(b_type_id) })) => {
+                    a_len == b_len && self.types_match(a_type_id, b_type_id)
+                }
+                _ => false,
+            }
         }
     }
 }

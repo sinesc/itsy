@@ -214,18 +214,21 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right);
+                self.write_tmp_ref(&item.right);
                 if ty.is_primitive() {
                     // stack: [ ..., PRIM_SRC ], store directly to variable
                     self.write_store(index, ty);
                 } else {
                     // stack: [ ..., OBJ_SRC ], load target variable for heap copy (consumes src+dest)
                     self.write_load(index, ty); // [ ..., OBJ_SRC, OBJ_DEST ]
-                    self.writer.heap_copy_32(self.type_size(&ty));
+                    self.writer.heap_copy_32(self.compute_type_size(&ty));
                 }
+                self.write_tmp_unref(&item.right);
             },
             _ => {
                 self.write_load(index, ty);
                 self.compile_expression(&item.right);
+                self.write_tmp_ref(&item.right);
                 // stack: [ ..., PRIM_DEST, PRIM_SRC ]
                 match item.op {
                     BO::AddAssign => self.write_add(&ty),
@@ -236,6 +239,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
                 self.write_store(index, ty);
+                self.write_tmp_unref(&item.right);
             },
         };
     }
@@ -244,24 +248,23 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_index_assignment(self: &Self, item: &ast::Assignment<'ast>) {
         use crate::frontend::ast::BinaryOperator as BO;
         let ty = self.bindingtype(&item.left);
+        self.compile_expression(&item.right);
+        self.write_tmp_ref(&item.right);
+        self.compile_expression(&item.left);
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right);
-                self.compile_expression(&item.left);
                 if ty.is_primitive() {
                     // stack: [ ..., PRIM_SRC, OBJ_DEST ], copy primitive to heap object, consumes both
                     self.write_heap_put(ty.size());
                 } else {
                     // stack: [ ..., OBJ_SRC, OBJ_DEST ], copy from object to object, consumes both
-                    self.writer.heap_copy_32(self.type_size(&ty));
+                    self.writer.heap_copy_32(self.compute_type_size(&ty));
                 }
             },
             _ => {
-                self.compile_expression(&item.right);
-                self.compile_expression(&item.left);
                 // stack: [ ..., X_SRC, OBJ_DEST ]
                 if ty.size() == 8 {
-                    self.writer.backflip64(ty.size());
+                    self.writer.backflip64();
                 } else {
                     self.writer.backflip32(ty.size());
                 }
@@ -287,6 +290,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.write_heap_put(ty.size());
             },
         }
+        self.write_tmp_unref(&item.right);
     }
 
     /// Compiles the assignment operation.
@@ -326,10 +330,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
         self.compile_block(&item.block);
         if !item.block.returns() {
-            if item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id).is_primitive()) {
-                self.writer.heap_ref(); // todo: this refs result again so that the following unref doesn't remove it. instead: "just" don't unref this one
-            }
-            self.write_heap_unref();
+            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id).is_primitive());
+            self.write_heap_unref_all(return_heap_object);
             self.write_ret();
         }
         // destroy local environment
@@ -339,9 +341,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given call.
     fn compile_call(self: &Self, item: &ast::Call<'ast>) {
 
-        // put args on stack
+        // put args on stack, ensure temporaries are cleaned up later
         for arg in item.args.iter() {
             self.compile_expression(arg);
+            self.write_tmp_ref(arg);
         }
 
         if let Some(rust_fn_index) = item.rust_fn_index {
@@ -364,11 +367,16 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
             self.writer.call(target);
         }
+
+        for arg in item.args.iter() {
+            self.write_tmp_unref(arg);
+        }
     }
 
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
+            self.writer.comment("\nbinding");
             self.compile_expression(expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
@@ -494,11 +502,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr);
             let ty = self.bindingtype(expr);
-            if !ty.is_primitive() {
-                self.writer.heap_ref();// todo: this refs result again so that the following unref doesn't remove it. instead: "just" don't unref this one
-            }
+            self.write_heap_unref_all(!ty.is_primitive());
+        } else {
+            self.write_heap_unref_all(false);
         }
-        self.write_heap_unref();
         self.write_ret();
     }
 
@@ -611,7 +618,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
             self.compile_expression(&item.left);
+            self.write_tmp_ref(&item.left);
             self.compile_expression(&item.right);
+            self.write_tmp_ref(&item.right);
         }
 
         let result_type = self.bindingtype(item);
@@ -656,7 +665,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     self.write_heap_fetch_element(result_type.size());
                 } else {
                     // stack: <heap_index> <heap_offset> <index_operand>
-                    let size = self.type_size(&result_type);
+                    let size = self.compute_type_size(&result_type);
                     self.write_element_offset(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                     // stack now <heap_index> <new_heap_offset>
                 }
@@ -664,11 +673,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::Access | BO::AccessWrite => {
                 if item.op == BO::Access && result_type.is_primitive() {
                     // fetch heap object value if the result of the member read is a primitive
-                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                    let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
                     self.write_heap_fetch_member(result_type.size(), offset);
                 } else {
                     // stack: <heap_index> <heap_offset>
-                    let offset = self.member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
+                    let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
                     self.write_member_offset(offset); // push additional offset, pop both offsets, write computed offset
                     // stack now <heap_index> <new_heap_offset>
                 }
@@ -676,6 +685,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // others are handled elsewhere
             _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
         };
+        self.write_tmp_unref(&item.right);
+        self.write_tmp_unref(&item.left);
     }
 
     /// Compiles a variable binding and optional assignment.
@@ -900,14 +911,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Array(_) => {
                 let ty = self.bindingtype(item);
-                let size = self.type_size(ty);
+                let size = self.compute_type_size(ty);
                 let pos = self.writer.store_const(size);
                 self.store_literal_data(item);
                 pos
             },
             LiteralValue::Struct(_) => {
                 let ty = self.bindingtype(item);
-                let size = self.type_size(ty);
+                let size = self.compute_type_size(ty);
                 let pos = self.writer.store_const(size);
                 self.store_literal_data(item);
                 pos
@@ -939,29 +950,29 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
     /// Computes the size of a type in bytes.
-    fn type_size(self: &Self, ty: &Type) -> u32 {
+    fn compute_type_size(self: &Self, ty: &Type) -> u32 {
         match ty {
             Type::Array(array) => {
                 let len = array.len.unwrap();
                 if len == 0 {
                     0
                 } else {
-                    len as u32 * self.type_size(self.get_type(array.type_id))
+                    len as u32 * self.compute_type_size(self.get_type(array.type_id))
                 }
             }
             Type::Struct(struct_) => {
-                struct_.fields.iter().map(|&(_, type_id)| { self.type_size(self.get_type(type_id)) }).sum()
+                struct_.fields.iter().map(|&(_, type_id)| { self.compute_type_size(self.get_type(type_id)) }).sum()
             }
             Type::Enum(_) => unimplemented!("enum"),
             _ => ty.size() as u32
         }
     }
     /// Computes struct member offset in bytes.
-    fn member_offset(self: &Self, ty: &Type, member_index: u32) -> u32 {
+    fn compute_member_offset(self: &Self, ty: &Type, member_index: u32) -> u32 {
         let struct_ = ty.as_struct().unwrap();
         let mut offset = 0;
         for index in 0 .. member_index {
-            offset += self.type_size(self.get_type(struct_.fields[index as usize].1));
+            offset += self.compute_type_size(self.get_type(struct_.fields[index as usize].1));
         }
         offset
     }
@@ -999,6 +1010,49 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             4 => { self.writer.heap_fetch32(); },
             8 => { self.writer.heap_fetch64(); },
             _ => panic!("Invalid result size {} for heap_fetch", result_size)
+        }
+    }
+    fn write_const_fetch(self: &Self, index: u32, ty: &Type) {
+        use std::{u8, u16, u32};
+        match ty.size() {
+            2 => {
+                if index <= u8::MAX as u32 {
+                    self.writer.const_fetch16(index as u8);
+                } else if index <= u16::MAX as u32 {
+                    self.writer.const_fetch16_16(index as u16);
+                } else {
+                    self.writer.const_fetch16_32(index);
+                }
+            },
+            4 => {
+                if index <= u8::MAX as u32 {
+                    self.writer.const_fetch32(index as u8);
+                } else if index <= u16::MAX as u32 {
+                    self.writer.const_fetch32_16(index as u16);
+                } else {
+                    self.writer.const_fetch32_32(index);
+                }
+            },
+            8 => {
+                if ty.is_primitive() {
+                    if index <= u8::MAX as u32 {
+                        self.writer.const_fetch64(index as u8);
+                    } else if index <= u16::MAX as u32 {
+                        self.writer.const_fetch64_16(index as u16);
+                    } else {
+                        self.writer.const_fetch64_32(index as u32);
+                    }
+                } else {
+                    if index <= u8::MAX as u32 {
+                        self.writer.const_fetch_object(index as u8);
+                    } else if index <= u16::MAX as u32 {
+                        self.writer.const_fetch_object_16(index as u16);
+                    } else {
+                        self.writer.const_fetch_object_32(index);
+                    }
+                }
+            },
+            _ => panic!("Unsupported type size"),
         }
     }
     fn write_heap_put(self: &Self, result_size: u8) {
@@ -1046,19 +1100,97 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid element size {} for heap_put_element", element_size)
         }
     }*/
-    /// Writes operations to unref local heap objects.
-    fn write_heap_unref(self: &Self/*, exclude: Option<BindingId>*/) {
+    /// If item is a temporary heap object, writes operations to store topmost heap object reference on the tmp-stack.
+    fn write_tmp_ref(self: &Self, item: &ast::Expression<'ast>) {
+        if item.is_call() || item.is_literal() {
+            let ty = self.bindingtype(item);
+            if !ty.is_primitive() {
+                self.writer.store_tmp64();
+                self.writer.heap_ref();
+            }
+        }
+    }
+    /// If item is a temporary heap object, writes operations to unref the tmp-stack's topmost heap object.
+    fn write_tmp_unref(self: &Self, item: &ast::Expression<'ast>) {
+        if item.is_call() || item.is_literal() {
+            let ty = self.bindingtype(item);
+            if !ty.is_primitive() {
+                self.writer.pop_tmp64();
+                self.writer.heap_unref();
+            }
+        }
+    }
+    /// Writes operations to unref local heap objects. Set check_prior to avoid unref'ing function results.
+    fn write_heap_unref_all(self: &Self, check_prior: bool) {
         self.locals.borrow(|locals| {
-            // fixme: exclude returned binding
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let type_id = self.bindingtype_ids[binding_id.into_usize()];
                 let ty = &self.types[type_id.into_usize()];
                 if !ty.is_primitive() {
                     self.write_load(local.index, ty);
-                    self.writer.heap_unref();
+                    if check_prior {
+                        self.writer.heap_unref_result();
+                    } else {
+                        self.writer.heap_unref();
+                    }
                 }
             }
         });
+    }
+    /// Writes an appropriate variant of the store instruction.
+    fn write_store(self: &Self, index: i32, ty: &Type) {
+        use std::{i8, i16, i32};
+        let size = ty.size();
+        let kind = ty.kind();
+        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.storer64_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.storer64_s16(index as i16);
+            } else {
+                self.writer.storer64_s32(index);
+            }
+        } else if size <= 4 {
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.storer32_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.storer32_s16(index as i16);
+            } else {
+                self.writer.storer32_s32(index);
+            }
+        } else {
+            panic!("Unsupported type {:?} for store operation", ty);
+        }
+    }
+    /// Writes an appropriate variant of the load instruction.
+    fn write_load(self: &Self, index: i32, ty: &Type) {
+        use std::{i8, i16, i32};
+        let size = ty.size();
+        let kind = ty.kind();
+        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
+            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                self.writer.loadr64_s8(index as i8);
+            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                self.writer.loadr64_s16(index as i16);
+            } else {
+                self.writer.loadr64_s32(index);
+            }
+        } else if size <= 4 {
+            match index {
+                ARG1 => self.writer.load_arg1(),
+                ARG2 => self.writer.load_arg2(),
+                ARG3 => self.writer.load_arg3(),
+                _ => if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
+                    self.writer.loadr32_s8(index as i8)
+                } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
+                    self.writer.loadr32_s16(index as i16)
+                } else {
+                    self.writer.loadr32_s32(index)
+                }
+            };
+        } else {
+            panic!("Unsupported type {:?} for load operation", ty);
+        }
     }
     /// Swap 2 stack values, ty_a being topmost, ty_b next below.
     fn write_swap(self: &Self, ty_a: &Type, ty_b: &Type) {
@@ -1073,6 +1205,13 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         } else if size_a < 8 && size_b == 8 {
             self.writer.swap32_64();
         }
+    }
+    fn write_clone(self: &Self, ty: &Type, offset: u8) {
+        match ty.size() {
+            1 | 2 | 4 => self.writer.clone32(offset),
+            8 => self.writer.clone64(offset),
+            _ => panic!("unsupported type size"),
+        };
     }
     fn write_preinc(self: &Self, index: i32, ty: &Type) {
         match ty {
@@ -1192,111 +1331,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 TypeKind::Float => self.writer.cltef64(),
                 _ => panic!("Unsupported type kind"),
             },
-            _ => panic!("unsupported type size"),
-        };
-    }
-    fn write_const_fetch(self: &Self, index: u32, ty: &Type) {
-        use std::{u8, u16, u32};
-        match ty.size() {
-            2 => {
-                if index <= u8::MAX as u32 {
-                    self.writer.const_fetch16(index as u8);
-                } else if index <= u16::MAX as u32 {
-                    self.writer.const_fetch16_16(index as u16);
-                } else {
-                    self.writer.const_fetch16_32(index);
-                }
-            },
-            4 => {
-                if index <= u8::MAX as u32 {
-                    self.writer.const_fetch32(index as u8);
-                } else if index <= u16::MAX as u32 {
-                    self.writer.const_fetch32_16(index as u16);
-                } else {
-                    self.writer.const_fetch32_32(index);
-                }
-            },
-            8 => {
-                if ty.is_primitive() {
-                    if index <= u8::MAX as u32 {
-                        self.writer.const_fetch64(index as u8);
-                    } else if index <= u16::MAX as u32 {
-                        self.writer.const_fetch64_16(index as u16);
-                    } else {
-                        self.writer.const_fetch64_32(index as u32);
-                    }
-                } else {
-                    if index <= u8::MAX as u32 {
-                        self.writer.const_fetch_object(index as u8);
-                    } else if index <= u16::MAX as u32 {
-                        self.writer.const_fetch_object_16(index as u16);
-                    } else {
-                        self.writer.const_fetch_object_32(index);
-                    }
-                }
-            },
-            _ => panic!("Unsupported type size"),
-        }
-    }
-    /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, index: i32, ty: &Type) {
-        use std::{i8, i16, i32};
-        let size = ty.size();
-        let kind = ty.kind();
-        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
-            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                self.writer.storer64_s8(index as i8);
-            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                self.writer.storer64_s16(index as i16);
-            } else {
-                self.writer.storer64_s32(index);
-            }
-        } else if size <= 4 {
-            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                self.writer.storer32_s8(index as i8);
-            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                self.writer.storer32_s16(index as i16);
-            } else {
-                self.writer.storer32_s32(index);
-            }
-        } else {
-            panic!("Unsupported type {:?} for store operation", ty);
-        }
-    }
-    /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, index: i32, ty: &Type) {
-        use std::{i8, i16, i32};
-        let size = ty.size();
-        let kind = ty.kind();
-        if size == 8 || kind == TypeKind::String || kind == TypeKind::Array {
-            if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                self.writer.loadr64_s8(index as i8);
-            } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                self.writer.loadr64_s16(index as i16);
-            } else {
-                self.writer.loadr64_s32(index);
-            }
-        } else if size <= 4 {
-            match index {
-                ARG1 => self.writer.load_arg1(),
-                ARG2 => self.writer.load_arg2(),
-                ARG3 => self.writer.load_arg3(),
-                _ => if index >= i8::MIN as i32 && index <= i8::MAX as i32 {
-                    self.writer.loadr32_s8(index as i8)
-                } else if index >= i16::MIN as i32 && index <= i16::MAX as i32 {
-                    self.writer.loadr32_s16(index as i16)
-                } else {
-                    self.writer.loadr32_s32(index)
-                }
-            };
-        } else {
-            panic!("Unsupported type {:?} for load operation", ty);
-        }
-    }
-    fn write_clone(self: &Self, ty: &Type, offset: u8) {
-        match ty.size() {
-            1 | 2 | 4 => self.writer.clone32(offset),
-            8 => self.writer.clone64(offset),
             _ => panic!("unsupported type size"),
         };
     }

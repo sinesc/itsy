@@ -44,11 +44,15 @@ impl Heap {
         self.objects[index as usize].refs += 1;
     }
     /// Decrease reference count for given heap object, free it if count is at 0.
-    pub fn dec_ref(self: &mut Self, index: u32) {
+    pub fn dec_ref_or_free(self: &mut Self, index: u32) {
         self.objects[index as usize].refs -= 1;
         if self.objects[index as usize].refs == 0 {
             self.free(index);
         }
+    }
+    /// Decrease reference count for given heap object.
+    pub fn dec_ref(self: &mut Self, index: u32) {
+        self.objects[index as usize].refs -= 1;
     }
     /// Free a chunk of memory.
     pub fn free(self: &mut Self, index: u32) {
@@ -127,7 +131,6 @@ impl Heap {
 
     pub fn copy(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32) {
 
-        println!("{} bytes from {}:{} to {}:{} ", num, index_src, offset_src, index_dest, offset_dest);
         let index_dest = index_dest as usize;
         let index_src = index_src as usize;
         let offset_dest = offset_dest as usize;

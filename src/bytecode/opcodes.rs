@@ -229,7 +229,7 @@ impl_vm!{
     }
 
     // Transforms stack-top [ ..., X_SRC64, OBJ_DEST ] to [ ..., OBJ_DEST, PRIM_DEST, X_SRC64 ]
-    fn backflip64(&mut self, size: u8) {
+    fn backflip64(&mut self /*, size: u8 */) {
         // stack: [ ..., X_SRC, OBJ_DEST ]
         let heap_offset_dest: u32 = self.stack.pop();
         let heap_index_dest: u32 = self.stack.pop();
@@ -237,7 +237,7 @@ impl_vm!{
         // stack: [ ... ]
         self.stack.push(heap_index_dest);
         self.stack.push(heap_offset_dest);
-        match size {
+        /*match size {
             1 => {
                 let data = self.heap.read8(heap_index_dest, heap_offset_dest);
                 self.stack.push(data);
@@ -250,15 +250,36 @@ impl_vm!{
                 let data = self.heap.read32(heap_index_dest, heap_offset_dest);
                 self.stack.push(data);
             },
-            8 => {
+            8 => {*/
                 let data = self.heap.read64(heap_index_dest, heap_offset_dest);
                 self.stack.push(data);
-            },
+            /*},
             _ => panic!("invalid backflip size")
-        }
+        }*/
         // stack: [ ..., OBJ_DEST, PRIM_DEST, ]
         self.stack.push(other);
         // stack: [ ..., OBJ_DEST, PRIM_DEST, X_SRC64 ]
+    }
+
+    // Reads top 32 bit value off the stack and pushes it onto the tmp stack.
+    fn store_tmp32(&mut self) {
+        let value: Value = self.stack.top();
+        self.tmp.push(value);
+    }
+    // Reads top 64 bit value off the stack and pushes it onto the tmp stack.
+    fn store_tmp64(&mut self) {
+        let value: Value64 = self.stack.top();
+        self.tmp.push(value);
+    }
+    // Pops the top 32 bit value off the tmp stack and pushes it onto the stack.
+    fn pop_tmp32(&mut self) {
+        let value: Value = self.tmp.pop();
+        self.stack.push(value);
+    }
+    // Pops the top 64 bit value off the tmp stack and pushes it onto the stack.
+    fn pop_tmp64(&mut self) {
+        let value: Value64 = self.tmp.pop();
+        self.stack.push(value);
     }
 
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
@@ -266,11 +287,22 @@ impl_vm!{
         let heap_index: u32 = self.stack.load_sp(-2);
         self.heap.inc_ref(heap_index);
     }
-    /// Pop a heap object from the stack and reduce its reference count by 1.
+    /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn heap_unref(&mut self) {
         let _heap_offset: u32 = self.stack.pop();
         let heap_index: u32 = self.stack.pop();
-        self.heap.dec_ref(heap_index);
+        self.heap.dec_ref_or_free(heap_index);
+    }
+    /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0 unless it matches the heap object index immediately above on the stack.
+    fn heap_unref_result(&mut self) {
+        let _heap_offset: u32 = self.stack.pop();
+        let heap_index: u32 = self.stack.pop();
+        let prior_heap_index: u32 = self.stack.load(self.stack.sp() - 2);
+        if heap_index == prior_heap_index {
+            self.heap.dec_ref(heap_index);
+        } else {
+            self.heap.dec_ref_or_free(heap_index);
+        }
     }
 
     /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest
@@ -281,7 +313,6 @@ impl_vm!{
         let heap_index_src: u32 = self.stack.pop();
         self.heap.copy(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes);
     }
-
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch8(&mut self) {
         let heap_offset: u32 = self.stack.pop();
