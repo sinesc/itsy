@@ -4,7 +4,7 @@
 mod helper;
 use crate::bytecode::{ARG1, ARG2, ARG3};
 use crate::util::{array1, array2, array4, array8};
-use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp, HeapCmp};
+use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapOp, HeapCmp, HeapRef};
 
 impl_vm!{
 
@@ -284,139 +284,164 @@ impl_vm!{
 
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
     fn heap_ref(&mut self) {
-        let heap_index: u32 = self.stack.load_sp(-2);
-        self.heap.inc_ref(heap_index);
+        let item: HeapRef = self.stack.load_sp(-2);
+        self.heap.inc_ref(item.index);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn heap_unref(&mut self) {
-        let _heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        self.heap.dec_ref_or_free(heap_index);
+        let item: HeapRef = self.stack.pop();
+        self.heap.dec_ref_or_free(item.index);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0 unless it matches the heap object index immediately above on the stack.
     fn heap_unref_result(&mut self) {
-        let _heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let prior_heap_index: u32 = self.stack.load(self.stack.sp() - 2);
-        if heap_index == prior_heap_index {
-            self.heap.dec_ref(heap_index);
+        let item: HeapRef = self.stack.pop();
+        let prior_item: HeapRef = self.stack.load_sp(-2);
+        //println!("prior: {} current: {}", prior_heap_index, heap_index);
+        if item.index == prior_item.index {
+            self.heap.dec_ref(item.index);
         } else {
-            self.heap.dec_ref_or_free(heap_index);
+            self.heap.dec_ref_or_free(item.index);
         }
     }
 
-    /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest
+    /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest.
     fn heap_copy_32(&mut self, num_bytes: u32) {
-        let heap_offset_dest: u32 = self.stack.pop();
-        let heap_index_dest: u32 = self.stack.pop();
-        let heap_offset_src: u32 = self.stack.pop();
-        let heap_index_src: u32 = self.stack.pop();
-        self.heap.copy(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes);
+        let dest: HeapRef = self.stack.pop();
+        let src: HeapRef = self.stack.pop();
+        self.heap.copy(dest.index, dest.offset, src.index, src.offset, num_bytes);
     }
 
-    /// Pops 2 heap objects dest and src and compares num_bytes bytes.
-    fn heap_ceqr(&mut self, num_bytes: u32) {
-        let heap_offset_dest: u32 = self.stack.pop();
-        let heap_index_dest: u32 = self.stack.pop();
-        let heap_offset_src: u32 = self.stack.pop();
-        let heap_index_src: u32 = self.stack.pop();
-        let equals = self.heap.compare(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes, HeapCmp::Eq);
+    /// Pops 2 heap objects and compares num_bytes bytes.
+    fn heap_ceq(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Eq);
         self.stack.push(equals as Value);
     }
-    /// Pops 2 heap objects dest and src and compares num_bytes bytes.
-    fn heap_cneqr(&mut self, num_bytes: u32) {
-        let heap_offset_dest: u32 = self.stack.pop();
-        let heap_index_dest: u32 = self.stack.pop();
-        let heap_offset_src: u32 = self.stack.pop();
-        let heap_index_src: u32 = self.stack.pop();
-        let equals = self.heap.compare(heap_index_dest, heap_offset_dest, heap_index_src, heap_offset_src, num_bytes, HeapCmp::Neq);
+    /// Pops 2 heap objects and compares num_bytes bytes.
+    fn heap_cneq(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Neq);
         self.stack.push(equals as Value);
+    }
+
+    /// Pops 2 heap objects as strings and compares up to num_bytes bytes or the entire string if num_bytes is 0.
+    fn string_ceq(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Eq);
+        self.stack.push(equals as Value);
+    }
+    /// Pops 2 heap objects as strings and compares up to num_bytes bytes or the entire string if num_bytes is 0.
+    fn string_cneq(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Neq);
+        self.stack.push(equals as Value);
+    }
+    /// Pops 2 heap objects as strings and compares up to num_bytes bytes or the entire string if num_bytes is 0.
+    fn string_clt(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Lt);
+        self.stack.push(equals as Value);
+    }
+    /// Pops 2 heap objects as strings and compares up to num_bytes bytes or the entire string if num_bytes is 0.
+    fn string_clte(&mut self, num_bytes: u32) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a.index, a.offset, b.index, b.offset, num_bytes, HeapCmp::Lte);
+        self.stack.push(equals as Value);
+    }
+    /// Concatenates two heap objects into a new object.
+    fn string_concat(&mut self) {
+        let src_b: HeapRef = self.stack.pop();
+        let src_a: HeapRef = self.stack.pop();
+
+        let heap_index_dest: u32 = self.heap.alloc();
+
+        let num_len_a = self.heap.size_of(src_a.index);
+        self.heap.copy(heap_index_dest, 0, src_a.index, src_a.offset, num_len_a);
+
+        let num_len_b = self.heap.size_of(src_b.index);
+        self.heap.copy(heap_index_dest, num_len_a, src_b.index, src_b.offset, num_len_b);
+
+        self.stack.push(HeapRef { index: heap_index_dest, offset: 0 });
     }
 
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch8(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read8(heap_index, heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read8(item.index, item.offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch16(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read16(heap_index, heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read16(item.index, item.offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch32(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read32(heap_index, heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read32(item.index, item.offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset onto the stack.
     fn heap_fetch64(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read64(heap_index, heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read64(item.index, item.offset);
         self.stack.push(data);
     }
 
     /// Pop a heap object and a value and store the value at current offset in the heap.
     fn heap_put8(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         let value = self.stack.pop();
-        self.heap.write8(heap_index, heap_offset, value);
+        self.heap.write8(item.index, item.offset, value);
     }
     /// Pop a heap object and a value and store the value at current offset in the heap.
     fn heap_put16(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         let value = self.stack.pop();
-        self.heap.write16(heap_index, heap_offset, value);
+        self.heap.write16(item.index, item.offset, value);
     }
     /// Pop a heap object and a value and store the value at current offset in the heap.
     fn heap_put32(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         let value = self.stack.pop();
-        self.heap.write32(heap_index, heap_offset, value);
+        self.heap.write32(item.index, item.offset, value);
     }
     /// Pop a heap object and a value and store the value at current offset in the heap.
     fn heap_put64(&mut self) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         let value = self.stack.pop();
-        self.heap.write64(heap_index, heap_offset, value);
+        self.heap.write64(item.index, item.offset, value);
     }
 
     /// Pop a heap object and push the heap value at its current offset + given offset onto the stack.
     fn heap_fetch_member8(&mut self, offset: u32) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read8(heap_index, heap_offset + offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read8(item.index, item.offset + offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset + given offset onto the stack.
     fn heap_fetch_member16(&mut self, offset: u32) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read16(heap_index, heap_offset + offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read16(item.index, item.offset + offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset + given offset onto the stack.
     fn heap_fetch_member32(&mut self, offset: u32) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read32(heap_index, heap_offset + offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read32(item.index, item.offset + offset);
         self.stack.push(data);
     }
     /// Pop a heap object and push the heap value at its current offset + given offset onto the stack.
     fn heap_fetch_member64(&mut self, offset: u32) {
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let data = self.heap.read64(heap_index, heap_offset + offset);
+        let item: HeapRef = self.stack.pop();
+        let data = self.heap.read64(item.index, item.offset + offset);
         self.stack.push(data);
     }
 /*
@@ -452,37 +477,33 @@ impl_vm!{
     /// Pop an element index and heap object and push the heap value at element index onto the stack.
     fn heap_fetch_element8(&mut self) {
         let element_index: u32 = self.stack.pop();
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let source_heap_offset = heap_offset + (1 * element_index as u32);
-        let data = self.heap.read8(heap_index, source_heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let source_heap_offset = item.offset + (1 * element_index as u32);
+        let data = self.heap.read8(item.index, source_heap_offset);
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 2 onto the stack.
     fn heap_fetch_element16(&mut self) {
         let element_index: u32 = self.stack.pop();
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let source_heap_offset = heap_offset + (2 * element_index as u32);
-        let data = self.heap.read16(heap_index, source_heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let source_heap_offset = item.offset + (2 * element_index as u32);
+        let data = self.heap.read16(item.index, source_heap_offset);
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 4 onto the stack.
     fn heap_fetch_element32(&mut self) {
         let element_index: u32 = self.stack.pop();
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let source_heap_offset = heap_offset + (4 * element_index as u32);
-        let data = self.heap.read32(heap_index, source_heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let source_heap_offset = item.offset + (4 * element_index as u32);
+        let data = self.heap.read32(item.index, source_heap_offset);
         self.stack.push(data);
     }
     /// Pop an element index and heap object and push the heap value at element index * 8 onto the stack.
     fn heap_fetch_element64(&mut self) {
         let element_index: u32 = self.stack.pop();
-        let heap_offset: u32 = self.stack.pop();
-        let heap_index: u32 = self.stack.pop();
-        let source_heap_offset = heap_offset + (8 * element_index as u32);
-        let data = self.heap.read64(heap_index, source_heap_offset);
+        let item: HeapRef = self.stack.pop();
+        let source_heap_offset = item.offset + (8 * element_index as u32);
+        let data = self.heap.read64(item.index, source_heap_offset);
         self.stack.push(data);
     }
 /*

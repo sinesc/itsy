@@ -685,8 +685,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // others are handled elsewhere
             _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
         };
-        self.write_tmp_unref(&item.right);
-        self.write_tmp_unref(&item.left);
+
+        if item.op != BO::And && item.op != BO::Or {
+            self.write_tmp_unref(&item.right);
+            self.write_tmp_unref(&item.left);
+        }
     }
 
     /// Compiles a variable binding and optional assignment.
@@ -964,6 +967,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 struct_.fields.iter().map(|&(_, type_id)| { self.compute_type_size(self.get_type(type_id)) }).sum()
             }
             Type::Enum(_) => unimplemented!("enum"),
+            Type::String => panic!("invalid type string"),
             _ => ty.size() as u32
         }
     }
@@ -1102,7 +1106,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }*/
     /// If item is a temporary heap object, writes operations to store topmost heap object reference on the tmp-stack.
     fn write_tmp_ref(self: &Self, item: &ast::Expression<'ast>) {
-        if item.is_call() || item.is_literal() {
+        if !item.is_variable() {
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
                 self.writer.store_tmp64();
@@ -1112,7 +1116,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }
     /// If item is a temporary heap object, writes operations to unref the tmp-stack's topmost heap object.
     fn write_tmp_unref(self: &Self, item: &ast::Expression<'ast>) {
-        if item.is_call() || item.is_literal() {
+        if !item.is_variable() {
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
                 self.writer.pop_tmp64();
@@ -1255,6 +1259,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             Type::f64 => self.writer.addf64(),
             Type::i64 | Type::u64 => self.writer.addi64(),
             Type::f32 => self.writer.addf(),
+            Type::String => self.writer.string_concat(),
             ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.addi(),
             ty @ _ => panic!("Unsupported Add operand {:?}", ty),
         };
@@ -1293,8 +1298,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 8 => self.writer.ceqr64(),
                 _ => panic!("Unsupported type size"),
             };
+        } else if ty.is_string() {
+            self.writer.string_ceq(0);
         } else {
-            self.writer.heap_ceqr(self.compute_type_size(ty));
+            self.writer.heap_ceq(self.compute_type_size(ty));
         }
     }
     fn write_neq(self: &Self, ty: &Type) {
@@ -1304,8 +1311,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 8 => self.writer.cneqr64(),
                 _ => panic!("Unsupported type size"),
             };
+        } else if ty.is_string() {
+            self.writer.string_cneq(0);
         } else {
-            self.writer.heap_cneqr(self.compute_type_size(ty));
+            self.writer.heap_cneq(self.compute_type_size(ty));
         }
     }
     fn write_lt(self: &Self, ty: &Type) {
@@ -1325,6 +1334,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 },
                 _ => panic!("unsupported type size"),
             };
+        } else if ty.is_string() {
+            self.writer.string_clt(0);
         } else {
             panic!("unsupported type")
         }
@@ -1346,6 +1357,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 },
                 _ => panic!("unsupported type size"),
             };
+        } else if ty.is_string() {
+            self.writer.string_clte(0);
         } else {
             panic!("unsupported type")
         }

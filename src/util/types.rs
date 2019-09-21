@@ -240,6 +240,13 @@ impl Type {
             _ => false
         }
     }
+    /// Whether the type is a string.
+    pub fn is_string(self: &Self) -> bool {
+        match self {
+            Type::String => true,
+            _ => false
+        }
+    }
     /// Whether the type is void.
     pub fn is_void(self: &Self) -> bool {
         match self {

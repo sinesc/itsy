@@ -1,5 +1,6 @@
 use crate::util::{array2, array4, array8, index_twice};
 
+/// Allowed operator for compare.
 pub enum HeapCmp {
     Eq,
     Neq,
@@ -138,6 +139,10 @@ impl Heap {
         self.objects[index as usize].data[offset..offset+8].copy_from_slice(&value.to_ne_bytes());
     }
 
+    pub fn size_of(self: &Self, index: u32) -> u32 {
+        self.objects[index as usize].data.len() as u32
+    }
+
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
     pub fn copy(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32) {
 
@@ -165,25 +170,59 @@ impl Heap {
     }
 
     // Compares bytes in one heap object with another (starting at their respective current offset).
-    pub fn compare(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32, op: HeapCmp) -> bool {
+    pub fn compare(self: &mut Self, index_a: u32, offset_a: u32, index_b: u32, offset_b: u32, num: u32, op: HeapCmp) -> bool {
 
-        let index_dest = index_dest as usize;
-        let index_src = index_src as usize;
-        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+        let index_a = index_a as usize;
+        let index_b = index_b as usize;
+        let (a, b) = index_twice(&mut self.objects, index_a, index_b);
 
-        let offset_dest = offset_dest as usize;
-        let offset_src = offset_src as usize;
+        let offset_a = offset_a as usize;
+        let offset_b = offset_b as usize;
         let num = num as usize;
-        let slice_dest = &mut dest.data[offset_dest .. offset_dest + num];
-        let slice_src = &mut src.data[offset_src .. offset_src + num];
+
+        let slice_a = &a.data[offset_a .. offset_a + num];
+        let slice_b = &b.data[offset_b .. offset_b + num];
 
         match op {
-            HeapCmp::Eq => slice_dest == slice_src,
-            HeapCmp::Neq => slice_dest != slice_src,
-            HeapCmp::Lt => slice_dest < slice_src,
-            HeapCmp::Lte => slice_dest <= slice_src,
-            HeapCmp::Gt => slice_dest > slice_src,
-            HeapCmp::Gte => slice_dest >= slice_src,
+            HeapCmp::Eq => slice_a == slice_b,
+            HeapCmp::Neq => slice_a != slice_b,
+            //HeapCmp::Lt => slice_a < slice_b,
+            //HeapCmp::Lte => slice_a <= slice_b,
+            //HeapCmp::Gt => slice_a > slice_b,
+            //HeapCmp::Gte => slice_a >= slice_b,
+            _ => panic!("invalid compare operation"),
+        }
+    }
+
+    // Compares string in one heap object with another (starting at their respective current offset).
+    pub fn compare_string(self: &mut Self, index_a: u32, offset_a: u32, index_b: u32, offset_b: u32, num: u32, op: HeapCmp) -> bool {
+
+        let index_a = index_a as usize;
+        let index_b = index_b as usize;
+        let (a, b) = index_twice(&mut self.objects, index_a, index_b);
+        let a = as_string(&a.data);
+        let b = as_string(&b.data);
+
+        let offset_a = offset_a as usize;
+        let offset_b = offset_b as usize;
+        let num = num as usize;
+
+        let (num_b, num_a) = if num == 0 {
+            (b.len() - offset_b, a.len() - offset_a)
+        } else {
+            (usize::min(num, b.len() - offset_b), usize::min(num, a.len() - offset_a))
+        };
+
+        let slice_a = &a[offset_a .. offset_a + num_a];
+        let slice_b = &b[offset_b .. offset_b + num_b];
+
+        match op {
+            HeapCmp::Eq => slice_a == slice_b,
+            HeapCmp::Neq => slice_a != slice_b,
+            HeapCmp::Lt => slice_a < slice_b,
+            HeapCmp::Lte => slice_a <= slice_b,
+            HeapCmp::Gt => slice_a > slice_b,
+            HeapCmp::Gte => slice_a >= slice_b,
         }
     }
 }
@@ -200,6 +239,10 @@ pub trait HeapOp<T: Clone> {
     }
 }
 
+fn as_string(data: &Vec<u8>) -> &String {
+    unsafe { ::std::mem::transmute(data) }
+}
+
 impl HeapOp<String> for Heap {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn store(self: &mut Self, value: String) -> u32 {
@@ -209,7 +252,7 @@ impl HeapOp<String> for Heap {
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn load(self: &Self, pos: u32) -> &String {
-        unsafe { ::std::mem::transmute(&self.objects[pos as usize].data) }
+        as_string(&self.objects[pos as usize].data)
     }
 }
 

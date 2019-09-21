@@ -1087,3 +1087,87 @@ fn heap_compare() {
         true, false,
     ]);
 }
+
+#[test]
+fn string_compare() {
+    let result = run("
+        let string = \"abc\";
+
+        let cmp_a = \"abb\";
+        ret_bool(string != cmp_a);
+        ret_bool(string == cmp_a);
+        ret_bool(string < cmp_a);
+        ret_bool(string <= cmp_a);
+        ret_bool(string > cmp_a);
+        ret_bool(string >= cmp_a);
+
+        let cmp_b = \"abc\";
+        ret_bool(string != cmp_b);
+        ret_bool(string == cmp_b);
+        ret_bool(string < cmp_b);
+        ret_bool(string <= cmp_b);
+        ret_bool(string > cmp_b);
+        ret_bool(string >= cmp_b);
+
+        let cmp_c = \"abd\";
+        ret_bool(string != cmp_c);
+        ret_bool(string == cmp_c);
+        ret_bool(string < cmp_c);
+        ret_bool(string <= cmp_c);
+        ret_bool(string > cmp_c);
+        ret_bool(string >= cmp_c);
+
+    ");
+    assert_all(&result, &[
+        true, false, false, false, true, true,
+        false, true, false, true, false, true,
+        true, false, true, true, false, false,
+    ]);
+}
+
+#[test]
+fn string_len_compare() {
+    let result = run("
+        let string = \"abc\";
+
+        let cmp_a = \"ab\";
+        ret_bool(string != cmp_a);
+        ret_bool(string == cmp_a);
+        ret_bool(string < cmp_a);
+        ret_bool(string <= cmp_a);
+        ret_bool(string > cmp_a);
+        ret_bool(string >= cmp_a);
+
+        let cmp_b = \"abcd\";
+        ret_bool(string != cmp_b);
+        ret_bool(string == cmp_b);
+        ret_bool(string < cmp_b);
+        ret_bool(string <= cmp_b);
+        ret_bool(string > cmp_b);
+        ret_bool(string >= cmp_b);
+
+
+    ");
+    assert_all(&result, &[
+        true, false, false, false, true, true,
+        true, false, true, true, false, false,
+    ]);
+}
+
+#[test]
+fn string_concat() {
+    let result = run("
+        let a = \"Hello\";
+        let b = \"World\";
+        let result = a + \" \" + b;
+        ret_bool(result == \"Hello World\");
+        ret_bool(result != \"Hello World\");
+        ret_bool(result == \"Hello World fake\");
+        ret_bool(result != \"Hello World fake\");
+    ");
+    assert_all(&result, &[
+        true, false,
+        false, true
+    ]);
+}
+

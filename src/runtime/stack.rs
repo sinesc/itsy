@@ -214,3 +214,11 @@ impl_stack!(Stack, normal, f32);
 impl_stack!(Stack, large, u64);
 impl_stack!(Stack, large, i64);
 impl_stack!(Stack, large, f64);
+
+/// A heap reference as it would appear on the stack
+pub struct HeapRef {
+    pub index: u32,
+    pub offset: u32,
+}
+
+impl_stack!(Stack, large, HeapRef);
