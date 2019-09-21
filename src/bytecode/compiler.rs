@@ -88,6 +88,7 @@ impl LocalsStack {
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: VMFunc<T> {
+    /// Bytecode writer used to output to.
     writer          : Writer<T>,
     /// List of bindings mapped to their TypeIds
     bindingtype_ids : Vec<TypeId>,
@@ -263,16 +264,22 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             _ => {
                 // stack: [ ..., X_SRC, OBJ_DEST ]
-                if ty.size() == 8 {
-                    self.writer.backflip64();
-                } else {
-                    self.writer.backflip32(ty.size());
-                }
-                // stack: [ ..., OBJ_DEST, PRIM_DEST, X_SRC ]
+                self.writer.push_tmp64();
+                // stack: [ ..., X_SRC ], tmp: [ ..., OBJ_DEST ]
                 if !ty.is_primitive() {
                     self.write_heap_fetch(ty.size());
                 }
-                // stack: [ ..., OBJ_DEST, PRIM_DEST, PRIM_SRC ]
+                // stack: [ ..., PRIM_SRC ], tmp: [ ..., OBJ_DEST ]
+                self.writer.load_tmp64(); // todo: for primitives this will result in push+load which equals a store. optimize in optimizer or here?
+                // stack: [ ..., PRIM_SRC, OBJ_DEST  ], tmp: [ ..., OBJ_DEST ]
+                self.write_heap_fetch(ty.size());
+                // stack: [ ..., PRIM_SRC, PRIM_DEST  ], tmp: [ ..., OBJ_DEST ]
+                if ty.size() == 8 { // todo: swap not required for add/mul
+                    self.writer.swap64();
+                } else {
+                    self.writer.swap32();
+                }
+                // stack: [ ..., PRIM_DEST, PRIM_SRC  ], tmp: [ ..., OBJ_DEST ]
                 match item.op {
                     BO::AddAssign => self.write_add(&ty),
                     BO::SubAssign => self.write_sub(&ty),
@@ -281,12 +288,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(&ty),
                     _ => panic!("Unsupported assignment operator encountered"),
                 };
-                // stack: [ ..., OBJ_DEST, PRIM_RESULT ]
-                if ty.size() == 8 {
-                    self.writer.swap64();
-                } else {
-                    self.writer.swap32_64();
-                }
+                // stack: [ ..., PRIM_RESULT  ], tmp: [ ..., OBJ_DEST ]
+                self.writer.pop_tmp64();
+                // stack: [ ..., PRIM_RESULT, OBJ_DEST  ]
                 self.write_heap_put(ty.size());
             },
         }
@@ -304,8 +308,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given function.
     fn compile_function(self: &Self, item: &ast::Function<'ast>) {
-        self.writer.comment(&format!("\n{}", item.sig.ident.name));
-
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
         let function_id = item.function_id.unwrap();
@@ -376,7 +378,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
-            self.writer.comment("\nbinding");
             self.compile_expression(expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
@@ -398,6 +399,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.write_load(load_index, self.bindingtype(item));
     }
 
+    /// Compiles an if block without else part.
     fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) {
 
         let exit_jump = self.writer.j0(123);
@@ -406,6 +408,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
     }
 
+    /// Compiles an if+else block.
     fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) {
 
         let else_jump = self.writer.j0(123);

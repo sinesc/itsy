@@ -195,80 +195,34 @@ impl_vm!{
         self.stack.push(current_offset + (element_index as u32 * element_size));
     }
 
-    // Transforms stack-top [ ..., X_SRC32, OBJ_DEST ] to [ ..., OBJ_DEST, PRIM_DEST, X_SRC32 ]
-    fn backflip32(&mut self, size: u8) {
-        // stack: [ ..., X_SRC, OBJ_DEST ]
-        let heap_offset_dest: u32 = self.stack.pop();
-        let heap_index_dest: u32 = self.stack.pop();
-        let other: Value = self.stack.pop();
-        // stack: [ ... ]
-        self.stack.push(heap_index_dest);
-        self.stack.push(heap_offset_dest);
-        match size {
-            1 => {
-                let data = self.heap.read8(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            2 => {
-                let data = self.heap.read16(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            4 => {
-                let data = self.heap.read32(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            /*8 => {
-                let data = self.heap.read64(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },*/
-            _ => panic!("invalid backflip size")
-        }
-        // stack: [ ..., OBJ_DEST, PRIM_DEST, ]
-        self.stack.push(other);
-        // stack: [ ..., OBJ_DEST, PRIM_DEST, X_SRC32 ]
-    }
-
-    // Transforms stack-top [ ..., X_SRC64, OBJ_DEST ] to [ ..., OBJ_DEST, PRIM_DEST, X_SRC64 ]
-    fn backflip64(&mut self /*, size: u8 */) {
-        // stack: [ ..., X_SRC, OBJ_DEST ]
-        let heap_offset_dest: u32 = self.stack.pop();
-        let heap_index_dest: u32 = self.stack.pop();
-        let other: Value64 = self.stack.pop();
-        // stack: [ ... ]
-        self.stack.push(heap_index_dest);
-        self.stack.push(heap_offset_dest);
-        /*match size {
-            1 => {
-                let data = self.heap.read8(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            2 => {
-                let data = self.heap.read16(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            4 => {
-                let data = self.heap.read32(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            },
-            8 => {*/
-                let data = self.heap.read64(heap_index_dest, heap_offset_dest);
-                self.stack.push(data);
-            /*},
-            _ => panic!("invalid backflip size")
-        }*/
-        // stack: [ ..., OBJ_DEST, PRIM_DEST, ]
-        self.stack.push(other);
-        // stack: [ ..., OBJ_DEST, PRIM_DEST, X_SRC64 ]
-    }
-
-    // Reads top 32 bit value off the stack and pushes it onto the tmp stack.
+    // Reads the top 32 bit value off the stack and pushes it onto the tmp stack.
     fn store_tmp32(&mut self) {
         let value: Value = self.stack.top();
         self.tmp.push(value);
     }
-    // Reads top 64 bit value off the stack and pushes it onto the tmp stack.
+    // Reads the top 64 bit value off the stack and pushes it onto the tmp stack.
     fn store_tmp64(&mut self) {
         let value: Value64 = self.stack.top();
+        self.tmp.push(value);
+    }
+    // Reads the top 32 bit value off the tmp stack and pushes it onto the stack.
+    fn load_tmp32(&mut self) {
+        let value: Value = self.tmp.top();
+        self.stack.push(value);
+    }
+    // Reads the top 64 bit value off the tmp stack and pushes it onto the stack.
+    fn load_tmp64(&mut self) {
+        let value: Value64 = self.tmp.top();
+        self.stack.push(value);
+    }
+    // Pops the 32 bit value off the stack and pushes it onto the tmp stack.
+    fn push_tmp32(&mut self) {
+        let value: Value = self.stack.pop();
+        self.tmp.push(value);
+    }
+    // Pops the 64 bit value off the stack and pushes it onto the tmp stack.
+    fn push_tmp64(&mut self) {
+        let value: Value64 = self.stack.pop();
         self.tmp.push(value);
     }
     // Pops the top 32 bit value off the tmp stack and pushes it onto the stack.

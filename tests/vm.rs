@@ -709,9 +709,13 @@ fn heap_compound_assign64() {
             ret_u64(test[0]);
             test[left()] += right();
             ret_u64(test[0]);
+            test[left()] += right();
+            ret_u64(test[0]);
+            test[left()] -= right();
+            ret_u64(test[0]);
         }
     ");
-    assert_all(&result, &[ 0u64, 6, 9, 1 ]);
+    assert_all(&result, &[ 0u64, 6, 9, 1, 6, 9, 2, 6, 9, 1 ]);
 }
 
 #[test]
@@ -724,8 +728,10 @@ fn assign_heap_index_target() {
         ret_u8(array[0][1]);
         array[0][1] += 4;
         ret_u8(array[0][1]);
+        array[0][1] -= 1;
+        ret_u8(array[0][1]);
     ");
-    assert_all(&result, &[ 3u8, 4, 8 ]);
+    assert_all(&result, &[ 3u8, 4, 8, 7 ]);
 }
 
 #[test]

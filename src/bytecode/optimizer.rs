@@ -3,6 +3,11 @@
 
 /*
 
+notes:
+    push+load = store
+    swap+add = add
+    swap+mul = mul
+
     /// Computes the result of a literal x literal binary expression and alters the item variant to literal.
     fn precompute_binary_op(self: &mut Self, item: &mut ast::Expression<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
 // fixme: this should really just be another bytecode optimization
