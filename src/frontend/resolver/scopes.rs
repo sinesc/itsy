@@ -2,7 +2,7 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind};
+use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind, Intrinsic};
 
 // todo: move into resolver.rs, scrap struct or maybe just the impls on it (they have become trivial one-liners except for lookup_*)
 
@@ -78,14 +78,17 @@ impl Scopes {
 
 /// Function-scope handling
 impl Scopes {
+
     /// Sets the id of the function containing this scope.
     pub fn set_scopefunction_id(self: &mut Self, scope_id: ScopeId, function_id: FunctionId) {
         self.scopefunction.insert(scope_id, Some(function_id));
     }
+
     /// Gets the id of the function containing this scope.
     pub fn scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
         *self.scopefunction.get(&scope_id).unwrap_or(&None)
     }
+
     /// Finds the id of the closest function containing this scope.
     pub fn lookup_scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
         if let Some(function_id) = self.scopefunction_id(scope_id) {
@@ -107,12 +110,17 @@ impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
     pub fn insert_function<T>(self: &mut Self, scope_id: ScopeId, name: T, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
-        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Internal })
+        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::User })
     }
 
-    /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_rustfn<T>(self: &mut Self, scope_id: ScopeId, name: T, fn_index: u16, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
-        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
+    /// Insert a function into the given scope, returning a function id.
+    pub fn insert_rustfn<T>(self: &mut Self, scope_id: ScopeId, name: T, fn_index: u16, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
+        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
+    }
+
+    /// Insert an intrinsic function into the given scope, returning a function id.
+    pub fn insert_intrinsic<T>(self: &mut Self, scope_id: ScopeId, name: T, intrinsic: Intrinsic, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
+        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Intrinsic(intrinsic) })
     }
 
     /*/// Returns the id of the named function originating in exactly this scope.
@@ -178,12 +186,6 @@ impl Scopes {
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
         *self.bindings.by_id(binding_id)
     }
-/*
-    /// Returns the id of the named binding originating in exactly this scope.
-    pub fn binding_name(self: &Self, binding_id: BindingId) -> Option<&str> {
-        self.bindings.name_of(binding_id)
-    }
-*/
 }
 
 /// Type handling

@@ -4,7 +4,7 @@ mod scopes;
 
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
-use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, compute_loc};
+use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, compute_loc};
 use crate::runtime::VMFunc;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -109,13 +109,16 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
         string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
     };
 
+    // insert intrinsics // todo tie methods to their struct type
+    scopes.insert_intrinsic(root_scope_id, "len", Intrinsic::ArrayLen, primitives.unsigned[2], Vec::new());
+
     // insert rust functions into root scope
     for (name, info) in T::call_info().iter() {
         let (index, ret_type_name, arg_type_names) = info;
         let ret_type = if *ret_type_name == "" {
-            Some(scopes.void_type())
+            scopes.void_type()
         } else {
-            Some(scopes.type_id(root_scope_id, ret_type_name).expect("Unknown return type encountered"))
+            scopes.type_id(root_scope_id, ret_type_name).expect("Unknown return type encountered")
         };
         let arg_type_id = arg_type_names
             .iter()
@@ -414,11 +417,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             item.function_id = self.scopes.lookup_function_id(self.scope_id, item.ident.name);
         }
 
-        // is this a method? resolve self argument
-        if let CallType::Method(self_arg) = &mut item.calltype {
-            self.resolve_expression(self_arg, None)?;
-        }
-
         // found a function, resolve return type and arguments
         if let Some(function_id) = item.function_id {
 
@@ -456,7 +454,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // rustcall?
             if let Some(rust_fn_index) = function_types.rust_fn_index() {
-                item.rust_fn_index = Some(rust_fn_index);
+                item.call_kind = FnKind::Rust(rust_fn_index);
+            }
+
+            // is this a method? resolve self argument
+            if let CallType::Method(self_arg) = &mut item.call_type {
+                self.resolve_expression(self_arg, None)?;
+                if let Some(ty) = self.bindingtype(&**self_arg) { // todo: intrinsics needs a more generic approach. can't implement them all individually here
+                    if ty.is_array() && item.ident.name == "len" { // need to be in scope like rust_fns
+                        item.call_kind = FnKind::Intrinsic(Intrinsic::ArrayLen);
+                    }
+                }
             }
         }
 

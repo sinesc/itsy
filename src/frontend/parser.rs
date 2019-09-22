@@ -4,7 +4,7 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
 use std::collections::HashMap;
-use crate::util::{Numeric, compute_loc};
+use crate::util::{Numeric, FnKind, compute_loc};
 use crate::frontend::ast::*;
 
 /// Represents the various possible parser error-kinds.
@@ -289,9 +289,9 @@ named!(call(Input<'_>) -> Call<'_>, do_parse!(
         position        : position as u32,
         ident           : m.0,
         args            : m.1,
-        calltype        : CallType::Function,
+        call_type       : CallType::Function,
+        call_kind       : FnKind::User,
         function_id     : None,
-        rust_fn_index   : None,
         binding_id      : None,
     }) >>
     (result)
@@ -427,7 +427,7 @@ named!(prec7(Input<'_>) -> Expression<'_>, ws!(do_parse!(
         init, // todo: one of the position values must be wrong :)
         |acc, (op, mut val)| match &mut val {
             Expression::Call(call) if op == BinaryOperator::Access => {
-                call.calltype = CallType::Method(Box::new(acc));
+                call.call_type = CallType::Method(Box::new(acc));
                 val
             },
             _ => Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))

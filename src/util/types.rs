@@ -4,8 +4,9 @@ use crate::{util::{TypeId, Numeric}, runtime::Value};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
-    Internal,
+    User,
     Rust(u16),
+    Intrinsic(Intrinsic),
 }
 
 #[derive(Clone, Debug)]
@@ -254,4 +255,9 @@ impl Type {
             _ => false
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Intrinsic {
+    ArrayLen,
 }

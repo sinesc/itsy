@@ -1,8 +1,8 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 use std::{collections::HashMap, fmt::Debug, cell::RefCell};
-use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind};
-use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
+use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, FnKind};
+use crate::frontend::{ast::{self, Bindable, Returns, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, WriteConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::VMFunc;
 
@@ -98,7 +98,7 @@ pub struct Compiler<T> where T: VMFunc<T> {
     locals          : LocalsStack,
     // Maps functions to their call index.
     functions       : RefCell<HashMap<FunctionId, u32>>,
-    /// List of unresolved calls for each function.
+    /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
     unresolved      : RefCell<HashMap<FunctionId, Vec<u32>>>,
 }
 
@@ -349,10 +349,20 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.write_tmp_ref(arg);
         }
 
-        if let Some(rust_fn_index) = item.rust_fn_index {
+        if let FnKind::Rust(rust_fn_index) = item.call_kind {
 
             // rust function
             self.writer.rustcall(T::from_u16(rust_fn_index));
+
+        } else if let FnKind::Intrinsic(intrinsic) = &item.call_kind {
+
+            // intrinsics // TODO: actually check which one once there are some
+            if let CallType::Method(exp) = &item.call_type {
+                let ty = self.bindingtype(&**exp);
+                if let Type::Array(array) = ty {
+                    self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
+                }
+            }
 
         } else {
 
@@ -529,20 +539,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
-            LiteralValue::Numeric(Numeric::Unsigned(0)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit0(); }
-            LiteralValue::Numeric(Numeric::Unsigned(1)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit1(); }
-            LiteralValue::Numeric(Numeric::Unsigned(2)) if lit_type.is_integer() && lit_type.size() <= 4 => { self.writer.lit2(); }
-            LiteralValue::Numeric(Numeric::Signed(-1)) if lit_type.is_signed() && lit_type.size() <= 4 => { self.writer.litm1(); }
-            LiteralValue::Numeric(int) => {
-                match lit_type {
-                    Type::i8 => { self.writer.lits(int.as_signed().unwrap() as i8); },
-                    Type::u8 => { self.writer.litu(int.as_unsigned().unwrap() as u8); },
-                    _ if lit_type.is_integer() || lit_type.is_float() => {
-                         let pos = self.store_literal(item); self.write_const_fetch(pos, lit_type);
-                    },
-                    _ => panic!("Unexpected numeric literal type: {:?}", lit_type)
-                }
-            }
+            LiteralValue::Numeric(numeric) => self.write_numeric(numeric, lit_type),
             LiteralValue::Bool(v) =>  {
                 match lit_type {
                     Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
@@ -769,16 +766,19 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 }
 
 impl<'ast, T> Compiler<T> where T: VMFunc<T> {
+
     /// Returns the type of the given binding.
     fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
         let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
         let type_id = self.bindingtype_ids[binding_id];
         &self.types[Into::<usize>::into(type_id)]
     }
+
     /// Returns type for given type_id.
     fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
         &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
     }
+
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &Self, function_id: FunctionId, position: u32) {
         if let Some(targets) = self.unresolved.borrow_mut().remove(&function_id) {
@@ -790,6 +790,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.set_position(backup_position);
         }
     }
+
     /// Retrieve for-in loop range variable index/type
     fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (i32, &Type) {
         let var_index = {
@@ -799,6 +800,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         let var_type = self.bindingtype(&item.iter);
         (var_index, var_type)
     }
+
     /// Creates stack frame variables for expressions.
     fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut Locals) {
         if let ast::Expression::Block(block) = expression {
@@ -831,6 +833,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
+
     /// Creates stack frame variables for blocks.
     fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut Locals) {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
@@ -864,45 +867,70 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.create_stack_frame_exp(result, frame);
         }
     }
+
+    /// Writes given numeric, using const pool if necessary.
+    fn write_numeric(self: &Self, numeric: Numeric, ty: &Type) {
+        match numeric {
+            Numeric::Unsigned(0) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit0(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit1(); }
+            Numeric::Unsigned(2) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit2(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.size() <= 4 => { self.writer.litm1(); }
+            _ => {
+                match ty {
+                    Type::i8 => { self.writer.lits(numeric.as_signed().unwrap() as i8); },
+                    Type::u8 => { self.writer.litu(numeric.as_unsigned().unwrap() as u8); },
+                    _ if ty.is_integer() || ty.is_float() => {
+                         let pos = self.store_numeric(numeric, ty);
+                         self.write_const_fetch(pos, ty);
+                    },
+                    _ => panic!("Unexpected numeric literal type: {:?}", ty)
+                }
+            }
+        }
+    }
+
+    /// Stores given numeric on the const pool.
+    fn store_numeric(self: &Self, numeric: Numeric, ty: &Type) -> u32 {
+        match numeric {
+            Numeric::Signed(v) => {
+                match ty {
+                    Type::i8 => self.writer.store_const(v as i8),
+                    Type::i16 => self.writer.store_const(v as i16),
+                    Type::i32 => self.writer.store_const(v as i32),
+                    Type::i64 => self.writer.store_const(v as i64),
+                    _ => panic!("Unexpected signed integer literal type: {:?}", ty)
+                }
+            },
+            Numeric::Unsigned(v) => {
+                match ty {
+                    Type::i8 => self.writer.store_const(v as i8),
+                    Type::i16 => self.writer.store_const(v as i16),
+                    Type::i32 => self.writer.store_const(v as i32),
+                    Type::i64 => self.writer.store_const(v as i64),
+                    Type::u8 => self.writer.store_const(v as u8),
+                    Type::u16 => self.writer.store_const(v as u16),
+                    Type::u32 => self.writer.store_const(v as u32),
+                    Type::u64 => self.writer.store_const(v as u64),
+                    _ => panic!("Unexpected unsigned integer literal type: {:?}", ty)
+                }
+            },
+            Numeric::Float(v) => {
+                match ty {
+                    Type::f32 => self.writer.store_const(v as f32),
+                    Type::f64 => self.writer.store_const(v),
+                    _ => panic!("Unexpected float literal type: {:?}", ty)
+                }
+            },
+            Numeric::Overflow => panic!("Literal computation overflow")
+        }
+    }
+
     /// Stores given literal on the const pool.
     fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let lit_type = self.bindingtype(item);
         match item.value {
-            LiteralValue::Numeric(int) => {
-                match int {
-                    Numeric::Signed(v) => {
-                        match lit_type {
-                            Type::i8 => self.writer.store_const(v as i8),
-                            Type::i16 => self.writer.store_const(v as i16),
-                            Type::i32 => self.writer.store_const(v as i32),
-                            Type::i64 => self.writer.store_const(v as i64),
-                            _ => panic!("Unexpected signed integer literal type: {:?}", lit_type)
-                        }
-                    },
-                    Numeric::Unsigned(v) => {
-                        match lit_type {
-                            Type::i8 => self.writer.store_const(v as i8),
-                            Type::i16 => self.writer.store_const(v as i16),
-                            Type::i32 => self.writer.store_const(v as i32),
-                            Type::i64 => self.writer.store_const(v as i64),
-                            Type::u8 => self.writer.store_const(v as u8),
-                            Type::u16 => self.writer.store_const(v as u16),
-                            Type::u32 => self.writer.store_const(v as u32),
-                            Type::u64 => self.writer.store_const(v as u64),
-                            _ => panic!("Unexpected unsigned integer literal type: {:?}", lit_type)
-                        }
-                    },
-                    Numeric::Float(v) => {
-                        match lit_type {
-                            Type::f32 => self.writer.store_const(v as f32),
-                            Type::f64 => self.writer.store_const(v),
-                            _ => panic!("Unexpected float literal type: {:?}", lit_type)
-                        }
-                    },
-                    Numeric::Overflow => panic!("Literal computation overflow")
-                }
-            },
+            LiteralValue::Numeric(int) => self.store_numeric(int, lit_type),
             LiteralValue::Bool(v) =>  {
                 match lit_type {
                     Type::bool => self.writer.store_const(if v { 1u8 } else { 0u8 }),
@@ -931,6 +959,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
         }
     }
+
     /// Stores array data in constpool. Note: when read with const_fetch_object() array size needs to be written first!
     fn store_literal_data(self: &Self, item: &ast::Literal<'ast>) {
         use crate::frontend::ast::LiteralValue;
@@ -955,6 +984,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
+
     /// Computes the size of a type in bytes.
     fn compute_type_size(self: &Self, ty: &Type) -> u32 {
         match ty {
@@ -974,6 +1004,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => ty.size() as u32
         }
     }
+
     /// Computes struct member offset in bytes.
     fn compute_member_offset(self: &Self, ty: &Type, member_index: u32) -> u32 {
         let struct_ = ty.as_struct().unwrap();
@@ -983,6 +1014,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
         offset
     }
+
     fn write_member_offset(self: &Self, offset: u32) {
         if offset == 0 {
             // nothing to do
@@ -1001,6 +1033,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.addi();
         }
     }
+
     fn write_element_offset(self: &Self, element_size: u32) {
         if element_size < (1 << 8) {
             self.writer.index(element_size as u8);
@@ -1010,6 +1043,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.index_32(element_size);
         }
     }
+
     fn write_heap_fetch(self: &Self, result_size: u8) {
         match result_size {
             1 => { self.writer.heap_fetch8(); },
@@ -1019,6 +1053,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid result size {} for heap_fetch", result_size)
         }
     }
+
     fn write_const_fetch(self: &Self, index: u32, ty: &Type) {
         use std::{u8, u16, u32};
         match ty.size() {
@@ -1062,6 +1097,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Unsupported type size"),
         }
     }
+
     fn write_heap_put(self: &Self, result_size: u8) {
         match result_size {
             1 => { self.writer.heap_put8(); },
@@ -1071,6 +1107,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid result size {} for heap_put", result_size)
         }
     }
+
     fn write_heap_fetch_member(self: &Self, result_size: u8, offset: u32) {
         match result_size {
             1 => { self.writer.heap_fetch_member8(offset); },
@@ -1080,6 +1117,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid result size {} for heap_fetch_member", result_size)
         }
     }
+
     fn write_heap_fetch_element(self: &Self, element_size: u8) {
         match element_size {
             1 => { self.writer.heap_fetch_element8(); },
@@ -1089,6 +1127,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid element size {} for heap_fetch_element", element_size)
         }
     }
+
     /*fn write_heap_put_member(self: &Self, result_size: u8, offset: u32) {
         match result_size {
             1 => { self.writer.heap_put_member8(offset); },
@@ -1107,6 +1146,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("Invalid element size {} for heap_put_element", element_size)
         }
     }*/
+
     /// If item is a temporary heap object, writes operations to store topmost heap object reference on the tmp-stack.
     fn write_tmp_ref(self: &Self, item: &ast::Expression<'ast>) {
         if !item.is_variable() {
@@ -1117,6 +1157,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
+
     /// If item is a temporary heap object, writes operations to unref the tmp-stack's topmost heap object.
     fn write_tmp_unref(self: &Self, item: &ast::Expression<'ast>) {
         if !item.is_variable() {
@@ -1127,6 +1168,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         }
     }
+
     /// Writes operations to unref local heap objects. Set check_prior to avoid unref'ing function results.
     fn write_heap_unref_all(self: &Self, check_prior: bool) {
         self.locals.borrow(|locals| {
@@ -1144,6 +1186,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             }
         });
     }
+
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, index: i32, ty: &Type) {
         use std::{i8, i16, i32};
@@ -1169,6 +1212,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             panic!("Unsupported type {:?} for store operation", ty);
         }
     }
+
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, index: i32, ty: &Type) {
         use std::{i8, i16, i32};
@@ -1199,6 +1243,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             panic!("Unsupported type {:?} for load operation", ty);
         }
     }
+
     /// Swap 2 stack values, ty_a being topmost, ty_b next below.
     fn write_swap(self: &Self, ty_a: &Type, ty_b: &Type) {
         let size_a = ty_a.size();
@@ -1213,6 +1258,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.swap32_64();
         }
     }
+
     fn write_clone(self: &Self, ty: &Type, offset: u8) {
         match ty.size() {
             1 | 2 | 4 => self.writer.clone32(offset),
@@ -1220,6 +1266,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             _ => panic!("unsupported type size"),
         };
     }
+
     fn write_preinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.preinci64(index),
@@ -1227,6 +1274,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
+
     fn write_predec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index),
@@ -1234,6 +1282,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
+
     fn write_postinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postinci64(index),
@@ -1241,6 +1290,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
         };
     }
+
     fn write_postdec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index),
@@ -1248,6 +1298,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
         };
     }
+
     fn write_sub(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.subf64(),
@@ -1257,6 +1308,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Sub operand {:?}", ty),
         };
     }
+
     fn write_add(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.addf64(),
@@ -1267,6 +1319,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Add operand {:?}", ty),
         };
     }
+
     fn write_mul(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.mulf64(),
@@ -1276,6 +1329,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
         };
     }
+
     fn write_div(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.divf64(),
@@ -1285,6 +1339,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Div operand {:?}", ty),
         };
     }
+
     fn write_rem(self: &Self, ty: &Type) {
         match ty {
             Type::f64 => self.writer.remf64(),
@@ -1294,6 +1349,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => panic!("Unsupported Rem operand {:?}", ty),
         };
     }
+
     fn write_eq(self: &Self, ty: &Type) {
         if ty.is_primitive() {
             match ty.size() {
@@ -1307,6 +1363,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.heap_ceq(self.compute_type_size(ty));
         }
     }
+
     fn write_neq(self: &Self, ty: &Type) {
         if ty.is_primitive() {
             match ty.size() {
@@ -1320,6 +1377,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.writer.heap_cneq(self.compute_type_size(ty));
         }
     }
+
     fn write_lt(self: &Self, ty: &Type) {
         if ty.is_primitive() {
             match ty.size() {
@@ -1343,6 +1401,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             panic!("unsupported type")
         }
     }
+
     fn write_lte(self: &Self, ty: &Type) {
         if ty.is_primitive() {
             match ty.size() {
@@ -1366,6 +1425,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             panic!("unsupported type")
         }
     }
+
     /// Writes a return instruction with the correct arguments for the current stack frame.
     fn write_ret(self: &Self) {
         self.writer.ret(self.locals.ret_size() as u8, self.locals.arg_size() as u8);
