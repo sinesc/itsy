@@ -3,7 +3,7 @@
 mod scopes;
 
 use std::marker::PhantomData;
-use crate::frontend::ast::{self, Bindable, Positioned, Returns};
+use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, compute_loc};
 use crate::runtime::VMFunc;
 
@@ -412,6 +412,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // locate function definition
         if item.function_id.is_none() {
             item.function_id = self.scopes.lookup_function_id(self.scope_id, item.ident.name);
+        }
+
+        // is this a method? resolve self argument
+        if let CallType::Method(self_arg) = &mut item.calltype {
+            self.resolve_expression(self_arg, None)?;
         }
 
         // found a function, resolve return type and arguments

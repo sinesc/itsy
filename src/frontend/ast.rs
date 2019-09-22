@@ -590,10 +590,18 @@ impl_bindable!(Member);
 impl_positioned!(Member);
 
 #[derive(Debug)]
+pub enum CallType<'a> {
+    Function,
+    Method(Box<Expression<'a>>), // todo: maybe box call in expression instead?
+    Static(Path<'a>),
+}
+
+#[derive(Debug)]
 pub struct Call<'a> {
     pub position        : u32,
     pub ident           : Ident<'a>,
     pub args            : Vec<Expression<'a>>,
+    pub calltype        : CallType<'a>,
     pub function_id     : Option<FunctionId>,
     pub rust_fn_index   : Option<u16>,
     pub binding_id      : Option<BindingId>,

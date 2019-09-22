@@ -289,6 +289,7 @@ named!(call(Input<'_>) -> Call<'_>, do_parse!(
         position        : position as u32,
         ident           : m.0,
         args            : m.1,
+        calltype        : CallType::Function,
         function_id     : None,
         rust_fn_index   : None,
         binding_id      : None,
@@ -420,10 +421,17 @@ named!(prec7(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         alt!(
             map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::Index, e))
+            | map!(preceded!(tag!("."), call), |i| (BinaryOperator::Access, Expression::Call(i)))
             | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::Access, Expression::Member(Member { position: position as u32, ident: i, binding_id: None, index: None })))
         ),
         init, // todo: one of the position values must be wrong :)
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, mut val)| match &mut val {
+            Expression::Call(call) if op == BinaryOperator::Access => {
+                call.calltype = CallType::Method(Box::new(acc));
+                val
+            },
+            _ => Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        }
     ) >>
     (res)
 )));
@@ -574,7 +582,7 @@ named!(array(Input<'_>) -> Array<'_>, do_parse!(
     (result)
 ));
 
-// function
+// function definition
 
 named!(signature_argument(Input<'_>) -> Binding<'_>, do_parse!(
     position: rest_len >>
