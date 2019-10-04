@@ -5,11 +5,12 @@ use std::convert::Into;
 
 /// Macro to implement typesafe ids.
 macro_rules! impl_typed_id {
-    ($name:ident) => {
+    ($name:ident, $string:expr) => {
         #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
+        #[doc = $string]
         pub struct $name(NonZeroUsize);
         impl $name {
-            /// Converts the typed id into a usize. Useful to avoid Into::<usize>::into(self) when inference fails.
+            /// Converts the typed id into a usize. Useful to avoid `Into::<usize>::into(self)` when inference fails.
             pub fn into_usize(self: Self) -> usize {
                 self.into()
             }
@@ -35,8 +36,7 @@ macro_rules! impl_typed_id {
     };
 }
 
-// Unique numeric id of a type.
-impl_typed_id!(TypeId);
+impl_typed_id!(TypeId, "Unique numeric id of a type");
 
 impl TypeId {
     pub fn void() -> TypeId {
@@ -44,11 +44,8 @@ impl TypeId {
     }
 }
 
-// Unique numeric id of a scope.
-impl_typed_id!(ScopeId);
+impl_typed_id!(ScopeId, "Unique numeric id of a scope.");
 
-// Unique numeric id of a variable binding.
-impl_typed_id!(BindingId);
+impl_typed_id!(BindingId, "Unique numeric id of a variable binding.");
 
-// Unique numeric id of a function.
-impl_typed_id!(FunctionId);
+impl_typed_id!(FunctionId, "Unique numeric id of a function.");

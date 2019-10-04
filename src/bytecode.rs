@@ -14,7 +14,7 @@ const ARG1: i32 = -3;
 const ARG2: i32 = -4;
 const ARG3: i32 = -5;
 
-/// An Itsy bytecode program.
+/// An Itsy bytecode program. Programs can be created using the bytecode [`Writer`](struct.Writer.html).
 #[derive(Clone, Debug)]
 pub struct Program<T> where T: crate::runtime::VMFunc<T> {
     rust_fn: PhantomData<T>,
@@ -23,7 +23,7 @@ pub struct Program<T> where T: crate::runtime::VMFunc<T> {
 }
 
 impl<T> Program<T> where T: crate::runtime::VMFunc<T> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Program {
             rust_fn     : PhantomData,
             instructions: Vec::new(),
