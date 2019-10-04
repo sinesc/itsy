@@ -3,8 +3,11 @@
 use std::{mem::transmute, cell::{Cell, RefCell, RefMut}};
 use crate::bytecode::Program;
 use crate::runtime::VMFunc;
+use crate::util::HeapRef;
 
 /// Bytecode buffer and writer.
+///
+/// Provides methods to write bytecode instructions to the program as well as constants to the const pool (via the implemented [`StoreConst`](trait.StoreConst.html) trait).
 #[derive(Debug)]
 pub struct Writer<T> where T: VMFunc<T> {
     pub(crate) program: RefCell<Program<T>>,
@@ -26,15 +29,19 @@ impl<T> Writer<T> where T: VMFunc<T> {
     pub fn len(self: &Self) -> u32 {
         self.program().instructions.len() as u32
     }
-    /// Returns the current write position.
+    /// Returns the current length of the const pool.
+    pub fn const_len(self: &Self) -> u32 {
+        self.program().consts.len() as u32
+    }
+    /// Returns the current bytecode write position.
     pub fn position(self: &Self) -> u32 {
         self.position.get()
     }
-    /// Sets the current write position.
+    /// Sets the current bytecode write position.
     pub fn set_position(self: &Self, new_position: u32) {
         self.position.set(new_position);
     }
-    /// Converts the writer into the underlying buffer.
+    /// Converts the writer into the program it wrote.
     pub fn into_program(self: Self) -> Program<T> {
         self.program.into_inner()
     }
@@ -75,7 +82,7 @@ macro_rules! impl_store_const {
         $self.program().consts.extend_from_slice(&unsigned.to_le_bytes());
     };
     ($size:ident, $type:tt) => {
-        impl<P> WriteConst<$type> for Writer<P> where P: VMFunc<P> {
+        impl<P> StoreConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &Self, value: $type) -> u32 {
                 let position = self.program().consts.len();
                 impl_store_const!(@write $size, self, value);
@@ -85,8 +92,8 @@ macro_rules! impl_store_const {
     };
 }
 
-/// Trait for generic const writer operations.
-pub(crate) trait WriteConst<T> {
+/// Trait for writing typed data to a program const pool.
+pub trait StoreConst<T> {
     /// Write a constant to the constant pool
     fn store_const(self: &Self, value: T) -> u32;
 }
@@ -102,11 +109,19 @@ impl_store_const!(u64, u64);
 impl_store_const!(u64, i64);
 impl_store_const!(u64, f64);
 
-impl<P> WriteConst<&str> for Writer<P> where P: VMFunc<P> {
+impl<P> StoreConst<HeapRef> for Writer<P> where P: VMFunc<P> {
+    fn store_const(self: &Self, value: HeapRef) -> u32 {
+        let position = self.program().consts.len();
+        self.program().consts.extend_from_slice(&value.index.to_le_bytes());
+        self.program().consts.extend_from_slice(&value.len.to_le_bytes());
+        self.program().consts.extend_from_slice(&value.offset.to_le_bytes());
+        position as u32
+    }
+}
+
+impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &Self, value: &str) -> u32 {
         let position = self.program().consts.len();
-        let len = value.len() as u32;
-        self.program().consts.extend_from_slice(&len.to_le_bytes());
         self.program().consts.extend_from_slice(&value.as_bytes());
         position as u32
     }

@@ -111,16 +111,12 @@ macro_rules! extern_rust {
     (@handle-param $vm:ident, f64) => { $vm.stack.pop() };
     (@handle-param $vm:ident, bool) => { $vm.stack.pop() };
     (@handle-param $vm:ident, String) => { { // rust String specialcase
-        let heap_offset: u32 = $vm.stack.pop();
-        let heap_index: u32 = $vm.stack.pop();
-        let string_ref: &String = $vm.heap.load(heap_index);
-        string_ref[heap_offset as usize..].to_string()
+        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        $vm.heap.str(item).to_string()
     } };
     (@handle-param $vm:ident, & str) => { { // rust &str specialcase
-        let heap_offset: u32 = $vm.stack.pop();
-        let heap_index: u32 = $vm.stack.pop();
-        let string_ref: &String = $vm.heap.load(heap_index);
-        &string_ref[heap_offset as usize..]
+        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        $vm.heap.str(item)
     } };
     (@handle-param $vm:ident, & $_:tt) => { { // object by reference // fixme: this won't work, structs aren't aligned
         let heap_offset: u32 = $vm.stack.pop();
@@ -153,7 +149,7 @@ macro_rules! extern_rust {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
-                use $crate::runtime::{StackOp, HeapOp};
+                use $crate::runtime::StackOp;
                 match self {
                     $(
                         $type_name::$name => {

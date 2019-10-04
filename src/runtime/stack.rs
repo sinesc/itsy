@@ -1,6 +1,7 @@
 use std::ops::{Index, IndexMut};
 use std::mem::transmute;
 use crate::runtime::Value;
+use crate::util::HeapRef;
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]
@@ -125,7 +126,6 @@ macro_rules! impl_convert {
     (small, bool, $input:expr) => { $input != 0 };
     (small, $type:tt, $input:expr) => { $input as $type };
     (normal, $type:tt, $input:expr) => { unsafe { transmute($input) } };
-    (large, $type:tt, $input:expr) => { unsafe { transmute($input) } };
 }
 
 /// Implements Stack operations.
@@ -133,6 +133,12 @@ macro_rules! impl_convert {
 macro_rules! impl_stack {
 
     // push operations
+    (@push triple, $type:tt, $stack: ident, $var:ident) => { {
+        let (a, b, c): (u32, u32, u32) = unsafe { transmute($var) };
+        impl_stack!(@push normal, u32, $stack, a);
+        impl_stack!(@push normal, u32, $stack, b);
+        impl_stack!(@push normal, u32, $stack, c);
+    } };
     (@push large, $type:tt, $stack: ident, $var:ident) => { {
         let (low, high): (u32, u32) = unsafe { transmute($var) };
         impl_stack!(@push normal, u32, $stack, low);
@@ -141,6 +147,12 @@ macro_rules! impl_stack {
     (@push $size:tt, $type:tt, $stack: ident, $var:ident) => { $stack.data.push( impl_convert!($size, Value, $var) ); };
 
     // store operations
+    (@store triple, $type:tt, $stack: ident, $pos:expr, $var:ident) => { {
+        let (a, b, c): (u32, u32, u32) = unsafe { transmute($var) };
+        impl_stack!(@store normal, u32, $stack, $pos, a);
+        impl_stack!(@store normal, u32, $stack, $pos + 1, b);
+        impl_stack!(@store normal, u32, $stack, $pos + 2, c);
+    } };
     (@store large, $type:tt, $stack: ident, $pos:expr, $var:ident) => { {
         let (low, high): (u32, u32) = unsafe { transmute($var) };
         impl_stack!(@store normal, u32, $stack, $pos, low);
@@ -151,6 +163,12 @@ macro_rules! impl_stack {
     };
 
     // pop operations
+    (@pop triple, $type:tt, $stack: ident) => { {
+        let c: u32 = impl_stack!(@pop normal, u32, $stack);
+        let b: u32 = impl_stack!(@pop normal, u32, $stack);
+        let a: u32 = impl_stack!(@pop normal, u32, $stack);
+        unsafe { transmute((a, b, c)) }
+    } };
     (@pop large, $type:tt, $stack: ident) => { {
         let high: u32 = impl_stack!(@pop normal, u32, $stack);
         let low: u32 = impl_stack!(@pop normal, u32, $stack);
@@ -159,6 +177,12 @@ macro_rules! impl_stack {
     (@pop $size:tt, $type:tt, $stack: ident) => { impl_convert!($size, $type, $stack.data.pop().expect("Stack underflow")) };
 
     // load operations
+    (@load triple, $type:tt, $stack: ident, $pos:expr) => { {
+        let a: u32 = impl_stack!(@load normal, u32, $stack, $pos);
+        let b: u32 = impl_stack!(@load normal, u32, $stack, $pos + 1);
+        let c: u32 = impl_stack!(@load normal, u32, $stack, $pos + 2);
+        unsafe { transmute((a, b, c)) }
+    } };
     (@load large, $type:tt, $stack: ident, $pos:expr) => { {
         let low: u32 = impl_stack!(@load normal, u32, $stack, $pos);
         let high: u32 = impl_stack!(@load normal, u32, $stack, $pos + 1);
@@ -169,6 +193,9 @@ macro_rules! impl_stack {
     };
 
     // top operations
+    (@top triple, $stack: ident) => { {
+        $stack.load($stack.sp() - 3)
+    } };
     (@top large, $stack: ident) => { {
         $stack.load($stack.sp() - 2)
     } };
@@ -215,10 +242,5 @@ impl_stack!(Stack, large, u64);
 impl_stack!(Stack, large, i64);
 impl_stack!(Stack, large, f64);
 
-/// A heap reference as it would appear on the stack
-pub struct HeapRef {
-    pub index: u32,
-    pub offset: u32,
-}
 
-impl_stack!(Stack, large, HeapRef);
+impl_stack!(Stack, triple, HeapRef);

@@ -10,6 +10,7 @@ pub use self::vm::{VM, VMState};
 pub use self::stack::*;
 pub use self::heap::*;
 pub use self::traits::*;
+pub use crate::util::HeapRef;
 
 /// A stack value.
 pub(crate) type Value = i32;

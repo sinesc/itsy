@@ -10,7 +10,7 @@ macro_rules! impl_vm {
 
     // perform read from slice
     (do_read $ty:tt, $size:tt, $from:ident, $counter:expr) => ( {
-        let slice = &$from.program.instructions[$counter as usize..];
+        let slice = &$from.instructions[$counter as usize..];
         let dest: $ty = $ty::from_le_bytes( impl_vm!(to_array $size slice) );
         $counter += $size;
         dest
@@ -30,7 +30,7 @@ macro_rules! impl_vm {
     (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, 8, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
         let len = impl_vm!(do_read u32, 4, $from, $counter);
-        let slice = &$from.program.instructions[$counter as usize..($counter + len) as usize];
+        let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
     });
@@ -73,6 +73,7 @@ macro_rules! impl_vm {
         /// `const_fetch_16`   load 32 bit from constpool at given 16 bit address
         #[allow(non_camel_case_types)]
         #[repr(u8)]
+        #[derive(PartialEq)]
         pub enum OpCode {
             $(
                 $( #[ $attr ] )*
@@ -120,14 +121,23 @@ macro_rules! impl_vm {
             )+
 
             /// Returns disassembled opcode at given position along with the next opcode position.
-            #[allow(unused_imports)]
-            #[allow(unused_mut)]
-            pub(crate) fn parse_instruction(self: &Self, position: u32) -> Option<(String, u32)> {
+            pub(crate) fn read_instruction(self: &Self, position: u32) -> Option<(OpCode, u32)> {
                 let mut pc = position;
-                if pc < self.program.instructions.len() as u32 {
+                if pc < self.instructions.len() as u32 {
                     let instruction = impl_vm!(read u8, self, pc);
+                    Some((OpCode::from_u8(instruction), pc))
+                } else {
+                    None
+                }
+            }
+
+            /// Returns disassembled opcode as string at given position along with the next opcode position.
+            //#[allow(unused_imports)]
+            #[allow(unused_mut)]
+            pub(crate) fn describe_instruction(self: &Self, position: u32) -> Option<(String, u32)> {
+                if let Some((opcode, mut pc)) = self.read_instruction(position) {
                     #[allow(unreachable_patterns)]
-                    match OpCode::from_u8(instruction) {
+                    match opcode {
                         // implement special formatting for some opcodes
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));

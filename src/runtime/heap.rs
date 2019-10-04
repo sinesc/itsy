@@ -1,4 +1,7 @@
 use crate::util::{array2, array4, array8, index_twice};
+use crate::util::HeapRef;
+
+pub(crate) const CONSTPOOL_INDEX: u32 = 0;
 
 /// Allowed operator for compare.
 pub enum HeapCmp {
@@ -35,17 +38,17 @@ pub struct Heap {
 
 impl Heap {
     /// Creates a new VM heap.
-    pub fn new() -> Self {
+    pub fn new() -> Self { // todo: accept const pool here?
         Self {
             objects: Vec::with_capacity(128),
             free: Vec::with_capacity(16),
         }
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
-    pub fn alloc(self: &mut Self) -> u32 {
+    pub fn alloc(self: &mut Self, data: Vec<u8>) -> u32 {
         self.free.pop().unwrap_or_else(|| {
             let pos = self.objects.len();
-            self.objects.push(HeapObject::new());
+            self.objects.push(HeapObject { refs: 0, data: data });
             pos as u32
         })
     }
@@ -56,7 +59,7 @@ impl Heap {
     /// Decrease reference count for given heap object, free it if count is at 0.
     pub fn dec_ref_or_free(self: &mut Self, index: u32) {
         self.objects[index as usize].refs -= 1;
-        if self.objects[index as usize].refs == 0 {
+        if self.objects[index as usize].refs == 0 && index != CONSTPOOL_INDEX {
             self.free(index);
         }
     }
@@ -91,7 +94,7 @@ impl Heap {
     }
     /// Resets the heap, freeing all memory.
     pub fn reset(self: &mut Self) {
-        self.objects = Vec::with_capacity(128);
+        self.objects.truncate(1);
         self.free = Vec::with_capacity(16);
     }
     /// Asserts that the given heap object exists.
@@ -101,46 +104,84 @@ impl Heap {
         }
     }
 
-    pub fn read8(self: &Self, index: u32, offset: u32) -> u8 {
+    pub fn read8(self: &Self, item: HeapRef) -> u8 {
+        let HeapRef { index, offset, .. } = item;
         self.objects[index as usize].data[offset as usize]
     }
 
-    pub fn read16(self: &Self, index: u32, offset: u32) -> u16 {
+    pub fn read16(self: &Self, item: HeapRef) -> u16 {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         u16::from_ne_bytes(array2(&self.objects[index as usize].data[offset..offset + 2]))
     }
 
-    pub fn read32(self: &Self, index: u32, offset: u32) -> u32 {
+    pub fn read32(self: &Self, item: HeapRef) -> u32 {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         u32::from_ne_bytes(array4(&self.objects[index as usize].data[offset..offset + 4]))
     }
 
-    pub fn read64(self: &Self, index: u32, offset: u32) -> u64 {
+    pub fn read64(self: &Self, item: HeapRef) -> u64 {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         u64::from_ne_bytes(array8(&self.objects[index as usize].data[offset..offset + 8]))
     }
 
-    pub fn write8(self: &mut Self, index: u32, offset: u32, value: u8) {
+    pub fn read96(self: &Self, item: HeapRef) -> HeapRef {
+        HeapRef {
+            index   : self.read32(item),
+            len     : self.read32(item.offset(4)),
+            offset  : self.read32(item.offset(8)),
+        }
+    }
+
+    pub fn write8(self: &mut Self, item: HeapRef, value: u8) {
+        let HeapRef { index, offset, .. } = item;
         self.objects[index as usize].data[offset as usize] = value;
     }
 
-    pub fn write16(self: &mut Self, index: u32, offset: u32, value: u16) {
+    pub fn write16(self: &mut Self, item: HeapRef, value: u16) {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         self.objects[index as usize].data[offset..offset+2].copy_from_slice(&value.to_ne_bytes());
     }
 
-    pub fn write32(self: &mut Self, index: u32, offset: u32, value: u32) {
+    pub fn write32(self: &mut Self, item: HeapRef, value: u32) {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         self.objects[index as usize].data[offset..offset+4].copy_from_slice(&value.to_ne_bytes());
     }
 
-    pub fn write64(self: &mut Self, index: u32, offset: u32, value: u64) {
+    pub fn write64(self: &mut Self, item: HeapRef, value: u64) {
+        let HeapRef { index, offset, .. } = item;
         let offset = offset as usize;
         self.objects[index as usize].data[offset..offset+8].copy_from_slice(&value.to_ne_bytes());
     }
 
+    pub fn write96(self: &mut Self, item: HeapRef, value: HeapRef) {
+        self.write32(item, value.index);
+        self.write32(item.offset(4), value.len);
+        self.write32(item.offset(8), value.offset);
+    }
+
     pub fn size_of(self: &Self, index: u32) -> u32 {
         self.objects[index as usize].data.len() as u32
+    }
+
+    /// Returns a byte slice for the given heap reference.
+    pub fn slice(self: &Self, item: HeapRef) -> &[u8] {
+        let HeapRef { index, offset, len } = item;
+        let offset = offset as usize;
+        let len = len as usize;
+        &self.objects[index as usize].data[offset..offset + len]
+    }
+
+    /// Returns a string slice for the given heap reference.
+    pub fn str(self: &Self, item: HeapRef) -> &str {
+        use std::str;
+        let slice = self.slice(item);
+        //unsafe { str::from_utf8_unchecked(&slice) } // Todo: probably want to use this later, for now the extra check is nice
+        str::from_utf8(&slice).unwrap()
     }
 
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
@@ -169,53 +210,10 @@ impl Heap {
         }
     }
 
-    // Compares bytes in one heap object with another (starting at their respective current offset).
-    pub fn compare(self: &mut Self, index_a: u32, offset_a: u32, index_b: u32, offset_b: u32, num: u32, op: HeapCmp) -> bool {
-
-        let index_a = index_a as usize;
-        let index_b = index_b as usize;
-        let (a, b) = index_twice(&mut self.objects, index_a, index_b);
-
-        let offset_a = offset_a as usize;
-        let offset_b = offset_b as usize;
-        let num = num as usize;
-
-        let slice_a = &a.data[offset_a .. offset_a + num];
-        let slice_b = &b.data[offset_b .. offset_b + num];
-
-        match op {
-            HeapCmp::Eq => slice_a == slice_b,
-            HeapCmp::Neq => slice_a != slice_b,
-            //HeapCmp::Lt => slice_a < slice_b,
-            //HeapCmp::Lte => slice_a <= slice_b,
-            //HeapCmp::Gt => slice_a > slice_b,
-            //HeapCmp::Gte => slice_a >= slice_b,
-            _ => panic!("invalid compare operation"),
-        }
-    }
-
-    // Compares string in one heap object with another (starting at their respective current offset).
-    pub fn compare_string(self: &mut Self, index_a: u32, offset_a: u32, index_b: u32, offset_b: u32, num: u32, op: HeapCmp) -> bool {
-
-        let index_a = index_a as usize;
-        let index_b = index_b as usize;
-        let (a, b) = index_twice(&mut self.objects, index_a, index_b);
-        let a = as_string(&a.data);
-        let b = as_string(&b.data);
-
-        let offset_a = offset_a as usize;
-        let offset_b = offset_b as usize;
-        let num = num as usize;
-
-        let (num_b, num_a) = if num == 0 {
-            (b.len() - offset_b, a.len() - offset_a)
-        } else {
-            (usize::min(num, b.len() - offset_b), usize::min(num, a.len() - offset_a))
-        };
-
-        let slice_a = &a[offset_a .. offset_a + num_a];
-        let slice_b = &b[offset_b .. offset_b + num_b];
-
+    // Compares bytes of one heap object with another.
+    pub fn compare(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
+        let slice_a = self.slice(a);
+        let slice_b = self.slice(b);
         match op {
             HeapCmp::Eq => slice_a == slice_b,
             HeapCmp::Neq => slice_a != slice_b,
@@ -225,46 +223,18 @@ impl Heap {
             HeapCmp::Gte => slice_a >= slice_b,
         }
     }
-}
 
-/// Trait for generic stack operations.
-pub trait HeapOp<T: Clone> {
-    /// Store given value on the heap.
-    fn store(self: &mut Self, value: T) -> u32;
-    /// Load a value from the heap.
-    fn load(self: &Self, pos: u32) -> &T;
-    /// Clone a value from the heap.
-    fn clone(self: &Self, pos: u32) -> T {
-        (*self.load(pos)).clone()
-    }
-}
-
-fn as_string(data: &Vec<u8>) -> &String {
-    unsafe { ::std::mem::transmute(data) }
-}
-
-impl HeapOp<String> for Heap {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn store(self: &mut Self, value: String) -> u32 {
-        let pos = self.alloc();
-        self.objects[pos as usize].data = value.into_bytes();
-        pos
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn load(self: &Self, pos: u32) -> &String {
-        as_string(&self.objects[pos as usize].data)
-    }
-}
-
-impl HeapOp<Vec<u8>> for Heap {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn store(self: &mut Self, value: Vec<u8>) -> u32 {
-        let pos = self.alloc();
-        self.objects[pos as usize].data = value;
-        pos as u32
-    }
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    fn load(self: &Self, pos: u32) -> &Vec<u8> {
-        &self.objects[pos as usize].data
+    // Compares string of one heap object with another.
+    pub fn compare_string(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
+        let slice_a = self.str(a);
+        let slice_b = self.str(b);
+        match op {
+            HeapCmp::Eq => slice_a == slice_b,
+            HeapCmp::Neq => slice_a != slice_b,
+            HeapCmp::Lt => slice_a < slice_b,
+            HeapCmp::Lte => slice_a <= slice_b,
+            HeapCmp::Gt => slice_a > slice_b,
+            HeapCmp::Gte => slice_a >= slice_b,
+        }
     }
 }

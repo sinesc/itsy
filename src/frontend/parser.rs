@@ -3,7 +3,7 @@
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, cell::Cell};
 use crate::util::{Numeric, FnKind, compute_loc};
 use crate::frontend::ast::*;
 
@@ -129,32 +129,32 @@ fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_
     let (value, type_name) = parse_numerical_suffix(n);
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
         if let Ok(float) = str::parse::<f64>(value) {
-            //println!("f {} {:?}", float, type_name);
             return Ok((n, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
                 type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
                 binding_id  : None,
+                heap_ref    : Cell::new(None),
             }))
         }
     } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
         if let Ok(integer) = str::parse::<i64>(value) {
-            //println!("i {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Signed(integer)),
                 type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
                 binding_id  : None,
+                heap_ref    : Cell::new(None),
             }))
         }
     } else {
         if let Ok(integer) = str::parse::<u64>(value) {
-            //println!("u {} {:?}", integer, type_name);
             return Ok((n, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
                 type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
                 binding_id  : None,
+                heap_ref    : Cell::new(None),
             }))
         }
     }
@@ -180,6 +180,7 @@ named!(boolean(Input<'_>) -> Literal<'_>, do_parse!(
             value       : LiteralValue::Bool(*m == "true"),
             type_name   : None,
             binding_id  : None,
+            heap_ref    : Cell::new(None),
         }
     }) >>
     (result)
@@ -195,6 +196,7 @@ named!(string(Input<'_>) -> Literal<'_>, do_parse!(
             value       : LiteralValue::String(*m),
             type_name   : None,
             binding_id  : None,
+            heap_ref    : Cell::new(None),
         }
     }) >>
     (result)
@@ -207,12 +209,13 @@ named!(array_literal_elements(Input<'_>) -> Vec<Literal<'_>>, ws!(separated_list
 named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(delimited!(char!('['), array_literal_elements, char!(']'))), |m| Literal {
-        position: position as u32,
+        position    : position as u32,
         value: LiteralValue::Array(ArrayLiteral {
             elements: m,
         }),
-        type_name: None,
-        binding_id: None,
+        type_name   : None,
+        binding_id  : None,
+        heap_ref    : Cell::new(None),
     }) >>
     (result)
 ));
@@ -230,12 +233,13 @@ named!(struct_literal_fields(Input<'_>) -> HashMap<&str, Literal<'_>>, map!(ws!(
 named!(struct_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(path, char!('{'), struct_literal_fields, opt!(char!(',')), char!('}'))), |m| Literal {
-        position: position as u32,
+        position    : position as u32,
         value: LiteralValue::Struct(StructLiteral {
             fields: m.2,
         }),
-        type_name: Some(TypeName::from_path(m.0)),
-        binding_id: None,
+        type_name   : Some(TypeName::from_path(m.0)),
+        binding_id  : None,
+        heap_ref    : Cell::new(None),
     }) >>
     (result)
 ));
@@ -293,6 +297,23 @@ named!(call(Input<'_>) -> Call<'_>, do_parse!(
         call_kind       : FnKind::User,
         function_id     : None,
         binding_id      : None,
+    }) >>
+    (result)
+));
+
+named!(call_static(Input<'_>) -> Call<'_>, do_parse!(
+    position: rest_len >>
+    result: map!(ws!(tuple!(path, call_argument_list)), |mut m| {
+        let ident = Ident { position: position as u32, name: m.0.pop() };
+        Call {
+            position        : position as u32,
+            ident           : ident,
+            args            : m.1,
+            call_type       : CallType::Static(m.0),
+            call_kind       : FnKind::User,
+            function_id     : None,
+            binding_id      : None,
+        }
     }) >>
     (result)
 ));
@@ -410,6 +431,7 @@ named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
         | map!(prefix, |m| Expression::UnaryOp(Box::new(m)))
         | map!(numerical, |m| Expression::Literal(m))
         | map!(call, |m| Expression::Call(m))
+        | map!(call_static, |m| Expression::Call(m))
         | map!(ident, |m| Expression::Variable(Variable { position: position as u32, ident: m, binding_id: None }))
     )) >>
     (result)

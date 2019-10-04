@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::{util::{TypeId, Numeric}, runtime::Value};
+use crate::{util::{TypeId, Numeric}, runtime::{Value, CONSTPOOL_INDEX}};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -36,6 +36,45 @@ impl FnSig {
     }
 }
 
+/// A heap reference as it would appear on the stack
+#[derive(Debug, Copy, Clone)]
+pub struct HeapRef {
+    pub index   : u32,
+    pub len     : u32,
+    pub offset  : u32,
+}
+
+impl HeapRef {
+    /// Constructs a heap reference from const offset and length.
+    pub fn from_const(const_offset: u32, const_len: u32) -> Self {
+        HeapRef {
+            index   : CONSTPOOL_INDEX,
+            offset  : const_offset,
+            len     : const_len,
+        }
+    }
+    /// Offsets the heap reference.
+    pub fn offset(self: Self, offset: u32) -> Self { // Todo: might want to accept i32 instead
+        HeapRef {
+            index   : self.index,
+            offset  : self.offset + offset,
+            len     : self.len,
+        }
+    }
+    /// Adds to the length of the heap reference.
+    pub fn len(self: Self, len: u32) -> Self { // todo: i32?
+        HeapRef {
+            index   : self.index,
+            offset  : self.offset,
+            len     : self.len + len,
+        }
+    }
+    /// Returns the size of heap references.
+    pub fn size() -> u8 {
+        std::mem::size_of::<HeapRef>() as u8
+    }
+}
+
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Enum {
@@ -62,6 +101,14 @@ pub struct Array {
     pub len: Option<u32>,
     pub type_id: Option<TypeId>,
 }
+
+impl Array {
+    /// Returns whether the array is fixed size or dynamic.
+    pub fn is_sized(self: &Self) -> bool {
+        self.len.is_some()
+    }
+}
+
 /*
 impl Debug for Array {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -126,7 +173,7 @@ pub(crate) enum TypeKind {
 }
 
 impl Type {
-    /// Size of the type in bytes.
+    /// Size of the primitive type in bytes, otherwise size of the reference.
     pub fn size(self: &Self) -> u8 {
         match self {
             Type::void                          => 0,
@@ -134,7 +181,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            _ => 8, // heap object: 2xu32
+            _ => HeapRef::size(),
         }
     }
     /// Size of the type in stack elements.
@@ -178,6 +225,21 @@ impl Type {
             false
         }
     }
+    /// Whether the type is a primitive.
+    pub fn is_primitive(self: &Self) -> bool {
+        match self.kind() {
+            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool => true,
+            _ => false
+        }
+    }
+    /// Whether the type has a fixed size.
+    pub fn is_sized(self: &Self) -> bool {
+        match self {
+            Type::Array(array)  => array.is_sized(),
+            Type::String        => false,
+            _                   => true,
+        }
+    }
     /// Whether the type is an array.
     pub fn is_array(self: &Self) -> bool {
         match self.kind() {
@@ -204,13 +266,6 @@ impl Type {
         match self {
             Type::Struct(struct_) => Some(struct_),
             _ => None
-        }
-    }
-    /// Whether the type is a primitive.
-    pub fn is_primitive(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool => true,
-            _ => false
         }
     }
     /// Whether the type is an integer.

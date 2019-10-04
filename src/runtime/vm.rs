@@ -20,7 +20,8 @@ pub enum VMState {
 #[derive(Debug)]
 pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
     context_type        : std::marker::PhantomData<U>,
-    pub(crate) program  : Program<T>,
+    func_type           : std::marker::PhantomData<T>,
+    pub(crate) instructions  : Vec<u8>,
     pub(crate) pc       : u32,
     pub(crate) state    : VMState,
     pub stack           : Stack,
@@ -32,13 +33,17 @@ pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
 impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T, U> {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self {
+        let Program { instructions, consts, .. } = program;
+        let mut heap = Heap::new();
+        heap.alloc(consts); // FIXME: need type table for the pool so that it can be converted to correct endianess during heap upload
         VM {
             context_type: std::marker::PhantomData,
-            program     : program,
+            func_type   : std::marker::PhantomData,
+            instructions: instructions,
             pc          : 0,
             state       : VMState::Continue,
             stack       : Stack::new(),
-            heap        : Heap::new(),
+            heap        : heap,
             tmp         : Stack::new(),
         }
     }
@@ -56,7 +61,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     pub fn format_program(self: &Self) -> String {
         let mut position = 0;
         let mut result = "".to_string();
-        while let Some((instruction, next_position)) = self.parse_instruction(position) {
+        while let Some((instruction, next_position)) = self.describe_instruction(position) {
             result.push_str(&instruction);
             result.push_str("\n");
             position = next_position;
@@ -66,7 +71,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
 
     /// Disassembles the current bytecode instruction and returns it as a string.
     pub fn format_instruction(self: &Self) -> Option<String> {
-        self.parse_instruction(self.pc).map(|result| result.0)
+        self.describe_instruction(self.pc).map(|result| result.0)
     }
 
     /// Returns the current stack as a string.

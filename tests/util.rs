@@ -83,6 +83,6 @@ pub fn run(code: &str) -> Context {
     };
     let mut context = Vec::new();
     vm.run(&mut context);
-    assert!(vm.heap.len() == 0);
+    assert!(vm.heap.len() == 1); // const pool remains
     context
 }
