@@ -674,8 +674,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::Div => self.write_div(&result_type),
             BO::Rem => self.write_rem(&result_type),
             // comparison
-            BO::Greater     => { self.write_swap(compare_type, compare_type); self.write_lt(&compare_type); },
-            BO::GreaterOrEq => { self.write_swap(compare_type, compare_type); self.write_lte(&compare_type); },
+            BO::Greater     => { self.write_swap(compare_type); self.write_lt(&compare_type); },
+            BO::GreaterOrEq => { self.write_swap(compare_type); self.write_lte(&compare_type); },
             BO::Less        => self.write_lt(&compare_type),
             BO::LessOrEq    => self.write_lte(&compare_type),
             BO::Equal       => self.write_eq(&compare_type),
@@ -1296,30 +1296,22 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Swap 2 stack values, ty_a being topmost, ty_b next below.
-    fn write_swap(self: &Self, ty_a: &Type, ty_b: &Type) {
-        let size_a = ty_a.size();
-        let size_b = ty_b.size();
-        if size_a == 12 && size_b == 12 {
-            self.writer.swap96();
-        } else if size_a == 8 && size_b == 8 {
-            self.writer.swap64();
-        } else if size_a < 8 && size_b < 8 {
-            self.writer.swap32();
-        } else if size_a == 8 && size_b < 8 {
-            self.writer.swap64_32();
-        } else if size_a < 8 && size_b == 8 {
-            self.writer.swap32_64();
-        } else {
-            panic!("Unsupported swap sizes");
-        }
+    /// Swap topmost 2 stack values
+    fn write_swap(self: &Self, ty: &Type) {
+        match ty.size() {
+            12 => self.writer.swap96(),
+            8 => self.writer.swap64(),
+            4 | 2 | 1 => self.writer.swap32(),
+            size @ _ => panic!("Unsupported swap size {}", size),
+        };
     }
 
+    /// Clone stack value as negative given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type, offset: u8) {
         match ty.size() {
             1 | 2 | 4 => self.writer.clone32(offset),
             8 => self.writer.clone64(offset),
-            _ => panic!("unsupported type size"),
+            size @ _ => panic!("Unsupported clone size {}", size),
         };
     }
 

@@ -52,7 +52,7 @@ macro_rules! impl_vm {
     (
         $(
             $( #[ $attr:meta ] )*
-            fn $name:tt $( = $id:tt)* ( & mut $self:ident $(, & mut $context:ident)? $(, $op_name:ident : $op_type:tt )* ) $code:block
+            fn $name:tt $( < $( $variant_name:ident : $variant_type:tt as $variant_type_as:tt ),+ > )? ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* ) $code:block
         )+
     ) => {
 
@@ -76,9 +76,16 @@ macro_rules! impl_vm {
         #[derive(PartialEq)]
         pub enum OpCode {
             $(
+                // add opcode variants first (better readability in docs because we can't document these)
+                $(
+                    $(
+                        $variant_name,
+                    )+
+                )?
+                // add actual opcode
                 $( #[ $attr ] )*
-                $name $(= $id)*
-            ),+
+                $name,
+            )+
         }
 
         impl OpCode {
@@ -97,12 +104,25 @@ macro_rules! impl_vm {
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         impl<T> crate::bytecode::Writer<T> where T: crate::runtime::VMFunc<T> {
             $(
+                // add opcode variants first (better readability in docs because we can't document these)
+                $(
+                    $(
+                        #[allow(unused_imports)]
+                        pub fn $variant_name(self: &Self, value: impl_vm!(map_writer_type $variant_type)) -> u32 {
+                            let insert_pos = self.position();
+                            impl_vm!(write u8, OpCode::$variant_name.into_u8(), self);
+                            impl_vm!(write $variant_type, value, self);
+                            insert_pos as u32
+                        }
+                    )+
+                )?
+                // handle opcode
                 $( #[ $attr ] )*
                 #[allow(unused_imports)]
-                pub fn $name(self: &Self, $($op_name: impl_vm!(map_writer_type $op_type)),* ) -> u32 {
+                pub fn $name(self: &Self, $($arg_name: impl_vm!(map_writer_type $arg_type)),* ) -> u32 {
                     let insert_pos = self.position();
                     impl_vm!(write u8, OpCode::$name.into_u8(), self);
-                    $( impl_vm!(write $op_type, $op_name, self); )*
+                    $( impl_vm!(write $arg_type, $arg_name, self); )*
                     insert_pos as u32
                 }
             )+
@@ -115,7 +135,7 @@ macro_rules! impl_vm {
             $(
                 $( #[ $attr ] )*
                 #[cfg_attr(not(debug_assertions), inline(always))]
-                fn $name ( $self: &mut Self, $($context: &mut U,)? $($op_name: impl_vm!(map_reader_type $op_type)),* ) {
+                fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_vm!(map_reader_type $arg_type)),* ) {
                     $code
                 }
             )+
@@ -150,13 +170,24 @@ macro_rules! impl_vm {
                             Some((result, pc))
                         }
                         $(
+                            // handle opcode
                             OpCode::$name => {
                                 let mut result = format!("{:?} {} ", position, stringify!($name));
                                 $(
-                                    result.push_str(&format!("{:?} ", impl_vm!(read $op_type, self, pc) ));
+                                    result.push_str(&format!("{:?} ", impl_vm!(read $arg_type, self, pc) ));
                                 )*
                                 Some((result, pc))
                             }
+                            // handle opcode variants
+                            $(
+                                $(
+                                    OpCode::$variant_name => {
+                                        let mut result = format!("{:?} {} ", position, stringify!($variant_name));
+                                        result.push_str(&format!("{:?} ", impl_vm!(read $variant_type, self, pc) ));
+                                        Some((result, pc))
+                                    }
+                                )+
+                            )?
                         ),+,
                     }
                 } else {
@@ -172,10 +203,19 @@ macro_rules! impl_vm {
                 match OpCode::from_u8(instruction) {
                     $(
                         OpCode::$name => {
-                            let ( (), $( $op_name ),* ) = ( (), $( impl_vm!(read $op_type, self, self.pc) ),* );
+                            let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
                             $(let $context = context;)?
-                            self.$name( $($context,)? $( $op_name ),* );
+                            self.$name( $($context,)? $( $arg_name ),* );
                         }
+                        // handle opcode variants
+                        $(
+                            $(
+                                OpCode::$variant_name => {
+                                    let tmp: $variant_type = impl_vm!(read $variant_type, self, self.pc);
+                                    self.$name( tmp as $variant_type_as );
+                                }
+                            )+
+                        )?
                     ),+
                 }
             }

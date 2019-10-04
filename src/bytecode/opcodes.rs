@@ -50,60 +50,25 @@ impl_vm!{
     }
 
     /// Load 2 byte from constant pool onto stack.
-    fn const_fetch16(&mut self, const_id: u8) {
-        self.const_fetch16_32(const_id as u32);
-    }
-    /// Load 2 byte from constant pool onto stack.
-    fn const_fetch16_16(&mut self, const_id: u16) {
-        self.const_fetch16_32(const_id as u32);
-    }
-    /// Load 2 byte from constant pool onto stack.
-    fn const_fetch16_32(&mut self, const_id: u32) {
+    fn const_fetch16_32<const_fetch16: u8 as u32, const_fetch16_16: u16 as u32>(&mut self, const_id: u32) {
         let item = HeapRef::from_const(const_id, 2);
         let data = self.heap.read16(item);
         self.stack.push(data);
     }
-
     /// Load 4 byte from constant pool onto stack.
-    fn const_fetch32(&mut self, const_id: u8) {
-        self.const_fetch32_32(const_id as u32);
-    }
-    /// Load 4 byte from constant pool onto stack.
-    fn const_fetch32_16(&mut self, const_id: u16) {
-        self.const_fetch32_32(const_id as u32);
-    }
-    /// Load 4 byte from constant pool onto stack.
-    fn const_fetch32_32(&mut self, const_id: u32) {
+    fn const_fetch32_32<const_fetch32: u8 as u32, const_fetch32_16: u16 as u32>(&mut self, const_id: u32) {
         let item = HeapRef::from_const(const_id, 4);
         let data = self.heap.read32(item);
         self.stack.push(data);
     }
-
     /// Load 8 byte from constant pool onto stack.
-    fn const_fetch64(&mut self, const_id: u8) {
-        self.const_fetch64_32(const_id as u32);
-    }
-    /// Load 8 byte from constant pool onto stack.
-    fn const_fetch64_16(&mut self, const_id: u16) {
-        self.const_fetch64_32(const_id as u32);
-    }
-    /// Load 8 byte from constant pool onto stack.
-    fn const_fetch64_32(&mut self, const_id: u32) {
+    fn const_fetch64_32<const_fetch64: u8 as u32, const_fetch64_16: u16 as u32>(&mut self, const_id: u32) {
         let item = HeapRef::from_const(const_id, 8);
         let data = self.heap.read64(item);
         self.stack.push(data);
     }
-
     /// Load 12 byte from constant pool onto stack.
-    fn const_fetch96(&mut self, const_id: u8) {
-        self.const_fetch96_32(const_id as u32);
-    }
-    /// Load 12 byte from constant pool onto stack.
-    fn const_fetch96_16(&mut self, const_id: u16) {
-        self.const_fetch96_32(const_id as u32);
-    }
-    /// Load 12 byte from constant pool onto stack.
-    fn const_fetch96_32(&mut self, const_id: u32) {
+    fn const_fetch96_32<const_fetch96: u8 as u32, const_fetch96_16: u16 as u32>(&mut self, const_id: u32) {
         let item = HeapRef::from_const(const_id, 12);
         let data = self.heap.read96(item);
         self.stack.push(data);
@@ -126,160 +91,104 @@ impl_vm!{
     }
 
     /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr32_s8(&mut self, offset: i8) {
-        self.loadr32_s32(offset as i32);
-    }
-    /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr32_s16(&mut self, offset: i16) {
-        self.loadr32_s32(offset as i32);
-    }
-    /// Load stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr32_s32(&mut self, offset: i32) {
+    fn loadr32_s32<loadr32_s8: i8 as i32, loadr32_s16: i16 as i32>(&mut self, offset: i32) {
         let local: Value = self.stack.load_fp(offset);
         self.stack.push(local);
     }
     /// Pop stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer32_s8(&mut self, offset: i8) {
-        self.storer32_s32(offset as i32);
-    }
-    /// Pop stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer32_s16(&mut self, offset: i16) {
-        self.storer32_s32(offset as i32);
-    }
-    /// Pop stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer32_s32(&mut self, offset: i32) {
+    fn storer32_s32<storer32_s8: i8 as i32, storer32_s16: i16 as i32>(&mut self, offset: i32) {
         let local: Value = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
     /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr64_s8(&mut self, offset: i8) {
-        self.loadr64_s32(offset as i32);
-    }
-    /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr64_s16(&mut self, offset: i16) {
-        self.loadr64_s32(offset as i32);
-    }
-    /// Load 64 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr64_s32(&mut self, offset: i32) {
+    fn loadr64_s32<loadr64_s8: i8 as i32, loadr64_s16: i16 as i32>(&mut self, offset: i32) {
         let local: Value64 = self.stack.load_fp(offset);
         self.stack.push(local);
     }
     /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer64_s8(&mut self, offset: i8) {
-        self.storer64_s32(offset as i32);
-    }
-    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer64_s16(&mut self, offset: i16) {
-        self.storer64_s32(offset as i32);
-    }
-    /// Pop 64 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer64_s32(&mut self, offset: i32) {
+    fn storer64_s32<storer64_s8: i8 as i32, storer64_s16: i16 as i32>(&mut self, offset: i32) {
         let local: Value64 = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
     /// Load 96 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr96_s8(&mut self, offset: i8) {
-        self.loadr96_s32(offset as i32);
-    }
-    /// Load 96 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr96_s16(&mut self, offset: i16) {
-        self.loadr96_s32(offset as i32);
-    }
-    /// Load 96 bit stackvalue from offset (relative to the stack frame) and push onto the stack.
-    fn loadr96_s32(&mut self, offset: i32) {
+    fn loadr96_s32<loadr96_s8: i8 as i32, loadr96_s16: i16 as i32>(&mut self, offset: i32) {
         let local: HeapRef = self.stack.load_fp(offset);
         self.stack.push(local);
     }
     /// Pop 96 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer96_s8(&mut self, offset: i8) {
-        self.storer96_s32(offset as i32);
-    }
-    /// Pop 96 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer96_s16(&mut self, offset: i16) {
-        self.storer96_s32(offset as i32);
-    }
-    /// Pop 96 bit stackvalue and store it at the given offset (relative to the stack frame).
-    fn storer96_s32(&mut self, offset: i32) {
+    fn storer96_s32<storer96_s8: i8 as i32, storer96_s16: i16 as i32>(&mut self, offset: i32) {
         let local: HeapRef = self.stack.pop();
         self.stack.store_fp(offset, local);
     }
 
-    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack.
-    fn index_8(&mut self, element_size: u8) {
-        self.index_32(element_size as u32);
-    }
-    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack.
-    fn index_16(&mut self, element_size: u16) {
-        self.index_32(element_size as u32);
-    }
-    /// Pop two u32 "index" and "offset" and push the result of offset + index * element_size onto the stack. // todo fix description
-    fn index_32(&mut self, element_size: u32) {
+    /// Pop u32 "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
+    fn index_32<index_8: u8 as u32, index_16: u16 as u32>(&mut self, element_size: u32) {
         let element_index: u32 = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
         item.offset += element_index as u32 * element_size;
         self.stack.push(item);
     }
 
-    // Reads the top 32 bit value off the tmp stack and pushes it onto the stack.
+    /// Reads the top 32 bit value off the tmp stack and pushes it onto the stack.
     fn load_tmp32(&mut self) {
         let value: Value = self.tmp.top();
         self.stack.push(value);
     }
-    // Reads the top 32 bit value off the stack and pushes it onto the tmp stack.
+    /// Reads the top 32 bit value off the stack and pushes it onto the tmp stack.
     fn store_tmp32(&mut self) {
         let value: Value = self.stack.top();
         self.tmp.push(value);
     }
-    // Pops the top 32 bit value off the tmp stack and pushes it onto the stack.
+    /// Pops the top 32 bit value off the tmp stack and pushes it onto the stack.
     fn pop_tmp32(&mut self) {
         let value: Value = self.tmp.pop();
         self.stack.push(value);
     }
-    // Pops the 32 bit value off the stack and pushes it onto the tmp stack.
+    /// Pops the 32 bit value off the stack and pushes it onto the tmp stack.
     fn push_tmp32(&mut self) {
         let value: Value = self.stack.pop();
         self.tmp.push(value);
     }
 
-    // Reads the top 64 bit value off the tmp stack and pushes it onto the stack.
+    /// Reads the top 64 bit value off the tmp stack and pushes it onto the stack.
     fn load_tmp64(&mut self) {
         let value: Value64 = self.tmp.top();
         self.stack.push(value);
     }
-    // Reads the top 64 bit value off the stack and pushes it onto the tmp stack.
+    /// Reads the top 64 bit value off the stack and pushes it onto the tmp stack.
     fn store_tmp64(&mut self) {
         let value: Value64 = self.stack.top();
         self.tmp.push(value);
     }
-    // Pops the top 64 bit value off the tmp stack and pushes it onto the stack.
+    /// Pops the top 64 bit value off the tmp stack and pushes it onto the stack.
     fn pop_tmp64(&mut self) {
         let value: Value64 = self.tmp.pop();
         self.stack.push(value);
     }
-    // Pops the 64 bit value off the stack and pushes it onto the tmp stack.
+    /// Pops the 64 bit value off the stack and pushes it onto the tmp stack.
     fn push_tmp64(&mut self) {
         let value: Value64 = self.stack.pop();
         self.tmp.push(value);
     }
 
-    // Reads the top 96 bit value off the tmp stack and pushes it onto the stack.
+    /// Reads the top 96 bit value off the tmp stack and pushes it onto the stack.
     fn load_tmp96(&mut self) {
         let value: HeapRef = self.tmp.top();
         self.stack.push(value);
     }
-    // Reads the top 96 bit value off the stack and pushes it onto the tmp stack.
+    /// Reads the top 96 bit value off the stack and pushes it onto the tmp stack.
     fn store_tmp96(&mut self) {
         let value: HeapRef = self.stack.top();
         self.tmp.push(value);
     }
-    // Pops the top 96 bit value off the tmp stack and pushes it onto the stack.
+    /// Pops the top 96 bit value off the tmp stack and pushes it onto the stack.
     fn pop_tmp96(&mut self) {
         let value: HeapRef = self.tmp.pop();
         self.stack.push(value);
     }
-    // Pops the 96 bit value off the stack and pushes it onto the tmp stack.
+    /// Pops the 96 bit value off the stack and pushes it onto the tmp stack.
     fn push_tmp96(&mut self) {
         let value: HeapRef = self.stack.pop();
         self.tmp.push(value);
@@ -299,6 +208,7 @@ impl_vm!{
     fn heap_decref_result(&mut self) {
         let item: HeapRef = self.stack.pop();
         let prior_item: HeapRef = self.stack.top();
+        //println!("prior: {} current: {}", prior_heap_index, heap_index);
         if item.index == prior_item.index {
             self.heap.dec_ref(item.index);
         } else {
@@ -564,20 +474,6 @@ impl_vm!{
         let b: HeapRef = self.stack.load(pos_b);
         self.stack.store(pos_a, b);
         self.stack.store(pos_b, a);
-    }
-    /// Swap the two topmost 64 and 32 bit stack values.
-    fn swap64_32(&mut self) {
-        let a: Value64 = self.stack.pop();
-        let b: Value = self.stack.pop();
-        self.stack.push(a);
-        self.stack.push(b);
-    }
-    /// Swap the two topmost 32 and 64 bit stack values.
-    fn swap32_64(&mut self) {
-        let a: Value = self.stack.pop();
-        let b: Value64 = self.stack.pop();
-        self.stack.push(a);
-        self.stack.push(b);
     }
 
     /// Calls the given Rust function.
