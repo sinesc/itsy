@@ -185,28 +185,48 @@ impl Heap {
     }
 
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
-    pub fn copy(self: &mut Self, index_dest: u32, offset_dest: u32, index_src: u32, offset_src: u32, num: u32) {
+    pub fn copy(self: &mut Self, dest_item: HeapRef, src_item: HeapRef) {
 
-        let index_dest = index_dest as usize;
-        let index_src = index_src as usize;
-        let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
+        if dest_item.index != src_item.index {
 
-        let offset_dest = offset_dest as usize;
-        let offset_src = offset_src as usize;
-        let num_bytes = usize::min(num as usize, src.data.len() - offset_src);
-        let copy_bytes = usize::min(num_bytes, dest.data.len() - offset_dest);
-        let push_bytes = num_bytes - copy_bytes;
+            let (dest, src) = index_twice(&mut self.objects, dest_item.index as usize, src_item.index as usize);
 
-        if copy_bytes > 0 {
-            let slice_dest = &mut dest.data[offset_dest .. offset_dest + copy_bytes];
-            let slice_src = &mut src.data[offset_src .. offset_src + copy_bytes];
-            slice_dest.copy_from_slice(slice_src);
-        }
+            let offset_src = src_item.offset as usize;
+            let offset_dest = dest_item.offset as usize;
+            let num_bytes = src_item.len as usize;
+            let copy_bytes = usize::min(num_bytes, dest.data.len() - offset_dest);
+            let push_bytes = num_bytes - copy_bytes;
 
-        if push_bytes > 0 {
-            let (dest, src) = index_twice(&mut self.objects, index_dest, index_src);
-            let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
-            dest.data.extend_from_slice(slice_src);
+            if copy_bytes > 0 {
+                let slice_dest = &mut dest.data[offset_dest .. offset_dest + copy_bytes];
+                let slice_src = &mut src.data[offset_src .. offset_src + copy_bytes];
+                slice_dest.copy_from_slice(slice_src);
+            }
+
+            if push_bytes > 0 {
+                let (dest, src) = index_twice(&mut self.objects, dest_item.index as usize, src_item.index as usize);
+                let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
+                dest.data.extend_from_slice(slice_src);
+            }
+
+        } else {
+
+            let slice = &mut self.objects[src_item.index as usize].data;
+
+            let offset_src = src_item.offset as usize;
+            let offset_dest = dest_item.offset as usize;
+            let num_bytes = src_item.len as usize;
+            let copy_bytes = usize::min(src_item.len as usize, slice.len() - offset_src);
+            let push_bytes = num_bytes - copy_bytes;
+
+            if copy_bytes > 0 {
+                slice.copy_within(offset_src..offset_src + copy_bytes, offset_dest);
+            }
+
+            if push_bytes > 0 {
+                let mut tmp = slice[offset_src + copy_bytes..offset_src + copy_bytes + push_bytes].to_vec();
+                slice.append(&mut tmp);
+            }
         }
     }
 

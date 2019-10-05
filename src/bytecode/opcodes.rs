@@ -219,8 +219,9 @@ impl_vm!{
     /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest.
     fn heap_copy_32(&mut self, num_bytes: u32) {
         let dest: HeapRef = self.stack.pop();
-        let src: HeapRef = self.stack.pop();
-        self.heap.copy(dest.index, dest.offset, src.index, src.offset, num_bytes);
+        let mut src: HeapRef = self.stack.pop();
+        src.len = u32::min(num_bytes, src.len);
+        self.heap.copy(dest, src);
     }
 
     /// Pops 2 heap objects and compares num_bytes bytes.
@@ -295,12 +296,12 @@ impl_vm!{
         let src_b: HeapRef = self.stack.pop();
         let src_a: HeapRef = self.stack.pop();
 
-        let heap_index_dest: u32 = self.heap.alloc(Vec::new());
+        let dest_index: u32 = self.heap.alloc(Vec::new());
 
-        self.heap.copy(heap_index_dest, 0, src_a.index, src_a.offset, src_a.len);
-        self.heap.copy(heap_index_dest, src_a.len, src_b.index, src_b.offset, src_b.len);
+        self.heap.copy(HeapRef { index: dest_index, offset: 0, len: 0 }, src_a);
+        self.heap.copy(HeapRef { index: dest_index, offset: src_a.len, len: src_a.len }, src_b);
 
-        self.stack.push(HeapRef { index: heap_index_dest, offset: 0, len: src_a.len + src_b.len });
+        self.stack.push(HeapRef { index: dest_index, offset: 0, len: src_a.len + src_b.len });
     }
 
     /// Pop a heap object and push the heap value at its current offset onto the stack.
