@@ -191,15 +191,15 @@ impl_positioned!(Function);
 pub struct Signature<'a> {
     pub ident   : Ident<'a>,
     pub args    : Vec<Binding<'a>>,
-    pub ret     : Option<TypeName<'a>>,
+    pub ret     : Option<InlineType<'a>>,
 }
 
 impl<'a> Signature<'a> {
     pub fn ret_resolved(self: &Self) -> bool {
-        self.ret.as_ref().map_or(true, |ret| ret.type_id.is_some())
+        self.ret.as_ref().map_or(true, |ret| ret.type_id().is_some())
     }
     pub fn ret_type_id(self: &Self) -> Option<TypeId> {
-        self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id)
+        self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id())
     }
     pub fn args_resolved(self: &Self) -> bool {
         self.args.iter().fold(true, |acc, arg| acc && arg.ty.as_ref().map_or(false, |type_name| type_name.type_id().is_some()))

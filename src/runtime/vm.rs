@@ -66,7 +66,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
             result.push_str("\n");
             position = next_position;
         }
-        return result;
+        result
     }
 
     /// Disassembles the current bytecode instruction and returns it as a string.

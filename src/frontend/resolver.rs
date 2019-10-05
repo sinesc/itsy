@@ -368,7 +368,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // resolve return type
         if let Some(ret) = &mut item.ret {
-            self.resolve_type(ret, None)?;
+            self.resolve_inline_type(ret)?;
         }
         Ok(())
     }

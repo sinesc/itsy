@@ -621,7 +621,7 @@ named!(signature_argument(Input<'_>) -> Binding<'_>, do_parse!(
 
 named!(signature_argument_list(Input<'_>) -> Vec<Binding<'_>>, ws!(delimited!(char!('('), separated_list_complete!(char!(','), signature_argument), char!(')'))));
 
-named!(signature_return_part(Input<'_>) -> Path, ws!(preceded!(tag!("->"), path)));
+named!(signature_return_part(Input<'_>) -> InlineType, ws!(preceded!(tag!("->"), inline_type)));
 
 named!(signature(Input<'_>) -> Signature<'_>, map!(
     preceded!(tag!("fn"), return_error!(
@@ -630,7 +630,7 @@ named!(signature(Input<'_>) -> Signature<'_>, map!(
     )), |sig| Signature {
     ident   : sig.0,
     args    : sig.1,
-    ret     : if let Some(sig_ty) = sig.2 { Some(TypeName::from_path(sig_ty)) } else { None },
+    ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
 }));
 
 named!(function(Input<'_>) -> Statement<'_>, do_parse!(

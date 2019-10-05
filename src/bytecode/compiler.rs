@@ -351,7 +351,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.fix_targets(function_id, position);
         // create local environment
         let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id).quadsize()) as u32;
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id()).quadsize()) as u32;
         for arg in item.sig.args.iter() {
             let arg_size = self.bindingtype(arg).quadsize();
             frame.next_arg -= arg_size as i32 - 1;
@@ -369,7 +369,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.compile_block(&item.block);
         if !item.block.returns() {
             comment!(self, "Cleanup function {}", item.sig.ident.name);
-            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id).is_primitive());
+            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id()).is_primitive());
             self.write_heap_decref_all(return_heap_object);
             self.write_ret();
         }
