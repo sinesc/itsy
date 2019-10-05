@@ -526,24 +526,30 @@ impl_vm!{
 
     /// Pops value off the stack, truncates it to the given number of bits and pushes the result.
     /// Allowed values for size are 8 and 16.
-    fn trunc(&mut self, size: u8) { // todo: might as well make 2 opcodes
+    fn truncate32(&mut self, size: u8) { // todo: might as well make 2 opcodes
         let value: Value = self.stack.pop();
         self.stack.push(value & ((1 << size as u32) - 1));
     }
     /// Pops a 64 bit value off the stack, truncates it to the given number of bits and pushes the 32 bit result.
     /// Allowed values for size are 8, 16 and 32.
-    fn trunc64(&mut self, size: u8) {
+    fn truncate64(&mut self, size: u8) {
         let value: Value64 = self.stack.pop();
         self.stack.push((value & ((1 << size as u64) - 1)) as u32);
     }
 
+    /// Extends the unsigned up to 32 bit value at the top of the stack to 64 bit.
+    fn extend64(&mut self) {
+        let value: Value = self.stack.pop();
+        self.stack.push(value as Value64);
+    }
+
     /// Pops a value off the stack, sign-extends it *by* the given number of bits up to a maximum of 32 and pushes the result.
-    fn extends(&mut self, num_bits: u8) {
+    fn sign_extend32(&mut self, num_bits: u8) {
         let value: Value = self.stack.pop();
         self.stack.push(value.wrapping_shl(num_bits as u32).wrapping_shr(num_bits as u32));
     }
     /// Pops a max 32 bit value off the stack, sign-extends it *by* the given number of bits up to a maximum of 64 and pushes the 64 bit result.
-    fn extends64(&mut self, num_bits: u8) { // todo: naming shouldn't be 64 since its popping 32 bits. we don't have a convention for output size though
+    fn sign_extend64(&mut self, num_bits: u8) { // todo: naming shouldn't be 64 since its popping 32 bits. we don't have a convention for output size though
         let value: Value = self.stack.pop();
         let value = value as i64;
         self.stack.push(value.wrapping_shl(num_bits as u32).wrapping_shr(num_bits as u32));

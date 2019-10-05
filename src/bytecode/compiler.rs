@@ -775,33 +775,23 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             } else if from.size() == 4 && to.size() == 8 {
                 self.writer.f32tof64();
             }
-        } else if from.is_unsigned() {
-            if from.size() > to.size() {
-                if from.size() == 8 {
-                    self.writer.trunc64(to.size() * 8);
-                } else if from.size() <= 4 {
-                    self.writer.trunc(to.size() * 8);
-                } else {
-                    panic!("invalid type size")
-                }
+        } else if from.size() > to.size() {
+            match from.size() {
+                8 => { self.writer.truncate64(to.size() * 8); },
+                4 | 2 | 1 => { self.writer.truncate32(to.size() * 8); },
+                size @ _ => panic!("Invalid truncate size {}", size),
             }
-        } else if from.is_signed() {
-            if from.size() > to.size() {
-                if from.size() == 8 {
-                    self.writer.trunc64(to.size() * 8);
-                } else if from.size() <= 4 {
-                    self.writer.trunc(to.size() * 8);
-                } else {
-                    panic!("invalid type size")
-                }
-            } else if from.size() < to.size() {
-                if to.size() == 8 {
-                    self.writer.extends64((to.size() - from.size()) * 8);
-                } else if to.size() <= 4 {
-                    self.writer.extends((to.size() - from.size()) * 8);
-                } else {
-                    panic!("invalid type size")
-                }
+        } else if from.is_unsigned() && from.size() < to.size() {
+            match to.size() {
+                8 => { self.writer.extend64(); },
+                4 | 2 | 1 => { /* nothing to do */ },
+                size @ _ => panic!("Invalid sign_extend size {}", size),
+            }
+        } else if from.is_signed() && from.size() < to.size() {
+            match to.size() {
+                8 => { self.writer.sign_extend64((to.size() - from.size()) * 8); },
+                4 | 2 | 1 => { self.writer.sign_extend32((to.size() - from.size()) * 8); },
+                size @ _ => panic!("Invalid sign_extend size {}", size),
             }
         }
 

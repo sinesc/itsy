@@ -186,6 +186,52 @@ fn compound_f64() {
     ]);
 }
 
+// --- cast unsigned to unsigend ---
+
+#[allow(overflowing_literals)]
+#[test]
+fn cast_u8_u16() {
+    let result = run("
+        ret_u16(23u8 as u16);
+        ret_u16(280u8 as u16);
+        ret_u16(243u8 as u16);
+    ");
+    assert_all(&result, &[ 23u8 as u16, 280u8 as u16, 243u8 as u16 ]);
+}
+
+#[allow(overflowing_literals)]
+#[test]
+fn cast_u64_u16() {
+    let result = run("
+        ret_u16(23u64 as u16);
+        ret_u16(280u64 as u16);
+        ret_u16(243u64 as u16);
+    ");
+    assert_all(&result, &[ 23u64 as u16, 280u64 as u16, 243u64 as u16 ]);
+}
+
+#[allow(overflowing_literals)]
+#[test]
+fn cast_u8_u64() {
+    let result = run("
+        ret_u64(23u8 as u64);
+        ret_u64(280u8 as u64);
+        ret_u64(243u8 as u64);
+    ");
+    assert_all(&result, &[ 23u8 as u64, 280u8 as u64, 243u8 as u64 ]);
+}
+
+#[allow(overflowing_literals)]
+#[test]
+fn cast_u64_u8() {
+    let result = run("
+        ret_u8(23u64 as u8);
+        ret_u8(280u64 as u8);
+        ret_u8(243u64 as u8);
+    ");
+    assert_all(&result, &[ 23u64 as u8, 280u64 as u8, 243u64 as u8 ]);
+}
+
 // --- cast signed to signed ---
 
 #[allow(overflowing_literals)]
