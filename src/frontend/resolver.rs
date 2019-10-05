@@ -320,17 +320,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     // Resolves an inline type definition.
-    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) ->Option<TypeId> {
+    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Result<Option<TypeId>, ResolveError> {
         use ast::InlineType as IT;
         match item {
-            IT::TypeName(type_name) => self.resolve_type(type_name, None).unwrap(), // todo: not sure about this one. inline-type is usually defining, so if it differs, the other side should be wrong
+            IT::TypeName(type_name) => self.resolve_type(type_name, None), // todo: not sure about this one. inline-type is usually defining, so if it differs, the other side should be wrong
             IT::Array(array) => self.resolve_array(array),
         }
     }
 
     /// Resolves an array definition
-    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Option<TypeId> {
-        let inner_type_id = self.resolve_inline_type(&mut item.element_type);
+    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Result<Option<TypeId>, ResolveError> {
+        let inner_type_id = self.resolve_inline_type(&mut item.element_type)?;
         if item.type_id.is_none() {
             let ty = Type::Array(Array {
                 len     : Some(item.len),
@@ -338,13 +338,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             });
             item.type_id = Some(self.scopes.insert_type(self.scope_id, None, ty));
         }
-        item.type_id
+        Ok(item.type_id)
     }
 
     /// Resolves a struct definition.
     fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'ast>) -> ResolveResult {
         for (_, field) in &mut item.fields {
-            self.resolve_inline_type(field);
+            self.resolve_inline_type(field)?;
         }
         if item.type_id.is_none() {
             let mut fields = Vec::new();
@@ -685,9 +685,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'ast>) -> ResolveResult {
 
         // check if a type is specified
-        let explicit = match item.type_name {
+        let explicit = match item.ty {
             Some(ref mut ty) => {
-                self.resolve_type(ty, None)?
+                self.resolve_inline_type(ty)?
             },
             None => None,
         };

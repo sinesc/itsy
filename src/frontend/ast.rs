@@ -171,7 +171,7 @@ pub struct Binding<'a> {
     pub ident       : Ident<'a>,
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
-    pub type_name   : Option<TypeName<'a>>,
+    pub ty          : Option<InlineType<'a>>,
     pub binding_id  : Option<BindingId>,
 }
 impl_bindable!(Binding);
@@ -202,10 +202,10 @@ impl<'a> Signature<'a> {
         self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id)
     }
     pub fn args_resolved(self: &Self) -> bool {
-        self.args.iter().fold(true, |acc, arg| acc && arg.type_name.as_ref().map_or(false, |type_name| type_name.type_id.is_some()))
+        self.args.iter().fold(true, |acc, arg| acc && arg.ty.as_ref().map_or(false, |type_name| type_name.type_id().is_some()))
     }
     pub fn arg_type_ids(self: &Self) -> Vec<Option<TypeId>> {
-        self.args.iter().map(|arg| arg.type_name.as_ref().map_or(None, |type_name| type_name.type_id)).collect()
+        self.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id())).collect()
     }
 }
 

@@ -549,14 +549,14 @@ named!(binding(Input<'_>) -> Statement<'_>, do_parse!(
     result: map!(
         preceded!(tag!("let"), return_error!(
             ErrorKind::Custom(ParseErrorKind::SyntaxLet as u32),
-            ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), path)), opt!(preceded!(char!('='), expression)), char!(';')))
+            ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), inline_type)), opt!(preceded!(char!('='), expression)), char!(';')))
         )),
         |m| Statement::Binding(Binding {
             position    : position as u32,
             ident       : m.1,
             mutable     : m.0.is_some(),
             expr        : m.3,
-            type_name   : m.2.map(|t| TypeName::from_path(t)),
+            ty          : m.2,
             binding_id  : None,
         })
     ) >>
@@ -608,12 +608,12 @@ named!(array(Input<'_>) -> Array<'_>, do_parse!(
 
 named!(signature_argument(Input<'_>) -> Binding<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), path)), |tuple| Binding {
+    result: map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), inline_type)), |tuple| Binding {
         position    : position as u32,
         ident       : tuple.1,
         expr        : None,
         mutable     : tuple.0.is_some(),
-        type_name   : Some(TypeName::from_path(tuple.3)),
+        ty          : Some(tuple.3),
         binding_id  : None,
     }) >>
     (result)
@@ -672,7 +672,7 @@ named!(for_loop(Input<'_>) -> ForLoop<'_>, do_parse!(
             ident       : m.1,
             mutable     : true,
             expr        : None,
-            type_name   : None,
+            ty          : None,
             binding_id  : None,
         },
         range   : m.3,
