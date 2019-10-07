@@ -209,10 +209,10 @@ named!(array_literal_elements(Input<'_>) -> Vec<Literal<'_>>, ws!(separated_list
 
 named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(delimited!(char!('['), array_literal_elements, char!(']'))), |m| Literal {
+    result: map!(ws!(tuple!(char!('['), array_literal_elements, opt!(char!(',')), char!(']'))), |m| Literal {
         position    : position as u32,
         value: LiteralValue::Array(ArrayLiteral {
-            elements: m,
+            elements: m.1,
         }),
         type_name   : None,
         binding_id  : None,
