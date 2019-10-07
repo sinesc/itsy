@@ -66,6 +66,8 @@ struct Resolver<'ctx> {
 
 /// Utility structure to handle primitive type information and casting.
 struct Primitives {
+    /// Void type
+    pub void    : TypeId,
     /// Boolean type
     pub bool    : TypeId,
     /// Unsigned types ordered by bit count.
@@ -86,9 +88,8 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
     let mut scopes = scopes::Scopes::new();
     let root_scope_id = scopes::Scopes::root_id();
 
-    scopes.insert_type(root_scope_id, None, Type::void);
-
     let primitives = Primitives {
+        void: scopes.insert_type(root_scope_id, None, Type::void),
         bool: scopes.insert_type(root_scope_id, Some("bool"), Type::bool),
         unsigned: [
             scopes.insert_type(root_scope_id, Some("u8"), Type::u8),
@@ -554,27 +555,50 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-        let mut truncate_before = None;
-        let num_statements = item.statements.len();
-        for (index, mut statement) in item.statements.iter_mut().enumerate() {
-            self.resolve_statement(&mut statement)?;
-            // check for unconditional returns, code below is unreachable, remove
+
+        // check for unconditional returns, code below those is unreachable, remove
+        let mut return_index = None;
+        for (index, statement) in item.statements.iter_mut().enumerate() {
             if statement.returns() {
-                item.explicit_return = true;
-                if index + 1 < num_statements {
-                    truncate_before = Some(index + 1);
-                }
+                return_index = Some(index);
                 break;
             }
         }
-        // remove code after root level return (including the return, which was moved to item.result)
-        if let Some(truncate_before) = truncate_before {
-            item.statements.truncate(truncate_before);
-
+        // remove code after return, move return to returns
+        if let Some(return_index) = return_index {
+            item.statements.truncate(return_index + 1);
+            let returns = item.statements.pop().unwrap();
+            item.returns = Some(returns.into_expression().unwrap());
+            item.result = None;
         }
-        // resolve block result
+        // check if the result returns, if so move to returns
+        if item.result.as_ref().map_or(false, |r| r.returns()) {
+            item.returns = item.result.take();
+        }
+
+        // resolve statments, result and returns
+        for statement in item.statements.iter_mut() {
+            self.resolve_statement(statement)?;
+        }
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, expected_result)?;
+        }
+        if let Some(ref mut returns) = item.returns {
+            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).expect("Encountered return outside of function");
+            let ret_type_id = self.scopes.function_type(function_id).ret_type;
+            self.resolve_expression(returns, ret_type_id)?;
+        }
+
+        // check result type matches expected type unless block is returned from before ever resulting
+        if item.returns.is_none() && expected_result.is_some() {
+            if item.result.is_none() { // no result = void
+                self.check_types_match(item, expected_result, Some(self.primitives.void))?;
+            } else if let Some(result_expression) = &mut item.result {
+                let result_type_id = self.bindingtype_id(result_expression);
+                if result_type_id.is_some() {
+                    self.check_types_match(item, expected_result, result_type_id)?;
+                }
+            }
         }
         self.scope_id = parent_scope_id;
         Ok(())

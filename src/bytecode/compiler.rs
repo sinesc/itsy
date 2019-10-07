@@ -379,11 +379,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &Self, item: &ast::Call<'ast>) {
-        comment!(self, "Call");
+        comment!(self, "Call {}", item.ident.name);
 
         // put args on stack, ensure temporaries are cleaned up later
         for (index, arg) in item.args.iter().enumerate() {
-            comment!(self, "arg {}", index);
+            comment!(self, "  arg {}", index);
             self.compile_expression(arg);
             self.write_tmp_ref(arg);
         }
@@ -567,12 +567,15 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given block.
     fn compile_block(self: &Self, item: &ast::Block<'ast>) {
-
         for statement in item.statements.iter() {
             self.compile_statement(statement);
         }
-
-        if let Some(result) = &item.result {
+        if let Some(returns) = &item.returns {
+            self.compile_expression(returns);
+            if !returns.returns() {
+                self.write_ret();
+            }
+        } else if let Some(result) = &item.result {
             self.compile_expression(result);
         }
     }

@@ -1223,3 +1223,37 @@ fn string_concat() {
     ]);
 }
 
+#[test]
+fn dead_code_result() {
+    let result = run("
+        fn result() -> u32 {
+            if true {
+                return 1;
+            } else if true {
+                return 2;
+            } else {
+                return 3;
+            }
+            let dead_code: f64 = 3.14;
+            dead_code
+        }
+        fn return_() -> u32 {
+            if false {
+                return 1;
+            } else if true {
+                return 2;
+            } else {
+                return 3;
+            }
+            let dead_code: f64 = 3.14;
+            return dead_code;
+        }
+        fn main() {
+            ret_u32(result());
+            ret_u32(return_());
+        }
+    ");
+    assert_all(&result, &[
+        1u32, 2u32
+    ]);
+}

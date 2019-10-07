@@ -56,18 +56,7 @@ pub(crate) trait Returns {
     /// Returns true if this structure unconditionally causes the parent function to return.
     fn returns(self: &Self) -> bool;
 }
-/*
-/// Implements the Returns trait for given structure.
-macro_rules! impl_no_return {
-    ($struct_name:ident) => {
-        impl<'a> Returns for $struct_name<'a> {
-            fn returns(self: &Self) -> bool {
-                false
-            }
-        }
-    };
-}
-*/
+
 #[derive(Debug)]
 pub struct Ident<'a> {
     pub position: u32,
@@ -103,20 +92,20 @@ pub enum Statement<'a> {
 
 impl<'a> Statement<'a> {
     /// Returns whether the statement could also be an expression. Notably, an expression could not be since Statement::Expression is ; terminated
-    pub fn is_expressable(self: &Self) -> bool {
+    pub fn maybe_expression(self: &Self) -> bool {
         match self {
             Statement::IfBlock(_) | Statement::Block(_) => true,
             _ => false,
         }
     }
     /// Converts the statement into an expression or panics if the conversion would be invalid.
-    pub fn into_expression(self: Self) -> Expression<'a> {
+    pub fn into_expression(self: Self) -> Option<Expression<'a>> {
         match self {
-            Statement::IfBlock(if_block)        => Expression::IfBlock(Box::new(if_block)),
-            Statement::Block(block)             => Expression::Block(Box::new(block)),
-            Statement::Expression(expression)   => expression,
-            Statement::Return(ret)              => ret.expr.unwrap(),
-            _                                   => panic!("invalid statement to expression conversion"),
+            Statement::IfBlock(if_block)        => Some(Expression::IfBlock(Box::new(if_block))),
+            Statement::Block(block)             => Some(Expression::Block(Box::new(block))),
+            Statement::Expression(expression)   => Some(expression),
+            Statement::Return(ret)              => Some(ret.expr.unwrap()),
+            _                                   => None,
         }
     }
 }
@@ -337,14 +326,14 @@ pub struct Block<'a> {
     pub position    : u32,
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
+    pub returns     : Option<Expression<'a>>,
     pub scope_id    : Option<ScopeId>,
-    pub explicit_return: bool,
 }
 impl_positioned!(Block);
 
 impl<'a> Returns for Block<'a> {
     fn returns(self: &Self) -> bool {
-        self.explicit_return
+        self.returns.is_some() || self.result.as_ref().map_or(false, |result| result.returns()) || self.statements.iter().any(|statement| statement.returns())
     }
 }
 

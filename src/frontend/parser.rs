@@ -12,13 +12,14 @@ use crate::frontend::ast::*;
 #[derive(Copy, Clone, Debug)]
 pub enum ParseErrorKind {
     Unknown = 1,
-    UnexpectedEOF = 2,
-    SyntaxError = 3,
-    SyntaxLet = 4,
-    SyntaxFn = 5,
-    SyntaxIf = 6,
-    SyntaxElse = 7,
-    InvalidNumerical = 8,
+    UnexpectedEOF,
+    SyntaxError,
+    SyntaxLet,
+    SyntaxFn,
+    SyntaxIf,
+    SyntaxElse,
+    SyntaxInlineType,
+    InvalidNumerical,
     // TODO: add error handling to all parsers where it make sense
 }
 
@@ -326,15 +327,15 @@ named!(block(Input<'_>) -> Block<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(char!('{'), block_items, opt!(expression), char!('}'))), |mut m| {
         // move last block item into result if it could be an expression and no result was matched
-        if m.2.is_none() && m.1.last().map_or(false, |l| l.is_expressable()) {
-            m.2 = m.1.pop().map(|s| s.into_expression());
+        if m.2.is_none() && m.1.last().map_or(false, |l| l.maybe_expression()) {
+            m.2 = m.1.pop().map(|s| s.into_expression().unwrap());
         }
         Block {
             position        : position as u32,
             statements      : m.1,
             result          : m.2,
+            returns         : None,
             scope_id        : None,
-            explicit_return : false,
         }
     }) >>
     (result)
@@ -349,8 +350,8 @@ named!(block_or_if(Input<'_>) -> Block<'_>, do_parse!(
             position        : position as u32,
             statements      : Vec::new(),
             result          : Some(Expression::IfBlock(Box::new(m))),
+            returns         : None,
             scope_id        : None,
-            explicit_return : false,
         })
         | block
     )) >>
@@ -595,7 +596,7 @@ named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
 
 named!(array(Input<'_>) -> Array<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(delimited!(char!('['), tuple!(inline_type, char!(';'), static_size), char!(']'))), |tuple| Array {
+    result: map!(delimited!(char!('['), return_error!(ErrorKind::Custom(ParseErrorKind::SyntaxInlineType as u32), ws!(tuple!(inline_type, char!(';'), static_size))), char!(']')), |tuple| Array {
         position    : position as u32,
         element_type: tuple.0,
         len         : tuple.2,
