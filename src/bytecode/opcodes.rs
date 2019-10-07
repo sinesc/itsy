@@ -439,13 +439,19 @@ impl_vm!{
     /// Reads a 32 bit value from the n-th stack element relative to the top of the (32 bit) stack and pushes it.
     /// n=0 is the topmost 32 bit stack value, n=1 the previous value.
     fn clone32(&mut self, n: u8) {
-        let data: Value = self.stack.load(self.stack.sp() - 1 - n as u32);
+        let data: Value = self.stack.load_sp(- 1 - n as i32);
         self.stack.push(data);
     }
     /// Reads a 64 bit value from the n-th stack element relative to the top of the (32 bit) stack and pushes it.
     /// n=0 is the topmost 64 bit stack value, n=2 the previous value.
     fn clone64(&mut self, n: u8) {
-        let data: Value64 = self.stack.load(self.stack.sp() - 2 - n as u32);
+        let data: Value64 = self.stack.load_sp(- 2 - n as i32);
+        self.stack.push(data);
+    }
+    /// Reads a 96 bit value from the n-th stack element relative to the top of the (32 bit) stack and pushes it.
+    /// n=0 is the topmost 96 bit stack value, n=3 the previous value.
+    fn clone96(&mut self, n: u8) {
+        let data: HeapRef = self.stack.load_sp(- 3 - n as i32);
         self.stack.push(data);
     }
 

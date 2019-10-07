@@ -624,7 +624,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given unary operation.
     fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) {
-        use crate::frontend::ast::UnaryOperator as UO;
+        use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
 
         let exp_type = self.bindingtype(&item.expr);
 
@@ -637,6 +637,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // arithmetic
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
                 if let ast::Expression::Variable(var) = &item.expr {
+                    comment!(self, "{:?} on stack", item.op);
                     let load_index = {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
                         self.locals.lookup(binding_id).index
@@ -648,8 +649,27 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                         UO::DecAfter => self.write_postdec(load_index, &exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
+                } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
+                    assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
+                    self.compile_expression(&item.expr);
+                    comment!(self, "{:?} on heap", item.op);
+                    self.writer.store_tmp96();
+                    self.write_heap_fetch(exp_type.size());
+                    if item.op == UO::IncAfter || item.op == UO::DecAfter {
+                        self.write_clone(exp_type, 0);
+                    }
+                    match item.op {
+                        UO::IncBefore | UO::IncAfter => self.write_inc(&exp_type),
+                        UO::DecBefore | UO::DecAfter => self.write_dec(&exp_type),
+                        _ => panic!("Internal error in operator handling"),
+                    };
+                    if item.op == UO::IncBefore || item.op == UO::DecBefore {
+                        self.write_clone(exp_type, 0);
+                    }
+                    self.writer.pop_tmp96();
+                    self.write_heap_put(exp_type.size());
                 } else {
-                    panic!("Operator {:?} can only be used on variable bindings", item.op); // FIXME not true anymore
+                    panic!("Operator {:?} can not be used here", item.op);
                 }
             },
         }
@@ -1302,9 +1322,26 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Clone stack value as negative given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type, offset: u8) {
         match ty.size() {
-            1 | 2 | 4 => self.writer.clone32(offset),
+            12 => self.writer.clone96(offset),
             8 => self.writer.clone64(offset),
+            1 | 2 | 4 => self.writer.clone32(offset),
             size @ _ => panic!("Unsupported clone size {}", size),
+        };
+    }
+
+    fn write_inc(self: &Self, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.inci64(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.inci(),
+            ty @ _ => panic!("Unsupported inc operand {:?}", ty),
+        };
+    }
+
+    fn write_dec(self: &Self, ty: &Type) {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.deci64(),
+            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.deci(),
+            ty @ _ => panic!("Unsupported dec operand {:?}", ty),
         };
     }
 
