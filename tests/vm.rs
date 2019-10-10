@@ -955,6 +955,37 @@ fn postfix_suffix() {
     assert_all(&result, &[ 0i8, 1, 1, 0 ]);
 }
 
+fn heap_postfix_suffix() {
+    let result = run("
+        struct Test2 {
+            field: u32,
+        }
+        fn main() {
+            let x = [ 0u8 ];
+            let y = x[0]++;     // used result
+            let z = ++x[0];
+            x[0]++;             // unused result
+            ++x[0];
+            ret_u8(x[0]);
+            ret_u8(y);
+            ret_u8(z);
+
+            let a = Test { field: 0 };
+            let b = a.field++;  // used result
+            let c = ++a.field;
+            a.field++;          // unused result
+            ++a.field;
+            ret_u8(a.field);
+            ret_u8(b);
+            ret_u8(c);
+        }
+    ");
+    assert_all(&result, &[
+        4u8, 0, 2,
+        4u8, 0, 2,
+    ]);
+}
+
 #[test]
 fn explicit_return() {
     // todo: add bytecode test, check dead code was removed
