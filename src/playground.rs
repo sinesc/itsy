@@ -1,4 +1,5 @@
 use itsy::*;
+use std::fs;
 
 extern_rust!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
@@ -37,21 +38,20 @@ extern_rust!(MyFns, (), {
     fn prints(&mut context, value: &str) {
         println!("&\"{}\"", value);
     }
+    fn printss(&mut context, value: String) {
+        println!("&\"{}\"", value);
+    }
 });
+
 
 #[allow(unused_variables)]
 fn main() {
-    let source = "
-        fn main() {
-            prints(\"Hello World\");
-        }
-    ";
-    //println!("source:\n{}", source);
+    let source = fs::read_to_string("itsy/test.itsy").unwrap();
     //println!("ast:\n{:#?}", parse(source));
     //println!("highest opcode id: {}", bytecode::OpCode::comment as u8);
-    let mut vm = vm::<MyFns, ()>(source);
+    let mut vm = vm::<MyFns, ()>(&source);
     println!("bytecode:\n{:}", vm.format_program());
     let vm_start = std::time::Instant::now();
     vm.run(&mut ());
-    //println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
+    println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
 }
