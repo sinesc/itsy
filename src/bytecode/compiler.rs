@@ -109,9 +109,10 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T
     compiler.into_program()
 }
 
-// Writes a comment to the bytecode when in debug mode. // TODO: conditionally based on debug/release build or a runtime setting
+// Writes a comment to the bytecode when in debug mode. // TODO: add compiler option instead
 macro_rules! comment {
     ($self:ident, $format:literal $(, $value:expr)*) => {
+        #[cfg(debug_assertions)]
         $self.writer.comment(&format!($format $(, $value)*));
     }
 }
@@ -345,7 +346,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_function(self: &Self, item: &ast::Function<'ast>) {
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
-        comment!(self, "\nFunction {}", item.sig.ident.name);
+        comment!(self, "\nfunction {}", item.sig.ident.name);
         let function_id = item.function_id.unwrap();
         self.functions.borrow_mut().insert(function_id, position);
         self.fix_targets(function_id, position);
@@ -368,7 +369,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
         self.compile_block(&item.block);
         if !item.block.returns() {
-            comment!(self, "Cleanup function {}", item.sig.ident.name);
             let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id()).is_primitive());
             self.write_heap_decref_all(return_heap_object);
             self.write_ret();
@@ -379,11 +379,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &Self, item: &ast::Call<'ast>) {
-        comment!(self, "Call {}", item.ident.name);
+        comment!(self, "call {}", item.ident.name);
 
         // put args on stack, ensure temporaries are cleaned up later
         for (index, arg) in item.args.iter().enumerate() {
-            comment!(self, "  arg {}", index);
+            comment!(self, "call-arg {}", index);
             self.compile_expression(arg);
             self.write_tmp_ref(arg);
         }
@@ -427,7 +427,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
-            comment!(self, "Binding {}", item.ident.name);
+            comment!(self, "binding {}", item.ident.name);
             self.compile_expression(expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
@@ -510,7 +510,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         if let Some(binary_op) = item.range.as_binary_op() {
 
             if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
-                comment!(self, "For loop");
+                comment!(self, "for-loop");
                 // todo: refactor this mess
                 let (var_index, var_type) = self.range_info(item);
                 // store lower range bound in iter variable
@@ -528,11 +528,9 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
                 let exit_jump = self.writer.j0(123);
                 // compile block
-                comment!(self, "For loop block");
                 let start_target = self.writer.position();
                 self.compile_block(&item.block);
                 // load bounds, increment and compare
-                comment!(self, "For loop compare");
                 self.write_preinc(var_index, var_type);
                 self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
@@ -637,7 +635,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // arithmetic
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
                 if let ast::Expression::Variable(var) = &item.expr {
-                    comment!(self, "{:?} on stack", item.op);
                     let load_index = {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
                         self.locals.lookup(binding_id).index
@@ -652,7 +649,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr);
-                    comment!(self, "{:?} on heap", item.op);
                     self.writer.store_tmp96();
                     self.write_heap_fetch(exp_type.size());
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
@@ -723,7 +719,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // special
             BO::Range => unimplemented!("range"),
             BO::Index => {
-                comment!(self, "Index");
                 // fetch heap object value if the result of the index read is directly used (primitives and for string, their reference)
                 if result_type.is_primitive() || result_type.is_string() {
                     self.write_heap_fetch_element(result_type.size());
@@ -732,14 +727,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             BO::IndexWrite => {
-                comment!(self, "IndexWrite");
                 // stack: <heap_index> <heap_offset> <index_operand>
                 let size = if result_type.is_string() { result_type.size() as u32 } else { self.compute_type_size(&result_type) }; // todo: need size_stack() or similar
                 self.write_element_offset(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                 // stack now <heap_index> <new_heap_offset>
             },
             BO::Access => {
-                comment!(self, "Access");
                 // fetch heap object value if the result of the member read is directly used (primitives and for string, their reference)
                 if result_type.is_primitive() || result_type.is_string() {
                     let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
@@ -750,7 +743,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             BO::AccessWrite => {
-                comment!(self, "AccessWrite");
                 // stack: <heap_index> <heap_offset>
                 let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
                 self.write_member_offset(offset); // push additional offset, pop both offsets, write computed offset
