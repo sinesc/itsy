@@ -49,9 +49,14 @@ fn main() {
     let source = fs::read_to_string("itsy/test.itsy").unwrap();
     //println!("ast:\n{:#?}", parse(source));
     //println!("highest opcode id: {}", bytecode::OpCode::comment as u8);
-    let mut vm = vm::<MyFns, ()>(&source);
-    println!("bytecode:\n{:}", vm.format_program());
-    let vm_start = std::time::Instant::now();
-    vm.run(&mut ());
-    println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
+    let vm = vm::<MyFns, ()>(&source);
+    if let Ok(mut vm) = vm {
+        println!("bytecode:\n{:}", vm.format_program());
+        let vm_start = std::time::Instant::now();
+        vm.run(&mut ());
+        println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
+    } else if let Err(err) = vm {
+        let loc =  err.loc(&source);
+        println!("Error: {} at line {}, column {}.", err, loc.0, loc.1);
+    }
 }

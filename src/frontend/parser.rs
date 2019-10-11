@@ -4,6 +4,7 @@ use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
 use std::{collections::HashMap, cell::Cell};
+use std::fmt::{self, Display};
 use crate::util::{Numeric, FnKind, compute_loc};
 use crate::frontend::ast::*;
 
@@ -27,18 +28,27 @@ pub enum ParseErrorKind {
 #[derive(Copy, Clone, Debug)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
-    line: u32,
-    column: u32,
+    position: u32, // this is the position from the end of the input
 }
 
 impl ParseError {
-    fn new(kind: ParseErrorKind, offset: u32, input: &str) -> ParseError {
-        let (line, column) = compute_loc(input, offset);
-        Self { kind, line, column }
+    fn new(kind: ParseErrorKind, offset: u32) -> ParseError {
+        Self { kind: kind, position: offset }
     }
-    /// Returns the source code location of this error.
-    pub fn loc(self: &Self) -> (u32, u32) {
-        (self.line, self.column)
+    /// Computes and returns the source code location of this error.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        compute_loc(input, input.len() as u32 - self.position)
+    }
+}
+
+impl Display for ParseError {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            ParseErrorKind::SyntaxError => write!(f, "Syntax error"),
+            ParseErrorKind::InvalidNumerical => write!(f, "Invalid numeric value"),
+            // Todo: handle the others
+            _ => write!(f, "{:?}", self.kind),
+        }
     }
 }
 
@@ -744,10 +754,10 @@ fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseErro
     let (remainder, error_kind) = err.unwrap();
     match error_kind {
         ErrorKind::Custom(custom) => {
-            ParseError::new(unsafe { transmute(*custom) }, (input.len() - remainder.len()) as u32, input) // todo: figure out how to specify custom error type
+            ParseError::new(unsafe { transmute(*custom) }, (input.len() - remainder.len()) as u32) // todo: figure out how to specify custom error type
         }
         _ => {
-            ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as u32, input)
+            ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as u32)
         }
     }
 }
@@ -758,7 +768,7 @@ pub fn parse(input: &str) -> Result<ParsedProgram<'_>, ParseError> {
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
-                Err(ParseError::new(ParseErrorKind::UnexpectedEOF, input.len() as u32, input))
+                Err(ParseError::new(ParseErrorKind::UnexpectedEOF, input.len() as u32))
             } else {
                 Ok(ParsedProgram(result.1))
             }

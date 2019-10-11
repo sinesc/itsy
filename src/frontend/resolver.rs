@@ -2,6 +2,7 @@
 
 mod scopes;
 
+use std::fmt::{self, Display};
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, compute_loc};
@@ -41,12 +42,24 @@ pub struct ResolveError {
 
 impl ResolveError {
     fn new<T>(item: &T, kind: ResolveErrorKind) -> ResolveError where T: Positioned {
-        ResolveError { kind: kind, position: item.position() }
+        Self { kind: kind, position: item.position() }
     }
     /// Computes and returns the source code location of this error. Since the AST only stores byte
     /// offsets, the original source is required to recover line and column information.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
         compute_loc(input, input.len() as u32 - self.position)
+    }
+}
+
+impl Display for ResolveError {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            ResolveErrorKind::TypeMismatch(t1, t2) => write!(f, "Incompatible types {:?} and {:?}", t1, t2),
+            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {:?} for expected type {:?}", n, t),
+            ResolveErrorKind::NumberOfArguments(e, g) => write!(f, "Expected {} arguments, got {}", e, g),
+            // Todo: handle the others
+            _ => write!(f, "{:?}", self.kind),
+        }
     }
 }
 

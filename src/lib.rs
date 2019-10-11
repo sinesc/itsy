@@ -3,6 +3,7 @@
 //!
 //! Look at the [`vm()` Examples](fn.vm.html#examples) to get started.
 
+use std::fmt::{self, Display};
 pub mod frontend;
 pub mod runtime;
 #[macro_use]
@@ -185,6 +186,42 @@ macro_rules! extern_rust {
     };
 }
 
+#[derive(Clone, Debug)]
+pub enum ItsyError {
+    ParseError(frontend::ParseError),
+    ResolveError(frontend::ResolveError),
+}
+
+impl ItsyError {
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        match self {
+            Self::ParseError(e) => e.loc(input),
+            Self::ResolveError(e) => e.loc(input),
+        }
+    }
+}
+
+impl Display for ItsyError {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ParseError(e) => write!(f, "{}", e),
+            Self::ResolveError(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl From<frontend::ParseError> for ItsyError {
+    fn from(error: frontend::ParseError) -> ItsyError {
+        ItsyError::ParseError(error)
+    }
+}
+
+impl From<frontend::ResolveError> for ItsyError {
+    fn from(error: frontend::ResolveError) -> ItsyError {
+        ItsyError::ResolveError(error)
+    }
+}
+
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a `VM` for it.
 /// Program execution starts from the `main` function.
 ///
@@ -215,10 +252,10 @@ macro_rules! extern_rust {
 ///     vm.run(&mut ());
 /// }
 /// ```
-pub fn vm<T, U>(program: &str) -> runtime::VM<T, U> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> { // todo: Result
+pub fn vm<T, U>(program: &str) -> Result<runtime::VM<T, U>, ItsyError> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> {
     use crate::runtime::VM;
-    let parsed = parse(program).unwrap(); // todo: forward error
-    let resolved = resolve::<T>(parsed, "main").unwrap(); // todo: forward error
+    let parsed = parse(program)?;
+    let resolved = resolve::<T>(parsed, "main")?;
     let program = compile(resolved); // todo: compiler needs error handling. then forward error
-    VM::new(program)
+    Ok(VM::new(program))
 }
