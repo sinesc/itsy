@@ -335,6 +335,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the assignment operation.
     fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+        comment!(self, "{}", item);
         match item.left {
             ast::Expression::Variable(_) => self.compile_variable_assignment(item),
             ast::Expression::BinaryOp(_) => self.compile_index_assignment(item),
@@ -427,8 +428,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
         if let Some(expr) = &item.expr {
-            comment!(self, "binding {}", item.ident.name);
             self.compile_expression(expr);
+            comment!(self, "let {} = {}", item.ident.name, expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
                 self.writer.heap_incref();
@@ -442,6 +443,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given variable.
     fn compile_variable(self: &Self, item: &ast::Variable<'ast>) {
+        comment!(self, "variable {}", item);
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
@@ -451,7 +453,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles an if block without else part.
     fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) {
-
+        comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
         self.compile_block(&item.if_block);
         let exit_target = self.writer.position();
@@ -496,6 +498,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a while loop.
     fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) {
+        comment!(self, "{}", item);
         let start_target = self.writer.position();
         self.compile_expression(&item.expr);
         let exit_jump = self.writer.j0(123);
@@ -581,6 +584,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given literal
     fn compile_literal(self: &Self, item: &ast::Literal<'ast>) {
         use crate::frontend::ast::LiteralValue;
+        comment!(self, "{}", item);
         let lit_type = self.bindingtype(item);
         match item.value {
             LiteralValue::Numeric(numeric) => self.write_numeric(numeric, lit_type),
@@ -630,11 +634,13 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // logical
             UO::Not => {
                 self.compile_expression(&item.expr);
+                comment!(self, "{}", item);
                 self.writer.not();
             }
             // arithmetic
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
                 if let ast::Expression::Variable(var) = &item.expr {
+                    comment!(self, "{}", item);
                     let load_index = {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
                         self.locals.lookup(binding_id).index
@@ -651,6 +657,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     self.compile_expression(&item.expr);
                     self.writer.store_tmp96();
                     self.write_heap_fetch(exp_type.size());
+                    comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
                         self.write_clone(exp_type, 0);
                     }
@@ -680,6 +687,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.write_tmp_ref(&item.left);
             self.compile_expression(&item.right);
             self.write_tmp_ref(&item.right);
+            comment!(self, "{}", item);
         }
 
         let result_type = self.bindingtype(item);
