@@ -51,6 +51,23 @@ macro_rules! impl_positioned {
     };
 }
 
+/// Implements a match block with cases for all variants of Expression or Statement
+macro_rules! impl_matchall {
+    ($self:ident, Expression, $val_name:ident, $code:tt) => {
+        impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
+    };
+    ($self:ident, Statement, $val_name:ident, $code:tt) => {
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, Structure, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
+    };
+    ($self:ident, $struct_name:ident, $val_name:ident, $code:tt $(, $field:ident)+) => {
+        match $self {
+            $(
+                $struct_name::$field($val_name) => $code,
+            )+
+        }
+    };
+}
+
 /// Provides information whether this AST structure causes an unconditional function return.
 pub(crate) trait Returns {
     /// Returns true if this structure unconditionally causes the parent function to return.
@@ -124,33 +141,13 @@ impl<'a> Returns for Statement<'a> {
 
 impl<'a> Positioned for Statement<'a> {
     fn position(self: &Self) -> u32 {
-        match self {
-            Statement::Binding(v)   => v.position(),
-            Statement::Function(v)  => v.position(),
-            Statement::Structure(v) => v.position(),
-            Statement::ForLoop(v)   => v.position(),
-            Statement::WhileLoop(v) => v.position(),
-            Statement::IfBlock(v)   => v.position(),
-            Statement::Block(v)     => v.position(),
-            Statement::Return(v)    => v.position(),
-            Statement::Expression(v)=> v.position(),
-        }
+        impl_matchall!(self, Statement, item, { item.position() })
     }
 }
 
 impl<'a> Debug for Statement<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Statement::Binding(v)   => write!(f, "{:#?}", v),
-            Statement::Function(v)  => write!(f, "{:#?}", v),
-            Statement::Structure(v) => write!(f, "{:#?}", v),
-            Statement::ForLoop(v)   => write!(f, "{:#?}", v),
-            Statement::WhileLoop(v) => write!(f, "{:#?}", v),
-            Statement::IfBlock(v)   => write!(f, "{:#?}", v),
-            Statement::Block(v)     => write!(f, "{:#?}", v),
-            Statement::Return(v)    => write!(f, "{:#?}", v),
-            Statement::Expression(v)=> write!(f, "Statement{:#?}", v),
-        }
+        impl_matchall!(self, Statement, item, { write!(f, "{:#?}", item) })
     }
 }
 
@@ -424,66 +421,22 @@ impl<'a> Expression<'a> {
 
 impl<'a> Bindable for Expression<'a> {
     fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        match self {
-            Expression::Literal(literal)        => literal.binding_id_mut(),
-            Expression::Variable(variable)      => variable.binding_id_mut(),
-            Expression::Call(call)              => call.binding_id_mut(),
-            Expression::Member(member)          => member.binding_id_mut(),
-            Expression::Assignment(assignment)  => assignment.binding_id_mut(),
-            Expression::BinaryOp(binary_op)     => binary_op.binding_id_mut(),
-            Expression::UnaryOp(unary_op)       => unary_op.binding_id_mut(),
-            Expression::Cast(cast)              => cast.binding_id_mut(),
-            Expression::Block(block)            => block.binding_id_mut(),
-            Expression::IfBlock(if_block)       => if_block.binding_id_mut(),
-        }
+        impl_matchall!(self, Expression, item, { item.binding_id_mut() })
     }
     fn binding_id(self: &Self) -> Option<BindingId> {
-        match self {
-            Expression::Literal(literal)        => literal.binding_id(),
-            Expression::Variable(variable)      => variable.binding_id(),
-            Expression::Call(call)              => call.binding_id(),
-            Expression::Member(member)          => member.binding_id(),
-            Expression::Assignment(assignment)  => assignment.binding_id(),
-            Expression::BinaryOp(binary_op)     => binary_op.binding_id(),
-            Expression::UnaryOp(unary_op)       => unary_op.binding_id(),
-            Expression::Cast(cast)              => cast.binding_id(),
-            Expression::Block(block)            => block.binding_id(),
-            Expression::IfBlock(if_block)       => if_block.binding_id(),
-        }
+        impl_matchall!(self, Expression, item, { item.binding_id() })
     }
 }
 
 impl<'a> Positioned for Expression<'a> {
     fn position(self: &Self) -> u32 {
-        match self {
-            Expression::Literal(literal)        => literal.position(),
-            Expression::Variable(variable)      => variable.position(),
-            Expression::Call(call)              => call.position(),
-            Expression::Member(member)          => member.position(),
-            Expression::Assignment(assignment)  => assignment.position(),
-            Expression::BinaryOp(binary_op)     => binary_op.position(),
-            Expression::UnaryOp(unary_op)       => unary_op.position(),
-            Expression::Cast(cast)              => cast.position(),
-            Expression::Block(block)            => block.position(),
-            Expression::IfBlock(if_block)       => if_block.position(),
-        }
+        impl_matchall!(self, Expression, item, { item.position() })
     }
 }
 
 impl<'a> Debug for Expression<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Expression::Literal(literal)        => write!(f, "{:#?}", literal),
-            Expression::Variable(variable)      => write!(f, "{:#?}", variable),
-            Expression::Call(call)              => write!(f, "{:#?}", call),
-            Expression::Member(member)          => write!(f, "{:#?}", member),
-            Expression::Assignment(assignment)  => write!(f, "{:#?}", assignment),
-            Expression::BinaryOp(binary_op)     => write!(f, "{:#?}", binary_op),
-            Expression::UnaryOp(unary_op)       => write!(f, "{:#?}", unary_op),
-            Expression::Cast(cast)              => write!(f, "{:#?}", cast),
-            Expression::Block(block)            => write!(f, "{:#?}", block),
-            Expression::IfBlock(if_block)       => write!(f, "{:#?}", if_block),
-        }
+        impl_matchall!(self, Expression, item, { write!(f, "{:#?}", item) })
     }
 }
 
