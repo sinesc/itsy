@@ -2,16 +2,35 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnSig, FnKind, Intrinsic};
+use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic};
 
-// todo: move into resolver.rs, scrap struct or maybe just the impls on it (they have become trivial one-liners except for lookup_*)
+#[derive(Clone, Debug)]
+pub struct FnSig {
+    pub ret_type: Option<TypeId>,
+    pub arg_type: Vec<TypeId>,
+    pub kind    : FnKind,
+}
+
+impl FnSig {
+    pub fn rust_fn_index(self: &Self) -> Option<u16> {
+        match self.kind {
+            FnKind::Rust(index) => Some(index),
+            _ => None,
+        }
+    }
+}
+
+struct BindingInfo {
+    mutable: bool,
+    type_id: Option<TypeId>,
+}
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types           : Repository<TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings        : Repository<BindingId, Option<TypeId>>,
+    bindings        : Repository<BindingId, BindingInfo>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<FunctionId, FnSig>,
     /// Function scopes (the function containing this scope)
@@ -37,7 +56,7 @@ impl Scopes {
     /// Returns the number of unresolved and total items in the Scopes.
     pub fn state(self: &Self) -> (u32, u32) {
         (
-            self.bindings.values().fold(0, |acc, x| acc + if x.is_some() { 0 } else { 1 })
+            self.bindings.values().fold(0, |acc, x| acc + if x.type_id.is_some() { 0 } else { 1 })
             + self.types.values().fold(0, |acc, x| acc + match x {
                 Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
                 _ => 0,
@@ -154,7 +173,7 @@ impl Scopes {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
     pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, type_id: Option<TypeId>) -> BindingId {
-        self.bindings.insert(scope_id, name.map(|n| n.into()), type_id)
+        self.bindings.insert(scope_id, name.map(|n| n.into()), BindingInfo { mutable: false, type_id: type_id })
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
@@ -179,12 +198,12 @@ impl Scopes {
 
     /// Returns a mutable reference to the type-id of the given binding id.
     pub fn binding_type_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
-        self.bindings.by_id_mut(binding_id)
+        &mut self.bindings.by_id_mut(binding_id).type_id
     }
 
     /// Returns a copy of the type-id of the given binding id.
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
-        *self.bindings.by_id(binding_id)
+        self.bindings.by_id(binding_id).type_id
     }
 }
 
@@ -236,7 +255,7 @@ impl Into<(Vec<TypeId>, Vec<Type>)> for Scopes {
     /// convert scopes into type vector
     fn into(self: Self) -> (Vec<TypeId>, Vec<Type>) {
         let types: Vec<Type> = self.types.into();
-        let type_map = self.bindings.values().map(|type_id| type_id.expect("Unresolved binding type while creating type map")).collect();
+        let type_map = self.bindings.values().map(|info| info.type_id.expect("Unresolved binding type while creating type map")).collect();
         (type_map, types)
     }
 }
