@@ -199,33 +199,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Return existing binding-id or create and return new binding-id.
-    fn try_create_binding(self: &mut Self, item: &mut impl Bindable, name: &str) -> BindingId {
-        if let Some(binding_id) = item.binding_id() {
-            binding_id
-        } else {
-            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
-            if self.scopes.binding_id(self.scope_id, name).is_some() {
-                unimplemented!("cannot shadow {}", name); // todo: support shadowing
-            }
-            let binding_id = self.scopes.insert_binding(self.scope_id, Some(name), None);
-            *item.binding_id_mut() = Some(binding_id);
-            binding_id
-        }
-    }
-
-    /// Return existing binding-id or create and return new binding-id.
     fn try_create_anon_binding(self: &mut Self, item: &mut impl Bindable) -> BindingId {
         if let Some(binding_id) = item.binding_id() {
             binding_id
         } else {
-            let binding_id = self.scopes.insert_binding(self.scope_id, None, None); // todo: a &mut would be nicer than the index
+            let binding_id = self.scopes.insert_binding(self.scope_id, None, None);
             *item.binding_id_mut() = Some(binding_id);
             binding_id
         }
     }
 
     /// Sets given TypeId for the given binding, generating a BindingId if required.
-    fn set_bindingtype_id(self: &mut Self, item: &mut (impl Bindable+Positioned), new_type_id: TypeId) -> Result<(), ResolveError>  {
+    fn binding_set_type_id(self: &mut Self, item: &mut (impl Bindable+Positioned), new_type_id: TypeId) -> Result<(), ResolveError>  {
         let binding_id = self.try_create_anon_binding(item);
         let type_id = self.scopes.binding_type_id_mut(binding_id);
         if type_id.is_none() {
@@ -238,22 +223,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns TypeId for the given binding.
-    fn bindingtype_id(self: &Self, item: &mut impl Bindable) -> Option<TypeId> {
+    fn binding_type_id(self: &Self, item: &impl Bindable) -> Option<TypeId> {
         item.binding_id().and_then(|binding_id| self.scopes.binding_type_id(binding_id))
     }
 
     /// Returns a reference to the type of the given binding.
-    fn bindingtype(self: &mut Self, item: &impl Bindable) -> Option<&Type> {
+    fn binding_type(self: &mut Self, item: &impl Bindable) -> Option<&Type> {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_ref(type_id))
-    }
-
-    /// Returns a mutable reference to the type of the given binding.
-    fn bindingtype_mut(self: &mut Self, item: &mut impl Bindable) -> Option<&mut Type> {
-        item.binding_id()
-            .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
-            .map(move |type_id| self.scopes.type_mut(type_id))
     }
 
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
@@ -415,7 +393,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             item.fn_ret_type_id = ret_type_id;
             self.resolve_expression(expr, ret_type_id)?;
             // check return type matches function result type // todo: would be unnecessary if resolve_expression would always check expected_type
-            let expression_type_id = self.bindingtype_id(expr);
+            let expression_type_id = self.binding_type_id(expr);
             if expression_type_id.is_some() {
                 self.check_types_match(item, ret_type_id, expression_type_id)?;
             }
@@ -440,13 +418,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // return value
             let function_types = self.scopes.function_type(function_id).clone();
             if let Some(ret_type_id) = function_types.ret_type { // fixme: probably should be Some(Void) instead
-                self.set_bindingtype_id(item, ret_type_id)?;
+                self.binding_set_type_id(item, ret_type_id)?;
             } else {
-                self.set_bindingtype_id(item, TypeId::void())?;
+                self.binding_set_type_id(item, TypeId::void())?;
             }
 
             if expected_result.is_some() {
-                let actual_result = self.bindingtype_id(item);
+                let actual_result = self.binding_type_id(item);
                 if actual_result.is_some() {
                     self.check_types_match(item, expected_result, actual_result)?;
                 }
@@ -460,10 +438,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // arguments
             for (index, &expected_type) in function_types.arg_type.iter().enumerate() {
                 self.resolve_expression(&mut item.args[index], Some(expected_type))?;
-                let actual_type = self.bindingtype_id(&mut item.args[index]);
+                let actual_type = self.binding_type_id(&item.args[index]);
                 // infer arguments
                 if actual_type.is_none() {
-                    self.set_bindingtype_id(&mut item.args[index], expected_type)?;
+                    self.binding_set_type_id(&mut item.args[index], expected_type)?;
                 } else if actual_type.is_some() {
                     self.check_types_match(&item.args[index], Some(expected_type), actual_type)?;
                 }
@@ -477,7 +455,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // is this a method? resolve self argument
             if let CallType::Method(self_arg) = &mut item.call_type {
                 self.resolve_expression(self_arg, None)?;
-                if let Some(ty) = self.bindingtype(&**self_arg) { // todo: intrinsics needs a more generic approach. can't implement them all individually here
+                if let Some(ty) = self.binding_type(&**self_arg) { // todo: intrinsics needs a more generic approach. can't implement them all individually here
                     if ty.is_array() && item.ident.name == "len" { // need to be in scope like rust_fns
                         item.call_kind = FnKind::Intrinsic(Intrinsic::ArrayLen);
                     }
@@ -512,7 +490,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // set expected type, if any
         if let Some(expected_result) = expected_result {
-            self.set_bindingtype_id(item, expected_result)?;
+            self.binding_set_type_id(item, expected_result)?;
         }
         Ok(())
     }
@@ -526,12 +504,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // optionally resolve else block
         if let Some(else_block) = &mut item.else_block {
             self.resolve_block(else_block, expected_result)?;
-            let if_type_id = self.bindingtype_id(&mut item.if_block);
-            let else_type_id = self.bindingtype_id(else_block);
+            let if_type_id = self.binding_type_id(&item.if_block);
+            let else_type_id = self.binding_type_id(else_block);
             if if_type_id.is_some() && else_type_id.is_some() {
                 self.check_types_match(item, if_type_id, else_type_id)?;
             }
-        } else if let Some(if_type_id) = self.bindingtype_id(&mut item.if_block) {
+        } else if let Some(if_type_id) = self.binding_type_id(&item.if_block) {
             // if block with a non-void result but no else block
             self.check_types_match(item, Some(if_type_id), Some(TypeId::void()))?; // Todo: meh, using check_types_match to generate an error when we already know there is an error.
         }
@@ -545,10 +523,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // create binding for the iterator variable
         self.resolve_binding(&mut item.iter)?;
         // resolve the range type using the type of the iterator variable, if possible, then apply range type back to iter
-        let type_id = self.bindingtype_id(&mut item.iter);
+        let type_id = self.binding_type_id(&item.iter);
         self.resolve_expression(&mut item.range, type_id)?;
-        if let Some(type_id) = self.bindingtype_id(&mut item.range) {
-            self.set_bindingtype_id(&mut item.iter, type_id)?;
+        if let Some(type_id) = self.binding_type_id(&item.range) {
+            self.binding_set_type_id(&mut item.iter, type_id)?;
         }
         // handle block
         self.resolve_block(&mut item.block, None)?;
@@ -606,8 +584,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.returns.is_none() && expected_result.is_some() {
             if item.result.is_none() { // no result = void
                 self.check_types_match(item, expected_result, Some(self.primitives.void))?;
-            } else if let Some(result_expression) = &mut item.result {
-                let result_type_id = self.bindingtype_id(result_expression);
+            } else if let Some(result_expression) = &item.result {
+                let result_type_id = self.binding_type_id(result_expression);
                 if result_type_id.is_some() {
                     self.check_types_match(item, expected_result, result_type_id)?;
                 }
@@ -619,11 +597,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'ast>) -> ResolveResult {
-        let right_type_id = self.bindingtype_id(&mut item.right);
+        let right_type_id = self.binding_type_id(&item.right);
         self.resolve_expression(&mut item.left, right_type_id)?;
-        let left_type_id = self.bindingtype_id(&mut item.left);
+        let left_type_id = self.binding_type_id(&item.left);
         self.resolve_expression(&mut item.right, left_type_id)?;
-        self.set_bindingtype_id(item, TypeId::void())?;
+        self.binding_set_type_id(item, TypeId::void())?;
         Ok(())
     }
 
@@ -632,13 +610,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_type(&mut item.ty, expected_result)?;
         self.resolve_expression(&mut item.expr, None)?;
         if let Some(type_id) = item.ty.type_id {
-            self.set_bindingtype_id(item, type_id)?;
+            self.binding_set_type_id(item, type_id)?;
             let ty = self.scopes.type_ref(type_id);
             if !ty.is_primitive() {
                 return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(ty.clone())));
             }
         }
-        if let Some(ty) = self.bindingtype(&mut item.expr) {
+        if let Some(ty) = self.binding_type(&mut item.expr) {
             if !ty.is_primitive() {
                 return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(ty.clone())));
             }
@@ -654,62 +632,66 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             O::And | O::Or => {
                 self.resolve_expression(&mut item.left, Some(self.primitives.bool))?;
                 self.resolve_expression(&mut item.right, Some(self.primitives.bool))?;
-                self.set_bindingtype_id(item, self.primitives.bool)?;
+                self.binding_set_type_id(item, self.primitives.bool)?;
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
                 self.resolve_expression(&mut item.left, None)?;
-                let left_type_id = self.bindingtype_id(&mut item.left);
+                let left_type_id = self.binding_type_id(&item.left);
                 self.resolve_expression(&mut item.right, left_type_id)?;
-                let right_type_id = self.bindingtype_id(&mut item.right);
-                self.set_bindingtype_id(item, self.primitives.bool)?;
+                let right_type_id = self.binding_type_id(&item.right);
+                self.binding_set_type_id(item, self.primitives.bool)?;
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
-                    self.set_bindingtype_id(&mut item.left, common_type_id)?;
-                    self.set_bindingtype_id(&mut item.right, common_type_id)?;
+                    self.binding_set_type_id(&mut item.left, common_type_id)?;
+                    self.binding_set_type_id(&mut item.right, common_type_id)?;
                 }
             }
             O::Add | O::Sub | O::Mul | O::Div | O::Rem | O::Range | O::RangeInclusive => {
                 self.resolve_expression(&mut item.left, expected_result)?;
-                let left_type_id = self.bindingtype_id(&mut item.left);
+                let left_type_id = self.binding_type_id(&item.left);
                 self.resolve_expression(&mut item.right, left_type_id)?;
-                let type_id = self.bindingtype_id(item);
-                let right_type_id = self.bindingtype_id(&mut item.right);
+                let type_id = self.binding_type_id(item);
+                let right_type_id = self.binding_type_id(&item.right);
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
-                    self.set_bindingtype_id(item, common_type_id)?;
-                    self.set_bindingtype_id(&mut item.left, common_type_id)?;
-                    self.set_bindingtype_id(&mut item.right, common_type_id)?;
+                    self.binding_set_type_id(item, common_type_id)?;
+                    self.binding_set_type_id(&mut item.left, common_type_id)?;
+                    self.binding_set_type_id(&mut item.right, common_type_id)?;
                 }
             }
             O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None)?;
                 self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2]))?; // u32
                 // left[right] : item
-                self.set_bindingtype_id(&mut item.right, self.primitives.unsigned[2])?; // u32
+                self.binding_set_type_id(&mut item.right, self.primitives.unsigned[2])?; // u32
                 self.try_create_anon_binding(item);
                 // if we know the result type, set the array element type to that
-                if let Some(result_type_id) = self.bindingtype_id(item) {
-                    let ty = self.bindingtype_mut(&mut item.left);
+                if let Some(result_type_id) = self.binding_type_id(item) {
+                    // get mutable reference to type
+                    let ty = item.left.binding_id()
+                        .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
+                        .map(|type_id| self.scopes.type_mut(type_id));
+
                     if let Some(Type::Array(array)) = ty {
                         array.type_id = Some(result_type_id); // todo: check that array.type_id is either None or equals binding_type_id
                     }
                 }
                 // if we know the array element type, set the result type to that
-                if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.bindingtype(&item.left) {
-                    self.set_bindingtype_id(item, element_type_id)?;
+                if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.binding_type(&item.left) {
+                    self.binding_set_type_id(item, element_type_id)?;
                 }
             }
             O::Access | O::AccessWrite => {
                 self.resolve_expression(&mut item.left, None)?;
                 self.resolve_expression(&mut item.right, None)?;
                 // left.right : item
-                if let Some(ty) = self.bindingtype(&item.left) {
+                if let Some(ty) = self.binding_type(&item.left) {
                     let struct_ = ty.as_struct().expect("Member access on a non-struct");
                     let field = item.right.as_member_mut().expect("Internal error: Member access using a non-field");
                     if field.index.is_none() {
                         field.index = Some(struct_.fields.iter().position(|f| f.0 == field.ident.name).expect("Unknown struct member") as u32);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
-                        self.set_bindingtype_id(item, type_id)?;
-                        self.set_bindingtype_id(&mut item.right, type_id)?;
+                        self.binding_set_type_id(item, type_id)?;
+                        self.binding_set_type_id(&mut item.right, type_id)?;
                     }
                 }
             }
@@ -733,11 +715,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         };
 
         // create binding id if we don't have one yet
-        self.try_create_binding(item, item.ident.name);
+        if item.binding_id().is_none() {
+            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
+            if self.scopes.binding_id(self.scope_id, item.ident.name).is_some() {
+                unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
+            }
+            let binding_id = self.scopes.insert_binding(self.scope_id, Some(item.ident.name), None);
+            *item.binding_id_mut() = Some(binding_id);
+        }
 
         // apply explicit type if we got one
         if let Some(explicit) = explicit {
-            self.set_bindingtype_id(item, explicit)?;
+            self.binding_set_type_id(item, explicit)?;
         }
 
         // resolve right hand side
@@ -746,16 +735,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         // if we have a binding type, apply it to the expression
-        let lhs = self.bindingtype_id(item);
+        let lhs = self.binding_type_id(item);
 
         if let (Some(lhs), Some(expr)) = (lhs, &mut item.expr) {
-            self.set_bindingtype_id(expr, lhs)?;
+            self.binding_set_type_id(expr, lhs)?;
         }
 
         // if the expression has a type, apply it back to the binding
         if let Some(expr) = &mut item.expr {
-            if let Some(expr_type) = self.bindingtype_id(expr) {
-                self.set_bindingtype_id(item, expr_type)?;
+            let expr_type_id = self.binding_type_id(expr);
+            if let Some(expr_type_id) = expr_type_id {
+                self.binding_set_type_id(item, expr_type_id)?;
             }
         };
 
@@ -771,11 +761,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if expected_type.is_some() {
                     self.check_types_match(item, expected_type, Some(self.primitives.bool))?;
                 }
-                self.set_bindingtype_id(item, self.primitives.bool)?;
+                self.binding_set_type_id(item, self.primitives.bool)?;
             },
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
-                if let Some(type_id) = self.bindingtype_id(&mut item.expr) {
-                    self.set_bindingtype_id(item, type_id)?;
+                if let Some(type_id) = self.binding_type_id(&item.expr) {
+                    self.binding_set_type_id(item, type_id)?;
                 }
             },
         }
@@ -790,12 +780,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if expected_type.is_some() {
                 self.check_types_match(item, expected_type, Some(self.primitives.bool))?;
             }
-            self.set_bindingtype_id(item, self.primitives.bool)?;
+            self.binding_set_type_id(item, self.primitives.bool)?;
         } else if let LV::String(_) = item.value {
             if expected_type.is_some() {
                 self.check_types_match(item, expected_type, Some(self.primitives.string))?;
             }
-            self.set_bindingtype_id(item, self.primitives.string)?;
+            self.binding_set_type_id(item, self.primitives.string)?;
         } else if let LV::Array(_) = item.value {
             self.resolve_array_literal(item, expected_type)?;
         } else if let LV::Struct(_) = item.value {
@@ -803,7 +793,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name, expected_type)? {
-                self.set_bindingtype_id(item, explicit_type_id)?;
+                self.binding_set_type_id(item, explicit_type_id)?;
                 if expected_type.is_some() {
                     self.check_types_match(item, expected_type, Some(explicit_type_id))?;
                 }
@@ -813,12 +803,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if !ty.is_compatible_numeric(numeric) {
                 return Err(ResolveError::new(item, ResolveErrorKind::IncompatibleNumeric(ty.clone(), numeric)));
             }
-            self.set_bindingtype_id(item, expected_type)?;
+            self.binding_set_type_id(item, expected_type)?;
         } else if self.infer_literals {
             // numerics, once normal resolution has failed
             if let LV::Numeric(value) = item.value {
                 if let Some(type_id) = self.classify_numeric(value) {
-                    self.set_bindingtype_id(item, type_id)?;
+                    self.binding_set_type_id(item, type_id)?;
                 }
             }
         } else {
@@ -840,7 +830,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // resolve fields from field definition
 
         if let Some(type_id) = type_id {
-            self.set_bindingtype_id(item, type_id)?;
+            self.binding_set_type_id(item, type_id)?;
             let struct_def = self.scopes.type_ref(type_id).as_struct().unwrap().clone(); // todo: this sucks
             let struct_ = item.value.as_struct_mut().unwrap();
             for (name, field) in &mut struct_.fields {
@@ -858,7 +848,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // apply expected type if known
         if let Some(expected_type) = expected_type {
-            self.set_bindingtype_id(item, expected_type)?;
+            self.binding_set_type_id(item, expected_type)?;
         }
 
         let array = item.value.as_array_mut().unwrap();
@@ -871,9 +861,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *element.binding_id_mut() = Some(element_binding_id);
             self.resolve_literal(element, None)?;
             if elements_type_id == None {
-                elements_type_id = self.bindingtype_id(element);
+                elements_type_id = self.binding_type_id(element);
             } else {
-                let this_type_id = self.bindingtype_id(element);
+                let this_type_id = self.binding_type_id(element);
                 if this_type_id.is_some() {
                     self.check_types_match(element, elements_type_id, this_type_id)?;
                 }
@@ -893,7 +883,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(type_id) = self.scopes.binding_type_id(binding_id) {
             let ty = self.scopes.type_ref(type_id);
             if let Some(elements_type_id) = ty.as_array().unwrap().type_id {
-                self.set_bindingtype_id(array.elements.first_mut().unwrap(), elements_type_id)?; // all elements have the same binding id, so set only first item type
+                self.binding_set_type_id(array.elements.first_mut().unwrap(), elements_type_id)?; // all elements have the same binding id, so set only first item type
             }
         }
 
