@@ -77,9 +77,9 @@ extern_rust!(TestFns, Context, {
 #[allow(dead_code)]
 pub fn run(code: &str) -> Context {
     let mut vm = if code.find("fn main()").is_some() {
-        vm::<TestFns, Context>(code)
+        vm::<TestFns, Context>(code).unwrap()
     } else {
-        vm::<TestFns, Context>(&format!("fn main() {{ {} }}", code))
+        vm::<TestFns, Context>(&format!("fn main() {{ {} }}", code)).unwrap()
     };
     let mut context = Vec::new();
     vm.run(&mut context);

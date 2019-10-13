@@ -50,7 +50,7 @@ pub use {frontend::{parse, resolve}, bytecode::compile};
 ///             let lives = get_lives();
 ///             set_lives(lives - 1);
 ///         }
-///     ");
+///     ").unwrap();
 ///
 ///     // Create some application state and run the VM a few times on it.
 ///     let mut state = MyGameState { lives: 3 };
@@ -247,7 +247,7 @@ impl From<frontend::ResolveError> for ItsyError {
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
 ///         }
-///     ");
+///     ").unwrap();
 ///
 ///     vm.run(&mut ());
 /// }
