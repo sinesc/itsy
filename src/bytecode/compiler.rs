@@ -832,7 +832,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns the type of the given binding.
-    fn bindingtype<B>(self: &Self, item: &B) -> &Type where B: Bindable {
+    fn bindingtype(self: &Self, item: &impl Bindable) -> &Type {
         let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
         let type_id = self.bindingtype_ids[binding_id];
         &self.types[Into::<usize>::into(type_id)]

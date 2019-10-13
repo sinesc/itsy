@@ -128,17 +128,17 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function<T>(self: &mut Self, scope_id: ScopeId, name: T, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId {
         self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::User })
     }
 
     /// Insert a function into the given scope, returning a function id.
-    pub fn insert_rustfn<T>(self: &mut Self, scope_id: ScopeId, name: T, fn_index: u16, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
+    pub fn insert_rustfn(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, fn_index: u16, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId {
         self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
     }
 
     /// Insert an intrinsic function into the given scope, returning a function id.
-    pub fn insert_intrinsic<T>(self: &mut Self, scope_id: ScopeId, name: T, intrinsic: Intrinsic, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId where T: Into<String> {
+    pub fn insert_intrinsic(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, intrinsic: Intrinsic, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId {
         self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Intrinsic(intrinsic) })
     }
 

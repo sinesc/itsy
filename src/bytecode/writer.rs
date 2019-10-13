@@ -46,9 +46,7 @@ impl<T> Writer<T> where T: VMFunc<T> {
         self.program.into_inner()
     }
     /// Overwrites the program at given position and returns to the previous position afterwards.
-    pub fn overwrite<F>(self: &Self, position: u32, mut write_fn: F) -> u32
-         where F: FnMut(&Self) -> u32
-    {
+    pub fn overwrite(self: &Self, position: u32, mut write_fn: impl FnMut(&Self) -> u32) -> u32 {
         let original_position = self.position();
         self.position.set(position);
         let result = write_fn(self);

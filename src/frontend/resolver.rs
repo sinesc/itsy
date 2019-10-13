@@ -41,7 +41,7 @@ pub struct ResolveError {
 }
 
 impl ResolveError {
-    fn new<T>(item: &T, kind: ResolveErrorKind) -> ResolveError where T: Positioned {
+    fn new(item: &impl Positioned, kind: ResolveErrorKind) -> ResolveError {
         Self { kind: kind, position: item.position() }
     }
     /// Computes and returns the source code location of this error. Since the AST only stores byte
@@ -225,7 +225,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Sets given TypeId for the given binding, generating a BindingId if required.
-    fn set_bindingtype_id<T>(self: &mut Self, item: &mut T, new_type_id: TypeId) -> Result<(), ResolveError> where T: Bindable+Positioned {
+    fn set_bindingtype_id(self: &mut Self, item: &mut (impl Bindable+Positioned), new_type_id: TypeId) -> Result<(), ResolveError>  {
         let binding_id = self.try_create_anon_binding(item);
         let type_id = self.scopes.binding_type_id_mut(binding_id);
         if type_id.is_none() {
@@ -238,19 +238,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns TypeId for the given binding.
-    fn bindingtype_id<T>(self: &Self, item: &mut T) -> Option<TypeId> where T: Bindable {
+    fn bindingtype_id(self: &Self, item: &mut impl Bindable) -> Option<TypeId> {
         item.binding_id().and_then(|binding_id| self.scopes.binding_type_id(binding_id))
     }
 
     /// Returns a reference to the type of the given binding.
-    fn bindingtype<T>(self: &mut Self, item: &T) -> Option<&Type> where T: Bindable {
+    fn bindingtype(self: &mut Self, item: &impl Bindable) -> Option<&Type> {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_ref(type_id))
     }
 
     /// Returns a mutable reference to the type of the given binding.
-    fn bindingtype_mut<T>(self: &mut Self, item: &mut T) -> Option<&mut Type> where T: Bindable {
+    fn bindingtype_mut(self: &mut Self, item: &mut impl Bindable) -> Option<&mut Type> {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_mut(type_id))
@@ -290,7 +290,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns Ok if the given type_ids refer to matching or fully compatible types. Otherwise a TypeMismatch error.
-    fn check_types_match<T>(self: &Self, item: &T, type_id_a: Option<TypeId>, type_id_b: Option<TypeId>) -> ResolveResult where T: Positioned {
+    fn check_types_match(self: &Self, item: &impl Positioned, type_id_a: Option<TypeId>, type_id_b: Option<TypeId>) -> ResolveResult  {
         if !self.types_match(type_id_a, type_id_b) {
             let error_kind = ResolveErrorKind::TypeMismatch(self.scopes.type_ref(type_id_a.unwrap()).clone(), self.scopes.type_ref(type_id_b.unwrap()).clone());
             Err(ResolveError::new(item, error_kind))
