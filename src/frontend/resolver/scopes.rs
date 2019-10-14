@@ -2,7 +2,7 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic};
+use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic, Bindings};
 
 #[derive(Clone, Debug)]
 pub struct FnSig {
@@ -259,11 +259,12 @@ impl Scopes {
     }
 }
 
-impl Into<(Vec<TypeId>, Vec<Type>)> for Scopes {
+impl Into<Bindings> for Scopes {
     /// convert scopes into type vector
-    fn into(self: Self) -> (Vec<TypeId>, Vec<Type>) {
+    fn into(self: Self) -> Bindings {
         let types: Vec<Type> = self.types.into();
         let type_map = self.bindings.values().map(|info| info.type_id.expect("Unresolved binding type while creating type map")).collect();
-        (type_map, types)
+        let mutability_map = self.bindings.values().map(|info| info.mutable).collect();
+        Bindings::new(mutability_map, type_map, types)
     }
 }

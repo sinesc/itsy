@@ -5,20 +5,17 @@ mod scopes;
 use std::fmt::{self, Display};
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
-use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, compute_loc};
+use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, compute_loc, Bindings};
 use crate::runtime::VMFunc;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
-#[derive(Debug)]
 pub struct ResolvedProgram<'ast, T> where T: VMFunc<T> {
     /// Programs are generic over their Rust API
     ty: PhantomData<T>,
     /// Program AST with resolved `BindingId`s.
     pub ast: super::ParsedProgram<'ast>,
-    /// Mapping from `BindingId` (vector index) to `TypeId`.
-    pub bindingtype_ids: Vec<TypeId>,
-    /// Mapping from `TypeId` (vector index) to primitive type.
-    pub types: Vec<Type>,
+    /// Type and mutability data for each binding.
+    pub bindings: Bindings,
     /// `FunctionId` of the entry/main function.
     pub entry_fn: FunctionId,
 }
@@ -176,14 +173,12 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
     }
 
     let entry_fn = scopes.lookup_function_id(root_scope_id, entry).expect("Failed to resolve entry function");
-    let (bindingtype_ids, types) = scopes.into();
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
         ast             : program,
         entry_fn        : entry_fn,
-        types           : types,
-        bindingtype_ids : bindingtype_ids,
+        bindings        : scopes.into(),
     })
 }
 

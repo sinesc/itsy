@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::{util::{TypeId, Numeric}, runtime::{Value, CONSTPOOL_INDEX}};
+use crate::{util::{TypeId, BindingId, Numeric}, runtime::{Value, CONSTPOOL_INDEX}};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -45,6 +45,44 @@ impl HeapRef {
     /// Returns the size of heap references.
     pub fn size() -> u8 {
         std::mem::size_of::<HeapRef>() as u8
+    }
+}
+
+/// Program binding data.
+pub struct Bindings {
+    /// List of bindings mapped to their TypeIds
+    type_map        : Vec<TypeId>,
+    /// List of registered types, effectively mapped via vector index = TypeId.
+    types           : Vec<Type>,
+    /// Binding mutability, effectively mapped via vector index = mutability.
+    mutability_map  : Vec<bool>,
+}
+
+impl Bindings {
+    pub(crate) fn empty() -> Self {
+        Self { type_map: Vec::new(), types: Vec::new(), mutability_map: Vec::new() } // todo: remove once compiler::new is removed
+    }
+    pub(crate) fn new(mutability_map: Vec<bool>, type_map: Vec<TypeId>, types: Vec<Type>) -> Self {
+        Self {
+            type_map,
+            types,
+            mutability_map
+        }
+    }
+    /// Returns the type of the given binding.
+    pub fn binding_type(self: &Self, binding_id: BindingId) -> &Type {
+        let binding_index = Into::<usize>::into(binding_id);
+        let type_id = self.type_map[binding_index];
+        &self.types[Into::<usize>::into(type_id)]
+    }
+    /// Returns the mutability of the given binding.
+    pub fn binding_mut(self: &Self, binding_id: BindingId) -> bool {
+        let binding_index = Into::<usize>::into(binding_id);
+        self.mutability_map[binding_index]
+    }
+    pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
+        let type_index = Into::<usize>::into(type_id);
+        &self.types[type_index]
     }
 }
 

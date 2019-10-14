@@ -1,7 +1,7 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 use std::{collections::HashMap, fmt::Debug, cell::RefCell};
-use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef};
+use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings};
 use crate::frontend::{ast::{self, Bindable, Returns, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, CONSTPOOL_INDEX};
@@ -90,10 +90,8 @@ impl LocalsStack {
 pub struct Compiler<T> where T: VMFunc<T> {
     /// Bytecode writer used to output to.
     writer          : Writer<T>,
-    /// List of bindings mapped to their TypeIds
-    bindingtype_ids : Vec<TypeId>,
-    /// List of registered types, effectively mapped via vector index = TypeId.
-    types           : Vec<Type>,
+    /// Type and mutability data for each binding.
+    bindings        : Bindings,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
     // Maps functions to their call index.
@@ -149,11 +147,10 @@ macro_rules! unsigned {
 impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Creates a new compiler.
-    fn new() -> Self {
+    fn new() -> Self { // todo: remove, make compile static
         Compiler {
             writer          : Writer::new(),
-            types           : Vec::new(),
-            bindingtype_ids : Vec::new(),
+            bindings        : Bindings::empty(),
             locals          : LocalsStack::new(),
             functions       : RefCell::new(HashMap::new()),
             unresolved      : RefCell::new(HashMap::new()),
@@ -163,15 +160,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the current program.
     fn compile(self: &mut Self, program: ResolvedProgram<'ast, T>) {
 
-        let ResolvedProgram { ast: statements, bindingtype_ids, types, entry_fn, .. } = program;
+        let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
 
         // write placeholder jump to program entry
         let initial_pos = self.writer.call(123);
         self.writer.exit();
 
         // compile program
-        self.types = types;
-        self.bindingtype_ids = bindingtype_ids;
+        self.bindings = bindings;
         for statement in statements.0.iter() {
             self.compile_statement(statement);
         }
@@ -833,14 +829,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns the type of the given binding.
     fn bindingtype(self: &Self, item: &impl Bindable) -> &Type {
-        let binding_id = Into::<usize>::into(item.binding_id().expect("Unresolved binding encountered."));
-        let type_id = self.bindingtype_ids[binding_id];
-        &self.types[Into::<usize>::into(type_id)]
+        self.bindings.binding_type(item.binding_id().expect("Unresolved binding encountered."))
     }
 
     /// Returns type for given type_id.
     fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
-        &self.types[Into::<usize>::into(type_id.expect("Unresolved type encountered."))]
+        self.bindings.get_type(type_id.expect("Unresolved binding encountered."))
     }
 
     /// Fixes function call targets for previously not generated functions.
@@ -1268,8 +1262,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn write_heap_decref_all(self: &Self, check_prior: bool) {
         self.locals.borrow(|locals| {
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
-                let type_id = self.bindingtype_ids[binding_id.into_usize()];
-                let ty = &self.types[type_id.into_usize()];
+                let ty = self.bindings.binding_type(binding_id);
                 if !ty.is_primitive() {
                     self.write_load(local.index, ty);
                     if check_prior {
