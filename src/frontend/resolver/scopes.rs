@@ -172,8 +172,8 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, type_id: Option<TypeId>) -> BindingId {
-        self.bindings.insert(scope_id, name.map(|n| n.into()), BindingInfo { mutable: false, type_id: type_id })
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, mutable: bool, type_id: Option<TypeId>) -> BindingId {
+        self.bindings.insert(scope_id, name.map(|n| n.into()), BindingInfo { mutable, type_id })
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
@@ -204,6 +204,14 @@ impl Scopes {
     /// Returns a copy of the type-id of the given binding id.
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
         self.bindings.by_id(binding_id).type_id
+    }
+
+    pub fn binding_mutable_mut(self: &mut Self, binding_id: BindingId) -> &mut bool {
+        &mut self.bindings.by_id_mut(binding_id).mutable
+    }
+
+    pub fn binding_mutable(self: &Self, binding_id: BindingId) -> bool {
+        self.bindings.by_id(binding_id).mutable
     }
 }
 

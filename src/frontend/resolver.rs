@@ -31,6 +31,8 @@ pub enum ResolveErrorKind {
     IncompatibleNumeric(Type, Numeric),
     UnknownValue(String),
     NumberOfArguments(u32, u32),
+    MutabilityEscalation,
+    AssignToImmutable,
 }
 
 /// A type resolution error.
@@ -57,6 +59,8 @@ impl Display for ResolveError {
             ResolveErrorKind::TypeMismatch(t1, t2) => write!(f, "Incompatible types {:?} and {:?}", t1, t2),
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {:?} for expected type {:?}", n, t),
             ResolveErrorKind::NumberOfArguments(e, g) => write!(f, "Expected {} arguments, got {}", e, g),
+            ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
+            ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
             // Todo: handle the others
             _ => write!(f, "{:?}", self.kind),
         }
@@ -203,7 +207,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(binding_id) = item.binding_id() {
             binding_id
         } else {
-            let binding_id = self.scopes.insert_binding(self.scope_id, None, None);
+            let binding_id = self.scopes.insert_binding(self.scope_id, None, true, None);
             *item.binding_id_mut() = Some(binding_id);
             binding_id
         }
@@ -232,6 +236,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         item.binding_id()
             .and_then(|binding_id| self.scopes.binding_type_id(binding_id))
             .map(move |type_id| self.scopes.type_ref(type_id))
+    }
+
+    /// Sets mutability for given binding.
+    fn binding_set_mutable(self: &mut Self, item: &mut impl Bindable, value: bool) {
+        let binding_id = self.try_create_anon_binding(item);
+        *self.scopes.binding_mutable_mut(binding_id) = value;
+    }
+
+    /// Returns mutability for given binding.
+    fn binding_mutable(self: &Self, item: &impl Bindable) -> Option<bool> {
+        item.binding_id().map(|binding_id| self.scopes.binding_mutable(binding_id))
     }
 
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
@@ -274,6 +289,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Err(ResolveError::new(item, error_kind))
         } else {
             Ok(())
+        }
+    }
+
+    /// Returns whether an expression is/may become mutable or not.
+    fn expression_may_become_mutable(self: &Self, item: &ast::Expression) -> Option<bool> {
+        if item.is_literal() || item.is_call() {
+            // literals and call results accept any mutability
+            Some(true)
+        } else if let Some(expr_type_id) = self.binding_type_id(item) {
+            // primitives or mutable references may become/are mutable
+            Some(self.scopes.type_ref(expr_type_id).is_primitive() || self.binding_mutable(item).unwrap())
+        } else {
+            None
         }
     }
 }
@@ -498,6 +526,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let mut result_mutability = None;
         // resolve condition and block
         self.resolve_expression(&mut item.cond, Some(self.primitives.bool))?;
         self.resolve_block(&mut item.if_block, expected_result)?;
@@ -507,11 +536,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let if_type_id = self.binding_type_id(&item.if_block);
             let else_type_id = self.binding_type_id(else_block);
             if if_type_id.is_some() && else_type_id.is_some() {
+                result_mutability = Some(self.binding_mutable(&item.if_block).unwrap() && self.binding_mutable(else_block).unwrap());
                 self.check_types_match(item, if_type_id, else_type_id)?;
             }
         } else if let Some(if_type_id) = self.binding_type_id(&item.if_block) {
             // if block with a non-void result but no else block
             self.check_types_match(item, Some(if_type_id), Some(TypeId::void()))?; // Todo: meh, using check_types_match to generate an error when we already know there is an error.
+            result_mutability = Some(self.binding_mutable(&item.if_block).unwrap());
+        }
+        if let Some(result_mutability) = result_mutability {
+            self.binding_set_mutable(item, result_mutability);
         }
         self.scope_id = parent_scope_id;
         Ok(())
@@ -602,7 +636,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let left_type_id = self.binding_type_id(&item.left);
         self.resolve_expression(&mut item.right, left_type_id)?;
         self.binding_set_type_id(item, TypeId::void())?;
-        Ok(())
+        if let Some(false) = self.binding_mutable(&item.left) {
+            Err(ResolveError::new(item, ResolveErrorKind::AssignToImmutable))
+        } else {
+            Ok(())
+        }
     }
 
     /// Resolves an assignment expression.
@@ -673,6 +711,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if let Some(Type::Array(array)) = ty {
                         array.type_id = Some(result_type_id); // todo: check that array.type_id is either None or equals binding_type_id
                     }
+                    if let Some(false) = self.binding_mutable(&item.left) {
+                        self.binding_set_mutable(item, false);
+                    }
                 }
                 // if we know the array element type, set the result type to that
                 if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.binding_type(&item.left) {
@@ -692,6 +733,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
                         self.binding_set_type_id(item, type_id)?;
                         self.binding_set_type_id(&mut item.right, type_id)?;
+                    }
+                    if let Some(false) = self.binding_mutable(&item.left) {
+                        self.binding_set_mutable(item, false);
                     }
                 }
             }
@@ -720,7 +764,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if self.scopes.binding_id(self.scope_id, item.ident.name).is_some() {
                 unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
             }
-            let binding_id = self.scopes.insert_binding(self.scope_id, Some(item.ident.name), None);
+            let binding_id = self.scopes.insert_binding(self.scope_id, Some(item.ident.name), item.mutable, None);
             *item.binding_id_mut() = Some(binding_id);
         }
 
@@ -748,6 +792,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.binding_set_type_id(item, expr_type_id)?;
             }
         };
+
+        // for mutable binding, expression needs to be a primitive or a literal (both copied/constructed) or mutable itself
+        if let Some(expr) = &item.expr {
+            if item.mutable && !self.expression_may_become_mutable(expr).unwrap_or(true) {
+                return Err(ResolveError::new(item, ResolveErrorKind::MutabilityEscalation));
+            }
+        }
 
         Ok(())
     }

@@ -129,7 +129,7 @@ fn numerics() {
 #[test]
 fn compound_i8() {
     let result = run("
-        let x = 1;
+        let mut x = 1;
         x += 1;
         ret_i8(x);
         x *= 6;
@@ -147,7 +147,7 @@ fn compound_i8() {
 #[test]
 fn compound_i64() {
     let result = run("
-        let x = 10000000000;
+        let mut x = 10000000000;
         x += 1;
         ret_i64(x);
         x *= 6;
@@ -165,7 +165,7 @@ fn compound_i64() {
 #[test]
 fn compound_f64() {
     let result = run("
-        let x = 1.000001;
+        let mut x = 1.000001;
         x += 1.0;
         ret_f64(x);
         x *= 6.0;
@@ -442,7 +442,7 @@ fn op_order_lt() {
 #[test]
 fn branching() {
     let result = run("
-        let x = 1;
+        let mut x = 1;
         let y = 2;
         while x <= 3 {
             if x < y {
@@ -660,7 +660,7 @@ fn member_assign_primitive() {
             ob: Inner,
         }
         fn main() {
-            let x: Outer = Outer {
+            let mut x: Outer = Outer {
                 oa: 0,
                 ob: Inner {
                     ia: 0,
@@ -783,7 +783,7 @@ fn assign_heap_index_target() {
 #[test]
 fn assign_heap_var_target() {
     let result = run("
-        let values = [ 5u8, 6 ];
+        let mut values = [ 5u8, 6 ];
         let morevalues = [ [ 15u8, 16 ], [ 12, 13 ] ];
         values = [ 7u8, 8 ];
         ret_u8(values[1]);
@@ -797,7 +797,7 @@ fn assign_heap_var_target() {
 #[test]
 fn assign_stack_target() {
     let result = run("
-        let value = 1u8;
+        let mut value = 1u8;
         let values = [ 0u8, 10 ];
         value = 2;
         ret_u8(value);
@@ -901,7 +901,7 @@ fn for_in_inference_let() {
 #[test]
 fn for_in_inference_assign() {
     let result = run("
-        let y;
+        let mut y;
         for x in 1..4 {
             y = x * 2;
             ret_u8(y);
@@ -955,10 +955,11 @@ fn postfix_suffix() {
     assert_all(&result, &[ 0i8, 1, 1, 0 ]);
 }
 
+#[test]
 fn heap_postfix_suffix() {
     let result = run("
-        struct Test2 {
-            field: u32,
+        struct Test {
+            field: u8,
         }
         fn main() {
             let x = [ 0u8 ];
@@ -1139,7 +1140,7 @@ fn heap_return() {
             return x.b;
         }
         fn main() {
-            let y = test();
+            let mut y = test();
             ret_u32(y.c);
             y.c += 1;
             ret_u32(y.c);
