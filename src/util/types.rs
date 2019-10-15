@@ -59,9 +59,6 @@ pub struct Bindings {
 }
 
 impl Bindings {
-    pub(crate) fn empty() -> Self {
-        Self { type_map: Vec::new(), types: Vec::new(), mutability_map: Vec::new() } // todo: remove once compiler::new is removed
-    }
     pub(crate) fn new(mutability_map: Vec<bool>, type_map: Vec<TypeId>, types: Vec<Type>) -> Self {
         Self {
             type_map,

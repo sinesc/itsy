@@ -1,6 +1,6 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
-use std::{collections::HashMap, fmt::Debug, cell::RefCell};
+use std::{collections::HashMap, cell::RefCell};
 use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings};
 use crate::frontend::{ast::{self, Bindable, Returns, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
@@ -101,10 +101,33 @@ pub struct Compiler<T> where T: VMFunc<T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T: VMFunc<T>+Debug {
-    let mut compiler = Compiler::new();
-    compiler.compile(program);
-    compiler.into_program()
+pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T: VMFunc<T> {
+
+    let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
+
+    let compiler = Compiler {
+        writer          : Writer::new(),
+        bindings        : bindings,
+        locals          : LocalsStack::new(),
+        functions       : RefCell::new(HashMap::new()),
+        unresolved      : RefCell::new(HashMap::new()),
+    };
+
+    // write placeholder jump to program entry
+    let initial_pos = compiler.writer.call(123);
+    compiler.writer.exit();
+
+    // compile program
+    for statement in statements.0.iter() {
+        compiler.compile_statement(statement);
+    }
+
+    // overwrite placeholder with actual entry position
+    let &entry_fn_pos = compiler.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
+    compiler.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos));
+
+    // return generated program
+    compiler.writer.into_program()
 }
 
 // Writes a comment to the bytecode when in debug mode. // TODO: add compiler option instead
@@ -141,46 +164,6 @@ macro_rules! unsigned {
             $self.writer.$variant32($value);
         }
     }}
-}
-
-/// Basic compiler functionality.
-impl<'ast, T> Compiler<T> where T: VMFunc<T> {
-
-    /// Creates a new compiler.
-    fn new() -> Self { // todo: remove, make compile static
-        Compiler {
-            writer          : Writer::new(),
-            bindings        : Bindings::empty(),
-            locals          : LocalsStack::new(),
-            functions       : RefCell::new(HashMap::new()),
-            unresolved      : RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Compiles the current program.
-    fn compile(self: &mut Self, program: ResolvedProgram<'ast, T>) {
-
-        let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
-
-        // write placeholder jump to program entry
-        let initial_pos = self.writer.call(123);
-        self.writer.exit();
-
-        // compile program
-        self.bindings = bindings;
-        for statement in statements.0.iter() {
-            self.compile_statement(statement);
-        }
-
-        // overwrite placeholder with actual entry position
-        let &entry_fn_pos = self.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
-        self.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos));
-    }
-
-    /// Returns compiled bytecode program.
-    fn into_program(self: Self) -> Program<T> {
-        self.writer.into_program()
-    }
 }
 
 /// Methods for compiling individual code structures.
