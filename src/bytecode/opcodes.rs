@@ -4,7 +4,7 @@
 mod helper;
 use crate::bytecode::{ARG1, ARG2, ARG3};
 use crate::util::{array1, array2, array4};
-use crate::runtime::{Value, Value64, StackOp, StackOpRel, HeapCmp};
+use crate::runtime::{Value, Value64, StackOp, StackOffsetOp, HeapCmp};
 use crate::util::HeapRef;
 
 impl_vm!{

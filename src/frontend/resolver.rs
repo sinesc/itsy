@@ -32,7 +32,7 @@ pub enum ResolveErrorKind {
     AssignToImmutable,
 }
 
-/// A type resolution error.
+/// An error reported by the resolver (e.g. unknown/mismatching types).
 #[derive(Clone, Debug)]
 pub struct ResolveError {
     pub kind: ResolveErrorKind,

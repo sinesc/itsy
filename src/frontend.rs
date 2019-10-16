@@ -3,10 +3,10 @@
 pub mod ast;
 
 mod parser;
-pub use crate::frontend::parser::{parse, ParseError, ParseErrorKind, ParsedProgram};
+pub use crate::frontend::parser::{parse, ParsedProgram, ParseError, ParseErrorKind};
 
 mod resolver;
-pub use crate::frontend::resolver::{resolve, ResolvedProgram, ResolveError};
+pub use crate::frontend::resolver::{resolve, ResolvedProgram, ResolveError, ResolveErrorKind};
 
 pub mod resolved {
     //! Resolved information to be used by the bytecode generator.

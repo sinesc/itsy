@@ -57,6 +57,6 @@ fn main() {
         println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
     } else if let Err(err) = vm {
         let loc =  err.loc(&source);
-        println!("Error: {} at line {}, column {}.", err, loc.0, loc.1);
+        println!("Error: {} in line {}, column {}.", err, loc.0, loc.1);
     }
 }

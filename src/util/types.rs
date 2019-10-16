@@ -128,7 +128,7 @@ impl Debug for Array {
     }
 }
 */
-/// Information about a primitive type in a resolved program.
+/// Information about a data type in a resolved program.
 #[allow(non_camel_case_types)]
 #[derive(Clone, PartialEq)]
 pub enum Type {

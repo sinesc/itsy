@@ -186,6 +186,7 @@ macro_rules! extern_rust {
     };
 }
 
+/// An error generated during program compilation or execution.
 #[derive(Clone, Debug)]
 pub enum ItsyError {
     ParseError(frontend::ParseError),

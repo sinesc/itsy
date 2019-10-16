@@ -4,7 +4,7 @@ use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
 use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic, Bindings};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FnSig {
     pub ret_type: Option<TypeId>,
     pub arg_type: Vec<TypeId>,

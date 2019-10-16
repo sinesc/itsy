@@ -24,7 +24,7 @@ pub enum ParseErrorKind {
     // TODO: add error handling to all parsers where it make sense
 }
 
-/// A parser error including information about the kind of error and position.
+/// An error reported by the parser (e.g. syntax error).
 #[derive(Copy, Clone, Debug)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
