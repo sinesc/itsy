@@ -1,14 +1,49 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
-use std::{collections::HashMap, cell::RefCell};
-use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings};
-use crate::frontend::{ast::{self, Bindable, Returns, CallType}, ResolvedProgram};
+use std::{collections::HashMap, cell::RefCell, fmt::{self, Display}};
+use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings, compute_loc};
+use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, CONSTPOOL_INDEX};
 mod locals;
 use locals::{Local, Locals, LocalsStack};
 #[macro_use]
 mod macros;
+
+/// Represents the various possible compiler error-kinds.
+#[derive(Clone, Debug)]
+pub enum CompileErrorKind {
+    Error
+}
+
+/// An error reported by the compiler.
+#[derive(Clone, Debug)]
+pub struct CompileError {
+    pub kind: CompileErrorKind,
+    position: u32, // this is the position from the end of the input
+}
+
+impl CompileError {
+    fn new(item: &impl Positioned, kind: CompileErrorKind) -> CompileError {
+        Self { kind: kind, position: item.position() }
+    }
+    /// Computes and returns the source code location of this error. Since the AST only stores byte
+    /// offsets, the original source is required to recover line and column information.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        compute_loc(input, input.len() as u32 - self.position)
+    }
+}
+
+impl Display for CompileError {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            CompileErrorKind::Error => write!(f, "Internal error"),
+            //_ => write!(f, "{:?}", self.kind),
+        }
+    }
+}
+
+type CompileResult = Result<(), CompileError>;
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: VMFunc<T> {
@@ -25,7 +60,7 @@ pub struct Compiler<T> where T: VMFunc<T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T: VMFunc<T> {
+pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
     let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
 
@@ -43,7 +78,7 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T
 
     // compile program
     for statement in statements.0.iter() {
-        compiler.compile_statement(statement);
+        compiler.compile_statement(statement)?;
     }
 
     // overwrite placeholder with actual entry position
@@ -51,54 +86,57 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos));
 
     // return generated program
-    compiler.writer.into_program()
+    Ok(compiler.writer.into_program())
 }
 
 /// Methods for compiling individual code structures.
 impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
-    fn compile_statement(self: &Self, item: &ast::Statement<'ast>) {
+    fn compile_statement(self: &Self, item: &ast::Statement<'ast>) -> CompileResult {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.compile_function(function),
-            S::Structure(_)             => { /* nothing to do here */ },
+            S::Structure(_)             => Ok(()),
             S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => {
-                self.compile_if_block(if_block);
+                self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
                     for _ in 0..self.bindingtype(result).quadsize() {
                         self.writer.discard32();
                     }
                 }
+                Ok(())
             }
             S::ForLoop(for_loop)        => self.compile_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
             S::Block(block)             => {
-                self.compile_block(block);
+                self.compile_block(block)?;
                 if let Some(result) = &block.result {
                     for _ in 0..self.bindingtype(result).quadsize() {
                         self.writer.discard32();
                     }
                 }
+                Ok(())
             }
             S::Return(ret)              => self.compile_return(ret),
             S::Expression(expression)   => {
-                self.compile_expression(expression);
+                self.compile_expression(expression)?;
                 for _ in 0..self.bindingtype(expression).quadsize() {
                     self.writer.discard32();
                 }
+                Ok(())
             }
         }
     }
 
     /// Compiles the given expression.
-    fn compile_expression(self: &Self, item: &ast::Expression<'ast>) {
+    fn compile_expression(self: &Self, item: &ast::Expression<'ast>) -> CompileResult {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
             E::Variable(variable)       => self.compile_variable(variable),
-            E::Member(_)                => { /* nothing to do here */ }
+            E::Member(_)                => Ok(()),
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
             E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
@@ -106,18 +144,18 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             E::Cast(cast)               => self.compile_cast(cast),
             E::Block(block)             => self.compile_block(block),
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
-        };
+        }
     }
 
     /// Compiles an assignment to a local variable.
-    fn compile_variable_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+    fn compile_variable_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         let binding_id = item.left.binding_id().unwrap();
         let index = self.locals.lookup(binding_id).index;
         let ty = self.bindingtype(&item.left);
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right)?;
                 self.write_tmp_ref(&item.right);
                 if ty.is_primitive() {
                     // stack: [ ..., PRIM_SRC ], store directly to variable
@@ -131,7 +169,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             _ => {
                 self.write_load(index, ty);
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right)?;
                 self.write_tmp_ref(&item.right);
                 // stack: [ ..., PRIM_DEST, PRIM_SRC ]
                 match item.op {
@@ -146,15 +184,16 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.write_tmp_unref(&item.right);
             },
         };
+        Ok(())
     }
 
     /// Compiles an assignment to an index operation.
-    fn compile_index_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+    fn compile_index_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         let ty = self.bindingtype(&item.left);
-        self.compile_expression(&item.right);
+        self.compile_expression(&item.right)?;
         self.write_tmp_ref(&item.right);
-        self.compile_expression(&item.left);
+        self.compile_expression(&item.left)?;
         match item.op {
             BO::Assign => {
                 if ty.is_primitive() {
@@ -198,10 +237,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
         }
         self.write_tmp_unref(&item.right);
+        Ok(())
     }
 
     /// Compiles the assignment operation.
-    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) {
+    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         comment!(self, "{}", item);
         match item.left {
             ast::Expression::Variable(_) => self.compile_variable_assignment(item),
@@ -211,7 +251,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given function.
-    fn compile_function(self: &Self, item: &ast::Function<'ast>) {
+    fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
         comment!(self, "\nfunction {}", item.sig.ident.name);
@@ -235,7 +275,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
-        self.compile_block(&item.block);
+        self.compile_block(&item.block)?;
         if !item.block.returns() {
             let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id()).is_primitive());
             self.write_heap_decref_all(return_heap_object);
@@ -243,16 +283,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
         // destroy local environment
         self.locals.pop();
+        Ok(())
     }
 
     /// Compiles the given call.
-    fn compile_call(self: &Self, item: &ast::Call<'ast>) {
+    fn compile_call(self: &Self, item: &ast::Call<'ast>) -> CompileResult {
         comment!(self, "call {}", item.ident.name);
 
         // put args on stack, ensure temporaries are cleaned up later
         for (index, arg) in item.args.iter().enumerate() {
             comment!(self, "call-arg {}", index);
-            self.compile_expression(arg);
+            self.compile_expression(arg)?;
             self.write_tmp_ref(arg);
         }
 
@@ -290,12 +331,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         for arg in item.args.iter() {
             self.write_tmp_unref(arg);
         }
+
+        Ok(())
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &Self, item: &ast::Binding<'ast>) {
+    fn compile_binding(self: &Self, item: &ast::Binding<'ast>) -> CompileResult {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr);
+            self.compile_expression(expr)?;
             comment!(self, "let {} = {}", item.ident.name, expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
@@ -306,32 +349,35 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.write_store(index, ty);
             self.locals.set_active(binding_id, true);
         }
+        Ok(())
     }
 
     /// Compiles the given variable.
-    fn compile_variable(self: &Self, item: &ast::Variable<'ast>) {
+    fn compile_variable(self: &Self, item: &ast::Variable<'ast>) -> CompileResult {
         comment!(self, "variable {}", item);
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
         };
         self.write_load(load_index, self.bindingtype(item));
+        Ok(())
     }
 
     /// Compiles an if block without else part.
-    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) {
+    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) -> CompileResult {
         comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
-        self.compile_block(&item.if_block);
+        let result = self.compile_block(&item.if_block);
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        result
     }
 
     /// Compiles an if+else block.
-    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) {
+    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) -> CompileResult {
 
         let else_jump = self.writer.j0(123);
-        self.compile_block(if_block);
+        let result = self.compile_block(if_block);
         let exit_jump = if !if_block.returns() {
             Some(self.writer.jmp(123))
         } else {
@@ -339,7 +385,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         };
 
         let else_target = self.writer.position();
-        self.compile_block(else_block);
+        self.compile_block(else_block)?;
 
         let exit_target = self.writer.position();
 
@@ -348,35 +394,38 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         if let Some(exit_jump) = exit_jump {
             self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
         }
+
+        result
     }
 
     /// Compiles the given if block.
-    fn compile_if_block(self: &Self, item: &ast::IfBlock<'ast>) {
+    fn compile_if_block(self: &Self, item: &ast::IfBlock<'ast>) -> CompileResult {
 
         // compile condition and jump placeholder
-        self.compile_expression(&item.cond);
+        self.compile_expression(&item.cond)?;
 
         if item.else_block.is_none() {
-            self.compile_if_only_block(item);
+            self.compile_if_only_block(item)
         } else {
-            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap());
+            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap())
         }
     }
 
     /// Compiles a while loop.
-    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) {
+    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) -> CompileResult {
         comment!(self, "{}", item);
         let start_target = self.writer.position();
-        self.compile_expression(&item.expr);
+        self.compile_expression(&item.expr)?;
         let exit_jump = self.writer.j0(123);
-        self.compile_block(&item.block);
+        self.compile_block(&item.block)?;
         self.writer.jmp(start_target);
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        Ok(())
     }
 
     /// Compiles a for - in loop
-    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) {
+    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) -> CompileResult {
         if let Some(binary_op) = item.range.as_binary_op() {
 
             if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
@@ -384,10 +433,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 // todo: refactor this mess
                 let (var_index, var_type) = self.range_info(item);
                 // store lower range bound in iter variable
-                self.compile_expression(&binary_op.left);
+                self.compile_expression(&binary_op.left)?;
                 self.write_store(var_index, var_type);
                 // push upper range bound
-                self.compile_expression(&binary_op.right);
+                self.compile_expression(&binary_op.right)?;
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
                 self.write_load(var_index, var_type);
                 self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
@@ -399,7 +448,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let exit_jump = self.writer.j0(123);
                 // compile block
                 let start_target = self.writer.position();
-                self.compile_block(&item.block);
+                self.compile_block(&item.block)?;
                 // load bounds, increment and compare
                 self.write_preinc(var_index, var_type);
                 self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
@@ -412,44 +461,47 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 // exit position
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+                Ok(())
             } else {
-                unimplemented!("non-range binary op");
+                Err(CompileError::new(item, CompileErrorKind::Error))
             }
 
         } else {
-            panic!("expected binary op");
+            Err(CompileError::new(item, CompileErrorKind::Error))
         }
     }
 
     /// Compiles a return statement
-    fn compile_return(self: &Self, item: &ast::Return<'ast>) {
+    fn compile_return(self: &Self, item: &ast::Return<'ast>) -> CompileResult {
         if let Some(expr) = &item.expr {
-            self.compile_expression(expr);
+            self.compile_expression(expr)?;
             let ty = self.bindingtype(expr);
             self.write_heap_decref_all(!ty.is_primitive());
         } else {
             self.write_heap_decref_all(false);
         }
         self.write_ret();
+        Ok(())
     }
 
     /// Compiles the given block.
-    fn compile_block(self: &Self, item: &ast::Block<'ast>) {
+    fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
         for statement in item.statements.iter() {
-            self.compile_statement(statement);
+            self.compile_statement(statement)?;
         }
         if let Some(returns) = &item.returns {
-            self.compile_expression(returns);
+            self.compile_expression(returns)?;
             if !returns.returns() {
                 self.write_ret();
             }
         } else if let Some(result) = &item.result {
-            self.compile_expression(result);
+            self.compile_expression(result)?;
         }
+        Ok(())
     }
 
     /// Compiles the given literal
-    fn compile_literal(self: &Self, item: &ast::Literal<'ast>) {
+    fn compile_literal(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
         let lit_type = self.bindingtype(item);
@@ -489,10 +541,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 };
             }
         }
+        Ok(())
     }
 
     /// Compiles the given unary operation.
-    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) {
+    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) -> CompileResult {
         use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
 
         let exp_type = self.bindingtype(&item.expr);
@@ -500,7 +553,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         match item.op {
             // logical
             UO::Not => {
-                self.compile_expression(&item.expr);
+                self.compile_expression(&item.expr)?;
                 comment!(self, "{}", item);
                 self.writer.not();
             }
@@ -521,7 +574,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
-                    self.compile_expression(&item.expr);
+                    self.compile_expression(&item.expr)?;
                     self.writer.store_tmp96();
                     self.write_heap_fetch(exp_type.size());
                     comment!(self, "{}", item);
@@ -543,16 +596,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
             },
         }
+        Ok(())
     }
 
     /// Compiles the given binary operation.
-    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) {
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
 
         if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
-            self.compile_expression(&item.left);
+            self.compile_expression(&item.left)?;
             self.write_tmp_ref(&item.left);
-            self.compile_expression(&item.right);
+            self.compile_expression(&item.right)?;
             self.write_tmp_ref(&item.right);
             comment!(self, "{}", item);
         }
@@ -576,17 +630,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::NotEqual    => self.write_neq(&compare_type),
             // boolean
             BO::And => {
-                self.compile_expression(&item.left);
+                self.compile_expression(&item.left)?;
                 let exit_jump = self.writer.j0_top(123); // left is false, result cannot ever be true, skip right
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right)?;
                 self.writer.and();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.j0_top(exit_target));
             },
             BO::Or => {
-                self.compile_expression(&item.left);
+                self.compile_expression(&item.left)?;
                 let exit_jump = self.writer.jn0_top(123); // left is true, result cannot ever be false, skip right
-                self.compile_expression(&item.right);
+                self.compile_expression(&item.right)?;
                 self.writer.or();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.jn0_top(exit_target));
@@ -631,12 +685,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.write_tmp_unref(&item.right);
             self.write_tmp_unref(&item.left);
         }
+
+        Ok(())
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_cast(self: &Self, item: &ast::Cast<'ast>) {
+    fn compile_cast(self: &Self, item: &ast::Cast<'ast>) -> CompileResult {
 
-        self.compile_expression(&item.expr);
+        self.compile_expression(&item.expr)?;
 
         let mut from = self.bindingtype(&item.expr);
         let mut to = self.get_type(item.ty.type_id);
@@ -693,6 +749,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 self.writer.i64tof64();
             }
         }
+
+        Ok(())
     }
 }
 

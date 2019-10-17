@@ -191,6 +191,7 @@ macro_rules! extern_rust {
 pub enum ItsyError {
     ParseError(frontend::ParseError),
     ResolveError(frontend::ResolveError),
+    CompileError(bytecode::CompileError),
 }
 
 impl ItsyError {
@@ -198,6 +199,7 @@ impl ItsyError {
         match self {
             Self::ParseError(e) => e.loc(input),
             Self::ResolveError(e) => e.loc(input),
+            Self::CompileError(e) => e.loc(input),
         }
     }
 }
@@ -207,6 +209,7 @@ impl Display for ItsyError {
         match self {
             Self::ParseError(e) => write!(f, "{}", e),
             Self::ResolveError(e) => write!(f, "{}", e),
+            Self::CompileError(e) => write!(f, "{}", e),
         }
     }
 }
@@ -220,6 +223,12 @@ impl From<frontend::ParseError> for ItsyError {
 impl From<frontend::ResolveError> for ItsyError {
     fn from(error: frontend::ResolveError) -> ItsyError {
         ItsyError::ResolveError(error)
+    }
+}
+
+impl From<bytecode::CompileError> for ItsyError {
+    fn from(error: bytecode::CompileError) -> ItsyError {
+        ItsyError::CompileError(error)
     }
 }
 
@@ -257,6 +266,6 @@ pub fn vm<T, U>(program: &str) -> Result<runtime::VM<T, U>, ItsyError> where T: 
     use crate::runtime::VM;
     let parsed = parse(program)?;
     let resolved = resolve::<T>(parsed, "main")?;
-    let program = compile(resolved); // todo: compiler needs error handling. then forward error
+    let program = compile(resolved)?; // todo: compiler needs error handling. then forward error
     Ok(VM::new(program))
 }

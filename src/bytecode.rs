@@ -7,7 +7,7 @@ mod optimizer;
 
 use std::marker::PhantomData;
 pub use self::writer::*;
-pub use self::compiler::compile;
+pub use self::compiler::{compile, CompileError, CompileErrorKind};
 pub use self::opcodes::OpCode;
 
 const ARG1: i32 = -3;
