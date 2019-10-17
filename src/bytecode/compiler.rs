@@ -1,90 +1,14 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 use std::{collections::HashMap, cell::RefCell};
-use crate::util::{Numeric, BindingId, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings};
+use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings};
 use crate::frontend::{ast::{self, Bindable, Returns, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, CONSTPOOL_INDEX};
-
-/// Describes a single local variable of a stack frame
-#[derive(Copy,Clone)]
-struct Local {
-    /// The load-index for this variable.
-    index   : i32,
-    /// Whether this variable is currently in scope (stack frame does not equal scope!)
-    in_scope: bool,
-}
-
-impl Local {
-    fn new(index: i32) -> Self {
-        Local { index, in_scope: false }
-    }
-}
-
-/// Maps bindings and arguments to indices relative to the stack frame.
-struct Locals {
-    map     : HashMap<BindingId, Local>,
-    next_arg: i32,
-    next_var: i32,
-    arg_size: u32,
-    ret_size: u32,
-}
-
-impl Locals {
-    pub fn new() -> Self {
-        Locals {
-            map     : HashMap::new(),
-            next_arg: ARG1,
-            next_var: 0,
-            arg_size: 0,
-            ret_size: 0,
-        }
-    }
-}
-
-/// A stack Locals mappings for nested structures.
-struct LocalsStack(RefCell<Vec<Locals>>);
-
-impl LocalsStack {
-    const NO_STACK: &'static str = "Attempted to access empty LocalsStack";
-    const UNKNOWN_BINDING: &'static str = "Unknown local binding";
-    /// Create new local stack frame descriptor stack.
-    fn new() -> Self {
-        LocalsStack(RefCell::new(Vec::new()))
-    }
-    /// Push stack frame descriptor.
-    fn push(self: &Self, frame: Locals) {
-        self.0.borrow_mut().push(frame);
-    }
-    /// Pop stack frame descriptor and return it.
-    fn pop(self: &Self) -> Locals {
-        self.0.borrow_mut().pop().expect(Self::NO_STACK)
-    }
-    /// Borrow the top stack frame descriptor within given function.
-    fn borrow(self: &Self, func: impl FnOnce(&Locals)) {
-        let inner = self.0.borrow_mut();
-        let locals = inner.last().expect(Self::NO_STACK);
-        func(&locals);
-    }
-    /// Returns the argument size in stack elements for the top stack frame descriptor.
-    fn arg_size(self: &Self) -> u32 {
-        self.0.borrow_mut().last().expect(Self::NO_STACK).arg_size
-    }
-    /// Returns the return value size in stack elements for the top stack frame descriptor.
-    fn ret_size(self: &Self) -> u32 {
-        self.0.borrow_mut().last().expect(Self::NO_STACK).ret_size
-    }
-    /// Look up local variable descriptor for the given BindingId.
-    fn lookup(self: &Self, binding_id: BindingId) -> Local {
-        *self.0.borrow().last().expect(Self::NO_STACK).map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
-    }
-    /// Sets whether the given local variable is currently in scope.
-    fn set_active(self: &Self, binding_id: BindingId, active: bool) {
-        let mut inner = self.0.borrow_mut();
-        let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING).in_scope = active;
-    }
-}
+mod locals;
+use locals::{Local, Locals, LocalsStack};
+#[macro_use]
+mod macros;
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<T> where T: VMFunc<T> {
@@ -128,42 +52,6 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Program<T> where T
 
     // return generated program
     compiler.writer.into_program()
-}
-
-// Writes a comment to the bytecode when in debug mode. // TODO: add compiler option instead
-macro_rules! comment {
-    ($self:ident, $format:literal $(, $value:expr)*) => {
-        #[cfg(debug_assertions)]
-        $self.writer.comment(&format!($format $(, $value)*));
-    }
-}
-
-// Writes a 8, 16 or 32 bit variant of an instruction that takes one signed argument.
-macro_rules! signed {
-    ($self:ident, $variant8:ident, $varian16:ident, $variant32:ident, $value:expr) => {{
-        use std::{i8, i16};
-        if $value >= i8::MIN as i32 && $value <= i8::MAX as i32 {
-            $self.writer.$variant8($value as i8);
-        } else if $value >= i16::MIN as i32 && $value <= i16::MAX as i32 {
-            $self.writer.$varian16($value as i16);
-        } else {
-            $self.writer.$variant32($value);
-        }
-    }}
-}
-
-// Writes a 8, 16 or 32 bit variant of an instruction that takes one unsigned argument.
-macro_rules! unsigned {
-    ($self:ident, $variant8:ident, $varian16:ident, $variant32:ident, $value:expr) => {{
-        use std::{u8, u16};
-        if $value <= u8::MAX as u32 {
-            $self.writer.$variant8($value as u8);
-        } else if $value <= u16::MAX as u32 {
-            $self.writer.$varian16($value as u16);
-        } else {
-            $self.writer.$variant32($value);
-        }
-    }}
 }
 
 /// Methods for compiling individual code structures.
