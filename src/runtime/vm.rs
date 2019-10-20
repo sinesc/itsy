@@ -5,9 +5,7 @@ use crate::runtime::*;
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum VMState {
-    /// The VM will continue to execute white it is in this state.
-    Continue,
+pub(crate) enum VMState {
     /// Yield after current instruction. The program can be resumed after a yield.
     Yield,
     /// Terminate after current instruction. The program state will be reset.
@@ -41,7 +39,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
             func_type   : std::marker::PhantomData,
             instructions: instructions,
             pc          : 0,
-            state       : VMState::Continue,
+            state       : VMState::Terminate,
             stack       : Stack::new(),
             heap        : heap,
             tmp         : Stack::new(),
@@ -54,7 +52,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
         self.heap.reset();
         self.tmp.reset();
         self.pc = 0;
-        self.state = VMState::Continue;
+        self.state = VMState::Terminate;
     }
 
     /// Disassembles the bytecode and returns it as a string.
@@ -86,17 +84,10 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
 
     /// Executes bytecode until it terminates.
     pub fn run(self: &mut Self, context: &mut U) -> &mut Self {
-        while self.state == VMState::Continue {
-            self.exec(context);
-        }
+        self.exec(context);
         if self.state == VMState::Terminate {
             self.reset();
         }
         self
-    }
-
-    /// Returns the current VM state.
-    pub fn state(self: &Self) -> VMState {
-        self.state
     }
 }

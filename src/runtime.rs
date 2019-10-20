@@ -6,7 +6,8 @@ mod stack;
 mod heap;
 mod traits;
 
-pub use self::vm::{VM, VMState};
+pub use self::vm::VM;
+pub(crate) use self::vm::VMState;
 pub use self::stack::*;
 pub use self::heap::*;
 pub use self::traits::*;

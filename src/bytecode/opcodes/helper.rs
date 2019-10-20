@@ -197,26 +197,36 @@ macro_rules! impl_vm {
 
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
-            #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
-                let instruction = impl_vm!(read u8, self, self.pc);
-                match OpCode::from_u8(instruction) {
-                    $(
-                        OpCode::$name => {
-                            let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
-                            $(let $context = context;)?
-                            self.$name( $($context,)? $( $arg_name ),* );
+                loop {
+                    let instruction = impl_vm!(read u8, self, self.pc);
+                    #[allow(unreachable_patterns)]
+                    match OpCode::from_u8(instruction) {
+                        OpCode::exit => {
+                            self.exit();
+                            return;
                         }
-                        // handle opcode variants
+                        OpCode::yld => {
+                            self.yld();
+                            return;
+                        }
                         $(
+                            OpCode::$name => {
+                                let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
+                                $(let $context: &mut U = context;)?
+                                self.$name( $($context,)? $( $arg_name ),* );
+                            }
+                            // handle opcode variants
                             $(
-                                OpCode::$variant_name => {
-                                    let tmp: $variant_type = impl_vm!(read $variant_type, self, self.pc);
-                                    self.$name( tmp as $variant_type_as );
-                                }
-                            )+
-                        )?
-                    ),+
+                                $(
+                                    OpCode::$variant_name => {
+                                        let tmp: $variant_type = impl_vm!(read $variant_type, self, self.pc);
+                                        self.$name( tmp as $variant_type_as );
+                                    }
+                                )+
+                            )?
+                        ),+
+                    }
                 }
             }
         }
