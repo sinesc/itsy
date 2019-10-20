@@ -26,7 +26,7 @@ impl HeapRef {
             len     : const_len,
         }
     }
-    /// Offsets the heap reference.
+    /// Returns a clone of this heap reference offset by the given value.
     pub fn offset(self: Self, offset: u32) -> Self { // Todo: might want to accept i32 instead
         HeapRef {
             index   : self.index,
@@ -34,12 +34,12 @@ impl HeapRef {
             len     : self.len,
         }
     }
-    /// Adds to the length of the heap reference.
-    pub fn len(self: Self, len: u32) -> Self { // todo: i32?
+    /// Returns a clone of this heap reference with the given length set.
+    pub fn len(self: Self, len: u32) -> Self {
         HeapRef {
             index   : self.index,
             offset  : self.offset,
-            len     : self.len + len,
+            len     : len,
         }
     }
     /// Returns the size of heap references.
@@ -66,6 +66,11 @@ impl Bindings {
             mutability_map
         }
     }
+    /// Returns the TypeId of the given binding.
+    pub fn binding_type_id(self: &Self, binding_id: BindingId) -> TypeId {
+        let binding_index = Into::<usize>::into(binding_id);
+        self.type_map[binding_index]
+    }
     /// Returns the type of the given binding.
     pub fn binding_type(self: &Self, binding_id: BindingId) -> &Type {
         let binding_index = Into::<usize>::into(binding_id);
@@ -80,6 +85,9 @@ impl Bindings {
     pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
         let type_index = Into::<usize>::into(type_id);
         &self.types[type_index]
+    }
+    pub fn types(self: &Self) -> &[Type] {
+        &self.types
     }
 }
 
@@ -323,4 +331,23 @@ impl Type {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Intrinsic {
     ArrayLen,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Constructor {
+    _EnumStart = 173,
+    Copy,           // Copy(num_bytes)
+    CopyDynamic,    // CopyDynamic
+    Array,          // Array(len, recursive elements)
+    ArrayDynamic,   // ArrayDynamic
+    Struct,         // Struct(num_fields, recursive fields)
+    _EnumEnd,
+}
+
+impl Constructor {
+    pub fn from_u8(raw: u8) -> Constructor {
+        assert!(raw > Constructor::_EnumStart as u8 && raw < Constructor::_EnumEnd as u8);
+        unsafe { std::mem::transmute(raw) }
+    }
 }

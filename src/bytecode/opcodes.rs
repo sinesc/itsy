@@ -4,7 +4,7 @@
 mod helper;
 use crate::bytecode::{ARG1, ARG2, ARG3};
 use crate::util::{array1, array2, array4};
-use crate::runtime::{Value, Value64, StackOp, StackOffsetOp, HeapCmp};
+use crate::runtime::{Value, Value64, StackOp, StackOffsetOp, HeapCmp, CONSTPOOL_INDEX};
 use crate::util::HeapRef;
 
 impl_vm!{
@@ -222,6 +222,20 @@ impl_vm!{
         let mut src: HeapRef = self.stack.pop();
         src.len = u32::min(num_bytes, src.len);
         self.heap.copy(dest, src);
+    }
+
+    /// Pops a constructor and a prototype reference and pushes the heap reference of the constructed instance. If the prototype
+    /// reference is not actually a prototype (anymore), only the constructor is popped.
+    fn heap_construct(&mut self) {
+        let mut constructor: HeapRef = self.stack.pop();
+        let mut prototype: HeapRef = self.stack.pop();
+        if prototype.index == CONSTPOOL_INDEX {
+            let mut dest = HeapRef { index: self.heap.alloc(Vec::new()), len: 0, offset: 0 };
+            self.heap.construct(&mut constructor, &mut prototype, &mut dest);
+            self.stack.push(dest);
+        } else {
+            self.stack.push(prototype);
+        }
     }
 
     /// Pops 2 heap objects and compares num_bytes bytes.

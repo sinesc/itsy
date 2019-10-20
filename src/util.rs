@@ -50,7 +50,7 @@ pub(crate) fn compute_loc(input: &str, offset: u32) -> (u32, u32) {
 }
 
 /// References two elements of a slice mutably
-pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+pub(crate) fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
     if a == b {
         panic!("tried to index element {} twice", a);
     } else if a >= slice.len() || b >= slice.len() {

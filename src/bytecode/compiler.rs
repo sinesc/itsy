@@ -1,7 +1,7 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 use std::{collections::HashMap, cell::RefCell, fmt::{self, Display}};
-use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings, compute_loc};
+use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings, Constructor, compute_loc};
 use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, CONSTPOOL_INDEX};
@@ -53,6 +53,8 @@ pub struct Compiler<T> where T: VMFunc<T> {
     bindings        : Bindings,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
+    /// Type constructors
+    constructors    : HashMap<TypeId, u32>,
     // Maps functions to their call index.
     functions       : RefCell<HashMap<FunctionId, u32>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
@@ -64,13 +66,21 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
 
     let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
 
-    let compiler = Compiler {
+    let mut compiler = Compiler {
         writer          : Writer::new(),
         bindings        : bindings,
         locals          : LocalsStack::new(),
         functions       : RefCell::new(HashMap::new()),
         unresolved      : RefCell::new(HashMap::new()),
+        constructors    : HashMap::new(),
     };
+
+    // serialize constructors onto const pool
+    for (type_id, ty) in compiler.bindings.types().iter().enumerate().map(|(index, ty)| (TypeId::from(index), ty)) {
+        // todo: save a few bytes by skipping the default primary types
+        let pos = compiler.store_constructor(ty);
+        compiler.constructors.insert(type_id, pos);
+    }
 
     // write placeholder jump to program entry
     let initial_pos = compiler.writer.call(123);
@@ -163,7 +173,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 } else {
                     // stack: [ ..., OBJ_SRC ], load target variable for heap copy (consumes src+dest)
                     self.write_load(index, ty); // [ ..., OBJ_SRC, OBJ_DEST ]
-                    self.writer.heap_copy_32(self.compute_type_size(&ty));
+                    self.writer.heap_copy_32(self.compute_type_size(&ty)); // FIXME strings and probably objects
                 }
                 self.write_tmp_unref(&item.right);
             },
@@ -307,9 +317,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // intrinsics // TODO: actually check which one once there are some
             if let CallType::Method(exp) = &item.call_type {
                 let ty = self.bindingtype(&**exp);
-                if let Type::Array(array) = ty {
-                    self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
-                }
+                self.write_intrinsic_len(ty);
             }
 
         } else {
@@ -342,6 +350,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             comment!(self, "let {} = {}", item.ident.name, expr);
             let ty = self.bindingtype(item);
             if !ty.is_primitive() {
+                if item.mutable {
+                    let type_id = self.bindings.binding_type_id(expr.binding_id().unwrap());
+                    self.write_heap_ref(HeapRef::from_const(*self.constructors.get(&type_id).unwrap(), 0));
+                    self.writer.heap_construct();
+                }
                 self.writer.heap_incref();
             }
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
@@ -855,6 +868,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
+    fn write_intrinsic_len(self: &Self, ty: &Type) {
+        if let Type::Array(array) = ty {
+            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
+        } else {
+            unimplemented!("dynamic array len");
+        }
+    }
+
     /// Writes a heap reference (which will always be a heap 0 = constpool ref)
     fn write_heap_ref(self: &Self, item: HeapRef) {
         assert!(item.index == 0);
@@ -884,6 +905,64 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }
             }
         }
+    }
+
+    /// Writes a heap copy-on-write constructor. Expects target reference at top of stack, source second to top.
+    fn store_constructor(self: &Self, ty: &Type) -> u32 {
+        let pos = self.writer.const_len();
+        if ty.is_primitive() {
+            self.writer.store_const(Constructor::Copy as u8);
+            self.writer.store_const(ty.size() as u32);
+        } else {
+            match ty {
+                Type::Array(array) => {
+                    let inner_ty = self.get_type(array.type_id);
+                    if inner_ty.is_primitive() {
+                        let inner_size = inner_ty.size();
+                        if let Some(len) = array.len {
+                            self.writer.store_const(Constructor::Copy as u8);
+                            self.writer.store_const(len * inner_size as u32);
+                        } else {
+                            self.writer.store_const(Constructor::CopyDynamic as u8);
+                            self.writer.store_const(inner_size as u32);
+                            unimplemented!("dynamic array constructor serialization");
+                        }
+                    } else {
+                        if let Some(len) = array.len {
+                            self.writer.store_const(Constructor::Array as u8);
+                            self.writer.store_const(len as u32);
+                            self.store_constructor(inner_ty);
+                        } else {
+                            self.writer.store_const(Constructor::ArrayDynamic as u8);
+                            unimplemented!("dynamic array constructor serialization");
+                        }
+                    }
+                }
+                Type::Struct(struct_) => {
+                    let primitive = struct_.fields.iter().all(|f| self.get_type(f.1).is_primitive());
+                    if primitive {
+                        self.writer.store_const(Constructor::Copy as u8);
+                        self.writer.store_const(self.compute_type_size(ty) as u32);
+                    } else {
+                        self.writer.store_const(Constructor::Struct as u8);
+                        self.writer.store_const(struct_.fields.len() as u32);
+                        for field in &struct_.fields {
+                            let field_type = self.get_type(field.1);
+                            self.store_constructor(field_type);
+                        }
+                    }
+                }
+                Type::String => {
+                    self.writer.store_const(Constructor::CopyDynamic as u8);
+                }
+                Type::Enum(_item) => {
+                    unimplemented!("enum constructor serialization");
+                },
+                Type::void => { },
+                _ => unreachable!("{:?}", ty),
+            }
+        }
+        pos
     }
 
     /// Stores given numeric on the const pool.
@@ -975,7 +1054,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     let inner_ty = self.get_type(*type_id);
                     // primitives won't contain nested unsized data, we can skip them (performance, otherwise doesn't matter)
                     if !inner_ty.is_primitive() {
-                        let item = &struct_.fields[&name[..]];
+                        let item = &struct_.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
                         self.store_unsized_literal_data(item);
                     }
                 }
@@ -1045,7 +1124,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compute_type_size(self: &Self, ty: &Type) -> u32 {
         match ty {
             Type::Array(array) => {
-                let len = array.len.unwrap();
+                let len = array.len.expect("cannot compute size of unsized array");
                 if len == 0 {
                     0
                 } else {
@@ -1062,7 +1141,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 }).sum()
             }
             Type::Enum(_) => unimplemented!("enum"),
-            Type::String => panic!("invalid type string"),
+            Type::String => panic!("cannot compute size of unsized string"),
             _ => ty.size() as u32
         }
     }

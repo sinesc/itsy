@@ -1,5 +1,4 @@
-use crate::util::{array2, array4, array8, index_twice};
-use crate::util::HeapRef;
+use crate::util::{HeapRef, Constructor, array2, array4, array8, index_twice};
 
 pub(crate) const CONSTPOOL_INDEX: u32 = 0;
 
@@ -97,6 +96,66 @@ impl Heap {
         self.objects.truncate(1);
         self.free = Vec::with_capacity(16);
     }
+
+    fn read_op(self: &Self, index: u32, offset: &mut u32) -> Constructor {
+        let result = Constructor::from_u8(self.objects[index as usize].data[*offset as usize]);
+        *offset += 1;
+        result
+    }
+    fn read_arg(self: &Self, index: u32, offset: &mut u32) -> u32 {
+        let result = u32::from_ne_bytes(array4(&self.objects[index as usize].data[*offset as usize..*offset as usize + 4]));
+        *offset += 4;
+        result
+    }
+    fn append_ref(self: &mut Self, item: HeapRef, value: HeapRef) {
+        let data = &mut self.objects[item.index as usize].data;
+        data.extend_from_slice(&value.index.to_ne_bytes());
+        data.extend_from_slice(&value.len.to_ne_bytes());
+        data.extend_from_slice(&value.offset.to_ne_bytes());
+    }
+    /// Creates a new instance from construction instructions (constructor) and prototype.
+    /// TODO: probably should go into VM
+    pub fn construct(self: &mut Self, constructor: &mut HeapRef, prototype: &mut HeapRef, dest: &mut HeapRef) {
+        match self.read_op(constructor.index, &mut constructor.offset) {
+            Constructor::Copy => {
+                let len = self.read_arg(constructor.index, &mut constructor.offset);
+                let (dest, src) = index_twice(&mut self.objects, dest.index as usize, prototype.index as usize);
+                let src_slice = &src.data[prototype.offset as usize .. prototype.offset as usize + len as usize];
+                prototype.offset += len;
+                dest.data.extend_from_slice(src_slice);
+            }
+            Constructor::CopyDynamic => {
+                let src_ref = self.read96(*prototype);
+                prototype.offset += 12;
+                // clone src data
+                let src = &self.objects[src_ref.index as usize];
+                let src_slice = &src.data[src_ref.offset as usize .. src_ref.offset as usize + src_ref.len as usize];
+                let src_vec = src_slice.to_vec();
+                // store in new heap object
+                let new_dest = HeapRef { index: self.alloc(src_vec), len: src_ref.len, offset: 0 };
+                self.objects[new_dest.index as usize].refs = 1;
+                // append reference to newly created object
+                self.append_ref(*dest, new_dest);
+            }
+            Constructor::Array => {
+                let len = self.read_arg(constructor.index, &mut constructor.offset);
+                for _ in 0..len {
+                    self.construct(constructor, prototype, dest);
+                }
+            }
+            Constructor::ArrayDynamic => {
+                unimplemented!();
+            }
+            Constructor::Struct => {
+                let len = self.read_arg(constructor.index, &mut constructor.offset);
+                for _ in 0..len {
+                    self.construct(constructor, prototype, dest);
+                }
+            }
+            _ => unreachable!()
+        };
+    }
+
     /// Asserts that the given heap object exists.
     fn assert_exists(self: &Self, index: u32) {
         if let Some(pos) = self.free.iter().find(|&&pos| pos == index) {
@@ -204,7 +263,6 @@ impl Heap {
             }
 
             if push_bytes > 0 {
-                let (dest, src) = index_twice(&mut self.objects, dest_item.index as usize, src_item.index as usize);
                 let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
                 dest.data.extend_from_slice(slice_src);
             }
