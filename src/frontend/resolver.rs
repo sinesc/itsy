@@ -369,7 +369,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
                 fields.push((field_name.to_string(), field_type.type_id()));
             }
-            let ty = Type::Struct(Struct { fields });
+            let ty = Type::Struct(Struct { fields: fields, by_ref: item.by_ref });
             item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
         }
         Ok(())

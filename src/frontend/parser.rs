@@ -593,10 +593,11 @@ named!(struct_fields(Input<'_>) -> Vec<(&str, InlineType<'_>)>, map!(ws!(separat
 
 named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(tuple!(tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
+    result: map!(ws!(tuple!(opt!(tag!("ref")), tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
         position: position as u32,
-        ident   : tuple.1,
-        fields  : tuple.3,
+        by_ref  : tuple.0.is_some(),
+        ident   : tuple.2,
+        fields  : tuple.4,
         type_id : None,
     })) >>
     (result)

@@ -54,7 +54,7 @@ pub struct Compiler<T> where T: VMFunc<T> {
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
     /// Type constructors
-    constructors    : HashMap<TypeId, u32>,
+    constructors    : HashMap<TypeId, HeapRef>,
     // Maps functions to their call index.
     functions       : RefCell<HashMap<FunctionId, u32>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
@@ -77,9 +77,9 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.bindings.types().iter().enumerate().map(|(index, ty)| (TypeId::from(index), ty)) {
-        // todo: save a few bytes by skipping the default primary types
-        let pos = compiler.store_constructor(ty);
-        compiler.constructors.insert(type_id, pos);
+        if Into::<usize>::into(type_id) <= 12 { continue; } // fixme: tbd: save a few bytes by skipping the default primary types? if count changes this will break silently
+        let heap_ref = compiler.store_constructor(ty);
+        compiler.constructors.insert(type_id, heap_ref);
     }
 
     // write placeholder jump to program entry
@@ -167,7 +167,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
                 self.write_tmp_ref(&item.right);
-                if ty.is_primitive() {
+                if !ty.is_stackref() {
                     // stack: [ ..., PRIM_SRC ], store directly to variable
                     self.write_store(index, ty);
                 } else {
@@ -206,7 +206,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.compile_expression(&item.left)?;
         match item.op {
             BO::Assign => {
-                if ty.is_primitive() {
+                if !ty.is_stackref() {
                     // stack: [ ..., PRIM_SRC, OBJ_DEST ], copy primitive to heap object, consumes both
                     self.write_heap_put(ty.size());
                 } else {
@@ -218,7 +218,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 // stack: [ ..., X_SRC, OBJ_DEST ]
                 self.writer.push_tmp96();
                 // stack: [ ..., X_SRC ], tmp: [ ..., OBJ_DEST ]
-                if !ty.is_primitive() {
+                if ty.is_stackref() {
                     self.write_heap_fetch(ty.size());
                 }
                 // stack: [ ..., PRIM_SRC ], tmp: [ ..., OBJ_DEST ]
@@ -287,7 +287,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
         self.compile_block(&item.block)?;
         if !item.block.returns() {
-            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| !self.get_type(ret.type_id()).is_primitive());
+            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| self.get_type(ret.type_id()).is_stackref());
             self.write_heap_decref_all(return_heap_object);
             self.write_ret();
         }
@@ -349,10 +349,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(expr)?;
             comment!(self, "let {} = {}", item.ident.name, expr);
             let ty = self.bindingtype(item);
-            if !ty.is_primitive() {
+            if ty.is_stackref() {
                 if item.mutable {
                     let type_id = self.bindings.binding_type_id(expr.binding_id().unwrap());
-                    self.write_heap_ref(HeapRef::from_const(*self.constructors.get(&type_id).unwrap(), 0));
+                    self.write_heap_ref(*self.constructors.get(&type_id).unwrap());
                     self.writer.heap_construct();
                 }
                 self.writer.heap_incref();
@@ -489,7 +489,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             self.compile_expression(expr)?;
             let ty = self.bindingtype(expr);
-            self.write_heap_decref_all(!ty.is_primitive());
+            self.write_heap_decref_all(ty.is_stackref());
         } else {
             self.write_heap_decref_all(false);
         }
@@ -530,7 +530,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::String => {
                         self.write_heap_ref(self.store_literal(item));
-                        // fixme: this needs to clone into a new heap ref or I need to implement copy-on-write
                     },
                     _ => panic!("Unexpected string literal type: {:?}", lit_type)
                 };
@@ -539,7 +538,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Array(_) => {
                         self.write_heap_ref(self.store_literal(item));
-                        // fixme: this needs to clone into a new heap ref or I need to implement copy-on-write
                     },
                     _ => panic!("Unexpected array literal type: {:?}", lit_type)
                 };
@@ -548,7 +546,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 match lit_type {
                     Type::Struct(_) => {
                         self.write_heap_ref(self.store_literal(item));
-                        // fixme: this needs to clone into a new heap ref or I need to implement copy-on-write
                     },
                     _ => panic!("Unexpected struct literal type: {:?}", lit_type)
                 };
@@ -661,8 +658,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             // special
             BO::Range => unimplemented!("range"),
             BO::Index => {
-                // fetch heap object value if the result of the index read is directly used (primitives and for string, their reference)
-                if result_type.is_primitive() || result_type.is_string() {
+                // fetch heap object value if the result of the index read is directly used (primitives and for ref types, their reference)
+                if result_type.is_primitive() || result_type.is_ref() {
                     self.write_heap_fetch_element(result_type.size());
                 } else {
                     self.write_element_offset(self.compute_type_size(&result_type));
@@ -670,24 +667,24 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             BO::IndexWrite => {
                 // stack: <heap_index> <heap_offset> <index_operand>
-                let size = if result_type.is_string() { result_type.size() as u32 } else { self.compute_type_size(&result_type) }; // todo: need size_stack() or similar
+                let size = if result_type.is_ref() { result_type.size() as u32 } else { self.compute_type_size(&result_type) }; // todo: need size_stack() or similar
                 self.write_element_offset(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
                 // stack now <heap_index> <new_heap_offset>
             },
             BO::Access => {
-                // fetch heap object value if the result of the member read is directly used (primitives and for string, their reference)
-                if result_type.is_primitive() || result_type.is_string() {
+                // fetch heap object value if the result of the member read is directly used (primitives and for ref types, their reference)
+                if result_type.is_primitive() || result_type.is_ref() {
                     let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
                     self.write_heap_fetch_member(result_type.size(), offset);
                 } else {
                     let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                    self.write_member_offset(offset); // push additional offset, pop both offsets, write computed offset
+                    self.write_member_offset(offset, result_type); // push additional offset, pop both offsets, write computed offset
                 }
             },
             BO::AccessWrite => {
                 // stack: <heap_index> <heap_offset>
                 let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                self.write_member_offset(offset); // push additional offset, pop both offsets, write computed offset
+                self.write_member_offset(offset, result_type); // push additional offset, pop both offsets, write computed offset
                 // stack now <heap_index> <new_heap_offset>
             },
             // others are handled elsewhere
@@ -908,8 +905,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes a heap copy-on-write constructor. Expects target reference at top of stack, source second to top.
-    fn store_constructor(self: &Self, ty: &Type) -> u32 {
-        let pos = self.writer.const_len();
+    fn store_constructor(self: &Self, ty: &Type) -> HeapRef {
+        let start_position = self.writer.const_len();
         if ty.is_primitive() {
             self.writer.store_const(Constructor::Copy as u8);
             self.writer.store_const(ty.size() as u32);
@@ -918,33 +915,44 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 Type::Array(array) => {
                     let inner_ty = self.get_type(array.type_id);
                     if inner_ty.is_primitive() {
+                        // primitive copy optimization
                         let inner_size = inner_ty.size();
                         if let Some(len) = array.len {
                             self.writer.store_const(Constructor::Copy as u8);
                             self.writer.store_const(len * inner_size as u32);
                         } else {
-                            self.writer.store_const(Constructor::CopyDynamic as u8);
-                            self.writer.store_const(inner_size as u32);
                             unimplemented!("dynamic array constructor serialization");
+                            //self.writer.store_const(Constructor::CopyRef as u8);
                         }
                     } else {
+                        // array construction instructions
                         if let Some(len) = array.len {
                             self.writer.store_const(Constructor::Array as u8);
                             self.writer.store_const(len as u32);
                             self.store_constructor(inner_ty);
                         } else {
-                            self.writer.store_const(Constructor::ArrayDynamic as u8);
                             unimplemented!("dynamic array constructor serialization");
+                            //self.writer.store_const(Constructor::ArrayRef as u8);
                         }
                     }
                 }
                 Type::Struct(struct_) => {
                     let primitive = struct_.fields.iter().all(|f| self.get_type(f.1).is_primitive());
                     if primitive {
-                        self.writer.store_const(Constructor::Copy as u8);
-                        self.writer.store_const(self.compute_type_size(ty) as u32);
+                        // primitive copy optimization
+                        if struct_.by_ref {
+                            self.writer.store_const(Constructor::CopyRef as u8);
+                        } else {
+                            self.writer.store_const(Constructor::Copy as u8);
+                            self.writer.store_const(self.compute_type_size(ty) as u32);
+                        }
                     } else {
-                        self.writer.store_const(Constructor::Struct as u8);
+                        // struct construction instructions
+                        if struct_.by_ref {
+                            self.writer.store_const(Constructor::StructRef as u8);
+                        } else {
+                            self.writer.store_const(Constructor::Struct as u8);
+                        }
                         self.writer.store_const(struct_.fields.len() as u32);
                         for field in &struct_.fields {
                             let field_type = self.get_type(field.1);
@@ -953,7 +961,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     }
                 }
                 Type::String => {
-                    self.writer.store_const(Constructor::CopyDynamic as u8);
+                    self.writer.store_const(Constructor::CopyRef as u8);
                 }
                 Type::Enum(_item) => {
                     unimplemented!("enum constructor serialization");
@@ -962,7 +970,72 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 _ => unreachable!("{:?}", ty),
             }
         }
-        pos
+        let end_position = self.writer.const_len();
+        HeapRef::from_const(start_position, end_position - start_position)
+    }
+
+    /// Stores given literal on the const pool.
+    fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> HeapRef {
+        use crate::frontend::ast::LiteralValue;
+        let ty = self.bindingtype(item);
+        match &item.value {
+            LiteralValue::Numeric(int) => self.store_numeric(*int, ty),
+            LiteralValue::Bool(bool_literal) =>  {
+                match ty {
+                    Type::bool => HeapRef::from_const(self.writer.store_const(if *bool_literal { 1u8 } else { 0u8 }), Type::bool.size() as u32) ,
+                    _ => panic!("Unexpected boolean literal type: {:?}", ty)
+                }
+            },
+            LiteralValue::String(string_literal) => {
+                let offset = self.writer.store_const(*string_literal);
+                let heap_ref = HeapRef::from_const(offset, string_literal.len() as u32);
+                item.heap_ref.set(Some(heap_ref));
+                heap_ref
+            },
+            LiteralValue::Array(array_literal) => {
+                // store referenced objects first
+                for element in &array_literal.elements {
+                    let element_type = self.bindingtype(element);
+                    if element_type.is_ref() {
+                        let heap_ref = self.store_literal(element);
+                        element.heap_ref.set(Some(heap_ref));
+                    }
+                }
+                // store non-referenced data along with references to previously stored objects
+                let pos = self.writer.const_len();
+                for element in &array_literal.elements {
+                    if let Some(heap_ref) = element.heap_ref.get() {
+                        self.writer.store_const(heap_ref);
+                    } else {
+                        self.store_literal(element);
+                    }
+                }
+                HeapRef::from_const(pos, self.writer.const_len() - pos)
+            },
+            LiteralValue::Struct(struct_literal) => {
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                // store referenced objects first
+                for (name, _) in struct_def.fields.iter() {
+                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
+                    let field_type = self.bindingtype(field);
+                    if field_type.is_ref() {
+                        let heap_ref = self.store_literal(field);
+                        field.heap_ref.set(Some(heap_ref));
+                    }
+                }
+                // store non-referenced data along with references to previously stored objects
+                let pos = self.writer.const_len();
+                for (name, _) in struct_def.fields.iter() {
+                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
+                    if let Some(heap_ref) = field.heap_ref.get() {
+                        self.writer.store_const(heap_ref);
+                    } else {
+                        self.store_literal(field);
+                    }
+                }
+                HeapRef::from_const(pos, self.writer.const_len() - pos)
+            }
+        }
     }
 
     /// Stores given numeric on the const pool.
@@ -1002,125 +1075,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         HeapRef { index: CONSTPOOL_INDEX, offset: offset, len: ty.size() as u32 }
     }
 
-    /// Stores given literal on the const pool.
-    fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> HeapRef {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.bindingtype(item);
-        match item.value {
-            LiteralValue::Numeric(int) => self.store_numeric(int, ty),
-            LiteralValue::Bool(v) =>  {
-                match ty {
-                    Type::bool => HeapRef::from_const(self.writer.store_const(if v { 1u8 } else { 0u8 }), Type::bool.size() as u32) ,
-                    _ => panic!("Unexpected boolean literal type: {:?}", ty)
-                }
-            },
-            LiteralValue::String(_) => {
-                self.store_unsized_literal_data(item);
-                self.store_literal_data(item)
-            },
-            LiteralValue::Array(_) => {
-                self.store_unsized_literal_data(item);
-                self.store_literal_data(item)
-            },
-            LiteralValue::Struct(_) => {
-                self.store_unsized_literal_data(item);
-                self.store_literal_data(item)
-            },
-        }
-    }
-
-    /// Recursively stores all unsized data and stores a reference to the data on the AST object.
-    fn store_unsized_literal_data(self: &Self, item: &ast::Literal<'ast>) {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.bindingtype(item);
-        match &item.value { // todo: probably better to match based on ty
-            LiteralValue::Array(array) => {
-                let inner_ty = self.get_type(ty.as_array().unwrap().type_id);
-                // primitives won't contain nested unsized data, we can skip them (performance, otherwise doesn't matter)
-                if !inner_ty.is_primitive() {
-                    for item in &array.elements {
-                        self.store_unsized_literal_data(item);
-                    }
-                }
-                // unsized arrays need to be stored here to get their reference
-                if !ty.as_array().unwrap().is_sized() {
-                    // FIXME: this isn't symmetric with string (store_literal_data vs store_literal)
-                    let heap_ref = self.store_literal_data(item);
-                    item.heap_ref.set(Some(heap_ref));
-                }
-            }
-            LiteralValue::Struct(struct_) => {
-                for (name, type_id) in ty.as_struct().unwrap().fields.iter() {
-                    let inner_ty = self.get_type(*type_id);
-                    // primitives won't contain nested unsized data, we can skip them (performance, otherwise doesn't matter)
-                    if !inner_ty.is_primitive() {
-                        let item = &struct_.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                        self.store_unsized_literal_data(item);
-                    }
-                }
-            }
-            LiteralValue::String(string) => {
-                let heap_ref = HeapRef::from_const(self.writer.store_const(*string), string.len() as u32);
-                item.heap_ref.set(Some(heap_ref));
-            }
-            _ => { }
-        }
-    }
-
-    /// Stores array data in constpool. Note: when read with const_fetch_object() array size needs to be written first!
-    fn store_literal_data(self: &Self, item: &ast::Literal<'ast>) -> HeapRef {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.bindingtype(item);
-        match &item.value {
-            LiteralValue::Array(array) => {
-                let num_elements = array.elements.len() as u32;
-                if num_elements > 0 {
-                    let inner_ty = self.get_type(ty.as_array().unwrap().type_id);
-                    let pos = self.writer.const_len();
-                    for item in &array.elements {
-                        if let Some(heap_ref) = item.heap_ref.get() {
-                            self.writer.store_const(heap_ref);
-                        } else {
-                            self.store_literal_data(item);
-                        }
-                    }
-                    HeapRef::from_const(pos, (inner_ty.size() as usize * array.elements.len()) as u32)
-                } else {
-                    let pos = self.writer.const_len();
-                    HeapRef::from_const(pos, 0)
-                }
-            }
-            LiteralValue::Struct(struct_) => {
-                let num_fields = ty.as_struct().unwrap().fields.len() as u32;
-                if num_fields > 0 {
-                    let pos = self.writer.const_len();
-                    let mut size = 0;
-                    for (name, _) in ty.as_struct().unwrap().fields.iter() {
-                        let item = &struct_.fields[&name[..]];
-                        if let Some(heap_ref) = item.heap_ref.get() {
-                            self.writer.store_const(heap_ref);
-                            size += HeapRef::size() as u32;
-                        } else {
-                            let heap_ref = self.store_literal_data(item);
-                            size += heap_ref.len;
-                        }
-                    }
-                    HeapRef::from_const(pos, size)
-                } else {
-                    let pos = self.writer.const_len();
-                    HeapRef::from_const(pos, 0)
-                }
-            }
-            LiteralValue::String(_) => {
-                item.heap_ref.get().unwrap()
-            }
-            _ => {
-                self.store_literal(item)
-            }
-        }
-    }
-
-    /// Computes the shallow (unless array with inlined data) size of a type in bytes.
+    /// Computes the shallow size of a type in bytes.
     fn compute_type_size(self: &Self, ty: &Type) -> u32 {
         match ty {
             Type::Array(array) => {
@@ -1129,15 +1084,15 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     0
                 } else {
                     let inner_type = self.get_type(array.type_id);
-                    // sized types are inlined, unsized referenced (use reference size)
-                    len as u32 * if !inner_type.is_sized() { inner_type.size() as u32 } else { self.compute_type_size(inner_type) }
+                    // use reference size for references, otherwise shallow type size
+                    len as u32 * if inner_type.is_ref() { inner_type.size() as u32 } else { self.compute_type_size(inner_type) }
                 }
             }
             Type::Struct(struct_) => {
                 struct_.fields.iter().map(|&(_, type_id)| {
                     let field_type = self.get_type(type_id);
-                    // sized types are inlined, unsized referenced (use reference size)
-                    if !field_type.is_sized() { field_type.size() as u32 } else { self.compute_type_size(field_type) }
+                    // use reference size for references, otherwise shallow type size
+                    if field_type.is_ref() { field_type.size() as u32 } else { self.compute_type_size(field_type) }
                 }).sum()
             }
             Type::Enum(_) => unimplemented!("enum"),
@@ -1152,20 +1107,21 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         let mut offset = 0;
         for index in 0 .. member_index {
             let field_type = self.get_type(struct_.fields[index as usize].1);
-            // sized types are inlined, unsized referenced (use reference size)
-            offset += if !field_type.is_sized() { field_type.size() as u32 } else { self.compute_type_size(field_type) };
+            // use reference size for references, otherwise shallow type size
+            offset += if field_type.is_ref() { field_type.size() as u32 } else { self.compute_type_size(field_type) };
         }
         offset
     }
 
     /// Writes instructions to compute member offset for access on a struct.
-    fn write_member_offset(self: &Self, offset: u32) {
+    fn write_member_offset(self: &Self, offset: u32, result_type: &Type) {
         use std::u8;
+        let member_size = if result_type.is_ref() { result_type.size() as u32 } else { self.compute_type_size(&result_type) };
+        unsigned!(self, setlen_8, setlen_16, setlen_32, member_size);
         if offset == 0 {
             // nothing to do
         } else if offset == 1 {
-            self.writer.lit1();
-            self.writer.addi();
+            self.writer.inci();
         } else if offset == 2 {
             self.writer.lit2();
             self.writer.addi();
@@ -1181,6 +1137,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to compute element offset for indexing of an array.
     fn write_element_offset(self: &Self, element_size: u32) {
+        //unsigned!(self, setlen_8, setlen_16, setlen_32, element_size);
         unsigned!(self, index_8, index_16, index_32, element_size);
     }
 
@@ -1248,7 +1205,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn write_tmp_ref(self: &Self, item: &ast::Expression<'ast>) {
         if !item.is_variable() {
             let ty = self.bindingtype(item);
-            if !ty.is_primitive() {
+            if ty.is_stackref() {
                 self.writer.store_tmp96();
                 self.writer.heap_incref();
             }
@@ -1259,7 +1216,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn write_tmp_unref(self: &Self, item: &ast::Expression<'ast>) {
         if !item.is_variable() {
             let ty = self.bindingtype(item);
-            if !ty.is_primitive() {
+            if ty.is_stackref() {
                 self.writer.pop_tmp96();
                 self.writer.heap_decref();
             }
@@ -1271,7 +1228,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         self.locals.borrow(|locals| {
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let ty = self.bindings.binding_type(binding_id);
-                if !ty.is_primitive() {
+                if ty.is_stackref() {
                     self.write_load(local.index, ty);
                     if check_prior {
                         self.writer.heap_decref_result();

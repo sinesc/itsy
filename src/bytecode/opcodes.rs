@@ -131,6 +131,11 @@ impl_vm!{
         self.stack.push(item);
     }
 
+    /// Sets the length of the top heap reference. // TODO: too specific, maybe expose load/store_sp in general?
+    fn setlen_32<setlen_8: u8 as u32, setlen_16: u16 as u32>(&mut self, len: u32) {
+        self.stack.store_sp(-2, len);
+    }
+
     /// Reads the top 32 bit value off the tmp stack and pushes it onto the stack.
     fn load_tmp32(&mut self) {
         let value: Value = self.tmp.top();
@@ -208,7 +213,6 @@ impl_vm!{
     fn heap_decref_result(&mut self) {
         let item: HeapRef = self.stack.pop();
         let prior_item: HeapRef = self.stack.top();
-        //println!("prior: {} current: {}", prior_heap_index, heap_index);
         if item.index == prior_item.index {
             self.heap.dec_ref(item.index);
         } else {

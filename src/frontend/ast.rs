@@ -263,6 +263,7 @@ impl_positioned!(Array);
 pub struct Struct<'a> {
     pub position: u32,
     pub ident   : Ident<'a>,
+    pub by_ref  : bool,
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub type_id : Option<TypeId>,
 }

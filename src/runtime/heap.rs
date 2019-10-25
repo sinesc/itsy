@@ -45,11 +45,15 @@ impl Heap {
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc(self: &mut Self, data: Vec<u8>) -> u32 {
-        self.free.pop().unwrap_or_else(|| {
-            let pos = self.objects.len();
+        let index = if let Some(index) = self.free.pop() {
+            self.objects[index as usize] = HeapObject { refs: 0, data: data };
+            index
+        } else {
+            let index = self.objects.len();
             self.objects.push(HeapObject { refs: 0, data: data });
-            pos as u32
-        })
+            index as u32
+        };
+        index
     }
     /// Increase reference count for given heap object.
     pub fn inc_ref(self: &mut Self, index: u32) {
@@ -116,6 +120,7 @@ impl Heap {
     /// Creates a new instance from construction instructions (constructor) and prototype.
     /// TODO: probably should go into VM
     pub fn construct(self: &mut Self, constructor: &mut HeapRef, prototype: &mut HeapRef, dest: &mut HeapRef) {
+        // see util::types::Constructor for details
         match self.read_op(constructor.index, &mut constructor.offset) {
             Constructor::Copy => {
                 let len = self.read_arg(constructor.index, &mut constructor.offset);
@@ -124,7 +129,7 @@ impl Heap {
                 prototype.offset += len;
                 dest.data.extend_from_slice(src_slice);
             }
-            Constructor::CopyDynamic => {
+            Constructor::CopyRef => {
                 let src_ref = self.read96(*prototype);
                 prototype.offset += 12;
                 // clone src data
@@ -143,7 +148,7 @@ impl Heap {
                     self.construct(constructor, prototype, dest);
                 }
             }
-            Constructor::ArrayDynamic => {
+            Constructor::ArrayRef => {
                 unimplemented!();
             }
             Constructor::Struct => {
@@ -154,6 +159,7 @@ impl Heap {
             }
             _ => unreachable!()
         };
+        dest.len = self.size_of(dest.index);
     }
 
     /// Asserts that the given heap object exists.
@@ -223,6 +229,7 @@ impl Heap {
         self.write32(item.offset(8), value.offset);
     }
 
+    /// Returns the size in bytes of the given heap object.
     pub fn size_of(self: &Self, index: u32) -> u32 {
         self.objects[index as usize].data.len() as u32
     }

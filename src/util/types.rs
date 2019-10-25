@@ -102,6 +102,7 @@ pub struct Enum {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Struct {
     pub fields: Vec<(String, Option<TypeId>)>,
+    pub by_ref: bool,
 }
 
 impl Struct {
@@ -116,13 +117,6 @@ impl Struct {
 pub struct Array {
     pub len: Option<u32>,
     pub type_id: Option<TypeId>,
-}
-
-impl Array {
-    /// Returns whether the array is fixed size or dynamic.
-    pub fn is_sized(self: &Self) -> bool {
-        self.len.is_some()
-    }
 }
 
 /*
@@ -248,13 +242,18 @@ impl Type {
             _ => false
         }
     }
-    /// Whether the type has a fixed size.
-    pub fn is_sized(self: &Self) -> bool {
+    /// Whether the type is referenced when wrapped.
+    pub fn is_ref(self: &Self) -> bool {
         match self {
-            Type::Array(array)  => array.is_sized(),
-            Type::String        => false,
-            _                   => true,
+            Type::Struct(s)     => s.by_ref, // TODO needs to move of type def (need generic & support for all types)
+            Type::Array(a)      => false, // FIXME just testing ref array
+            Type::String        => true,
+            _                   => false,
         }
+    }
+    /// Whether the type is referenced while on the stack.
+    pub fn is_stackref(self: &Self) -> bool {
+        !self.is_primitive() || self.is_ref()
     }
     /// Whether the type is an array.
     pub fn is_array(self: &Self) -> bool {
@@ -337,11 +336,12 @@ pub enum Intrinsic {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
     _EnumStart = 173,
-    Copy,           // Copy(num_bytes)
-    CopyDynamic,    // CopyDynamic
-    Array,          // Array(len, recursive elements)
-    ArrayDynamic,   // ArrayDynamic
-    Struct,         // Struct(num_fields, recursive fields)
+    Copy,           // 174 Copy(num_bytes): memcopies data
+    CopyRef,        // 175 CopyRef: memcopies referenced data to new heap object (size determined from reference)
+    Array,          // 176 Array(len, recursive elements): copies an array
+    ArrayRef,       // 177 NYI
+    Struct,         // 178 Struct(num_fields, recursive fields): copies a struct
+    StructRef,      // 179 StructDynamic(num_fields, recursive fields): copies a referenced struct to new heap object
     _EnumEnd,
 }
 
