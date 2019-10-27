@@ -974,10 +974,45 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         HeapRef::from_const(start_position, end_position - start_position)
     }
 
+    /// Recurse into struct/array literals and store referenced data.
+    fn recurse_literal(self: &Self, item: &ast::Literal<'ast>) {
+        use crate::frontend::ast::LiteralValue;
+        let ty = self.bindingtype(item);
+        match &item.value {
+            LiteralValue::Array(array_literal) => {
+                let array_def = ty.as_array().expect("Expected array, got something else");
+                let element_type = self.get_type(array_def.type_id);
+                for element in &array_literal.elements {
+                    if element_type.is_ref() && element.heap_ref.get().is_none() { // FIXME ugly check if we've already stored this lit by checking if heap_ref is set. shouldn't get here in the first place
+                        let heap_ref = self.store_literal(element);
+                        element.heap_ref.set(Some(heap_ref));
+                    } else if element_type.is_struct() || element_type.is_array() {
+                        self.recurse_literal(element);
+                    }
+                }
+            }
+            LiteralValue::Struct(struct_literal) => {
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                for (name, field_type_id) in struct_def.fields.iter() {
+                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
+                    let field_type = self.get_type(*field_type_id);
+                    if field_type.is_ref() && field.heap_ref.get().is_none() { // FIXME ugly check if we've already stored this lit by checking if heap_ref is set. shouldn't get here in the first place
+                        let heap_ref = self.store_literal(field);
+                        field.heap_ref.set(Some(heap_ref));
+                    } else if field_type.is_struct() || field_type.is_array() {
+                        self.recurse_literal(field);
+                    }
+                }
+            },
+            _ => unreachable!(),
+        }
+    }
+
     /// Stores given literal on the const pool.
     fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> HeapRef {
         use crate::frontend::ast::LiteralValue;
         let ty = self.bindingtype(item);
+
         match &item.value {
             LiteralValue::Numeric(int) => self.store_numeric(*int, ty),
             LiteralValue::Bool(bool_literal) =>  {
@@ -994,13 +1029,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Array(array_literal) => {
                 // store referenced objects first
-                for element in &array_literal.elements {
-                    let element_type = self.bindingtype(element);
-                    if element_type.is_ref() {
-                        let heap_ref = self.store_literal(element);
-                        element.heap_ref.set(Some(heap_ref));
-                    }
-                }
+                self.recurse_literal(item);
                 // store non-referenced data along with references to previously stored objects
                 let pos = self.writer.const_len();
                 for element in &array_literal.elements {
@@ -1013,18 +1042,11 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 HeapRef::from_const(pos, self.writer.const_len() - pos)
             },
             LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 // store referenced objects first
-                for (name, _) in struct_def.fields.iter() {
-                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                    let field_type = self.bindingtype(field);
-                    if field_type.is_ref() {
-                        let heap_ref = self.store_literal(field);
-                        field.heap_ref.set(Some(heap_ref));
-                    }
-                }
+                self.recurse_literal(item);
                 // store non-referenced data along with references to previously stored objects
                 let pos = self.writer.const_len();
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 for (name, _) in struct_def.fields.iter() {
                     let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
                     if let Some(heap_ref) = field.heap_ref.get() {
