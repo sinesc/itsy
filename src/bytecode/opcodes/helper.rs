@@ -52,7 +52,7 @@ macro_rules! impl_vm {
     (
         $(
             $( #[ $attr:meta ] )*
-            fn $name:tt $( < $( $variant_name:ident : $variant_type:tt as $variant_type_as:tt ),+ > )? ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* ) $code:block
+            fn $name:tt $( < $( $variant_name:ident : $variant_type:tt as $variant_type_as:tt ),+ > )? ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* ) $( $ret:ident )? $code:block
         )+
     ) => {
 
@@ -202,19 +202,12 @@ macro_rules! impl_vm {
                     let instruction = impl_vm!(read u8, self, self.pc);
                     #[allow(unreachable_patterns)]
                     match OpCode::from_u8(instruction) {
-                        OpCode::exit => {
-                            self.exit();
-                            return;
-                        }
-                        OpCode::yld => {
-                            self.yld();
-                            return;
-                        }
                         $(
                             OpCode::$name => {
                                 let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
+                                $( $ret; )?
                             }
                             // handle opcode variants
                             $(

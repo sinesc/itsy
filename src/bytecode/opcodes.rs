@@ -1096,14 +1096,12 @@ impl_vm!{
     }
 
     /// Yield program execution.
-    fn yld(&mut self) {
+    fn yld(&mut self) return {
         self.state = crate::runtime::VMState::Yield;
-        // special handling in impl_vm! generated vm::exec() results in a return from the function after executing this opcode
     }
     /// Terminate program execution.
-    fn exit(&mut self) {
+    fn exit(&mut self) return {
         self.state = crate::runtime::VMState::Terminate;
-        // special handling in impl_vm! generated vm::exec() results in a return from the function after executing this opcode
     }
 
     /// Does nothing. Written as comment into the opcode stream.
