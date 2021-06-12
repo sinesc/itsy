@@ -12,7 +12,6 @@ type Data8 = u8;
 type Data16 = u16;
 type Data32 = u32;
 type Data64 = u64;
-//type Data128 = u128;
 
 impl_vm!{
 
@@ -30,9 +29,7 @@ impl_vm!{
         discard16<T: Data16>(),
         discard32<T: Data32>(),
         discard64<T: Data64>(),
-        //discard128<T: Data128>()
     >(&mut self) {
-        //let _value: T = self.stack.pop();
         self.stack.truncate(self.stack.sp() - size_of::<T>() as u32);
     }
 
@@ -106,9 +103,6 @@ impl_vm!{
         const64_8<T: Data64>(offset: u8 as u32),
         const64_16<T: Data64>(offset: u16 as u32),
         const64_32<T: Data64>(offset: u32),
-        //const128_8<T: Data128>(offset: u8 as u32),
-        //const128_16<T: Data128>(offset: u16 as u32),
-        //const128_32<T: Data128>(offset: u32)
     >(&mut self) {
         let local: T = self.stack.load(offset);
         self.stack.push(local);
@@ -128,9 +122,6 @@ impl_vm!{
         load64_8<T: Data64>(offset: i8 as i32),
         load64_16<T: Data64>(offset: i16 as i32),
         load64_32<T: Data64>(offset: i32),
-        //load128_8<T: Data128>(offset: i8 as i32),
-        //load128_16<T: Data128>(offset: i16 as i32),
-        //load128_32<T: Data128>(offset: i32)
     >(&mut self) {
         let abs = (offset + if offset >= 0 { self.stack.fp as i32 } else { self.stack.sp() as i32 }) as u32; // fp+offset or sp-offset
         let local: T = self.stack.load(abs);
@@ -151,25 +142,12 @@ impl_vm!{
         store64_8<T: Data64>(offset: i8 as i32),
         store64_16<T: Data64>(offset: i16 as i32),
         store64_32<T: Data64>(offset: i32),
-        //store128_8<T: Data128>(offset: i8 as i32),
-        //store128_16<T: Data128>(offset: i16 as i32),
-        //store128_32<T: Data128>(offset: i32)
     >(&mut self) {
         let abs = (offset + if offset >= 0 { self.stack.fp as i32 } else { self.stack.sp() as i32 }) as u32; // fp+offset or sp-offset
         let local: T = self.stack.pop();
         self.stack.store(abs, local);
     }
-/*
-    /// Pops a u32 value skip_bytes, then pops total_bytes bytes of data off the stack. Pushes the read_bytes bytes read starting at skip_bytes back onto the stack.
-    fn extractn(&mut self, total_bytes: u32, read_bytes: u32) {
-        let skip_bytes: u32 = self.stack.pop();
-        let move_to = self.stack.sp() - total_bytes; // computed excluding the skip_bytes value
-        let truncate_from = move_to + read_bytes;
-        let read_from = move_to + skip_bytes;
-        self.stack.copy(read_from, move_to, read_bytes);
-        self.stack.truncate(truncate_from);
-    }
-*/
+
     /// Reads value from the n-th stack element relative to the top of the stack and pushes it.
     /// n=0 is the topmost stack value, n=sizeof(value) the previous value.
     fn <
@@ -177,7 +155,6 @@ impl_vm!{
         clone16<T: Data16>(n: u8),
         clone32<T: Data32>(n: u8),
         clone64<T: Data64>(n: u8),
-        //clone128<T: Data128>(n: u8)
     >(&mut self) {
         let data: T = self.stack.load_sp(- (size_of::<T>() as i32) - n as i32);
         self.stack.push(data);
@@ -189,7 +166,6 @@ impl_vm!{
         swap16<T: Data16>(),
         swap32<T: Data32>(),
         swap64<T: Data64>(),
-        //swap128<T: Data128>()
     >(&mut self) {
         let pos_a = self.stack.sp() - size_of::<T>() as u32;
         let pos_b = pos_a - size_of::<T>() as u32;
@@ -581,64 +557,6 @@ impl_vm!{
         self.stack.push((a <= b) as Data8);
     }
 
-/*
-    /// Pops two values and jumps to given address it they equal.
-    fn <
-        jeq32<T: Data32>(addr: u32),
-        jeq64<T: Data32>(addr: u32)
-    >(&mut self) {
-        let b: T = self.stack.pop();
-        let a: T = self.stack.pop();
-        if a == b {
-            self.pc = addr;
-        }
-    }
-
-    /// Pops two values and jumps to given address it they are not equal.
-    fn <
-        jneq32<T: Data32>(addr: u32),
-        jneq64<T: Data32>(addr: u32)
-    >(&mut self) {
-        let b: T = self.stack.pop();
-        let a: T = self.stack.pop();
-        if a != b {
-            self.pc = addr;
-        }
-    }
-
-    /// Pops two values and jumps to given address if the first value is less than the second.
-    fn <
-        jlts32<T: i32>(addr: u32),
-        jltu32<T: u32>(addr: u32),
-        jlts64<T: i64>(addr: u32),
-        jltu64<T: u64>(addr: u32),
-        jltf32<T: f32>(addr: u32),
-        jltf64<T: f64>(addr: u32)
-    >(&mut self) {
-        let b: T = self.stack.pop();
-        let a: T = self.stack.pop();
-        if a < b {
-            self.pc = addr;
-        }
-    }
-
-    /// Pops two values and jumps to given address if the first value is less/equal the second.
-    fn <
-        jltes32<T: i32>(addr: u32),
-        jlteu32<T: u32>(addr: u32),
-        jltes64<T: i64>(addr: u32),
-        jlteu64<T: u64>(addr: u32),
-        jltef32<T: f32>(addr: u32),
-        jltef64<T: f64>(addr: u32)
-    >(&mut self) {
-        let b: T = self.stack.pop();
-        let a: T = self.stack.pop();
-        if a <= b {
-            self.pc = addr;
-        }
-    }
-*/
-
     /// Jumps unconditionally to the given address.
     fn jmp(&mut self, addr: u32) {
         self.pc = addr;
@@ -722,47 +640,23 @@ impl_vm!{
         // remove stack frame, restore program counter
         self.pc = self.stack.pop_frame();
     }
-/*
-    /// Reads the top value off the tmp stack and pushes it onto the stack.
-    fn <
-        load_tmp64<T: Data64>(),
-        //load_tmp128<T: Data128>()
-    >(&mut self) {
-        let value: T = self.tmp.top();
-        self.stack.push(value);
-    }
-*/
+
     /// Reads the top value off the stack and pushes it onto the tmp stack.
-    fn <
-        store_tmp64<T: Data64>(),
-        //store_tmp128<T: Data128>()
-    >(&mut self) {
-        let value: T = self.stack.top();
+    fn store_tmp64(&mut self) {
+        let value: Data64 = self.stack.top();
         self.tmp.push(value);
+        //println!("store, now {:?}", &self.tmp.data());
     }
 
     /// Pops the top value off the tmp stack and pushes it onto the stack.
-    fn <
-        pop_tmp64<T: Data64>(),
-        //pop_tmp128<T: Data128>()
-    >(&mut self) {
-        let value: T = self.tmp.pop();
+    fn pop_tmp64(&mut self) {
+        let value: Data64 = self.tmp.pop();
         self.stack.push(value);
+        //println!("pop, now {:?}", &self.tmp.data());
     }
-/*
-    /// Pops the 64 bit value off the stack and pushes it onto the tmp stack.
-    fn <
-        push_tmp64<T: Data64>(),
-        //push_tmp128<T: Data128>()
-    >(&mut self) {
-        let value: T = self.stack.pop();
-        self.tmp.push(value);
-    }
-*/
+
     /// Pop u32 "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
-    fn <
-        index(element_size: u8),
-    >(&mut self) {
+    fn index(&mut self, element_size: u8) {
         let element_index: u32 = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
         item.offset += element_index * element_size as u32;
@@ -837,7 +731,6 @@ impl_vm!{
         heap_fetch16<T: Data16>(),
         heap_fetch32<T: Data32>(),
         heap_fetch64<T: Data64>(),
-        //heap_fetch128<T: Data128>(),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item);
@@ -850,7 +743,6 @@ impl_vm!{
         heap_put16<T: Data16>(),
         heap_put32<T: Data32>(),
         heap_put64<T: Data64>(),
-        //heap_put128<T: Data128>(),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         let value: T = self.stack.pop();
@@ -863,7 +755,6 @@ impl_vm!{
         heap_fetch_member16<T: Data16>(offset: u32),
         heap_fetch_member32<T: Data32>(offset: u32),
         heap_fetch_member64<T: Data64>(offset: u32),
-        //heap_fetch_member128<T: Data128>(offset: u32),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item.offset(offset));
@@ -876,7 +767,6 @@ impl_vm!{
         heap_fetch_element16<T: Data16>(),
         heap_fetch_element32<T: Data32>(),
         heap_fetch_element64<T: Data64>(),
-        //heap_fetch_element128<T: Data128>(),
     >(&mut self) {
         let element_index: u32 = self.stack.pop();
         let item: HeapRef = self.stack.pop();
