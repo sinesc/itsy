@@ -2,21 +2,43 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(Linux) lldb launch",
+            "name": "(Linux) lldb debug",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/playground",
             "args": [],
-            //"stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             //"environment": [],
             //"externalConsole": true
+            "sourceLanguages": ["rust"],
         },
         {
-            "name": "(Windows) Launch",
+            "name": "(Linux) lldb release",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/playground",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            //"environment": [],
+            //"externalConsole": true
+            "sourceLanguages": ["rust"],
+        },
+        {
+            "name": "(Windows) vsdebug debug",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/playground.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true
+        },
+        {
+            "name": "(Windows) vsdebug release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/playground.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
