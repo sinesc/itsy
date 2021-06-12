@@ -175,6 +175,14 @@ impl_vm!{
         self.stack.store(pos_b, a);
     }
 
+    /// Pop u32 "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
+    fn index(&mut self, element_size: u8) {
+        let element_index: u32 = self.stack.pop();
+        let mut item: HeapRef = self.stack.pop();
+        item.offset += element_index * element_size as u32;
+        self.stack.push(item);
+    }
+
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
     fn <
         zclampf32<T: f32>(),
@@ -596,18 +604,31 @@ impl_vm!{
         let mut prototype = prototype;
         self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack);
     }
+
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
-    fn incref(&mut self, constructor: u32) {
+    fn <
+        incref_8(constructor: u8 as u32),
+        incref_16(constructor: u16 as u32),
+        incref_32(constructor: u32),
+    >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc, false);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
-    fn decref(&mut self, constructor: u32) {
+    fn <
+        decref_8(constructor: u8 as u32),
+        decref_16(constructor: u16 as u32),
+        decref_32(constructor: u32),
+    >(&mut self) {
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec, true);
     }
-    /// Decreses reference count for the top heap object on the stack. Does not pop the object off the stack. Does not free the object on 0.
-    fn zeroref(&mut self, constructor: u32) {
+    /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
+    fn <
+        zeroref_8(constructor: u8 as u32),
+        zeroref_16(constructor: u16 as u32),
+        zeroref_32(constructor: u32),
+    >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Dec, false);
     }
@@ -654,14 +675,6 @@ impl_vm!{
         let value: Data64 = self.tmp.pop();
         self.stack.push(value);
         //println!("pop, now {:?}", &self.tmp.data());
-    }
-
-    /// Pop u32 "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
-    fn index(&mut self, element_size: u8) {
-        let element_index: u32 = self.stack.pop();
-        let mut item: HeapRef = self.stack.pop();
-        item.offset += element_index * element_size as u32;
-        self.stack.push(item);
     }
 
     /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest.

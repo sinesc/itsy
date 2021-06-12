@@ -188,9 +188,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
                 if ty.is_ref() {
-                    self.writer.incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
                     self.write_load(index as i32, ty);
-                    self.writer.decref(constructor);
+                    self.write_decref(constructor);
                 }
                 self.write_store(index as i32, ty);
             },
@@ -199,7 +199,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.compile_expression(&item.right)?; // stack: L R
                 if ty.is_ref() {
                     self.writer.store_tmp64(); // incref temporary right operand
-                    self.writer.incref(constructor);
+                    self.write_incref(constructor);
                 }
                 match item.op { // stack: Result
                     BO::AddAssign => self.write_add(ty),
@@ -210,11 +210,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
                 if ty.is_ref() {
-                    self.writer.incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
                     self.write_load(index as i32, ty);
-                    self.writer.decref(constructor);
+                    self.write_decref(constructor);
                     self.writer.pop_tmp64(); // decref temporary right operand
-                    self.writer.decref(constructor);
+                    self.write_decref(constructor);
                 }
                 self.write_store(index as i32, ty); // stack -
             },
@@ -232,13 +232,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;  // stack: right
                 if ty.is_ref() {
-                    self.writer.incref(constructor);
+                    self.write_incref(constructor);
                 }
                 self.compile_expression(&item.left)?;   // stack: right &left
                 if ty.is_ref() {
                     self.write_clone(ty, 0);            // stack: right &left &left
                     self.write_heap_fetch(ty);          // stack: right &left old
-                    self.writer.decref(constructor);    // stack: right &left
+                    self.write_decref(constructor);    // stack: right &left
                 }
                 self.write_heap_put(ty);                // stack: -
             },
@@ -246,13 +246,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 // TODO: optimize this case
                 self.compile_expression(&item.right)?;  // stack: right
                 if ty.is_ref() {
-                    self.writer.incref(constructor);
+                    self.write_incref(constructor);
                 }
                 self.compile_expression(&item.left)?;   // stack: right &left
                 if ty.is_ref() {
                     self.write_clone(ty, 0);            // stack: right &left &left
                     self.write_heap_fetch(ty);          // stack: right &left left
-                    self.writer.decref(constructor);    // stack: right &left
+                    self.write_decref(constructor);    // stack: right &left
                 }
                 self.writer.store_tmp64();              // stack: right &left, tmp: &left
                 self.write_heap_fetch(ty);              // stack: right left, tmp: &left
@@ -328,7 +328,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let index = self.locals.lookup(binding_id).index;
             let ty = self.binding_type(item);
             if ty.is_ref() {
-                self.writer.incref(self.get_constructor(ty));
+                self.write_incref(self.get_constructor(ty));
             }
             self.write_store(index as i32, ty);
         }
@@ -494,11 +494,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
         });
         if let Some(constructor) = constructor {
-            self.writer.incref(constructor);
+            self.write_incref(constructor);
         }
         self.write_decref_all();
         if let Some(constructor) = constructor {
-            self.writer.zeroref(constructor);
+            self.write_zeroref(constructor);
         }
         self.write_ret();
         self.locals.pop();
@@ -773,65 +773,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
 impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
-    /// Writes a cast from one float to another or from/to a 64 bit integer.
-    fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
-        match (from, to) {
-            (Type::i64, Type::f32) => self.writer.i64_to_f32(),
-            (Type::u64, Type::f32) => self.writer.u64_to_f32(),
-            (Type::f64, Type::f32) => self.writer.f64_to_f32(),
-
-            (Type::i64, Type::f64) => self.writer.i64_to_f64(),
-            (Type::u64, Type::f64) => self.writer.u64_to_f64(),
-            (Type::f32, Type::f64) => self.writer.f32_to_f64(),
-
-            (Type::f32, Type::i64) => self.writer.f32_to_i64(),
-            (Type::f64, Type::i64) => self.writer.f64_to_i64(),
-
-            (Type::f32, Type::u64) => self.writer.f32_to_u64(),
-            (Type::f64, Type::u64) => self.writer.f64_to_u64(),
-            _ => unreachable!("Invalid float/int cast {:?} to {:?}", from, to),
-        };
-    }
-
-    /// Writes a cast from one integer to another.
-    fn write_integer_cast(self: &Self, from: &Type, to: &Type) {
-        let from_size = (from.primitive_size() * 8) as u8;
-        let to_size = (to.primitive_size() * 8) as u8;
-        if to_size < from_size || (to_size == from_size && !from.is_signed() && to.is_signed()) {
-            if to.is_signed() {
-                match from_size {
-                    64 => self.writer.trims64(to_size),
-                    32 => self.writer.trims32(to_size),
-                    16 => self.writer.trims16(to_size),
-                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
-                };
-            } else {
-                match from_size {
-                    64 => self.writer.trimu64(to_size),
-                    32 => self.writer.trimu32(to_size),
-                    16 => self.writer.trimu16(to_size),
-                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
-                };
-            }
-        } else if to_size > from_size {
-            if from.is_signed() {
-                match from_size {
-                    32 => self.writer.extends32(to_size),
-                    16 => self.writer.extends16(to_size),
-                    8 => self.writer.extends8(to_size),
-                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
-                };
-            } else {
-                match from_size {
-                    32 => self.writer.extendu32(to_size),
-                    16 => self.writer.extendu16(to_size),
-                    8 => self.writer.extendu8(to_size),
-                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
-                };
-            }
-        }
-    }
-
     /// Returns the type of the given binding.
     fn binding_type(self: &Self, item: &impl Bindable) -> &Type {
         self.bindings.binding_type(item.binding_id().expect("Unresolved binding encountered."))
@@ -1039,7 +980,81 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         offset
     }
 
-    // TODO: r
+    /// Writes a cast from one float to another or from/to a 64 bit integer.
+    fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
+        match (from, to) {
+            (Type::i64, Type::f32) => self.writer.i64_to_f32(),
+            (Type::u64, Type::f32) => self.writer.u64_to_f32(),
+            (Type::f64, Type::f32) => self.writer.f64_to_f32(),
+
+            (Type::i64, Type::f64) => self.writer.i64_to_f64(),
+            (Type::u64, Type::f64) => self.writer.u64_to_f64(),
+            (Type::f32, Type::f64) => self.writer.f32_to_f64(),
+
+            (Type::f32, Type::i64) => self.writer.f32_to_i64(),
+            (Type::f64, Type::i64) => self.writer.f64_to_i64(),
+
+            (Type::f32, Type::u64) => self.writer.f32_to_u64(),
+            (Type::f64, Type::u64) => self.writer.f64_to_u64(),
+            _ => unreachable!("Invalid float/int cast {:?} to {:?}", from, to),
+        };
+    }
+
+    /// Writes a cast from one integer to another.
+    fn write_integer_cast(self: &Self, from: &Type, to: &Type) {
+        let from_size = (from.primitive_size() * 8) as u8;
+        let to_size = (to.primitive_size() * 8) as u8;
+        if to_size < from_size || (to_size == from_size && !from.is_signed() && to.is_signed()) {
+            if to.is_signed() {
+                match from_size {
+                    64 => self.writer.trims64(to_size),
+                    32 => self.writer.trims32(to_size),
+                    16 => self.writer.trims16(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            } else {
+                match from_size {
+                    64 => self.writer.trimu64(to_size),
+                    32 => self.writer.trimu32(to_size),
+                    16 => self.writer.trimu16(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            }
+        } else if to_size > from_size {
+            if from.is_signed() {
+                match from_size {
+                    32 => self.writer.extends32(to_size),
+                    16 => self.writer.extends16(to_size),
+                    8 => self.writer.extends8(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            } else {
+                match from_size {
+                    32 => self.writer.extendu32(to_size),
+                    16 => self.writer.extendu16(to_size),
+                    8 => self.writer.extendu8(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            }
+        }
+    }
+
+    /// Writes an appropriate variant of the incref instruction.
+    fn write_incref(self: &Self, constructor: u32) {
+        opcode_unsigned!(self, incref_8, incref_16, incref_32, constructor);
+    }
+
+    /// Writes an appropriate variant of the decref instruction.
+    fn write_decref(self: &Self, constructor: u32) {
+        opcode_unsigned!(self, decref_8, decref_16, decref_32, constructor);
+    }
+
+    /// Writes an appropriate variant of the zeroref instruction.
+    fn write_zeroref(self: &Self, constructor: u32) {
+        opcode_unsigned!(self, zeroref_8, zeroref_16, zeroref_32, constructor);
+    }
+
+    // TODO: try to remove tmp64 handling
     fn maybe_ref_temporary(self: &Self, op: HeapRefOp, item: &ast::Expression<'ast>) {
         let ty = self.binding_type(item);
         if ty.is_ref() {
@@ -1047,11 +1062,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             match op {
                 HeapRefOp::Inc => {
                     self.writer.store_tmp64();
-                    self.writer.incref(constructor);
+                    self.write_incref(constructor);
                 }
                 HeapRefOp::Dec => {
                     self.writer.pop_tmp64();
-                    self.writer.decref(constructor);
+                    self.write_decref(constructor);
                 }
             }
 
@@ -1066,7 +1081,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 if ty.is_ref() {
                     let constructor = self.get_constructor(ty);
                     self.write_load(local.index as i32, ty);
-                    self.writer.decref(constructor);
+                    self.write_decref(constructor);
                 }
             }
         });
