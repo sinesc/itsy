@@ -627,7 +627,8 @@ impl_vm!{
 
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
-    fn ret(&mut self, ret_size: u32) {
+    fn ret(&mut self, ret_size: u8) {
+        let ret_size = ret_size as u32;
         // move function result to the beginning of this stack frame
         if ret_size == 4 {
             let arg: u32 = self.stack.load(self.stack.sp() - 4);

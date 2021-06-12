@@ -1278,3 +1278,15 @@ fn dead_code_result() {
         1u32, 2u32
     ]);
 }
+
+#[test]
+fn temporary_heap_objects() {
+    let result = run("
+        fn main() {
+            ret_string(\"Temporary\");
+            ret_string(\"Heap\");
+            ret_string(\"Objects\");
+        }
+    ");
+    assert_all(&result, &[ "Temporary".to_string(), "Heap".to_string(), "Objects".to_string() ]);
+}

@@ -59,17 +59,17 @@ impl CallInfo {
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<'ty, T> where T: VMFunc<T> {
     /// Bytecode writer used to output to.
-    writer          : Writer<T>,
+    writer: Writer<T>,
     /// Type and mutability data for each binding.
-    bindings        : Bindings,
+    bindings: Bindings,
     /// Maps from binding id to load-argument for each frame.
-    locals          : LocalsStack,
+    locals: LocalsStack,
     /// Non-primitive type constructors.
-    constructors    : HashMap<&'ty Type, u32>,
+    constructors: HashMap<&'ty Type, u32>,
     // Maps functions to their call index.
-    functions       : RefCell<HashMap<FunctionId, CallInfo>>,
+    functions: RefCell<HashMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
-    unresolved      : RefCell<HashMap<FunctionId, Vec<u32>>>,
+    unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<u32>>>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -78,12 +78,12 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
     let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
 
     let mut compiler = Compiler {
-        writer          : Writer::new(),
-        bindings        : bindings,
-        locals          : LocalsStack::new(),
-        functions       : RefCell::new(HashMap::new()),
-        unresolved      : RefCell::new(HashMap::new()),
-        constructors    : HashMap::new(),
+        writer      : Writer::new(),
+        bindings    : bindings,
+        locals      : LocalsStack::new(),
+        functions   : RefCell::new(HashMap::new()),
+        unfixed_function_calls: RefCell::new(HashMap::new()),
+        constructors: HashMap::new(),
     };
 
     // serialize constructors onto const pool
@@ -274,12 +274,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &Self, item: &ast::Call<'ast>) -> CompileResult {
-        comment!(self, "call {}", item.ident.name);
+        comment!(self, "{}()", item.ident.name);
 
         // put args on stack, ensure temporaries are cleaned up later
         for (index, arg) in item.args.iter().enumerate() {
-            comment!(self, "call-arg {}", index);
+            comment!(self, "{}() arg {}", item.ident.name, index);
             self.compile_expression(arg)?;
+            self.maybe_ref_temporary(HeapRefOp::Inc, arg);
         }
 
         if let FnKind::Rust(rust_fn_index) = item.call_kind {
@@ -304,11 +305,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
                 target
             } else {
-                self.unresolved.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
                 CallInfo::PLACEHOLDER
             };
 
             self.writer.call(target.addr, target.arg_size);
+        }
+
+        for arg in item.args.iter().rev() {
+            self.maybe_ref_temporary(HeapRefOp::Dec, arg);
         }
 
         Ok(())
@@ -454,10 +459,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
-        comment!(self, "\nfunction {}", item.sig.ident.name);
+        comment!(self, "\nfn {}", item.sig.ident.name);
         // create local environment
         let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size()) as u32;
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos));
             frame.arg_pos += self.binding_type(arg).primitive_size() as u32;
@@ -475,38 +480,38 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
         self.compile_block(&item.block)?;
-        // block did not return, we have to
-        if !item.block.returns() {
-            comment!(self, "fn resulting");
-            let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
-                let ty = self.binding_type(ret);
-                if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
-            });
-            if let Some(constructor) = constructor {
-                self.writer.incref(constructor);
+        // fix forward-to-exit jmps within the function
+        let exit_address = self.writer.position();
+        self.locals.borrow_mut(|frame| {
+            while let Some(jmp_address) = frame.unfixed_exit_jmps.pop() {
+                self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
             }
-            self.write_decref_all();
-            if let Some(constructor) = constructor {
-                self.writer.zeroref(constructor);
-            }
-            self.write_ret();
+        });
+        // handle exit
+        comment!(self, "fn exiting");
+        let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
+            let ty = self.binding_type(ret);
+            if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
+        });
+        if let Some(constructor) = constructor {
+            self.writer.incref(constructor);
         }
-        // destroy local environment
+        self.write_decref_all();
+        if let Some(constructor) = constructor {
+            self.writer.zeroref(constructor);
+        }
+        self.write_ret();
         self.locals.pop();
         Ok(())
     }
 
     /// Compiles a return statement
     fn compile_return(self: &Self, item: &ast::Return<'ast>) -> CompileResult {
+        panic!("return should have been refactored by resolver");
         comment!(self, "return statement");
         if let Some(expr) = &item.expr {
             self.compile_expression(expr)?;
-            let ty = self.binding_type(expr);
-            self.write_decref_all(); // FIXME broken now
-        } else {
-            self.write_decref_all();
         }
-        self.write_ret();
         Ok(())
     }
 
@@ -518,9 +523,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(returns) = &item.returns {
             comment!(self, "block returning");
             self.compile_expression(returns)?;
-            if !returns.returns() {
-                self.write_ret();
-            }
+            let exit_jump = self.writer.jmp(123);
+            self.locals.add_forward_jmp(exit_jump);
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
@@ -615,6 +619,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // compile left, right and store references, left and right will be consumed
         self.compile_expression(&item.left)?;
         self.maybe_ref_temporary(HeapRefOp::Inc, &item.left);
+        comment!(self, "{}", item.op);
         self.compile_expression(&item.right)?;
         self.maybe_ref_temporary(HeapRefOp::Inc, &item.right);
 
@@ -844,7 +849,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &Self, function_id: FunctionId, info: CallInfo) {
-        if let Some(targets) = self.unresolved.borrow_mut().remove(&function_id) {
+        if let Some(targets) = self.unfixed_function_calls.borrow_mut().remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
@@ -1055,7 +1060,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes operations to unref local heap objects.
     fn write_decref_all(self: &Self) {
-        self.locals.borrow(|locals| {
+        self.locals.borrow_mut(|locals| {
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let ty = self.bindings.binding_type(binding_id);
                 if ty.is_ref() {
