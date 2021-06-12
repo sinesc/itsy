@@ -193,10 +193,10 @@ fn compound_f64() {
 fn cast_u8_u16() {
     let result = run("
         ret_u16(23u8 as u16);
-        ret_u16(280u8 as u16);
+        ret_u16(255u8 as u16);
         ret_u16(243u8 as u16);
     ");
-    assert_all(&result, &[ 23u8 as u16, 280u8 as u16, 243u8 as u16 ]);
+    assert_all(&result, &[ 23u16, 255, 243 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -215,10 +215,10 @@ fn cast_u64_u16() {
 fn cast_u8_u64() {
     let result = run("
         ret_u64(23u8 as u64);
-        ret_u64(280u8 as u64);
-        ret_u64(243u8 as u64);
+        ret_u64(255u8 as u64);
+        ret_u64(7u8 as u64);
     ");
-    assert_all(&result, &[ 23u8 as u64, 280u8 as u64, 243u8 as u64 ]);
+    assert_all(&result, &[ 23u64, 255, 7 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -229,7 +229,7 @@ fn cast_u64_u8() {
         ret_u8(280u64 as u8);
         ret_u8(243u64 as u8);
     ");
-    assert_all(&result, &[ 23u64 as u8, 280u64 as u8, 243u64 as u8 ]);
+    assert_all(&result, &[ 23u8, 255, 243 ]);
 }
 
 // --- cast signed to signed ---
@@ -239,10 +239,10 @@ fn cast_u64_u8() {
 fn cast_i8_i16() {
     let result = run("
         ret_i16(-23i8 as i16);
-        ret_i16(-280i8 as i16);
-        ret_i16(243i8 as i16);
+        ret_i16(-125i8 as i16);
+        ret_i16(127i8 as i16);
     ");
-    assert_all(&result, &[ -23i8 as i16, -280i8 as i16, 243i8 as i16 ]);
+    assert_all(&result, &[ -23i16, -125, 127 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -261,10 +261,10 @@ fn cast_i64_i16() {
 fn cast_i8_i64() {
     let result = run("
         ret_i64(-23i8 as i64);
-        ret_i64(-280i8 as i64);
-        ret_i64(243i8 as i64);
+        ret_i64(-128i8 as i64);
+        ret_i64(125i8 as i64);
     ");
-    assert_all(&result, &[ -23i8 as i64, -280i8 as i64, 243i8 as i64 ]);
+    assert_all(&result, &[ -23i64, -128, 125 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -275,7 +275,7 @@ fn cast_i64_i8() {
         ret_i8(-280i64 as i8);
         ret_i8(243i64 as i8);
     ");
-    assert_all(&result, &[ -23i64 as i8, -280i64 as i8, 243i64 as i8 ]);
+    assert_all(&result, &[ -23i8, -128, 127 ]);
 }
 
 // --- cast signed to unsigned ---
@@ -285,10 +285,10 @@ fn cast_i64_i8() {
 fn cast_i8_u16() {
     let result = run("
         ret_u16(-23i8 as u16);
-        ret_u16(-280i8 as u16);
-        ret_u16(243i8 as u16);
+        ret_u16(-128i8 as u16);
+        ret_u16(127i8 as u16);
     ");
-    assert_all(&result, &[ -23i8 as u16, -280i8 as u16, 243i8 as u16 ]);
+    assert_all(&result, &[ 0u16, 0, 127 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -299,7 +299,7 @@ fn cast_i64_u16() {
         ret_u16(-280i64 as u16);
         ret_u16(243i64 as u16);
     ");
-    assert_all(&result, &[ -23i64 as u16, -280i64 as u16, 243i64 as u16 ]);
+    assert_all(&result, &[ 0u16, 0, 243 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -307,10 +307,10 @@ fn cast_i64_u16() {
 fn cast_i8_u64() {
     let result = run("
         ret_u64(-23i8 as u64);
-        ret_u64(-280i8 as u64);
-        ret_u64(243i8 as u64);
+        ret_u64(-128i8 as u64);
+        ret_u64(127i8 as u64);
     ");
-    assert_all(&result, &[ -23i8 as u64, -280i8 as u64, 243i8 as u64 ]);
+    assert_all(&result, &[ 0u64, 0, 127 ]);
 }
 
 #[allow(overflowing_literals)]
@@ -321,7 +321,7 @@ fn cast_i64_u8() {
         ret_u8(-280i64 as u8);
         ret_u8(243i64 as u8);
     ");
-    assert_all(&result, &[ -23i64 as u8, -280i64 as u8, 243i64 as u8 ]);
+    assert_all(&result, &[ 0u8, 0, 243 ]);
 }
 
 // --- cast float to float ---
@@ -379,11 +379,7 @@ fn cast_f64_i16() {
         ret_i16(2147483657f64 as i16);
         ret_i16(-2147483657f64 as i16);
     ");
-    // this is actually buggy in rust: https://github.com/rust-lang/rust/issues/10184
-    // so we need to assign the value to a variable first, then cast it. additionally
-    // on debug compiles values > i32::MAX require a cast to i64 first
-    let values = [ 3.1415f64, -3.1415f64, 68123.45f64, 2147483657f64, -2147483657f64 ];
-    assert_all(&result, &[ values[0] as i16, values[1] as i16, values[2] as i16, (values[3] as i64) as i16, (values[4] as i64) as i16 ]);
+    assert_all(&result, &[ 3i16, -3, 32767, 32767, -32768 ]);
 }
 
 #[test]
@@ -395,11 +391,7 @@ fn cast_f32_i8() {
         ret_i8(2147483657f64 as i8);
         ret_i8(-2147483657f64 as i8);
     ");
-    // this is actually buggy in rust: https://github.com/rust-lang/rust/issues/10184
-    // so we need to assign the value to a variable first, then cast it. additionally
-    // on debug compiles values > i32::MAX require a cast to i64 first
-    let values = [ 3.1415f64, -3.1415f64, 68123.45f64, 2147483657f64, -2147483657f64 ];
-    assert_all(&result, &[ values[0] as i8, values[1] as i8, values[2] as i8, (values[3] as i64) as i8, (values[4] as i64) as i8 ]);
+    assert_all(&result, &[ 3i8, -3, 127, 127, -128 ]);
 }
 
 // --- cast float to unsigned ---
@@ -413,10 +405,7 @@ fn cast_f32_u16() {
         ret_u16(2147483657f32 as u16);
         ret_u16(-2147483657f32 as u16);
     ");
-    // this is actually buggy in rust: https://github.com/rust-lang/rust/issues/10184
-    // so we need to assign the value to a variable first, then cast it:
-    let values = [ 3.1415f32, -3.1415f32, 68123.45f32, 2147483657f32, -2147483657f32 ];
-    assert_all(&result, &[ values[0] as u16, values[1] as u16, values[2] as u16, (values[3] as i64) as u16, (values[4] as i64) as u16 ]);
+    assert_all(&result, &[ 3u16, 0, 65535, 65535, 0 ]);
 }
 
 #[test]

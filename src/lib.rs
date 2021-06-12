@@ -84,47 +84,47 @@ macro_rules! extern_rust {
         }
     };
     // handle return values
-    (@handle-ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value); };
-    (@handle-ret $vm:ident, $_:tt, $value:ident) => { // object by value
+    (@handle_ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
+    (@handle_ret $vm:ident, $_:tt, $value:ident) => { // object by value
         let heap_index: u32 = $vm.heap.store($value);
         $vm.stack.push(heap_index);
     };
     // handle parameters
-    (@handle-param $vm:ident, u8) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, u16) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, u32) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, u64) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, i8) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, i16) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, i32) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, i64) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, f32) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, f64) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, bool) => { $vm.stack.pop() };
-    (@handle-param $vm:ident, String) => { { // rust String specialcase
+    (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, u16) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, u32) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, u64) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, i8) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, i16) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, i32) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, i64) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, f32) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
+    (@handle_param $vm:ident, String) => { { // rust String specialcase
         let item: $crate::runtime::HeapRef = $vm.stack.pop();
-        $vm.heap.str(item).to_string()
+        $vm.heap.string(item).to_string()
     } };
-    (@handle-param $vm:ident, & str) => { { // rust &str specialcase
+    (@handle_param $vm:ident, & str) => { { // rust &str specialcase
         let item: $crate::runtime::HeapRef = $vm.stack.pop();
-        $vm.heap.str(item)
+        $vm.heap.string(item)
     } };
-    (@handle-param $vm:ident, & $_:tt) => { { // object by reference // fixme: this won't work, structs aren't aligned
+    (@handle_param $vm:ident, & $_:tt) => { { // object by reference // fixme: this won't work, structs aren't aligned
         let heap_offset: u32 = $vm.stack.pop();
         let heap_index: u32 = $vm.stack.pop();
         $vm.heap.load(heap_index)
     } };
-    (@handle-param $vm:ident, $_:tt) => { { // object by value // fixme: this won't work, structs aren't aligned
+    (@handle_param $vm:ident, $_:tt) => { { // object by value // fixme: this won't work, structs aren't aligned
         let heap_offset: u32 = $vm.stack.pop();
         let heap_index: u32 = $vm.stack.pop();
         $vm.heap.clone(heap_index)
@@ -158,14 +158,14 @@ macro_rules! extern_rust {
                             // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle-param vm, $($arg_type)*);
+                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle_param vm, $($arg_type)+);
                                 )*
                                 $code
                             };
                             // set return value, if any
                             $(
                                 let ret_typed: $ret_type = ret;
-                                extern_rust!(@handle-ret vm, $ret_type, ret_typed);
+                                extern_rust!(@handle_ret vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -177,7 +177,7 @@ macro_rules! extern_rust {
     (
         $vis:vis $type_name:ident, $context_type:ty, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle-ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
+            fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle_ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `extern_rust!` macro.

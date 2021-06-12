@@ -8,7 +8,6 @@ pub(super) struct Repository<I, V> {
     data    : Vec<(V, ScopeId)>,
 }
 
-//#[allow(dead_code)] // todo: remove and clean up
 impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     /// Creates a new repository.
     pub fn new() -> Self {
@@ -39,6 +38,10 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     pub fn by_id(self: &Self, index: I) -> &V {
         &self.data[index.into()].0
     }
+    /*/// Fetches an item scope by item id.
+    pub fn scope_by_id(self: &Self, index: I) -> ScopeId {
+        self.data[index.into()].1
+    }*/
     /// Mutably fetches an item by its id.
     pub fn by_id_mut(self: &mut Self, index: I) -> &mut V {
         &mut self.data[index.into()].0

@@ -43,15 +43,12 @@ extern_rust!(MyFns, (), {
     }
 });
 
-
 #[allow(unused_variables)]
+#[allow(overflowing_literals)]
 fn main() {
     let source = fs::read_to_string("itsy/test.itsy").unwrap();
-    //println!("ast:\n{:#?}", parse(source));
-    //println!("highest opcode id: {}", bytecode::OpCode::comment as u8);
     let vm = vm::<MyFns, ()>(&source);
     if let Ok(mut vm) = vm {
-        println!("bytecode:\n{:}", vm.format_program());
         let vm_start = std::time::Instant::now();
         vm.run(&mut ());
         println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);

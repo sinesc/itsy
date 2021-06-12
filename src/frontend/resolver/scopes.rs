@@ -2,7 +2,7 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic, Bindings};
+use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic, Bindings, BindingInfo};
 
 #[derive(Clone)]
 pub struct FnSig {
@@ -20,11 +20,6 @@ impl FnSig {
     }
 }
 
-struct BindingInfo {
-    mutable: bool,
-    type_id: Option<TypeId>,
-}
-
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
@@ -37,6 +32,15 @@ pub struct Scopes {
     scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
     parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
+}
+
+impl Into<Bindings> for Scopes {
+    /// convert scopes into type vector
+    fn into(self: Self) -> Bindings {
+        let type_map: Vec<Type> = self.types.into();
+        let binding_map = self.bindings.into();
+        Bindings::new(binding_map, type_map)
+    }
 }
 
 impl Scopes {
@@ -256,15 +260,5 @@ impl Scopes {
     /// Returns the id of type void.
     pub fn void_type(self: &Self) -> TypeId {
         0.into() // todo: this is a little bit hacky
-    }
-}
-
-impl Into<Bindings> for Scopes {
-    /// convert scopes into type vector
-    fn into(self: Self) -> Bindings {
-        let types: Vec<Type> = self.types.into();
-        let type_map = self.bindings.values().map(|info| info.type_id.expect("Unresolved binding type while creating type map")).collect();
-        let mutability_map = self.bindings.values().map(|info| info.mutable).collect();
-        Bindings::new(mutability_map, type_map, types)
     }
 }

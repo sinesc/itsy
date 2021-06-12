@@ -8,11 +8,8 @@ mod traits;
 
 pub use self::vm::VM;
 pub(crate) use self::vm::VMState;
+pub(crate) use self::vm::CopyTarget;
 pub use self::stack::*;
 pub use self::heap::*;
 pub use self::traits::*;
-pub use crate::util::HeapRef;
-
-/// A stack value.
-pub(crate) type Value = i32;
-pub(crate) type Value64 = i64;
+pub use crate::util::{HeapRef, HeapSlice};

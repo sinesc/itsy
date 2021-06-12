@@ -1,28 +1,29 @@
 use std::{collections::HashMap, cell::RefCell};
 use crate::util::BindingId;
-use crate::bytecode::ARG1;
-
 /// Describes a single local variable of a stack frame
 #[derive(Copy,Clone)]
 pub struct Local {
     /// The load-index for this variable.
-    pub index   : i32,
+    pub index   : u32,
     /// Whether this variable is currently in scope (stack frame does not equal scope!)
     pub in_scope: bool,
 }
 
 impl Local {
-    pub fn new(index: i32) -> Self {
+    pub fn new(index: u32) -> Self {
         Local { index, in_scope: false }
     }
 }
 
 /// Maps bindings and arguments to indices relative to the stack frame.
 pub struct Locals {
+    /// Maps a binding ID to a variable or argument position on the stack.
     pub map     : HashMap<BindingId, Local>,
-    pub next_arg: i32,
-    pub next_var: i32,
-    pub arg_size: u32,
+    /// Index of the NEXT argument to be inserted.
+    pub arg_pos : u32,
+    /// Index for the NEXT variable to be inserted.
+    pub var_pos : u32,
+    /// Size of the local block return value.
     pub ret_size: u32,
 }
 
@@ -30,9 +31,8 @@ impl Locals {
     pub fn new() -> Self {
         Locals {
             map     : HashMap::new(),
-            next_arg: ARG1,
-            next_var: 0,
-            arg_size: 0,
+            arg_pos : 0,
+            var_pos : 0,
             ret_size: 0,
         }
     }
@@ -62,11 +62,11 @@ impl LocalsStack {
         let locals = inner.last().expect(Self::NO_STACK);
         func(&locals);
     }
-    /// Returns the argument size in stack elements for the top stack frame descriptor.
+    /// Returns the argument size in bytes for the top stack frame descriptor.
     pub fn arg_size(self: &Self) -> u32 {
-        self.0.borrow_mut().last().expect(Self::NO_STACK).arg_size
+        self.0.borrow_mut().last().expect(Self::NO_STACK).arg_pos
     }
-    /// Returns the return value size in stack elements for the top stack frame descriptor.
+    /// Returns the return value size in bytes for the top stack frame descriptor.
     pub fn ret_size(self: &Self) -> u32 {
         self.0.borrow_mut().last().expect(Self::NO_STACK).ret_size
     }

@@ -3,7 +3,7 @@
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
-use std::{collections::HashMap, cell::Cell};
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use crate::util::{Numeric, FnKind, compute_loc};
 use crate::frontend::ast::*;
@@ -85,7 +85,7 @@ macro_rules! ws (
     })
 );
 
-// identifier [a-z_][a-z0-9_]*
+// identifier ([a-z_][a-z0-9_]*)
 
 named!(label(Input<'_>) -> &str, map!(recognize!(tuple!(take_while1!(|m| is_alphabetic(m as u8) || m == '_'), take_while!(|m| is_alphanumeric(m as u8) || m == '_'))), |s| *s));
 
@@ -98,7 +98,7 @@ named!(ident(Input<'_>) -> Ident, do_parse!(
     (result)
 ));
 
-// path
+// path (a::b)
 
 named!(path(Input<'_>) -> Path, do_parse!(
     position: rest_len >>
@@ -106,14 +106,13 @@ named!(path(Input<'_>) -> Path, do_parse!(
     (result)
 ));
 
-// literal numerical
+// literal numerical (-3.14f32)
 
 named!(opt_sign(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(one_of!("+-"))));
 named!(opt_fract(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(tuple!(tag!("."), not!(char!('.')), digit0)))); // not(.) to avoid matching ranges
 named!(opt_type(Input<'_>) -> Option<Input<'_>>, opt!(recognize!(tuple!(one_of!("iuf"), alt!(tag!("8") | tag!("16") | tag!("32") | tag!("64"))))));
 
 fn parse_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
-    // todo: there must be something in std to simplify this
     let tail = if n.len() > 3 {
         let tail = &n[n.len() - 3 ..];
         if &tail[0..1] != "u" && &tail[0..1] != "i" && &tail[0..1] != "f" {
@@ -136,6 +135,28 @@ fn parse_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
     }
 }
 
+fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
+    match type_name {
+        Some("i8")  => num >= i8::MIN as i64 && num <= i8::MAX as i64,
+        Some("i16") => num >= i16::MIN as i64 && num <= i16::MAX as i64,
+        Some("i32") => num >= i32::MIN as i64 && num <= i32::MAX as i64,
+        Some("i64") => true,
+        None        => true,
+        _           => false,
+    }
+}
+
+fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
+    match type_name {
+        Some("u8")  => num >= u8::MIN as u64 && num <= u8::MAX as u64,
+        Some("u16") => num >= u16::MIN as u64 && num <= u16::MAX as u64,
+        Some("u32") => num >= u32::MIN as u64 && num <= u32::MAX as u64,
+        Some("u64") => true,
+        None        => true,
+        _           => false,
+    }
+}
+
 fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_>> {
     let (value, type_name) = parse_numerical_suffix(n);
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
@@ -145,32 +166,33 @@ fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
                 type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
                 binding_id  : None,
-                heap_ref    : Cell::new(None),
-            }))
+            }));
         }
     } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
         if let Ok(integer) = str::parse::<i64>(value) {
-            return Ok((n, Literal {
-                position    : position,
-                value       : LiteralValue::Numeric(Numeric::Signed(integer)),
-                type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
-                binding_id  : None,
-                heap_ref    : Cell::new(None),
-            }))
+            if check_signed_range(integer, type_name) {
+                return Ok((n, Literal {
+                    position    : position,
+                    value       : LiteralValue::Numeric(Numeric::Signed(integer)),
+                    type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
+                    binding_id  : None,
+                }));
+            }
         }
     } else {
         if let Ok(integer) = str::parse::<u64>(value) {
-            return Ok((n, Literal {
-                position    : position,
-                value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
-                type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
-                binding_id  : None,
-                heap_ref    : Cell::new(None),
-            }))
+            if check_unsigned_range(integer, type_name) {
+                return Ok((n, Literal {
+                    position    : position,
+                    value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
+                    type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
+                    binding_id  : None,
+                }));
+            }
         }
     }
 
-    Err(Error::Failure(Context::Code(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as u32))))
+    Err(Error::Failure(Context::List(vec![(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as u32))])))
 }
 
 named!(numerical(Input<'_>) -> Literal<'_>, do_parse!(
@@ -181,7 +203,7 @@ named!(numerical(Input<'_>) -> Literal<'_>, do_parse!(
 
 named!(static_size(Input<'_>) -> u32, map!(recognize!(digit1), |digits| str::parse::<u32>(*digits).unwrap()));
 
-// literal boolean
+// literal boolean (true)
 
 named!(boolean(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
@@ -191,13 +213,12 @@ named!(boolean(Input<'_>) -> Literal<'_>, do_parse!(
             value       : LiteralValue::Bool(*m == "true"),
             type_name   : None,
             binding_id  : None,
-            heap_ref    : Cell::new(None),
         }
     }) >>
     (result)
 ));
 
-// literal string
+// literal string ("hello world")
 
 named!(string(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
@@ -207,13 +228,12 @@ named!(string(Input<'_>) -> Literal<'_>, do_parse!(
             value       : LiteralValue::String(*m),
             type_name   : None,
             binding_id  : None,
-            heap_ref    : Cell::new(None),
         }
     }) >>
     (result)
 ));
 
-// literal array
+// literal array ([ 1, 2, 3 ])
 
 named!(array_literal_elements(Input<'_>) -> Vec<Literal<'_>>, ws!(separated_list_complete!(char!(','), literal)));
 
@@ -226,12 +246,11 @@ named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
         }),
         type_name   : None,
         binding_id  : None,
-        heap_ref    : Cell::new(None),
     }) >>
     (result)
 ));
 
-// struct literal
+// literal struct (MyStruct { a: 1 })
 
 named!(struct_literal_field(Input<'_>) -> (&str, Literal<'_>), map!(ws!(tuple!(label, char!(':'), literal)),
     |tuple| (tuple.0, tuple.2)
@@ -250,12 +269,11 @@ named!(struct_literal(Input<'_>) -> Literal<'_>, do_parse!(
         }),
         type_name   : Some(TypeName::from_path(m.0)),
         binding_id  : None,
-        heap_ref    : Cell::new(None),
     }) >>
     (result)
 ));
 
-// general literal
+// literal
 
 named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_literal | struct_literal | numerical)));
 
@@ -271,7 +289,20 @@ named!(assignable(Input<'_>) -> Expression<'_>, ws!(do_parse!(
             | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as u32, ident: i, binding_id: None, index: None })))
         ),
         init,       // todo: one of the positions must be wrong ;)
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: op_position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |mut acc, (op, val)| {
+            // update left part of the expression to ensure only the final index/access is a write operation. // TODO: find less clunky solution
+            match &mut acc {
+                Expression::BinaryOp(exp) => {
+                    if exp.op == BinaryOperator::AccessWrite {
+                        exp.op = BinaryOperator::Access;
+                    } else if exp.op == BinaryOperator::IndexWrite {
+                        exp.op = BinaryOperator::Index;
+                    }
+                }
+                _ => {}
+            }
+            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as u32, op: op, left: acc, right: val, binding_id: None }))
+        }
     ) >>
     (res)
 )));
@@ -431,16 +462,12 @@ named!(unary(Input<'_>) -> Expression<'_>, do_parse!(
 named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
     position: rest_len >>
     result: ws!(alt!( // todo: this may require complete around alternatives: see "BE CAREFUL" in https://docs.rs/nom/4.1.1/nom/macro.alt.html
-        map!(boolean, |m| Expression::Literal(m))
-        | map!(string, |m| Expression::Literal(m))
+        map!(literal, |m| Expression::Literal(m))
         | map!(if_block, |m| Expression::IfBlock(Box::new(m)))
         | map!(block, |m| Expression::Block(Box::new(m)))
-        | map!(array_literal, |m| Expression::Literal(m))
-        | map!(struct_literal, |m| Expression::Literal(m))
         | parens
         | map!(suffix, |m| Expression::UnaryOp(Box::new(m)))
         | map!(prefix, |m| Expression::UnaryOp(Box::new(m)))
-        | map!(numerical, |m| Expression::Literal(m))
         | map!(call, |m| Expression::Call(m))
         | map!(call_static, |m| Expression::Call(m))
         | map!(ident, |m| Expression::Variable(Variable { position: position as u32, ident: m, binding_id: None }))
@@ -575,11 +602,11 @@ named!(binding(Input<'_>) -> Statement<'_>, do_parse!(
 ));
 
 // inline type
-// todo: everything using TypeName needs to be switched to this
-named!(inline_type(Input<'_>) -> InlineType<'_>, alt!(
-    map!(path, |t| InlineType::TypeName(TypeName::from_path(t)))
-    | map!(array, |a| InlineType::Array(Box::new(a)))
-));
+
+named!(inline_type(Input<'_>) -> InlineType<'_>, map!(ws!(alt!(
+    map!(path, |t| InlineTypeKind::TypeName(TypeName::from_path(t)))
+    | map!(array, |a| InlineTypeKind::Array(Box::new(a)))
+)), |pair| InlineType { kind: pair }));
 
 // struct definition
 
@@ -593,12 +620,11 @@ named!(struct_fields(Input<'_>) -> Vec<(&str, InlineType<'_>)>, map!(ws!(separat
 
 named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
-    result: map!(ws!(tuple!(opt!(tag!("ref")), tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
-        position: position as u32,
-        by_ref  : tuple.0.is_some(),
-        ident   : tuple.2,
-        fields  : tuple.4,
-        type_id : None,
+    result: map!(ws!(tuple!(tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
+        position    : position as u32,
+        ident       : tuple.1,
+        fields      : tuple.3,
+        binding_id  : None,
     })) >>
     (result)
 ));
@@ -611,7 +637,7 @@ named!(array(Input<'_>) -> Array<'_>, do_parse!(
         position    : position as u32,
         element_type: tuple.0,
         len         : tuple.2,
-        type_id     : None,
+        binding_id  : None,
     }) >>
     (result)
 ));
@@ -658,8 +684,6 @@ named!(function(Input<'_>) -> Statement<'_>, do_parse!(
 ));
 
 // for
-
-// TODO: accept "for ident in expression" and make .. an operator. implement iterators.
 
 named!(for_loop_range(Input<'_>) -> Expression<'_>, do_parse!(
     position: rest_len >>
@@ -715,7 +739,6 @@ named!(return_statement(Input<'_>) -> Statement<'_>, do_parse!(
         |m| Statement::Return(Return {
             position        : position as u32,
             expr            : m,
-            fn_ret_type_id  : None,
         })
     ) >>
     (result)
@@ -745,7 +768,6 @@ pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
 /// Attempt to return the innermost custom error, otherwise the innermost error.
 fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseError {
-    use std::mem::transmute;
 
     let err = list.iter().find(|(_, error_kind)| match error_kind {
         ErrorKind::Custom(_) => true,
@@ -755,7 +777,7 @@ fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseErro
     let (remainder, error_kind) = err.unwrap();
     match error_kind {
         ErrorKind::Custom(custom) => {
-            ParseError::new(unsafe { transmute(*custom) }, (input.len() - remainder.len()) as u32) // todo: figure out how to specify custom error type
+            ParseError::new(unsafe { ::std::mem::transmute(*custom) }, (input.len() - remainder.len()) as u32) // todo: figure out how to specify custom error type
         }
         _ => {
             ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as u32)

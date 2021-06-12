@@ -1,14 +1,15 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
-use std::{collections::HashMap, cell::RefCell, fmt::{self, Display}};
-use crate::util::{Numeric, FunctionId, Type, TypeId, TypeKind, FnKind, HeapRef, Bindings, Constructor, compute_loc};
-use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
-use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
-use crate::runtime::{VMFunc, CONSTPOOL_INDEX};
 mod locals;
-use locals::{Local, Locals, LocalsStack};
 #[macro_use]
 mod macros;
+
+use std::{cell::RefCell, collections::HashMap, fmt::{self, Display}};
+use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, compute_loc, TypeContainer, Struct};
+use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
+use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
+use crate::runtime::{VMFunc, HeapRefOp};
+use locals::{Local, Locals, LocalsStack};
 
 /// Represents the various possible compiler error-kinds.
 #[derive(Clone, Debug)]
@@ -45,18 +46,28 @@ impl Display for CompileError {
 
 type CompileResult = Result<(), CompileError>;
 
+#[derive(Clone, Copy)]
+struct CallInfo {
+    arg_size: u32,
+    addr: u32,
+}
+
+impl CallInfo {
+    const PLACEHOLDER: Self = Self { addr: 123, arg_size: 0 };
+}
+
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler<T> where T: VMFunc<T> {
+pub struct Compiler<'ty, T> where T: VMFunc<T> {
     /// Bytecode writer used to output to.
     writer          : Writer<T>,
     /// Type and mutability data for each binding.
     bindings        : Bindings,
     /// Maps from binding id to load-argument for each frame.
     locals          : LocalsStack,
-    /// Type constructors
-    constructors    : HashMap<TypeId, HeapRef>,
+    /// Non-primitive type constructors.
+    constructors    : HashMap<&'ty Type, u32>,
     // Maps functions to their call index.
-    functions       : RefCell<HashMap<FunctionId, u32>>,
+    functions       : RefCell<HashMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
     unresolved      : RefCell<HashMap<FunctionId, Vec<u32>>>,
 }
@@ -76,14 +87,15 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
     };
 
     // serialize constructors onto const pool
-    for (type_id, ty) in compiler.bindings.types().iter().enumerate().map(|(index, ty)| (TypeId::from(index), ty)) {
-        if Into::<usize>::into(type_id) <= 12 { continue; } // fixme: tbd: save a few bytes by skipping the default primary types? if count changes this will break silently
-        let heap_ref = compiler.store_constructor(ty);
-        compiler.constructors.insert(type_id, heap_ref);
+    for ty in compiler.bindings.types().iter() {
+        if !ty.is_primitive() {
+            let position = compiler.store_constructor(ty);
+            compiler.constructors.insert(ty, position);
+        }
     }
 
     // write placeholder jump to program entry
-    let initial_pos = compiler.writer.call(123);
+    let initial_pos = compiler.writer.call(123, 0);
     compiler.writer.exit();
 
     // compile program
@@ -92,15 +104,15 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
     }
 
     // overwrite placeholder with actual entry position
-    let &entry_fn_pos = compiler.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
-    compiler.writer.overwrite(initial_pos, |w| w.call(entry_fn_pos));
+    let &entry_call = compiler.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
+    compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
 
     // return generated program
     Ok(compiler.writer.into_program())
 }
 
 /// Methods for compiling individual code structures.
-impl<'ast, T> Compiler<T> where T: VMFunc<T> {
+impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
     fn compile_statement(self: &Self, item: &ast::Statement<'ast>) -> CompileResult {
@@ -112,9 +124,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             S::IfBlock(if_block)        => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
-                    for _ in 0..self.bindingtype(result).quadsize() {
-                        self.writer.discard32();
-                    }
+                    let result_type = self.binding_type(result);
+                    self.write_discard(result_type);
                 }
                 Ok(())
             }
@@ -123,18 +134,16 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             S::Block(block)             => {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
-                    for _ in 0..self.bindingtype(result).quadsize() {
-                        self.writer.discard32();
-                    }
+                    let result_type = self.binding_type(result);
+                    self.write_discard(result_type);
                 }
                 Ok(())
             }
             S::Return(ret)              => self.compile_return(ret),
             S::Expression(expression)   => {
                 self.compile_expression(expression)?;
-                for _ in 0..self.bindingtype(expression).quadsize() {
-                    self.writer.discard32();
-                }
+                let result_type = self.binding_type(expression);
+                self.write_discard(result_type);
                 Ok(())
             }
         }
@@ -157,142 +166,109 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Compiles an assignment to a local variable.
-    fn compile_variable_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+    /// Compiles the assignment operation.
+    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+        comment!(self, "{}", item);
+        match item.left {
+            ast::Expression::Variable(_) => self.compile_assignment_to_var(item),
+            ast::Expression::BinaryOp(_) => self.compile_assignment_to_offset(item),
+            _ => panic!("cannot assign to left expression"),
+        }
+    }
+
+    /// Compiles an assignment to a variable.
+    fn compile_assignment_to_var(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
+        comment!(self, "direct assignment");
         let binding_id = item.left.binding_id().unwrap();
         let index = self.locals.lookup(binding_id).index;
-        let ty = self.bindingtype(&item.left);
+        let ty = self.binding_type(&item.left);
+        let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                self.write_tmp_ref(&item.right);
-                if !ty.is_stackref() {
-                    // stack: [ ..., PRIM_SRC ], store directly to variable
-                    self.write_store(index, ty);
-                } else {
-                    // stack: [ ..., OBJ_SRC ], load target variable for heap copy (consumes src+dest)
-                    self.write_load(index, ty); // [ ..., OBJ_SRC, OBJ_DEST ]
-                    self.writer.heap_copy_32(self.compute_type_size(&ty)); // FIXME strings and probably objects
+                if ty.is_ref() {
+                    self.writer.incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_load(index as i32, ty);
+                    self.writer.decref(constructor);
                 }
-                self.write_tmp_unref(&item.right);
+                self.write_store(index as i32, ty);
             },
             _ => {
-                self.write_load(index, ty);
-                self.compile_expression(&item.right)?;
-                self.write_tmp_ref(&item.right);
-                // stack: [ ..., PRIM_DEST, PRIM_SRC ]
-                match item.op {
-                    BO::AddAssign => self.write_add(&ty),
-                    BO::SubAssign => self.write_sub(&ty),
-                    BO::MulAssign => self.write_mul(&ty),
-                    BO::DivAssign => self.write_div(&ty),
-                    BO::RemAssign => self.write_rem(&ty),
-                    _ => panic!("Unsupported assignment operator encountered"),
+                self.write_load(index as i32, ty); // stack: L
+                self.compile_expression(&item.right)?; // stack: L R
+                if ty.is_ref() {
+                    self.writer.store_tmp64(); // incref temporary right operand
+                    self.writer.incref(constructor);
+                }
+                match item.op { // stack: Result
+                    BO::AddAssign => self.write_add(ty),
+                    BO::SubAssign => self.write_sub(ty),
+                    BO::MulAssign => self.write_mul(ty),
+                    BO::DivAssign => self.write_div(ty),
+                    BO::RemAssign => self.write_rem(ty),
+                    op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_store(index, ty);
-                self.write_tmp_unref(&item.right);
+                if ty.is_ref() {
+                    self.writer.incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_load(index as i32, ty);
+                    self.writer.decref(constructor);
+                    self.writer.pop_tmp64(); // decref temporary right operand
+                    self.writer.decref(constructor);
+                }
+                self.write_store(index as i32, ty); // stack -
             },
         };
         Ok(())
     }
 
-    /// Compiles an assignment to an index operation.
-    fn compile_index_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+    /// Compiles an assignment to an index- or access-write operation.
+    fn compile_assignment_to_offset(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
-        let ty = self.bindingtype(&item.left);
-        self.compile_expression(&item.right)?;
-        self.write_tmp_ref(&item.right);
-        self.compile_expression(&item.left)?;
+        comment!(self, "offset assignment");
+        let ty = self.binding_type(&item.left);
+        let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
             BO::Assign => {
-                if !ty.is_stackref() {
-                    // stack: [ ..., PRIM_SRC, OBJ_DEST ], copy primitive to heap object, consumes both
-                    self.write_heap_put(ty.size());
-                } else {
-                    // stack: [ ..., OBJ_SRC, OBJ_DEST ], copy from object to object, consumes both
-                    self.writer.heap_copy_32(self.compute_type_size(&ty));
+                self.compile_expression(&item.right)?;  // stack: right
+                if ty.is_ref() {
+                    self.writer.incref(constructor);
                 }
+                self.compile_expression(&item.left)?;   // stack: right &left
+                if ty.is_ref() {
+                    self.write_clone(ty, 0);            // stack: right &left &left
+                    self.write_heap_fetch(ty);          // stack: right &left old
+                    self.writer.decref(constructor);    // stack: right &left
+                }
+                self.write_heap_put(ty);                // stack: -
             },
             _ => {
-                // stack: [ ..., X_SRC, OBJ_DEST ]
-                self.writer.push_tmp96();
-                // stack: [ ..., X_SRC ], tmp: [ ..., OBJ_DEST ]
-                if ty.is_stackref() {
-                    self.write_heap_fetch(ty.size());
+                // TODO: optimize this case
+                self.compile_expression(&item.right)?;  // stack: right
+                if ty.is_ref() {
+                    self.writer.incref(constructor);
                 }
-                // stack: [ ..., PRIM_SRC ], tmp: [ ..., OBJ_DEST ]
-                self.writer.load_tmp96(); // todo: for primitives this will result in push+load which equals a store. optimize in optimizer or here?
-                // stack: [ ..., PRIM_SRC, OBJ_DEST  ], tmp: [ ..., OBJ_DEST ]
-                self.write_heap_fetch(ty.size());
-                // stack: [ ..., PRIM_SRC, PRIM_DEST  ], tmp: [ ..., OBJ_DEST ]
-                if ty.size() == 8 { // todo: swap not required for add/mul
-                    self.writer.swap64();
-                } else {
-                    self.writer.swap32();
+                self.compile_expression(&item.left)?;   // stack: right &left
+                if ty.is_ref() {
+                    self.write_clone(ty, 0);            // stack: right &left &left
+                    self.write_heap_fetch(ty);          // stack: right &left left
+                    self.writer.decref(constructor);    // stack: right &left
                 }
-                // stack: [ ..., PRIM_DEST, PRIM_SRC  ], tmp: [ ..., OBJ_DEST ]
-                match item.op {
-                    BO::AddAssign => self.write_add(&ty),
-                    BO::SubAssign => self.write_sub(&ty),
-                    BO::MulAssign => self.write_mul(&ty),
-                    BO::DivAssign => self.write_div(&ty),
-                    BO::RemAssign => self.write_rem(&ty),
-                    _ => panic!("Unsupported assignment operator encountered"),
+                self.writer.store_tmp64();              // stack: right &left, tmp: &left
+                self.write_heap_fetch(ty);              // stack: right left, tmp: &left
+                self.write_swap(ty);                    // stack: left right, tmp: &left
+                match item.op {                         // stack: result, tmp: &left
+                    BO::AddAssign => self.write_add(ty),
+                    BO::SubAssign => self.write_sub(ty),
+                    BO::MulAssign => self.write_mul(ty),
+                    BO::DivAssign => self.write_div(ty),
+                    BO::RemAssign => self.write_rem(ty),
+                    _ => unreachable!("Unsupported assignment operator encountered"),
                 };
-                // stack: [ ..., PRIM_RESULT  ], tmp: [ ..., OBJ_DEST ]
-                self.writer.pop_tmp96();
-                // stack: [ ..., PRIM_RESULT, OBJ_DEST  ]
-                self.write_heap_put(ty.size());
+                self.writer.pop_tmp64();                // stack: result, &left
+                self.write_heap_put(ty);                // stack -
             },
         }
-        self.write_tmp_unref(&item.right);
-        Ok(())
-    }
-
-    /// Compiles the assignment operation.
-    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
-        comment!(self, "{}", item);
-        match item.left {
-            ast::Expression::Variable(_) => self.compile_variable_assignment(item),
-            ast::Expression::BinaryOp(_) => self.compile_index_assignment(item),
-            _ => panic!("cannot assign to left expression"),
-        }
-    }
-
-    /// Compiles the given function.
-    fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
-        // register function bytecode index, check if any bytecode needs fixing
-        let position = self.writer.position();
-        comment!(self, "\nfunction {}", item.sig.ident.name);
-        let function_id = item.function_id.unwrap();
-        self.functions.borrow_mut().insert(function_id, position);
-        self.fix_targets(function_id, position);
-        // create local environment
-        let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.get_type(ret.type_id()).quadsize()) as u32;
-        for arg in item.sig.args.iter() {
-            let arg_size = self.bindingtype(arg).quadsize();
-            frame.next_arg -= arg_size as i32 - 1;
-            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.next_arg));
-            frame.next_arg -= 1;
-            frame.arg_size += arg_size as u32;
-        }
-        self.create_stack_frame_block(&item.block, &mut frame);
-        // reserve space for local variables on the stack
-        if frame.next_var > 0 {
-            self.writer.reserve(frame.next_var as u8);
-        }
-        // push local environment on the locals stack so that it is accessible from nested compile_*
-        self.locals.push(frame);
-        self.compile_block(&item.block)?;
-        if !item.block.returns() {
-            let return_heap_object = item.sig.ret.as_ref().map_or(false, |ret| self.get_type(ret.type_id()).is_stackref());
-            self.write_heap_decref_all(return_heap_object);
-            self.write_ret();
-        }
-        // destroy local environment
-        self.locals.pop();
         Ok(())
     }
 
@@ -304,7 +280,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         for (index, arg) in item.args.iter().enumerate() {
             comment!(self, "call-arg {}", index);
             self.compile_expression(arg)?;
-            self.write_tmp_ref(arg);
         }
 
         if let FnKind::Rust(rust_fn_index) = item.call_kind {
@@ -316,7 +291,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
             // intrinsics // TODO: actually check which one once there are some
             if let CallType::Method(exp) = &item.call_type {
-                let ty = self.bindingtype(&**exp);
+                let ty = self.binding_type(&**exp);
                 self.write_intrinsic_len(ty);
             }
 
@@ -330,14 +305,10 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 target
             } else {
                 self.unresolved.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
-                123
+                CallInfo::PLACEHOLDER
             };
 
-            self.writer.call(target);
-        }
-
-        for arg in item.args.iter() {
-            self.write_tmp_unref(arg);
+            self.writer.call(target.addr, target.arg_size);
         }
 
         Ok(())
@@ -345,23 +316,18 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) -> CompileResult {
+        let binding_id = item.binding_id.expect("Unresolved binding encountered");
         if let Some(expr) = &item.expr {
+            comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
-            comment!(self, "let {} = {}", item.ident.name, expr);
-            let ty = self.bindingtype(item);
-            if ty.is_stackref() {
-                if item.mutable {
-                    let type_id = self.bindings.binding_type_id(expr.binding_id().unwrap());
-                    self.write_heap_ref(*self.constructors.get(&type_id).unwrap());
-                    self.writer.heap_construct();
-                }
-                self.writer.heap_incref();
-            }
-            let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let index = self.locals.lookup(binding_id).index;
-            self.write_store(index, ty);
-            self.locals.set_active(binding_id, true);
+            let ty = self.binding_type(item);
+            if ty.is_ref() {
+                self.writer.incref(self.get_constructor(ty));
+            }
+            self.write_store(index as i32, ty);
         }
+        self.locals.set_active(binding_id, true);
         Ok(())
     }
 
@@ -372,7 +338,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
         };
-        self.write_load(load_index, self.bindingtype(item));
+        self.write_load(load_index as i32, self.binding_type(item));
         Ok(())
     }
 
@@ -447,12 +413,12 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let (var_index, var_type) = self.range_info(item);
                 // store lower range bound in iter variable
                 self.compile_expression(&binary_op.left)?;
-                self.write_store(var_index, var_type);
+                self.write_store(var_index as i32, var_type);
                 // push upper range bound
                 self.compile_expression(&binary_op.right)?;
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
-                self.write_load(var_index, var_type);
-                self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
+                self.write_load(var_index as i32, var_type);
+                self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
                 } else {
@@ -463,8 +429,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let start_target = self.writer.position();
                 self.compile_block(&item.block)?;
                 // load bounds, increment and compare
-                self.write_preinc(var_index, var_type);
-                self.write_clone(var_type, if var_type.size() == 8 { 2 } else { 1 }); // clone upper bound for comparison, skip over iter inbetween
+                self.write_preinc(var_index as i32, var_type);
+                self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
                 } else {
@@ -484,14 +450,61 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
+    /// Compiles the given function.
+    fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
+        // register function bytecode index, check if any bytecode needs fixing
+        let position = self.writer.position();
+        comment!(self, "\nfunction {}", item.sig.ident.name);
+        // create local environment
+        let mut frame = Locals::new();
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size()) as u32;
+        for arg in item.sig.args.iter() {
+            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos));
+            frame.arg_pos += self.binding_type(arg).primitive_size() as u32;
+        }
+        self.create_stack_frame_block(&item.block, &mut frame);
+        // store call info required to compile calls to this function
+        let function_id = item.function_id.unwrap();
+        let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
+        self.functions.borrow_mut().insert(function_id, call_info);
+        self.fix_targets(function_id, call_info);
+        // reserve space for local variables on the stack
+        if frame.var_pos > 0 {
+            self.writer.reserve(frame.var_pos as u8);
+        }
+        // push local environment on the locals stack so that it is accessible from nested compile_*
+        self.locals.push(frame);
+        self.compile_block(&item.block)?;
+        // block did not return, we have to
+        if !item.block.returns() {
+            comment!(self, "fn resulting");
+            let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
+                let ty = self.binding_type(ret);
+                if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
+            });
+            if let Some(constructor) = constructor {
+                self.writer.incref(constructor);
+            }
+            self.write_decref_all();
+            if let Some(constructor) = constructor {
+                self.writer.zeroref(constructor);
+            }
+            self.write_ret();
+        }
+        // destroy local environment
+        self.locals.pop();
+        Ok(())
+    }
+
     /// Compiles a return statement
     fn compile_return(self: &Self, item: &ast::Return<'ast>) -> CompileResult {
+        comment!(self, "return statement");
         if let Some(expr) = &item.expr {
             self.compile_expression(expr)?;
-            let ty = self.bindingtype(expr);
-            self.write_heap_decref_all(ty.is_stackref());
+            let ty = self.binding_type(expr);
+            self.write_decref_all(); // FIXME broken now
         } else {
-            self.write_heap_decref_all(false);
+            self.write_decref_all();
         }
         self.write_ret();
         Ok(())
@@ -503,11 +516,13 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             self.compile_statement(statement)?;
         }
         if let Some(returns) = &item.returns {
+            comment!(self, "block returning");
             self.compile_expression(returns)?;
             if !returns.returns() {
                 self.write_ret();
             }
         } else if let Some(result) = &item.result {
+            comment!(self, "block resulting");
             self.compile_expression(result)?;
         }
         Ok(())
@@ -517,39 +532,20 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_literal(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
-        let lit_type = self.bindingtype(item);
+        let ty = self.binding_type(item);
         match item.value {
-            LiteralValue::Numeric(numeric) => self.write_numeric(numeric, lit_type),
+            LiteralValue::Numeric(numeric) => self.write_numeric(numeric, ty),
             LiteralValue::Bool(v) =>  {
-                match lit_type {
-                    Type::bool => { if v { self.writer.lit1(); } else { self.writer.lit0(); } },
-                    _ => panic!("Unexpected boolean literal type: {:?}", lit_type)
+                match ty {
+                    Type::bool => { if v { self.writer.one8(); } else { self.writer.zero8(); } },
+                    _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
-            LiteralValue::String(_) => { // todo refactor string, array, struct into one block
-                match lit_type {
-                    Type::String => {
-                        self.write_heap_ref(self.store_literal(item));
-                    },
-                    _ => panic!("Unexpected string literal type: {:?}", lit_type)
-                };
+            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
+                let prototype = self.store_literal_prototype(item);
+                let constructor = self.get_constructor(ty);
+                self.writer.construct(constructor, prototype);
             },
-            LiteralValue::Array(_) => {
-                match lit_type {
-                    Type::Array(_) => {
-                        self.write_heap_ref(self.store_literal(item));
-                    },
-                    _ => panic!("Unexpected array literal type: {:?}", lit_type)
-                };
-            },
-            LiteralValue::Struct(_) => {
-                match lit_type {
-                    Type::Struct(_) => {
-                        self.write_heap_ref(self.store_literal(item));
-                    },
-                    _ => panic!("Unexpected struct literal type: {:?}", lit_type)
-                };
-            }
         }
         Ok(())
     }
@@ -558,7 +554,7 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
     fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) -> CompileResult {
         use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
 
-        let exp_type = self.bindingtype(&item.expr);
+        let exp_type = self.binding_type(&item.expr);
 
         match item.op {
             // logical
@@ -576,17 +572,17 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                         self.locals.lookup(binding_id).index
                     };
                     match item.op {
-                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
-                        UO::DecBefore => self.write_predec(load_index, &exp_type),
-                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
-                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
+                        UO::IncBefore => self.write_preinc(load_index as i32, &exp_type),
+                        UO::DecBefore => self.write_predec(load_index as i32, &exp_type),
+                        UO::IncAfter => self.write_postinc(load_index as i32, &exp_type),
+                        UO::DecAfter => self.write_postdec(load_index as i32, &exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
-                } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
+                } else if let ast::Expression::BinaryOp(binary_op) = &item.expr { // FIXME: indexing no longer heap only
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;
-                    self.writer.store_tmp96();
-                    self.write_heap_fetch(exp_type.size());
+                    self.writer.store_tmp64();
+                    self.write_heap_fetch(exp_type);
                     comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
                         self.write_clone(exp_type, 0);
@@ -599,8 +595,8 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                     if item.op == UO::IncBefore || item.op == UO::DecBefore {
                         self.write_clone(exp_type, 0);
                     }
-                    self.writer.pop_tmp96();
-                    self.write_heap_put(exp_type.size());
+                    self.writer.pop_tmp64();
+                    self.write_heap_put(exp_type);
                 } else {
                     panic!("Operator {:?} can not be used here", item.op);
                 }
@@ -609,36 +605,45 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Compiles the given binary operation.
-    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+    /// Compiles a simple, non-shortcutting binary operation.
+    fn compile_binary_op_simple(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+
         use crate::frontend::ast::BinaryOperator as BO;
+        let ty_result = self.binding_type(item);
+        let ty_left = self.binding_type(&item.left);
 
-        if item.op != BO::And && item.op != BO::Or { // these short-circuit and need special handling // todo: can this be refactored?
-            self.compile_expression(&item.left)?;
-            self.write_tmp_ref(&item.left);
-            self.compile_expression(&item.right)?;
-            self.write_tmp_ref(&item.right);
-            comment!(self, "{}", item);
-        }
-
-        let result_type = self.bindingtype(item);
-        let compare_type = self.bindingtype(&item.left);
+        // compile left, right and store references, left and right will be consumed
+        self.compile_expression(&item.left)?;
+        self.maybe_ref_temporary(HeapRefOp::Inc, &item.left);
+        self.compile_expression(&item.right)?;
+        self.maybe_ref_temporary(HeapRefOp::Inc, &item.right);
 
         match item.op {
-            // arithmetic
-            BO::Add => self.write_add(&result_type),
-            BO::Sub => self.write_sub(&result_type),
-            BO::Mul => self.write_mul(&result_type),
-            BO::Div => self.write_div(&result_type),
-            BO::Rem => self.write_rem(&result_type),
+            // arithmetic/concat
+            BO::Add => self.write_add(ty_result),
+            BO::Sub => self.write_sub(ty_result),
+            BO::Mul => self.write_mul(ty_result),
+            BO::Div => self.write_div(ty_result),
+            BO::Rem => self.write_rem(ty_result),
             // comparison
-            BO::Greater     => { self.write_swap(compare_type); self.write_lt(&compare_type); },
-            BO::GreaterOrEq => { self.write_swap(compare_type); self.write_lte(&compare_type); },
-            BO::Less        => self.write_lt(&compare_type),
-            BO::LessOrEq    => self.write_lte(&compare_type),
-            BO::Equal       => self.write_eq(&compare_type),
-            BO::NotEqual    => self.write_neq(&compare_type),
-            // boolean
+            BO::Greater     => { self.write_swap(ty_left); self.write_lt(ty_left); },
+            BO::GreaterOrEq => { self.write_swap(ty_left); self.write_lte(ty_left); },
+            BO::Less        => self.write_lt(ty_left),
+            BO::LessOrEq    => self.write_lte(ty_left),
+            BO::Equal       => self.write_eq(ty_left),
+            BO::NotEqual    => self.write_neq(ty_left),
+            _ => unreachable!("Invalid simple-operation {:?} in compile_binary_op", item.op),
+        }
+
+        self.maybe_ref_temporary(HeapRefOp::Dec, &item.right);
+        self.maybe_ref_temporary(HeapRefOp::Dec, &item.left);
+        Ok(())
+    }
+
+    /// Compiles a short-circuiting binary operation (and/or)
+    fn compile_binary_op_shortcircuiting(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+        use crate::frontend::ast::BinaryOperator as BO;
+        match item.op {
             BO::And => {
                 self.compile_expression(&item.left)?;
                 let exit_jump = self.writer.j0_top(123); // left is false, result cannot ever be true, skip right
@@ -655,48 +660,60 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.jn0_top(exit_target));
             },
-            // special
-            BO::Range => unimplemented!("range"),
+            _ => unreachable!("Invalid shortcircuit-operation {:?} in compile_binary_op", item.op),
+        }
+        Ok(())
+    }
+
+    /// Compiles an offsetting binary operation, i.e.. indexing and member access.
+    fn compile_binary_op_offseting(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+        use crate::frontend::ast::BinaryOperator as BO;
+        let result_type = self.binding_type(item);
+        let compare_type = self.binding_type(&item.left);
+        self.compile_expression(&item.left)?;
+        self.compile_expression(&item.right)?;
+        match item.op {
             BO::Index => {
-                // fetch heap object value if the result of the index read is directly used (primitives and for ref types, their reference)
-                if result_type.is_primitive() || result_type.is_ref() {
-                    self.write_heap_fetch_element(result_type.size());
-                } else {
-                    self.write_element_offset(self.compute_type_size(&result_type));
-                }
+                comment!(self, "[{}]", &item.right);
+                // fetch heap value at reference-target
+                self.write_heap_fetch_element(result_type);
             },
             BO::IndexWrite => {
-                // stack: <heap_index> <heap_offset> <index_operand>
-                let size = if result_type.is_ref() { result_type.size() as u32 } else { self.compute_type_size(&result_type) }; // todo: need size_stack() or similar
-                self.write_element_offset(size); // pop <index_operand> and <heap_offset> and push <heap_offset+index_operand*element_size>
-                // stack now <heap_index> <new_heap_offset>
+                comment!(self, "[{}] (writing)", &item.right);
+                // compute and push the address of the reference-target
+                self.writer.index(result_type.primitive_size());
             },
             BO::Access => {
-                // fetch heap object value if the result of the member read is directly used (primitives and for ref types, their reference)
-                if result_type.is_primitive() || result_type.is_ref() {
-                    let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                    self.write_heap_fetch_member(result_type.size(), offset);
-                } else {
-                    let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                    self.write_member_offset(offset, result_type); // push additional offset, pop both offsets, write computed offset
-                }
+                comment!(self, ".{}", &item.right);
+                // fetch heap value at reference-target
+                let struct_ = compare_type.as_struct().unwrap();
+                let offset = self.compute_member_offset(struct_, item.right.as_member().unwrap().index.unwrap());
+                self.write_heap_fetch_member(result_type, offset);
             },
             BO::AccessWrite => {
-                // stack: <heap_index> <heap_offset>
-                let offset = self.compute_member_offset(&compare_type, item.right.as_member().unwrap().index.unwrap());
-                self.write_member_offset(offset, result_type); // push additional offset, pop both offsets, write computed offset
-                // stack now <heap_index> <new_heap_offset>
+                comment!(self, ".{} (writing)", &item.right);
+                // compute and push the address of the reference-target
+                let struct_ = compare_type.as_struct().unwrap();
+                let offset = self.compute_member_offset(struct_, item.right.as_member().unwrap().index.unwrap());
+                self.write_member_offset(offset);
+
             },
-            // others are handled elsewhere
-            _ => panic!("Encountered invalid operation {:?} in compile_binary_op", item.op)
-        };
-
-        if item.op != BO::And && item.op != BO::Or {
-            self.write_tmp_unref(&item.right);
-            self.write_tmp_unref(&item.left);
+            _ => unreachable!("Invalid offset-operation {:?} in compile_binary_op", item.op),
         }
-
         Ok(())
+    }
+
+    /// Compiles the given binary operation.
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+        if item.op.is_simple() {
+            self.compile_binary_op_simple(item)
+        } else if item.op.is_shortcircuit() {
+            self.compile_binary_op_shortcircuiting(item)
+        } else if item.op.is_offset() {
+            self.compile_binary_op_offseting(item)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Compiles a variable binding and optional assignment.
@@ -704,97 +721,146 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
         self.compile_expression(&item.expr)?;
 
-        let mut from = self.bindingtype(&item.expr);
-        let mut to = self.get_type(item.ty.type_id);
-        let orig_to = to;
+        let from = self.binding_type(&item.expr);
+        let to = self.binding_type(&item.ty);
 
-        // float to integer: convert fxx to i64, then convert that to the correct integer type
-        if from.is_float() && !to.is_float() {
-            if from.size() == 4 {
-                self.writer.f32toi64();
-                from = &Type::i64;
-            } else if from.size() == 8 {
-                self.writer.f64toi64();
-                from = &Type::i64;
-            }
+        if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
+            self.write_zclamp(from);
         }
 
-        // integer to float: cast input to i64 first, then convert that to the correct float type
-        if !from.is_float() && to.is_float() {
-            to = &Type::i64;
-        }
-
-        // convert float to float, integer to integer
-        if from.is_float() && to.is_float() {
-            if from.size() == 8 && to.size() == 4 {
-                self.writer.f64tof32();
-            } else if from.size() == 4 && to.size() == 8 {
-                self.writer.f32tof64();
+        if from.is_integer() && to.is_integer() {
+            self.write_integer_cast(from, to);
+        } else if from.is_float() && to.is_float() {
+            self.write_float_integer_cast(from, to);
+        } else if from.is_float() && to.is_integer() {
+            let temp_to = if to.is_signed() { &Type::i64 } else { &Type::u64 };
+            self.write_float_integer_cast(from, temp_to);
+            if to.primitive_size() != 8 {
+                self.write_integer_cast(temp_to, to);
             }
-        } else if from.size() > to.size() {
-            match from.size() {
-                8 => { self.writer.truncate64(to.size() * 8); },
-                4 | 2 | 1 => { self.writer.truncate32(to.size() * 8); },
-                size @ _ => panic!("Invalid truncate size {}", size),
+        } else if from.is_integer() && to.is_float() {
+            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
+            if from.primitive_size() != 8 {
+                self.write_integer_cast(from, temp_from);
             }
-        } else if from.is_unsigned() && from.size() < to.size() {
-            match to.size() {
-                8 => { self.writer.extend64(); },
-                4 | 2 | 1 => { /* nothing to do */ },
-                size @ _ => panic!("Invalid sign_extend size {}", size),
+            self.write_float_integer_cast(temp_from, to);
+        } else if from.is_integer() && to.is_string() {
+            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
+            if from.primitive_size() != 8 {
+                self.write_integer_cast(from, temp_from);
             }
-        } else if from.is_signed() && from.size() < to.size() {
-            match to.size() {
-                8 => { self.writer.sign_extend64((to.size() - from.size()) * 8); },
-                4 | 2 | 1 => { self.writer.sign_extend32((to.size() - from.size()) * 8); },
-                size @ _ => panic!("Invalid sign_extend size {}", size),
-            }
-        }
-
-        // integer to float: was cast to i64, now convert that to the correct float type
-        if !from.is_float() && orig_to.is_float() {
-            if orig_to.size() == 4 {
-                self.writer.i64tof32();
-            } else if orig_to.size() == 8 {
-                self.writer.i64tof64();
-            }
+            match temp_from {
+                Type::i64 => self.writer.i64_to_string(),
+                Type::u64 => self.writer.u64_to_string(), // TODO: refcounting, this creates a heap ref
+                _ => unreachable!(),
+            };
+        } else if from == &Type::f32 && to.is_string() {
+            self.writer.f32_to_string();
+        } else if from == &Type::f64 && to.is_string() {
+            self.writer.f64_to_string();
+        } else {
+            unreachable!("Invalid cast {:?} to {:?}", from, to);
         }
 
         Ok(())
     }
 }
 
-impl<'ast, T> Compiler<T> where T: VMFunc<T> {
+impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+
+    /// Writes a cast from one float to another or from/to a 64 bit integer.
+    fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
+        match (from, to) {
+            (Type::i64, Type::f32) => self.writer.i64_to_f32(),
+            (Type::u64, Type::f32) => self.writer.u64_to_f32(),
+            (Type::f64, Type::f32) => self.writer.f64_to_f32(),
+
+            (Type::i64, Type::f64) => self.writer.i64_to_f64(),
+            (Type::u64, Type::f64) => self.writer.u64_to_f64(),
+            (Type::f32, Type::f64) => self.writer.f32_to_f64(),
+
+            (Type::f32, Type::i64) => self.writer.f32_to_i64(),
+            (Type::f64, Type::i64) => self.writer.f64_to_i64(),
+
+            (Type::f32, Type::u64) => self.writer.f32_to_u64(),
+            (Type::f64, Type::u64) => self.writer.f64_to_u64(),
+            _ => unreachable!("Invalid float/int cast {:?} to {:?}", from, to),
+        };
+    }
+
+    /// Writes a cast from one integer to another.
+    fn write_integer_cast(self: &Self, from: &Type, to: &Type) {
+        let from_size = (from.primitive_size() * 8) as u8;
+        let to_size = (to.primitive_size() * 8) as u8;
+        if to_size < from_size || (to_size == from_size && !from.is_signed() && to.is_signed()) {
+            if to.is_signed() {
+                match from_size {
+                    64 => self.writer.trims64(to_size),
+                    32 => self.writer.trims32(to_size),
+                    16 => self.writer.trims16(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            } else {
+                match from_size {
+                    64 => self.writer.trimu64(to_size),
+                    32 => self.writer.trimu32(to_size),
+                    16 => self.writer.trimu16(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            }
+        } else if to_size > from_size {
+            if from.is_signed() {
+                match from_size {
+                    32 => self.writer.extends32(to_size),
+                    16 => self.writer.extends16(to_size),
+                    8 => self.writer.extends8(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            } else {
+                match from_size {
+                    32 => self.writer.extendu32(to_size),
+                    16 => self.writer.extendu16(to_size),
+                    8 => self.writer.extendu8(to_size),
+                    _ => unreachable!("Invalid integer cast {:?} to {:?}", from, to),
+                };
+            }
+        }
+    }
 
     /// Returns the type of the given binding.
-    fn bindingtype(self: &Self, item: &impl Bindable) -> &Type {
+    fn binding_type(self: &Self, item: &impl Bindable) -> &Type {
         self.bindings.binding_type(item.binding_id().expect("Unresolved binding encountered."))
     }
 
     /// Returns type for given type_id.
     fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
-        self.bindings.get_type(type_id.expect("Unresolved binding encountered."))
+        self.bindings.type_by_id(type_id.expect("Unresolved binding encountered."))
+    }
+
+    /// Returns constructor index for given type.
+    fn get_constructor(self: &Self, ty: &Type) -> u32 {
+        *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
     }
 
     /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &Self, function_id: FunctionId, position: u32) {
+    fn fix_targets(self: &Self, function_id: FunctionId, info: CallInfo) {
         if let Some(targets) = self.unresolved.borrow_mut().remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
-                self.writer.call(position);
+                self.writer.call(info.addr, info.arg_size);
             }
             self.writer.set_position(backup_position);
         }
     }
 
     /// Retrieve for-in loop range variable index/type
-    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (i32, &Type) {
+    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (u32, &Type) {
         let var_index = {
             let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
         };
-        let var_type = self.bindingtype(&item.iter);
+        let var_type = self.binding_type(&item.iter);
         (var_index, var_type)
     }
 
@@ -836,16 +902,14 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                let next_var = frame.next_var;
-                frame.map.insert(binding.binding_id.unwrap(), Local::new(next_var));
-                frame.next_var += self.bindingtype(binding).quadsize() as i32;
+                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos));
+                frame.var_pos += self.binding_type(binding).primitive_size() as u32;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                let next_var = frame.next_var;
-                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(next_var));
-                frame.next_var += self.bindingtype(&for_loop.iter).quadsize() as i32;
+                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos));
+                frame.var_pos += self.binding_type(&for_loop.iter).primitive_size() as u32;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);
@@ -865,204 +929,71 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    fn write_intrinsic_len(self: &Self, ty: &Type) {
-        if let Type::Array(array) = ty {
-            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
-        } else {
-            unimplemented!("dynamic array len");
-        }
-    }
-
-    /// Writes a heap reference (which will always be a heap 0 = constpool ref)
-    fn write_heap_ref(self: &Self, item: HeapRef) {
-        assert!(item.index == 0);
-        self.writer.lit0();
-        self.write_numeric(Numeric::Unsigned(item.len as u64), &Type::u32);
-        self.write_numeric(Numeric::Unsigned(item.offset as u64), &Type::u32);
-    }
-
-    /// Writes given numeric, using const pool if necessary.
-    fn write_numeric(self: &Self, numeric: Numeric, ty: &Type) {
-        use std::u8;
-        match numeric { // todo: try to refactor this mess
-            Numeric::Unsigned(0) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit0(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit1(); }
-            Numeric::Unsigned(2) if ty.is_integer() && ty.size() <= 4 => { self.writer.lit2(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.size() <= 4 => { self.writer.litm1(); }
-            Numeric::Unsigned(val) if ty.is_unsigned() && ty.size() <= 4 && val <= u8::MAX as u64 => { self.writer.litu(numeric.as_unsigned().unwrap() as u8); }
+    /// Writes a constructor for non-primitive types.
+    fn store_constructor(self: &Self, ty: &Type) -> u32 {
+        let position = self.writer.const_len();
+        match ty {
+            Type::Array(array) => {
+                self.writer.store_const(Constructor::Array as u8);
+                self.writer.store_const(array.len.unwrap() as u32);
+                self.store_constructor(self.get_type(array.type_id));
+            }
+            Type::Struct(structure) => {
+                self.writer.store_const(Constructor::Struct as u8);
+                self.writer.store_const(structure.fields.len() as u32);
+                for field in &structure.fields {
+                    self.store_constructor(self.get_type(field.1));
+                }
+            }
+            Type::String => {
+                self.writer.store_const(Constructor::String as u8);
+            }
+            Type::Enum(_) => unimplemented!("enum constructor"),
             _ => {
-                match ty {
-                    Type::i8 => { self.writer.lits(numeric.as_signed().unwrap() as i8); },
-                    Type::u8 => { self.writer.litu(numeric.as_unsigned().unwrap() as u8); },
-                    _ if ty.is_integer() || ty.is_float() => {
-                         let item = self.store_numeric(numeric, ty);
-                         self.write_const_fetch(item.offset, ty);
-                    },
-                    _ => panic!("Unexpected numeric literal type: {:?}", ty)
-                }
+                self.writer.store_const(Constructor::Primitive as u8);
+                self.writer.store_const(ty.primitive_size() as u32);
             }
         }
+        position
     }
 
-    /// Writes a heap copy-on-write constructor. Expects target reference at top of stack, source second to top.
-    fn store_constructor(self: &Self, ty: &Type) -> HeapRef {
-        let start_position = self.writer.const_len();
-        if ty.is_primitive() {
-            self.writer.store_const(Constructor::Copy as u8);
-            self.writer.store_const(ty.size() as u32);
-        } else {
-            match ty {
-                Type::Array(array) => {
-                    let inner_ty = self.get_type(array.type_id);
-                    if inner_ty.is_primitive() {
-                        // primitive copy optimization
-                        let inner_size = inner_ty.size();
-                        if let Some(len) = array.len {
-                            self.writer.store_const(Constructor::Copy as u8);
-                            self.writer.store_const(len * inner_size as u32);
-                        } else {
-                            unimplemented!("dynamic array constructor serialization");
-                            //self.writer.store_const(Constructor::CopyRef as u8);
-                        }
-                    } else {
-                        // array construction instructions
-                        if let Some(len) = array.len {
-                            self.writer.store_const(Constructor::Array as u8);
-                            self.writer.store_const(len as u32);
-                            self.store_constructor(inner_ty);
-                        } else {
-                            unimplemented!("dynamic array constructor serialization");
-                            //self.writer.store_const(Constructor::ArrayRef as u8);
-                        }
-                    }
-                }
-                Type::Struct(struct_) => {
-                    let primitive = struct_.fields.iter().all(|f| self.get_type(f.1).is_primitive());
-                    if primitive {
-                        // primitive copy optimization
-                        if struct_.by_ref {
-                            self.writer.store_const(Constructor::CopyRef as u8);
-                        } else {
-                            self.writer.store_const(Constructor::Copy as u8);
-                            self.writer.store_const(self.compute_type_size(ty) as u32);
-                        }
-                    } else {
-                        // struct construction instructions
-                        if struct_.by_ref {
-                            self.writer.store_const(Constructor::StructRef as u8);
-                        } else {
-                            self.writer.store_const(Constructor::Struct as u8);
-                        }
-                        self.writer.store_const(struct_.fields.len() as u32);
-                        for field in &struct_.fields {
-                            let field_type = self.get_type(field.1);
-                            self.store_constructor(field_type);
-                        }
-                    }
-                }
-                Type::String => {
-                    self.writer.store_const(Constructor::CopyRef as u8);
-                }
-                Type::Enum(_item) => {
-                    unimplemented!("enum constructor serialization");
-                },
-                Type::void => { },
-                _ => unreachable!("{:?}", ty),
-            }
-        }
-        let end_position = self.writer.const_len();
-        HeapRef::from_const(start_position, end_position - start_position)
-    }
-
-    /// Recurse into struct/array literals and store referenced data.
-    fn recurse_literal(self: &Self, item: &ast::Literal<'ast>) {
+    /// Stores given literal on the const pool. //FIXME: this needs to be written in the order of the fields in the type constructor, not how it was laid out in the literal
+    fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> u32 {
         use crate::frontend::ast::LiteralValue;
-        let ty = self.bindingtype(item);
+        let ty = self.binding_type(item);
+        let pos = self.writer.const_len();
         match &item.value {
-            LiteralValue::Array(array_literal) => {
-                let array_def = ty.as_array().expect("Expected array, got something else");
-                let element_type = self.get_type(array_def.type_id);
-                for element in &array_literal.elements {
-                    if element_type.is_ref() && element.heap_ref.get().is_none() { // FIXME ugly check if we've already stored this lit by checking if heap_ref is set. shouldn't get here in the first place
-                        let heap_ref = self.store_literal(element);
-                        element.heap_ref.set(Some(heap_ref));
-                    } else if element_type.is_struct() || element_type.is_array() {
-                        self.recurse_literal(element);
-                    }
-                }
-            }
-            LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
-                for (name, field_type_id) in struct_def.fields.iter() {
-                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                    let field_type = self.get_type(*field_type_id);
-                    if field_type.is_ref() && field.heap_ref.get().is_none() { // FIXME ugly check if we've already stored this lit by checking if heap_ref is set. shouldn't get here in the first place
-                        let heap_ref = self.store_literal(field);
-                        field.heap_ref.set(Some(heap_ref));
-                    } else if field_type.is_struct() || field_type.is_array() {
-                        self.recurse_literal(field);
-                    }
-                }
+            &LiteralValue::Numeric(int) => {
+                self.store_numeric_prototype(int, ty);
             },
-            _ => unreachable!(),
-        }
-    }
-
-    /// Stores given literal on the const pool.
-    fn store_literal(self: &Self, item: &ast::Literal<'ast>) -> HeapRef {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.bindingtype(item);
-
-        match &item.value {
-            LiteralValue::Numeric(int) => self.store_numeric(*int, ty),
-            LiteralValue::Bool(bool_literal) =>  {
+            &LiteralValue::Bool(boolean) =>  {
                 match ty {
-                    Type::bool => HeapRef::from_const(self.writer.store_const(if *bool_literal { 1u8 } else { 0u8 }), Type::bool.size() as u32) ,
+                    Type::bool => self.writer.store_const(if boolean { 1u8 } else { 0u8 }),
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
-                }
+                };
             },
-            LiteralValue::String(string_literal) => {
-                let offset = self.writer.store_const(*string_literal);
-                let heap_ref = HeapRef::from_const(offset, string_literal.len() as u32);
-                item.heap_ref.set(Some(heap_ref));
-                heap_ref
+            &LiteralValue::String(string_literal) => {
+                self.writer.store_const(string_literal);
             },
             LiteralValue::Array(array_literal) => {
-                // store referenced objects first
-                self.recurse_literal(item);
-                // store non-referenced data along with references to previously stored objects
-                let pos = self.writer.const_len();
                 for element in &array_literal.elements {
-                    if let Some(heap_ref) = element.heap_ref.get() {
-                        self.writer.store_const(heap_ref);
-                    } else {
-                        self.store_literal(element);
-                    }
+                    self.store_literal_prototype(element);
                 }
-                HeapRef::from_const(pos, self.writer.const_len() - pos)
-            },
+            }
             LiteralValue::Struct(struct_literal) => {
-                // store referenced objects first
-                self.recurse_literal(item);
-                // store non-referenced data along with references to previously stored objects
-                let pos = self.writer.const_len();
                 let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 for (name, _) in struct_def.fields.iter() {
                     let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                    if let Some(heap_ref) = field.heap_ref.get() {
-                        self.writer.store_const(heap_ref);
-                    } else {
-                        self.store_literal(field);
-                    }
+                    self.store_literal_prototype(field);
                 }
-                HeapRef::from_const(pos, self.writer.const_len() - pos)
             }
-        }
+        };
+        pos
     }
 
     /// Stores given numeric on the const pool.
-    fn store_numeric(self: &Self, numeric: Numeric, ty: &Type) -> HeapRef {
-        let offset = match numeric {
+    fn store_numeric_prototype(self: &Self, numeric: Numeric, ty: &Type) -> u32 {
+        match numeric {
             Numeric::Signed(v) => {
                 match ty {
                     Type::i8 => self.writer.store_const(v as i8),
@@ -1074,411 +1005,471 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
             },
             Numeric::Unsigned(v) => {
                 match ty {
-                    Type::i8 => self.writer.store_const(v as i8),
-                    Type::i16 => self.writer.store_const(v as i16),
-                    Type::i32 => self.writer.store_const(v as i32),
-                    Type::i64 => self.writer.store_const(v as i64),
-                    Type::u8 => self.writer.store_const(v as u8),
-                    Type::u16 => self.writer.store_const(v as u16),
-                    Type::u32 => self.writer.store_const(v as u32),
-                    Type::u64 => self.writer.store_const(v as u64),
+                    Type::i8 | Type::u8 => self.writer.store_const(v as u8),
+                    Type::i16 | Type::u16 => self.writer.store_const(v as u16),
+                    Type::i32 | Type::u32 => self.writer.store_const(v as u32),
+                    Type::i64 | Type::u64 => self.writer.store_const(v as u64),
                     _ => panic!("Unexpected unsigned integer literal type: {:?}", ty)
                 }
             },
             Numeric::Float(v) => {
                 match ty {
                     Type::f32 => self.writer.store_const(v as f32),
-                    Type::f64 => self.writer.store_const(v),
+                    Type::f64 => self.writer.store_const(v as f64),
                     _ => panic!("Unexpected float literal type: {:?}", ty)
                 }
             },
             Numeric::Overflow => panic!("Literal computation overflow")
-        };
-        HeapRef { index: CONSTPOOL_INDEX, offset: offset, len: ty.size() as u32 }
-    }
-
-    /// Computes the shallow size of a type in bytes.
-    fn compute_type_size(self: &Self, ty: &Type) -> u32 {
-        match ty {
-            Type::Array(array) => {
-                let len = array.len.expect("cannot compute size of unsized array");
-                if len == 0 {
-                    0
-                } else {
-                    let inner_type = self.get_type(array.type_id);
-                    // use reference size for references, otherwise shallow type size
-                    len as u32 * if inner_type.is_ref() { inner_type.size() as u32 } else { self.compute_type_size(inner_type) }
-                }
-            }
-            Type::Struct(struct_) => {
-                struct_.fields.iter().map(|&(_, type_id)| {
-                    let field_type = self.get_type(type_id);
-                    // use reference size for references, otherwise shallow type size
-                    if field_type.is_ref() { field_type.size() as u32 } else { self.compute_type_size(field_type) }
-                }).sum()
-            }
-            Type::Enum(_) => unimplemented!("enum"),
-            Type::String => panic!("cannot compute size of unsized string"),
-            _ => ty.size() as u32
         }
     }
 
     /// Computes struct member offset in bytes.
-    fn compute_member_offset(self: &Self, ty: &Type, member_index: u32) -> u32 {
-        let struct_ = ty.as_struct().unwrap();
+    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: u32) -> u32 {
         let mut offset = 0;
         for index in 0 .. member_index {
             let field_type = self.get_type(struct_.fields[index as usize].1);
             // use reference size for references, otherwise shallow type size
-            offset += if field_type.is_ref() { field_type.size() as u32 } else { self.compute_type_size(field_type) };
+            offset += field_type.primitive_size() as u32;
         }
         offset
     }
 
-    /// Writes instructions to compute member offset for access on a struct.
-    fn write_member_offset(self: &Self, offset: u32, result_type: &Type) {
-        use std::u8;
-        let member_size = if result_type.is_ref() { result_type.size() as u32 } else { self.compute_type_size(&result_type) };
-        unsigned!(self, setlen_8, setlen_16, setlen_32, member_size);
-        if offset == 0 {
-            // nothing to do
-        } else if offset == 1 {
-            self.writer.inci();
-        } else if offset == 2 {
-            self.writer.lit2();
-            self.writer.addi();
-        } else if offset <= u8::MAX as u32 {
-            self.writer.litu(offset as u8);
-            self.writer.addi();
-        } else {
-            let const_id = self.writer.store_const(offset);
-            self.write_const_fetch(const_id, &Type::u32);
-            self.writer.addi();
-        }
-    }
-
-    /// Writes instructions to compute element offset for indexing of an array.
-    fn write_element_offset(self: &Self, element_size: u32) {
-        //unsigned!(self, setlen_8, setlen_16, setlen_32, element_size);
-        unsigned!(self, index_8, index_16, index_32, element_size);
-    }
-
-    /// Writes instructions to fetch a primitive or heap reference (without dereferencing it) constant.
-    fn write_const_fetch(self: &Self, index: u32, ty: &Type) {
-        assert!(ty.is_primitive());
-        match ty.size() {
-            2 => unsigned!(self, const_fetch16, const_fetch16_16, const_fetch16_32, index),
-            4 => unsigned!(self, const_fetch32, const_fetch32_16, const_fetch32_32, index),
-            8 => unsigned!(self, const_fetch64, const_fetch64_16, const_fetch64_32, index),
-            12 => unsigned!(self, const_fetch96, const_fetch96_16, const_fetch96_32, index),
-            _ => panic!("Unsupported type size"),
-        }
-    }
-
-    /// Writes instructions to fetch a value of the given size from the target of the top heap reference on the stack.
-    fn write_heap_fetch(self: &Self, result_size: u8) {
-        match result_size {
-            1 => { self.writer.heap_fetch8(); },
-            2 => { self.writer.heap_fetch16(); },
-            4 => { self.writer.heap_fetch32(); },
-            8 => { self.writer.heap_fetch64(); },
-            12 => { self.writer.heap_fetch96(); },
-            _ => panic!("Invalid result size {} for heap_fetch", result_size)
-        }
-    }
-
-    /// Writes instructions to put a value of the given size at the target of the top heap reference on the stack.
-    fn write_heap_put(self: &Self, result_size: u8) {
-        match result_size {
-            1 => { self.writer.heap_put8(); },
-            2 => { self.writer.heap_put16(); },
-            4 => { self.writer.heap_put32(); },
-            8 => { self.writer.heap_put64(); },
-            12 => { self.writer.heap_put96(); },
-            _ => panic!("Invalid result size {} for heap_put", result_size)
-        }
-    }
-
-    /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
-    fn write_heap_fetch_member(self: &Self, result_size: u8, offset: u32) {
-        match result_size {
-            1 => { self.writer.heap_fetch_member8(offset); },
-            2 => { self.writer.heap_fetch_member16(offset); },
-            4 => { self.writer.heap_fetch_member32(offset); },
-            8 => { self.writer.heap_fetch_member64(offset); },
-            12 => { self.writer.heap_fetch_member96(offset); },
-            _ => panic!("Invalid result size {} for heap_fetch_member", result_size)
-        }
-    }
-
-    /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
-    fn write_heap_fetch_element(self: &Self, element_size: u8) {
-        match element_size {
-            1 => { self.writer.heap_fetch_element8(); },
-            2 => { self.writer.heap_fetch_element16(); },
-            4 => { self.writer.heap_fetch_element32(); },
-            8 => { self.writer.heap_fetch_element64(); },
-            12 => { self.writer.heap_fetch_element96(); },
-            _ => panic!("Invalid element size {} for heap_fetch_element", element_size)
-        }
-    }
-
-    /// If item is a temporary heap object, writes operations to store topmost heap object reference on the tmp-stack.
-    fn write_tmp_ref(self: &Self, item: &ast::Expression<'ast>) {
-        if !item.is_variable() {
-            let ty = self.bindingtype(item);
-            if ty.is_stackref() {
-                self.writer.store_tmp96();
-                self.writer.heap_incref();
+    // TODO: r
+    fn maybe_ref_temporary(self: &Self, op: HeapRefOp, item: &ast::Expression<'ast>) {
+        let ty = self.binding_type(item);
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            match op {
+                HeapRefOp::Inc => {
+                    self.writer.store_tmp64();
+                    self.writer.incref(constructor);
+                }
+                HeapRefOp::Dec => {
+                    self.writer.pop_tmp64();
+                    self.writer.decref(constructor);
+                }
             }
+
         }
     }
 
-    /// If item is a temporary heap object, writes operations to unref the tmp-stack's topmost heap object.
-    fn write_tmp_unref(self: &Self, item: &ast::Expression<'ast>) {
-        if !item.is_variable() {
-            let ty = self.bindingtype(item);
-            if ty.is_stackref() {
-                self.writer.pop_tmp96();
-                self.writer.heap_decref();
-            }
-        }
-    }
-
-    /// Writes operations to unref local heap objects. Set check_prior to avoid unref'ing function results.
-    fn write_heap_decref_all(self: &Self, check_prior: bool) {
+    /// Writes operations to unref local heap objects.
+    fn write_decref_all(self: &Self) {
         self.locals.borrow(|locals| {
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let ty = self.bindings.binding_type(binding_id);
-                if ty.is_stackref() {
-                    self.write_load(local.index, ty);
-                    if check_prior {
-                        self.writer.heap_decref_result();
-                    } else {
-                        self.writer.heap_decref();
-                    }
+                if ty.is_ref() {
+                    let constructor = self.get_constructor(ty);
+                    self.write_load(local.index as i32, ty);
+                    self.writer.decref(constructor);
                 }
             }
         });
     }
 
-    /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, index: i32, ty: &Type) {
-        match ty.size() {
-            12 => signed!(self, storer96_s8, storer96_s16, storer96_s32, index),
-            8 => signed!(self, storer64_s8, storer64_s16, storer64_s32, index),
-            4 | 2 | 1 => signed!(self, storer32_s8, storer32_s16, storer32_s32, index),
-            _ => panic!("Unsupported type {:?} for store operation", ty)
+    /// Writes instructions to compute member offset for access on a struct.
+    fn write_member_offset(self: &Self, offset: u32) {
+        if offset == 0 {
+            // nothing to do
+        } else if offset == 1 {
+            self.writer.inci32();
+        } else {
+            let const_id = self.writer.store_const(offset);
+            self.write_const(const_id, &Type::u32);
+            self.writer.addi32();
         }
     }
 
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, index: i32, ty: &Type) {
-        match ty.size() {
-            12 => signed!(self, loadr96_s8, loadr96_s16, loadr96_s32, index),
-            8 => signed!(self, loadr64_s8, loadr64_s16, loadr64_s32, index),
-            4 | 2 | 1 =>  {
-                match index {
-                    ARG1 => { self.writer.load_arg1(); }
-                    ARG2 => { self.writer.load_arg2(); }
-                    ARG3 => { self.writer.load_arg3(); }
-                    _ => signed!(self, loadr32_s8, loadr32_s16, loadr32_s32, index),
-                };
-            }
-            _ => panic!("Unsupported type {:?} for load operation", ty)
+    fn write_const(self: &Self, index: u32, ty: &Type) {
+        match ty.primitive_size() {
+            1 => opcode_unsigned!(self, const8_8, const8_16, const8_32, index),
+            2 => opcode_unsigned!(self, const16_8, const16_16, const16_32, index),
+            4 => opcode_unsigned!(self, const32_8, const32_16, const32_32, index),
+            8 => opcode_unsigned!(self, const64_8, const64_16, const64_32, index),
+            //16 => opcode_unsigned!(self, const128_8, const128_16, const128_32, index),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        };
+    }
+
+    /// Writes instructions to fetch a value of the given size from the target of the top heap reference on the stack.
+    fn write_heap_fetch(self: &Self, ty: &Type) {
+        match ty.primitive_size() {
+            1 => { self.writer.heap_fetch8(); },
+            2 => { self.writer.heap_fetch16(); },
+            4 => { self.writer.heap_fetch32(); },
+            8 => { self.writer.heap_fetch64(); },
+            //16 => { self.writer.heap_fetch128(); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
 
-    /// Swap topmost 2 stack values
+    /// Writes instructions to put a value of the given size at the target of the top heap reference on the stack.
+    fn write_heap_put(self: &Self, ty: &Type) {
+        match ty.primitive_size() {
+            1 => { self.writer.heap_put8(); },
+            2 => { self.writer.heap_put16(); },
+            4 => { self.writer.heap_put32(); },
+            8 => { self.writer.heap_put64(); },
+            //16 => { self.writer.heap_put128(); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
+    /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
+    fn write_heap_fetch_member(self: &Self, ty: &Type, offset: u32) {
+        match ty.primitive_size() {
+            1 => { self.writer.heap_fetch_member8(offset); },
+            2 => { self.writer.heap_fetch_member16(offset); },
+            4 => { self.writer.heap_fetch_member32(offset); },
+            8 => { self.writer.heap_fetch_member64(offset); },
+            //16 => { self.writer.heap_fetch_member128(offset); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
+    /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
+    fn write_heap_fetch_element(self: &Self, ty: &Type) {
+        match ty.primitive_size() {
+            1 => { self.writer.heap_fetch_element8(); },
+            2 => { self.writer.heap_fetch_element16(); },
+            4 => { self.writer.heap_fetch_element32(); },
+            8 => { self.writer.heap_fetch_element64(); },
+            //16 => { self.writer.heap_fetch_element128(); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
+    /// Writes an appropriate variant of the store instruction.
+    fn write_store(self: &Self, index: i32, ty: &Type) {
+        match ty.primitive_size() {
+            1 => opcode_signed!(self, store8_8, store8_16, store8_32, index),
+            2 => opcode_signed!(self, store16_8, store16_16, store16_32, index),
+            4 => opcode_signed!(self, store32_8, store32_16, store32_32, index),
+            8 => opcode_signed!(self, store64_8, store64_16, store64_32, index),
+            //16 => opcode_signed!(self, store128_8, store128_16, store128_32, index),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        };
+    }
+
+    /// Writes an appropriate variant of the load instruction.
+    fn write_load(self: &Self, index: i32, ty: &Type) {
+        match ty.primitive_size() {
+            1 => opcode_signed!(self, load8_8, load8_16, load8_32, index),
+            2 => opcode_signed!(self, load16_8, load16_16, load16_32, index),
+            4 => match index {
+                ARG1 => self.writer.load_arg1(),
+                ARG2 => self.writer.load_arg2(),
+                ARG3 => self.writer.load_arg3(),
+                _ => opcode_signed!(self, load32_8, load32_16, load32_32, index),
+            },
+            8 => opcode_signed!(self, load64_8, load64_16, load64_32, index),
+            //16 => opcode_signed!(self, load128_8, load128_16, load128_32, index),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        };
+    }
+
+    /// Discard topmost stack value
+    fn write_discard(self: &Self, ty: &Type) {
+        match ty.primitive_size() {
+            0 => 0,
+            1 => self.writer.discard8(),
+            2 => self.writer.discard16(),
+            4 => self.writer.discard32(),
+            8 => self.writer.discard64(),
+            //16 => self.writer.discard128(),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        };
+    }
+
+    /// Swap topmost 2 stack values.
     fn write_swap(self: &Self, ty: &Type) {
-        match ty.size() {
-            12 => self.writer.swap96(),
+        match ty.primitive_size() {
+            1 => self.writer.swap8(),
+            2 => self.writer.swap16(),
+            4 => self.writer.swap32(),
             8 => self.writer.swap64(),
-            4 | 2 | 1 => self.writer.swap32(),
-            size @ _ => panic!("Unsupported swap size {}", size),
+            //16 => self.writer.swap128(),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
     }
 
-    /// Clone stack value as negative given offset to the top of the stack.
+    /// Clone stack value at (negative of) given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type, offset: u8) {
-        match ty.size() {
-            12 => self.writer.clone96(offset),
+        match ty.primitive_size() {
+            1 => self.writer.clone8(offset),
+            2 => self.writer.clone16(offset),
+            4 => self.writer.clone32(offset),
             8 => self.writer.clone64(offset),
-            1 | 2 | 4 => self.writer.clone32(offset),
-            size @ _ => panic!("Unsupported clone size {}", size),
+            //16 => self.writer.clone128(offset),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
     }
 
+    /// Writes instructions for build-in len method.
+    fn write_intrinsic_len(self: &Self, ty: &Type) {
+        if let Type::Array(array) = ty {
+            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
+        } else {
+            unimplemented!("dynamic array len");
+        }
+    }
+
+    /// Writes given numeric, using const pool if necessary.
+    fn write_numeric(self: &Self, numeric: Numeric, ty: &Type) {
+        match numeric { // todo: try to refactor this mess
+
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
+
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
+
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
+
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
+
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
+
+            _ if ty.is_integer() || ty.is_float() => {
+                let address = self.store_numeric_prototype(numeric, ty);
+                self.write_const(address, ty);
+            },
+            _ => panic!("Unexpected numeric literal type: {:?}", ty),
+        }
+    }
+
+    /// Writes zclamp instruction.
+    fn write_zclamp(self: &Self, ty: &Type) {
+        match ty {
+            Type::f32 => self.writer.zclampf32(),
+            Type::f64 => self.writer.zclampf64(),
+            Type::i8 => self.writer.zclampi8(),
+            Type::i16 => self.writer.zclampi16(),
+            Type::i32 => self.writer.zclampi32(),
+            Type::i64 => self.writer.zclampi64(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        };
+    }
+
+    /// Write increment instruction.
     fn write_inc(self: &Self, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.inci64(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.inci(),
-            ty @ _ => panic!("Unsupported inc operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.inci32(),
+            Type::i16 | Type::u16 => self.writer.inci16(),
+            Type::i8 | Type::u8 => self.writer.inci8(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write decrement instruction.
     fn write_dec(self: &Self, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.deci64(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.deci(),
-            ty @ _ => panic!("Unsupported dec operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.deci32(),
+            Type::i16 | Type::u16 => self.writer.deci16(),
+            Type::i8 | Type::u8 => self.writer.deci8(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write pre-increment instruction.
     fn write_preinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.preinci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.preinci(index),
-            ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.preinci32(index),
+            Type::i16 | Type::u16 => self.writer.preinci16(index),
+            Type::i8 | Type::u8 => self.writer.preinci8(index),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write pre-decrement instruction.
     fn write_predec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.predeci(index),
-            ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.predeci32(index),
+            Type::i16 | Type::u16 => self.writer.predeci16(index),
+            Type::i8 | Type::u8 => self.writer.predeci8(index),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write post-increment instruction.
     fn write_postinc(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postinci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postinci(index),
-            ty @ _ => panic!("Unsupported Inc operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.postinci32(index),
+            Type::i16 | Type::u16 => self.writer.postinci16(index),
+            Type::i8 | Type::u8 => self.writer.postinci8(index),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write post-decrement instruction.
     fn write_postdec(self: &Self, index: i32, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.postdeci(index),
-            ty @ _ => panic!("Unsupported Dec operand {:?}", ty),
+            Type::i32 | Type::u32 => self.writer.postdeci32(index),
+            Type::i16 | Type::u16 => self.writer.postdeci16(index),
+            Type::i8 | Type::u8 => self.writer.postdeci8(index),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write subtraction instruction.
     fn write_sub(self: &Self, ty: &Type) {
         match ty {
-            Type::f64 => self.writer.subf64(),
+            Type::i8 | Type::u8 => self.writer.subi8(),
+            Type::i16 | Type::u16 => self.writer.subi16(),
+            Type::i32 | Type::u32 => self.writer.subi32(),
             Type::i64 | Type::u64 => self.writer.subi64(),
-            Type::f32 => self.writer.subf(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.subi(),
-            ty @ _ => panic!("Unsupported Sub operand {:?}", ty),
+            Type::f32 => self.writer.subf32(),
+            Type::f64 => self.writer.subf64(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write addition instruction.
     fn write_add(self: &Self, ty: &Type) {
         match ty {
-            Type::f64 => self.writer.addf64(),
+            Type::i8 | Type::u8 => self.writer.addi8(),
+            Type::i16 | Type::u16 => self.writer.addi16(),
+            Type::i32 | Type::u32 => self.writer.addi32(),
             Type::i64 | Type::u64 => self.writer.addi64(),
-            Type::f32 => self.writer.addf(),
+            Type::f32 => self.writer.addf32(),
+            Type::f64 => self.writer.addf64(),
             Type::String => self.writer.string_concat(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.addi(),
-            ty @ _ => panic!("Unsupported Add operand {:?}", ty),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write multiplication instruction.
     fn write_mul(self: &Self, ty: &Type) {
         match ty {
-            Type::f64 => self.writer.mulf64(),
+            Type::i8 | Type::u8 => self.writer.muli8(),
+            Type::i16 | Type::u16 => self.writer.muli16(),
+            Type::i32 | Type::u32 => self.writer.muli32(),
             Type::i64 | Type::u64 => self.writer.muli64(),
-            Type::f32 => self.writer.mulf(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.muli(),
-            ty @ _ => panic!("Unsupported Mul operand {:?}", ty),
+            Type::f32 => self.writer.mulf32(),
+            Type::f64 => self.writer.mulf64(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write division instruction.
     fn write_div(self: &Self, ty: &Type) {
         match ty {
+            Type::i8 => self.writer.divs8(),
+            Type::u8 => self.writer.divu8(),
+            Type::i16 => self.writer.divs16(),
+            Type::u16 => self.writer.divu16(),
+            Type::i32 => self.writer.divs32(),
+            Type::u32 => self.writer.divu32(),
+            Type::i64 => self.writer.divs64(),
+            Type::u64 => self.writer.divu64(),
+            Type::f32 => self.writer.divf32(),
             Type::f64 => self.writer.divf64(),
-            Type::i64 | Type::u64 => self.writer.divi64(),
-            Type::f32 => self.writer.divf(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.divi(),
-            ty @ _ => panic!("Unsupported Div operand {:?}", ty),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write remainder instruction.
     fn write_rem(self: &Self, ty: &Type) {
         match ty {
+            Type::i8 => self.writer.rems8(),
+            Type::u8 => self.writer.remu8(),
+            Type::i16 => self.writer.rems16(),
+            Type::u16 => self.writer.remu16(),
+            Type::i32 => self.writer.rems32(),
+            Type::u32 => self.writer.remu32(),
+            Type::i64 => self.writer.rems64(),
+            Type::u64 => self.writer.remu64(),
+            Type::f32 => self.writer.remf32(),
             Type::f64 => self.writer.remf64(),
-            Type::i64 | Type::u64 => self.writer.remi64(),
-            Type::f32 => self.writer.remf(),
-            ref ty @ _ if ty.is_integer() && ty.size() <= 4 => self.writer.remi(),
-            ty @ _ => panic!("Unsupported Rem operand {:?}", ty),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
 
+    /// Write compare equal instruction.
     fn write_eq(self: &Self, ty: &Type) {
         if ty.is_primitive() {
-            match ty.size() {
-                1 | 2 | 4 => self.writer.ceqr32(),
-                8 => self.writer.ceqr64(),
-                _ => panic!("Unsupported type size"),
+            match ty.primitive_size() {
+                1 => self.writer.ceq8(),
+                2 => self.writer.ceq16(),
+                4 => self.writer.ceq32(),
+                8 => self.writer.ceq64(),
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
             };
         } else if ty.is_string() {
-            self.writer.string_ceq(0);
+            self.writer.string_ceq();
         } else {
-            self.writer.heap_ceq(self.compute_type_size(ty));
+            self.writer.heap_ceq(self.bindings.type_size(ty)); //FIXME: check this
         }
     }
 
+    /// Write compare not equal instruction.
     fn write_neq(self: &Self, ty: &Type) {
         if ty.is_primitive() {
-            match ty.size() {
-                1 | 2 | 4 => self.writer.cneqr32(),
-                8 => self.writer.cneqr64(),
-                _ => panic!("Unsupported type size"),
+            match ty.primitive_size() {
+                1 => self.writer.cneq8(),
+                2 => self.writer.cneq16(),
+                4 => self.writer.cneq32(),
+                8 => self.writer.cneq64(),
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
             };
         } else if ty.is_string() {
-            self.writer.string_cneq(0);
+            self.writer.string_cneq();
         } else {
-            self.writer.heap_cneq(self.compute_type_size(ty));
+            self.writer.heap_cneq(self.bindings.type_size(ty)); //FIXME: check this
         }
     }
 
+    /// Write compare less than instruction.
     fn write_lt(self: &Self, ty: &Type) {
         if ty.is_primitive() {
-            match ty.size() {
-                1 | 2 | 4 => match ty.kind() {
-                    TypeKind::Signed => self.writer.clts32(),
-                    TypeKind::Unsigned => self.writer.cltu32(),
-                    TypeKind::Float => self.writer.cltf32(),
-                    _ => panic!("Unsupported type kind"),
-                },
-                8 => match ty.kind() {
-                    TypeKind::Signed => self.writer.clts64(),
-                    TypeKind::Unsigned => self.writer.cltu64(),
-                    TypeKind::Float => self.writer.cltf64(),
-                    _ => panic!("Unsupported type kind"),
-                },
-                _ => panic!("unsupported type size"),
+            match ty {
+                Type::i8 => self.writer.clts8(),
+                Type::u8 => self.writer.cltu8(),
+                Type::i16 => self.writer.clts16(),
+                Type::u16 => self.writer.cltu16(),
+                Type::i32 => self.writer.clts32(),
+                Type::u32 => self.writer.cltu32(),
+                Type::i64 => self.writer.clts64(),
+                Type::u64 => self.writer.cltu64(),
+                Type::f32 => self.writer.cltf32(),
+                Type::f64 => self.writer.cltf64(),
+                _ => unreachable!("Unsupported operation for type {:?}", ty),
             };
         } else if ty.is_string() {
-            self.writer.string_clt(0);
+            self.writer.string_clt();
         } else {
             panic!("unsupported type")
         }
     }
 
+    /// Write compare less than or equal instruction.
     fn write_lte(self: &Self, ty: &Type) {
         if ty.is_primitive() {
-            match ty.size() {
-                1 | 2 | 4 => match ty.kind() {
-                    TypeKind::Signed => self.writer.cltes32(),
-                    TypeKind::Unsigned => self.writer.clteu32(),
-                    TypeKind::Float => self.writer.cltef32(),
-                    _ => panic!("Unsupported type kind"),
-                },
-                8 => match ty.kind() {
-                    TypeKind::Signed => self.writer.cltes64(),
-                    TypeKind::Unsigned => self.writer.clteu64(),
-                    TypeKind::Float => self.writer.cltef64(),
-                    _ => panic!("Unsupported type kind"),
-                },
-                _ => panic!("unsupported type size"),
+            match ty {
+                Type::i8 => self.writer.cltes8(),
+                Type::u8 => self.writer.clteu8(),
+                Type::i16 => self.writer.cltes16(),
+                Type::u16 => self.writer.clteu16(),
+                Type::i32 => self.writer.cltes32(),
+                Type::u32 => self.writer.clteu32(),
+                Type::i64 => self.writer.cltes64(),
+                Type::u64 => self.writer.clteu64(),
+                Type::f32 => self.writer.cltef32(),
+                Type::f64 => self.writer.cltef64(),
+                _ => unreachable!("Unsupported operation for type {:?}", ty),
             };
         } else if ty.is_string() {
-            self.writer.string_clte(0);
+            self.writer.string_clte();
         } else {
             panic!("unsupported type")
         }
@@ -1486,6 +1477,6 @@ impl<'ast, T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a return instruction with the correct arguments for the current stack frame.
     fn write_ret(self: &Self) {
-        self.writer.ret(self.locals.ret_size() as u8, self.locals.arg_size() as u8);
+        self.writer.ret(self.locals.ret_size());
     }
 }

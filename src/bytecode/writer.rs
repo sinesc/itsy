@@ -1,7 +1,7 @@
 //! Bytecode buffer and writer.
 
-use std::{mem::transmute, cell::{Cell, RefCell, RefMut}};
-use crate::bytecode::Program;
+use std::cell::{Cell, RefCell, RefMut};
+use crate::bytecode::{Program, ConstEndianness, ConstDescriptor};
 use crate::runtime::VMFunc;
 use crate::util::HeapRef;
 
@@ -72,19 +72,20 @@ impl<T> Writer<T> where T: VMFunc<T> {
 /// Implements const pool write traits
 #[allow(unused_macros)]
 macro_rules! impl_store_const {
-    (@write u8, $self:ident, $value:ident) => {
-        $self.program().consts.push(unsafe { transmute($value) });
-    };
-    (@write $size:ident, $self:ident, $value:ident) => {
-        let unsigned: $size = unsafe { transmute($value) };
+    (@write $as_type:ident, $self:ident, $value:ident, $endianess:path) => {
+        let position = $self.program().consts.len() as u32;
+        let size = std::mem::size_of::<$as_type>() as u32;
+        let endianness = $endianess;
+        let unsigned: $as_type = unsafe { ::std::mem::transmute($value) };
+        $self.program().const_descriptors.push(ConstDescriptor { position, size, endianness });
         $self.program().consts.extend_from_slice(&unsigned.to_le_bytes());
     };
-    ($size:ident, $type:tt) => {
+    ($as_type:ident, $type:tt, $endianess:path) => {
         impl<P> StoreConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &Self, value: $type) -> u32 {
-                let position = self.program().consts.len();
-                impl_store_const!(@write $size, self, value);
-                position as u32
+                let position = self.program().consts.len() as u32;
+                impl_store_const!(@write $as_type, self, value, $endianess);
+                position
             }
         }
     };
@@ -96,31 +97,36 @@ pub trait StoreConst<T> {
     fn store_const(self: &Self, value: T) -> u32;
 }
 
-impl_store_const!(u8, u8);
-impl_store_const!(u8, i8);
-impl_store_const!(u16, u16);
-impl_store_const!(u16, i16);
-impl_store_const!(u32, u32);
-impl_store_const!(u32, i32);
-impl_store_const!(u32, f32);
-impl_store_const!(u64, u64);
-impl_store_const!(u64, i64);
-impl_store_const!(u64, f64);
+impl_store_const!(u8, u8, ConstEndianness::Integer);
+impl_store_const!(u8, i8, ConstEndianness::Integer);
+impl_store_const!(u16, u16, ConstEndianness::Integer);
+impl_store_const!(u16, i16, ConstEndianness::Integer);
+impl_store_const!(u32, u32, ConstEndianness::Integer);
+impl_store_const!(u32, i32, ConstEndianness::Integer);
+impl_store_const!(u32, f32, ConstEndianness::Float);
+impl_store_const!(u64, u64, ConstEndianness::Integer);
+impl_store_const!(u64, i64, ConstEndianness::Integer);
+impl_store_const!(u64, f64, ConstEndianness::Float);
 
 impl<P> StoreConst<HeapRef> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &Self, value: HeapRef) -> u32 {
-        let position = self.program().consts.len();
-        self.program().consts.extend_from_slice(&value.index.to_le_bytes());
-        self.program().consts.extend_from_slice(&value.len.to_le_bytes());
-        self.program().consts.extend_from_slice(&value.offset.to_le_bytes());
-        position as u32
+        let position = self.program().consts.len() as u32;
+        self.store_const(value.index);
+        self.store_const(value.offset);
+        position
     }
 }
 
 impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &Self, value: &str) -> u32 {
-        let position = self.program().consts.len();
-        self.program().consts.extend_from_slice(&value.as_bytes());
-        position as u32
+        // string length
+        let raw_bytes = &value.as_bytes();
+        let size = raw_bytes.len() as u32;
+        self.store_const(size);
+        // string data
+        let position = self.program().consts.len() as u32;
+        self.program().const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        self.program().consts.extend_from_slice(raw_bytes);
+        position
     }
 }

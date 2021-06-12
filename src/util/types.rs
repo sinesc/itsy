@@ -1,6 +1,28 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use crate::{util::{TypeId, BindingId, Numeric}, runtime::{Value, CONSTPOOL_INDEX}};
+use std::hash::{Hash, Hasher};
+use crate::util::{TypeId, BindingId, Numeric};
+
+pub(crate) trait TypeContainer {
+    fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
+    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
+
+    /// Computes the size of given type.
+    fn type_size(self: &Self, ty: &Type) -> u32 {
+        match ty {
+            Type::Array(a)  => {
+                let element_type = self.type_by_id(a.type_id.unwrap());
+                let element_size = self.type_size(element_type);
+                element_size * a.len.unwrap()
+            },
+            Type::Struct(s) => {
+                s.fields.iter().fold(0, |acc, f| acc + self.type_size(self.type_by_id(f.1.unwrap())))
+            },
+            Type::Enum(_)   => unimplemented!("enum size"),
+            _               => ty.primitive_size() as u32
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FnKind {
@@ -13,126 +35,160 @@ pub enum FnKind {
 #[derive(Debug, Copy, Clone)]
 pub struct HeapRef {
     pub index   : u32,
-    pub len     : u32,
     pub offset  : u32,
 }
 
 impl HeapRef {
-    /// Constructs a heap reference from const offset and length.
-    pub fn from_const(const_offset: u32, const_len: u32) -> Self {
-        HeapRef {
-            index   : CONSTPOOL_INDEX,
-            offset  : const_offset,
-            len     : const_len,
-        }
-    }
     /// Returns a clone of this heap reference offset by the given value.
-    pub fn offset(self: Self, offset: u32) -> Self { // Todo: might want to accept i32 instead
-        HeapRef {
+    pub fn offset(self: Self, offset: u32) -> Self { // FIXME negative offsets, but can't use i32 or lose address space. enum arg OFFSET_MINUS, OFFSET_PLUS ?
+        Self {
             index   : self.index,
             offset  : self.offset + offset,
-            len     : self.len,
         }
     }
-    /// Returns a clone of this heap reference with the given length set.
-    pub fn len(self: Self, len: u32) -> Self {
-        HeapRef {
+    /// Returns a HeapSlice of this heap reference with the given length set.
+    pub fn to_slice(self: Self, len: u32) -> HeapSlice {
+        HeapSlice {
             index   : self.index,
             offset  : self.offset,
             len     : len,
         }
     }
     /// Returns the size of heap references.
-    pub fn size() -> u8 {
-        std::mem::size_of::<HeapRef>() as u8
+    pub const fn size() -> u8 {
+        std::mem::size_of::<Self>() as u8
     }
+}
+
+/// A heap slice as it would appear on the stack
+#[derive(Debug, Copy, Clone)]
+pub struct HeapSlice {
+    pub len     : u32,
+    pub index   : u32,
+    pub offset  : u32,
+}
+
+impl HeapSlice {
+    /// Returns a clone of this heap reference offset by the given value.
+    pub fn offset(self: Self, offset: u32) -> Self { // FIXME negative offsets, but can't use i32 or lose address space. enum arg OFFSET_MINUS, OFFSET_PLUS ?
+        Self {
+            index   : self.index,
+            offset  : self.offset + offset,
+            len     : self.len,
+        }
+    }
+    /// Returns a HeapSlice of this heap reference with the given length set.
+    pub fn to_ref(self: Self) -> HeapRef {
+        HeapRef {
+            index   : self.index,
+            offset  : self.offset,
+        }
+    }
+    /// Returns the size of heap references.
+    pub fn size() -> u8 {
+        std::mem::size_of::<Self>() as u8
+    }
+}
+
+/// Binding meta information
+pub struct BindingInfo {
+    pub mutable: bool,
+    pub type_id: Option<TypeId>,
 }
 
 /// Program binding data.
 pub struct Bindings {
-    /// List of bindings mapped to their TypeIds
-    type_map        : Vec<TypeId>,
-    /// List of registered types, effectively mapped via vector index = TypeId.
-    types           : Vec<Type>,
-    /// Binding mutability, effectively mapped via vector index = mutability.
-    mutability_map  : Vec<bool>,
+    /// Maps binding ids to binding info descriptors.
+    binding_map : Vec<BindingInfo>,  // HashMap<BindingId, BindingInfo>
+    /// Maps type ids to types.
+    type_map    : Vec<Type>,    // HashMap<TypeId, Type>
 }
 
 impl Bindings {
-    pub(crate) fn new(mutability_map: Vec<bool>, type_map: Vec<TypeId>, types: Vec<Type>) -> Self {
+    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>) -> Self {
+        for info in binding_map.iter() {
+            info.type_id.expect("Unresolved binding type encountered.");
+        }
         Self {
-            type_map,
-            types,
-            mutability_map
+            binding_map,
+            type_map
         }
     }
     /// Returns the TypeId of the given binding.
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> TypeId {
         let binding_index = Into::<usize>::into(binding_id);
-        self.type_map[binding_index]
+        self.binding_map[binding_index].type_id.unwrap()
     }
     /// Returns the type of the given binding.
     pub fn binding_type(self: &Self, binding_id: BindingId) -> &Type {
-        let binding_index = Into::<usize>::into(binding_id);
-        let type_id = self.type_map[binding_index];
-        &self.types[Into::<usize>::into(type_id)]
+        let type_id = self.binding_type_id(binding_id);
+        &self.type_map[Into::<usize>::into(type_id)]
     }
     /// Returns the mutability of the given binding.
     pub fn binding_mut(self: &Self, binding_id: BindingId) -> bool {
         let binding_index = Into::<usize>::into(binding_id);
-        self.mutability_map[binding_index]
-    }
-    pub fn get_type(self: &Self, type_id: TypeId) -> &Type {
-        let type_index = Into::<usize>::into(type_id);
-        &self.types[type_index]
+        self.binding_map[binding_index].mutable
     }
     pub fn types(self: &Self) -> &[Type] {
-        &self.types
+        &self.type_map
+    }
+    pub fn len(self: &Self) -> usize {
+        self.binding_map.len()
+    }
+}
+
+/// Support TypeContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
+/// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
+impl TypeContainer for Bindings {
+    fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
+        let index: usize = type_id.into();
+        &self.type_map[index]
+    }
+    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
+        let index: usize = type_id.into();
+        &mut self.type_map[index]
     }
 }
 
 /// Information about an enum in a resolved program.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Enum {
     //repr: u8,
     pub keys: HashMap<usize, u64>
 }
 
+impl Hash for Enum {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for (k, v) in self.keys.iter() {
+            k.hash(state);
+            v.hash(state);
+        };
+    }
+}
+
 /// Information about a struct in a resolved program.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Struct {
     pub fields: Vec<(String, Option<TypeId>)>,
-    pub by_ref: bool,
 }
 
 impl Struct {
     /// Returns the TypeId for given field name.
     pub fn type_id(self: &Self, field: &str) -> Option<TypeId> {
-        self.fields.iter().find(|f| &f.0 == field).map(|f| &f.1).and_then(|o| *o) // todo: this lumps "not found" and "unresolved" together
+        self.fields.iter().find(|f| &f.0 == field).expect("Field not found").1
     }
 }
 
 /// Information about an array in a resolved program.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
     pub len: Option<u32>,
     pub type_id: Option<TypeId>,
 }
 
-/*
-impl Debug for Array {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(len) = self.len {
-            write!(f, "[ {}; {:?} ]", self.type_id.as_ref().map(|ty| format!("{:?}", ty)).unwrap_or("???".to_string()), len)
-        } else {
-            write!(f, "[ {} ]", self.type_id.as_ref().map(|ty| format!("{:?}", ty)).unwrap_or("???".to_string()))
-        }
-    }
-}
-*/
 /// Information about a data type in a resolved program.
 #[allow(non_camel_case_types)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     void,
     u8, u16, u32, u64,
@@ -165,7 +221,6 @@ impl Debug for Type {
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
         }
-
     }
 }
 
@@ -184,19 +239,15 @@ pub(crate) enum TypeKind {
 
 impl Type {
     /// Size of the primitive type in bytes, otherwise size of the reference.
-    pub fn size(self: &Self) -> u8 {
+    pub fn primitive_size(self: &Self) -> u8 {
         match self {
             Type::void                          => 0,
             Type::u8 | Type::i8 | Type::bool    => 1,
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            _ => HeapRef::size(),
+            _                                   => 8,
         }
-    }
-    /// Size of the type in stack elements.
-    pub fn quadsize(self: &Self) -> u8 {
-        (self.size() + (std::mem::size_of::<Value>() as u8 - 1)) / std::mem::size_of::<Value>() as u8
     }
     /// Kind of the type, e.g. Signed or Array.
     pub(crate) fn kind(self: &Self) -> TypeKind {
@@ -245,15 +296,9 @@ impl Type {
     /// Whether the type is referenced when wrapped.
     pub fn is_ref(self: &Self) -> bool {
         match self {
-            Type::Struct(s)     => s.by_ref, // TODO needs to move of type def (need generic & support for all types)
-            Type::Array(a)      => false, // FIXME just testing ref array
-            Type::String        => true,
-            _                   => false,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) => true,
+            _ => false,
         }
-    }
-    /// Whether the type is referenced while on the stack.
-    pub fn is_stackref(self: &Self) -> bool {
-        !self.is_primitive() || self.is_ref()
     }
     /// Whether the type is an array.
     pub fn is_array(self: &Self) -> bool {
@@ -335,19 +380,21 @@ pub enum Intrinsic {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
-    _EnumStart = 173,
-    Copy,           // 174 Copy(num_bytes): memcopies data
-    CopyRef,        // 175 CopyRef: memcopies referenced data to new heap object (size determined from reference)
-    Array,          // 176 Array(len, recursive elements): copies an array
-    ArrayRef,       // 177 NYI
-    Struct,         // 178 Struct(num_fields, recursive fields): copies a struct
-    StructRef,      // 179 StructDynamic(num_fields, recursive fields): copies a referenced struct to new heap object
-    _EnumEnd,
+    Primitive   = 174,  // Primitive(num_bytes): copies primitive data
+    Array       = 175,  // Array(num_elements, element constructor): copies an array
+    Struct      = 176,  // Struct(num_fields, field constructor, field constructor, ...): copies a struct
+    String      = 177,  // String: copies a string
 }
 
 impl Constructor {
     pub fn from_u8(raw: u8) -> Constructor {
-        assert!(raw > Constructor::_EnumStart as u8 && raw < Constructor::_EnumEnd as u8);
-        unsafe { std::mem::transmute(raw) }
+        match raw {
+            174 => Self::Primitive,
+            175 => Self::Array,
+            176 => Self::Struct,
+            177 => Self::String,
+            index @ _ => unreachable!("Invalid constructor type {}", index),
+        }
+        //unsafe { ::std::mem::transmute(raw) }
     }
 }

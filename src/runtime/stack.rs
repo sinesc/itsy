@@ -1,22 +1,39 @@
 use std::ops::{Index, IndexMut};
-use std::mem::transmute;
-use crate::runtime::Value;
-use crate::util::HeapRef;
+use std::mem::size_of;
+use std::convert::TryInto;
+
+use crate::util::{HeapRef, HeapSlice};
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]
 pub struct Stack {
-    data            : Vec<Value>,
+    /// Raw stack data.
+    data            : Vec<u8>,
+    /// Frames
+    frames          : Vec<(u32, u32)>,
+    /// Current frame pointer.
     pub(crate) fp   : u32,
+    /// Base frame pointer, pointing to the first byte after constant data.
+    base_fp         : u32,
 }
 
 impl Stack {
     /// Creates a new VM value stack.
     pub fn new() -> Self {
         Stack {
-            data: Vec::with_capacity(256),
-            fp  : 0,
+            data    : Vec::new(),
+            frames  : Vec::new(),
+            fp      : 0,
+            base_fp : 0,
         }
+    }
+    pub fn push_frame(self: &mut Self, pc: u32) {
+        self.frames.push((self.fp, pc));
+    }
+    pub fn pop_frame(self: &mut Self) -> u32 {
+        let (fp, pc) = self.frames.pop().expect("Pop on empty frame-stack");
+        self.fp = fp;
+        pc
     }
     /// Returns the current stack pointer.
     #[cfg_attr(not(debug_assertions), inline(always))]
@@ -28,24 +45,62 @@ impl Stack {
     pub fn fp(self: &Self) -> u32 {
         self.fp
     }
+    /// Sets the base frame pointer to the current stack length.
+    pub fn begin(self: &mut Self) {
+        self.base_fp = self.data.len() as u32;
+        self.fp = self.base_fp;
+    }
     /// Resets the stack.
     pub fn reset(self: &mut Self) {
-        self.fp = 0;
-        self.data.truncate(0);
+        self.fp = self.base_fp;
+        self.data.truncate(self.base_fp as usize);
     }
     /// Truncates the stack to given size.
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn truncate(self: &mut Self, size: u32) {
+        debug_assert!(size >= self.base_fp);
         self.data.truncate(size as usize);
     }
-    /// Returns the current frame as slice
-    pub fn frame(self: &Self) -> &[i32] {
+    /// Returns the current frame as slice.
+    pub fn frame(self: &Self) -> &[u8] {
         &self.data[self.fp as usize..]
+    }
+    /// Returns the current stack as slice.
+    pub fn data(self: &Self) -> &[u8] {
+        &self.data[self.base_fp as usize..]
+    }
+    /// Returns the stacks const-pool as slice.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub fn consts(self: &Self) -> &[u8] {
+        &self.data[..self.base_fp as usize]
+    }
+    /// Copies data within the stack.
+    pub fn copy(self: &mut Self, from: u32, to: u32, num_bytes: u32) {
+        //debug_assert!((to + num_bytes <= from) || (to >= from + num_bytes));
+        let from = from as usize;
+        let to = to as usize;
+        let num_bytes = num_bytes as usize;
+        self.data.copy_within(from..from+num_bytes, to);
+    }
+    /// Extends stack with data from stack.
+    pub fn extend(self: &mut Self, from: u32, num_bytes: u32) { // TODO: check that this isn't as slow as it looks, used quite a lot in construction
+        debug_assert!(from + num_bytes <= self.data.len() as u32);
+        let from = from as usize;
+        let num_bytes = num_bytes as usize;
+        let mut data: Vec<_> = self.data[from..from+num_bytes].into();
+        self.data.append(&mut data);
+    }
+    /// Extends stack with given data.
+    pub fn extend_from(self: &mut Self, slice: &[u8]) {
+        self.data.extend_from_slice(slice);
+    }
+    pub fn extend_zero(self: &mut Self, num_bytes: u32) {
+        self.data.resize(self.data.len() + num_bytes as usize, 0);
     }
 }
 
 impl Index<u32> for Stack {
-    type Output = i32;
+    type Output = u8;
 
     #[inline]
     fn index(&self, index: u32) -> &Self::Output {
@@ -90,7 +145,7 @@ pub trait StackOffsetOp<T>: StackOffset<T> + StackOp<T> {
         self.store(pos, value);
     }
     /// Load a value from the stack relative to the frame pointer.
-    fn load_fp(self: &mut Self, offset: i32) -> T {
+    fn load_fp(self: &Self, offset: i32) -> T {
         let pos = self.offset_fp(offset);
         self.load(pos)
     }
@@ -100,7 +155,7 @@ pub trait StackOffsetOp<T>: StackOffset<T> + StackOp<T> {
         self.store(pos, value);
     }
     /// Load a value from the stack relative to the stack pointer.
-    fn load_sp(self: &mut Self, offset: i32) -> T {
+    fn load_sp(self: &Self, offset: i32) -> T {
         let pos = self.offset_sp(offset);
         self.load(pos)
     }
@@ -119,89 +174,101 @@ impl<T> StackOffset<T> for Stack {
 
 impl<T> StackOffsetOp<T> for Stack where Stack: StackOp<T> + StackOffset<T> { }
 
-/// Stack/Const conversions
-#[allow(unused_macros)]
-macro_rules! impl_convert {
-    // cast smaller than 32 bit to 32 bit, transmute 32 bit types
-    (small, bool, $input:expr) => { $input != 0 };
-    (small, $type:tt, $input:expr) => { $input as $type };
-    (normal, $type:tt, $input:expr) => { unsafe { transmute($input) } };
-}
-
 /// Implements Stack operations.
 #[allow(unused_macros)]
 macro_rules! impl_stack {
 
-    // push operations
-    (@push triple, $type:tt, $stack: ident, $var:ident) => { {
-        let (a, b, c): (u32, u32, u32) = unsafe { transmute($var) };
-        impl_stack!(@push normal, u32, $stack, a);
-        impl_stack!(@push normal, u32, $stack, b);
-        impl_stack!(@push normal, u32, $stack, c);
-    } };
-    (@push large, $type:tt, $stack: ident, $var:ident) => { {
-        let (low, high): (u32, u32) = unsafe { transmute($var) };
-        impl_stack!(@push normal, u32, $stack, low);
-        impl_stack!(@push normal, u32, $stack, high);
-    } };
-    (@push $size:tt, $type:tt, $stack: ident, $var:ident) => { $stack.data.push( impl_convert!($size, Value, $var) ); };
-
-    // store operations
-    (@store triple, $type:tt, $stack: ident, $pos:expr, $var:ident) => { {
-        let (a, b, c): (u32, u32, u32) = unsafe { transmute($var) };
-        impl_stack!(@store normal, u32, $stack, $pos, a);
-        impl_stack!(@store normal, u32, $stack, $pos + 1, b);
-        impl_stack!(@store normal, u32, $stack, $pos + 2, c);
-    } };
-    (@store large, $type:tt, $stack: ident, $pos:expr, $var:ident) => { {
-        let (low, high): (u32, u32) = unsafe { transmute($var) };
-        impl_stack!(@store normal, u32, $stack, $pos, low);
-        impl_stack!(@store normal, u32, $stack, $pos + 1, high);
-    } };
-    (@store $size:tt, $type:tt, $stack: ident, $pos:expr, $var:ident) => {
-        *$stack.data.get_mut($pos as usize).expect("Stack bounds exceeded") = impl_convert!($size, Value, $var);
+    // push operationsoperations
+/*
+    (@push 32bit, $type:tt, $stack: ident, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data.push(bytes[0]);
+        $stack.data.push(bytes[1]);
+        $stack.data.push(bytes[2]);
+        $stack.data.push(bytes[3]);
+    };
+    (@push 16bit, $type:tt, $stack: ident, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data.push(bytes[0]);
+        $stack.data.push(bytes[1]);
+    };
+*/
+    (@push 8bit, $type:tt, $stack: ident, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data.push(bytes[0]);
+    };
+    (@push $size:tt, $type:tt, $stack: ident, $var:tt) => {
+        $stack.data.extend_from_slice(&$var.to_ne_bytes());
     };
 
     // pop operations
-    (@pop triple, $type:tt, $stack: ident) => { {
-        let c: u32 = impl_stack!(@pop normal, u32, $stack);
-        let b: u32 = impl_stack!(@pop normal, u32, $stack);
-        let a: u32 = impl_stack!(@pop normal, u32, $stack);
-        unsafe { transmute((a, b, c)) }
+/*
+    (@pop 32bit, $type:tt, $stack: ident) => { {
+        let d = $stack.data.pop().unwrap();
+        let c = $stack.data.pop().unwrap();
+        let b = $stack.data.pop().unwrap();
+        let a = $stack.data.pop().unwrap();
+        $type::from_ne_bytes([ a, b, c, d ])
     } };
-    (@pop large, $type:tt, $stack: ident) => { {
-        let high: u32 = impl_stack!(@pop normal, u32, $stack);
-        let low: u32 = impl_stack!(@pop normal, u32, $stack);
-        unsafe { transmute((low, high)) }
+    (@pop 16bit, $type:tt, $stack: ident) => { {
+        let b = $stack.data.pop().unwrap();
+        let a = $stack.data.pop().unwrap();
+        $type::from_ne_bytes([ a, b ])
     } };
-    (@pop $size:tt, $type:tt, $stack: ident) => { impl_convert!($size, $type, $stack.data.pop().expect("Stack underflow")) };
+*/
+    (@pop 8bit, $type:tt, $stack: ident) => { {
+        let bytes = [ $stack.data.pop().unwrap() ];
+        $type::from_ne_bytes(bytes)
+    } };
+    (@pop $size:tt, $type:tt, $stack: ident) => { {
+        let stack_len = $stack.data.len();
+        let start_pos = stack_len - size_of::<$type>();
+        let bytes = &$stack.data[start_pos .. stack_len];
+        let result = $type::from_ne_bytes(bytes.try_into().unwrap());
+        $stack.data.truncate(start_pos);
+        result
+    } };
+
+    // store operations
+/*
+    (@store 32bit, $type:tt, $stack: ident, $pos:expr, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data[$pos] = bytes[0];
+        $stack.data[$pos + 1] = bytes[1];
+        $stack.data[$pos + 2] = bytes[2];
+        $stack.data[$pos + 3] = bytes[3];
+    };
+    (@store 16bit, $type:tt, $stack: ident, $pos:expr, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data[$pos] = bytes[0];
+        $stack.data[$pos + 1] = bytes[1];
+    };
+*/
+    (@store 8bit, $type:tt, $stack: ident, $pos:expr, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data[$pos] = bytes[0];
+    };
+    (@store $size:tt, $type:tt, $stack: ident, $pos:expr, $var:tt) => {
+        let bytes = $var.to_ne_bytes();
+        $stack.data[$pos .. $pos + size_of::<$type>()].copy_from_slice(&bytes);
+    };
 
     // load operations
-    (@load triple, $type:tt, $stack: ident, $pos:expr) => { {
-        let a: u32 = impl_stack!(@load normal, u32, $stack, $pos);
-        let b: u32 = impl_stack!(@load normal, u32, $stack, $pos + 1);
-        let c: u32 = impl_stack!(@load normal, u32, $stack, $pos + 2);
-        unsafe { transmute((a, b, c)) }
+/*
+    (@load 32bit, $type:tt, $stack: ident, $pos:expr) => { {
+        $type::from_ne_bytes([ $stack.data[$pos], $stack.data[$pos + 1], $stack.data[$pos + 2], $stack.data[$pos + 3] ])
     } };
-    (@load large, $type:tt, $stack: ident, $pos:expr) => { {
-        let low: u32 = impl_stack!(@load normal, u32, $stack, $pos);
-        let high: u32 = impl_stack!(@load normal, u32, $stack, $pos + 1);
-        unsafe { transmute((low, high)) }
+    (@load 16bit, $type:tt, $stack: ident, $pos:expr) => { {
+        $type::from_ne_bytes([ $stack.data[$pos], $stack.data[$pos + 1] ])
     } };
-    (@load $size:tt, $type:tt, $stack: ident, $pos:expr) => {
-        impl_convert!($size, $type, *$stack.data.get($pos as usize).expect("Stack bounds exceeded"))
-    };
-
-    // top operations
-    (@top triple, $stack: ident) => { {
-        $stack.load($stack.sp() - 3)
+*/
+    (@load 8bit, $type:tt, $stack: ident, $pos:expr) => { {
+        $type::from_ne_bytes([ $stack.data[$pos] ])
     } };
-    (@top large, $stack: ident) => { {
-        $stack.load($stack.sp() - 2)
+    (@load $size:tt, $type:tt, $stack: ident, $pos:expr) => { {
+        let bytes = &$stack.data[$pos .. $pos + size_of::<$type>()];
+        $type::from_ne_bytes(bytes.try_into().unwrap())
     } };
-    (@top $size:tt, $stack: ident) => {
-        $stack.load($stack.sp() - 1)
-    };
 
     // implement stack operations for Stack
     ($target:ident, $size:tt, $type:tt) => {
@@ -216,31 +283,95 @@ macro_rules! impl_stack {
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn store(self: &mut Self, pos: u32, value: $type) {
-                impl_stack!(@store $size, $type, self, pos, value);
+                impl_stack!(@store $size, $type, self, pos as usize, value);
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn load(self: &Self, pos: u32) -> $type {
-                impl_stack!(@load $size, $type, self, pos)
+                impl_stack!(@load $size, $type, self, pos as usize)
             }
             #[cfg_attr(not(debug_assertions), inline(always))]
             fn top(self: &Self) -> $type {
-                impl_stack!(@top $size, self)
+                self.load(self.sp() - size_of::<$type>() as u32)
             }
         }
     };
 }
 
-impl_stack!(Stack, small, bool);
-impl_stack!(Stack, small, u8);
-impl_stack!(Stack, small, i8);
-impl_stack!(Stack, small, u16);
-impl_stack!(Stack, small, i16);
-impl_stack!(Stack, normal, u32);
-impl_stack!(Stack, normal, i32);
-impl_stack!(Stack, normal, f32);
-impl_stack!(Stack, large, u64);
-impl_stack!(Stack, large, i64);
-impl_stack!(Stack, large, f64);
+impl_stack!(Stack, 8bit, u8);
+impl_stack!(Stack, 8bit, i8);
+impl_stack!(Stack, 16bit, u16);
+impl_stack!(Stack, 16bit, i16);
+impl_stack!(Stack, 32bit, u32);
+impl_stack!(Stack, 32bit, i32);
+impl_stack!(Stack, 32bit, f32);
+impl_stack!(Stack, 64bit, u64);
+impl_stack!(Stack, 64bit, i64);
+impl_stack!(Stack, 64bit, f64);
+impl_stack!(Stack, 128bit, u128);
+impl_stack!(Stack, 128bit, i128);
 
+impl StackOp<HeapRef> for Stack {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn push(self: &mut Self, value: HeapRef) {
+        self.push(value.index);
+        self.push(value.offset);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn pop(self: &mut Self) -> HeapRef {
+        HeapRef {
+            offset: self.pop(),
+            index: self.pop(),
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn store(self: &mut Self, pos: u32, value: HeapRef) {
+        self.store(value.index, pos);
+        self.store(value.offset, pos + 4);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn load(self: &Self, pos: u32) -> HeapRef {
+        HeapRef {
+            index: self.load(pos),
+            offset: self.load(pos + 4),
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn top(self: &Self) -> HeapRef {
+        self.load(self.sp() - size_of::<HeapRef>() as u32)
+    }
+}
 
-impl_stack!(Stack, triple, HeapRef);
+impl StackOp<HeapSlice> for Stack {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn push(self: &mut Self, value: HeapSlice) {
+        self.push(value.len);
+        self.push(value.index);
+        self.push(value.offset);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn pop(self: &mut Self) -> HeapSlice {
+        HeapSlice {
+            offset: self.pop(),
+            index: self.pop(),
+            len: self.pop(),
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn store(self: &mut Self, pos: u32, value: HeapSlice) {
+        self.store(value.len, pos);
+        self.store(value.index, pos + 4);
+        self.store(value.offset, pos + 8);
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn load(self: &Self, pos: u32) -> HeapSlice {
+        HeapSlice {
+            len: self.load(pos),
+            index: self.load(pos + 4),
+            offset: self.load(pos + 8),
+        }
+    }
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn top(self: &Self) -> HeapSlice {
+        self.load(self.sp() - size_of::<HeapSlice>() as u32)
+    }
+}
