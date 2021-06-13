@@ -1,11 +1,12 @@
 //! AST type checker and resolver.
 
 mod scopes;
+pub(crate) mod error;
 
-use std::fmt::{self, Display};
 use std::marker::PhantomData;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
-use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, compute_loc, Bindings, TypeContainer};
+use crate::frontend::resolver::error::*;
+use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, Bindings, TypeContainer};
 use crate::runtime::VMFunc;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -20,51 +21,6 @@ pub struct ResolvedProgram<'ast, T> where T: VMFunc<T> {
     pub entry_fn: FunctionId,
 }
 
-/// Represents the various possible resolver error-kinds.
-#[derive(Clone, Debug)]
-pub enum ResolveErrorKind {
-    TypeMismatch(Type, Type),
-    NonPrimitiveCast(Type),
-    IncompatibleNumeric(Type, Numeric),
-    UnknownValue(String),
-    NumberOfArguments(u32, u32),
-    MutabilityEscalation,
-    AssignToImmutable,
-}
-
-/// An error reported by the resolver (e.g. unknown/mismatching types).
-#[derive(Clone, Debug)]
-pub struct ResolveError {
-    pub kind: ResolveErrorKind,
-    position: u32, // this is the position from the end of the input
-}
-
-impl ResolveError {
-    fn new(item: &impl Positioned, kind: ResolveErrorKind) -> ResolveError {
-        Self { kind: kind, position: item.position() }
-    }
-    /// Computes and returns the source code location of this error. Since the AST only stores byte
-    /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        compute_loc(input, input.len() as u32 - self.position)
-    }
-}
-
-impl Display for ResolveError {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            ResolveErrorKind::TypeMismatch(t1, t2) => write!(f, "Incompatible types {:?} and {:?}", t1, t2),
-            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {:?} for expected type {:?}", n, t),
-            ResolveErrorKind::NumberOfArguments(e, g) => write!(f, "Expected {} arguments, got {}", e, g),
-            ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
-            ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
-            // Todo: handle the others
-            _ => write!(f, "{:?}", self.kind),
-        }
-    }
-}
-
-type ResolveResult = Result<(), ResolveError>;
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
@@ -209,7 +165,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Sets given TypeId for the given binding, generating a BindingId if required.
-    fn binding_set_type_id(self: &mut Self, item: &mut (impl Bindable+Positioned), new_type_id: TypeId) -> Result<(), ResolveError>  {
+    fn binding_set_type_id(self: &mut Self, item: &mut (impl Bindable+Positioned), new_type_id: TypeId) -> ResolveResult  {
         let binding_id = self.try_create_anon_binding(item);
         let type_id = self.scopes.binding_type_id_mut(binding_id);
         if type_id.is_none() {
@@ -897,7 +853,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         if let Some(type_id) = type_id {
             self.binding_set_type_id(item, type_id)?;
-            let struct_def = self.type_by_id(type_id).as_struct().unwrap().clone(); // todo: this sucks
+            let struct_def = self.type_by_id(type_id).as_struct().some_or(item, ResolveErrorKind::Internal)?.clone();
             let struct_ = item.value.as_struct_mut().unwrap();
             for (name, field) in &mut struct_.fields {
                 self.resolve_expression(field, struct_def.type_id(name))?;

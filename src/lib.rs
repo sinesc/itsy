@@ -24,7 +24,7 @@ pub use {frontend::{parse, resolve}, bytecode::compile};
 /// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
 ///
 /// ```
-/// use itsy::*;
+/// use itsy::{extern_rust, vm};
 ///
 /// struct MyGameState {
 ///     lives: i32,
@@ -243,7 +243,7 @@ impl From<bytecode::CompileError> for ItsyError {
 /// For an example on how to share more useful data with Itsy code, have a look at the [`extern_rust!`](macro.extern_rust.html) documentation.
 ///
 /// ```
-/// use itsy::*;
+/// use itsy::{extern_rust, vm};
 ///
 /// extern_rust!(MyFns, (), {
 ///     /// prints given string
@@ -266,6 +266,6 @@ pub fn vm<T, U>(program: &str) -> Result<runtime::VM<T, U>, ItsyError> where T: 
     use crate::runtime::VM;
     let parsed = parse(program)?;
     let resolved = resolve::<T>(parsed, "main")?;
-    let program = compile(resolved)?; // todo: compiler needs error handling. then forward error
+    let program = compile(resolved)?;
     Ok(VM::new(program))
 }
