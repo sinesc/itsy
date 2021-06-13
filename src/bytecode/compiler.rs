@@ -139,7 +139,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 Ok(())
             }
-            S::Return(ret)              => self.compile_return(ret),
+            S::Return(_)                => unreachable!("Return AST nodes should have been rewritten"),
             S::Expression(expression)   => {
                 self.compile_expression(expression)?;
                 let result_type = self.binding_type(expression);
@@ -505,16 +505,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Compiles a return statement
-    fn compile_return(self: &Self, item: &ast::Return<'ast>) -> CompileResult {
-        panic!("return should have been refactored by resolver");
-        comment!(self, "return statement");
-        if let Some(expr) = &item.expr {
-            self.compile_expression(expr)?;
-        }
-        Ok(())
-    }
-
     /// Compiles the given block.
     fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
         for statement in item.statements.iter() {
@@ -586,7 +576,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         UO::DecAfter => self.write_postdec(load_index as i32, &exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
-                } else if let ast::Expression::BinaryOp(binary_op) = &item.expr { // FIXME: indexing no longer heap only
+                } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;
                     self.writer.store_tmp64();
