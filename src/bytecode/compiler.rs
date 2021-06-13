@@ -546,9 +546,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 };
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
-                let prototype = self.store_literal_prototype(item);
-                let constructor = self.get_constructor(ty);
-                self.writer.construct(constructor, prototype);
+                if item.value.is_static() {
+                    let prototype = self.store_literal_prototype(item);
+                    let constructor = self.get_constructor(ty);
+                    self.writer.construct(constructor, prototype);
+                } else {
+                    unimplemented!("Non-static array/struct literal not yet supported");
+                }
             },
         }
         Ok(())
@@ -923,14 +927,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             LiteralValue::Array(array_literal) => {
                 for element in &array_literal.elements {
-                    self.store_literal_prototype(element);
+                    self.store_literal_prototype(element.as_literal().unwrap()); // FIXME support expressions
                 }
             }
             LiteralValue::Struct(struct_literal) => {
                 let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 for (name, _) in struct_def.fields.iter() {
                     let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                    self.store_literal_prototype(field);
+                    self.store_literal_prototype(field.as_literal().unwrap()); // FIXME support expressions
                 }
             }
         };

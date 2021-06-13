@@ -505,6 +505,13 @@ pub enum LiteralValue<'a> {
 }
 
 impl<'a> LiteralValue<'a> {
+    pub fn is_static(self: &Self) -> bool {
+        match self {
+            LiteralValue::Array(v) => !v.elements.iter().any(|e| !e.is_literal()),
+            LiteralValue::Struct(v) => !v.fields.iter().any(|(_, e)| !e.is_literal()),
+            _ => true,
+        }
+    }
     pub fn as_string(self: &Self) -> Option<&'a str> {
         match self {
             LiteralValue::String(v) => Some(v),
@@ -557,12 +564,12 @@ impl<'a> Debug for LiteralValue<'a> {
 
 #[derive(Debug)]
 pub struct ArrayLiteral<'a> {
-    pub elements: Vec<Literal<'a>>, // todo: eventually need to support expressions here
+    pub elements: Vec<Expression<'a>>,
 }
 
 #[derive(Debug)]
 pub struct StructLiteral<'a> {
-    pub fields: HashMap<&'a str, Literal<'a>>, // todo: eventually need to support expressions here
+    pub fields: HashMap<&'a str, Expression<'a>>,
 }
 
 #[derive(Debug)]

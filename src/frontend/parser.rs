@@ -235,7 +235,7 @@ named!(string(Input<'_>) -> Literal<'_>, do_parse!(
 
 // literal array ([ 1, 2, 3 ])
 
-named!(array_literal_elements(Input<'_>) -> Vec<Literal<'_>>, ws!(separated_list_complete!(char!(','), literal)));
+named!(array_literal_elements(Input<'_>) -> Vec<Expression<'_>>, ws!(separated_list_complete!(char!(','), expression)));
 
 named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
@@ -252,11 +252,11 @@ named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
 
 // literal struct (MyStruct { a: 1 })
 
-named!(struct_literal_field(Input<'_>) -> (&str, Literal<'_>), map!(ws!(tuple!(label, char!(':'), literal)),
+named!(struct_literal_field(Input<'_>) -> (&str, Expression<'_>), map!(ws!(tuple!(label, char!(':'), expression)),
     |tuple| (tuple.0, tuple.2)
 ));
 
-named!(struct_literal_fields(Input<'_>) -> HashMap<&str, Literal<'_>>, map!(ws!(separated_list_complete!(char!(','), struct_literal_field)), |list| {
+named!(struct_literal_fields(Input<'_>) -> HashMap<&str, Expression<'_>>, map!(ws!(separated_list_complete!(char!(','), struct_literal_field)), |list| {
     list.into_iter().map(|item| (item.0, item.1)).collect()
 }));
 

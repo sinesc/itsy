@@ -900,7 +900,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let struct_def = self.type_by_id(type_id).as_struct().unwrap().clone(); // todo: this sucks
             let struct_ = item.value.as_struct_mut().unwrap();
             for (name, field) in &mut struct_.fields {
-                self.resolve_literal(field, struct_def.type_id(name))?;
+                self.resolve_expression(field, struct_def.type_id(name))?;
             }
         }
 
@@ -925,7 +925,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         for element in &mut array.elements {
             *element.binding_id_mut() = Some(element_binding_id);
-            self.resolve_literal(element, None)?;
+            self.resolve_expression(element, None)?;
             if elements_type_id == None {
                 elements_type_id = self.binding_type_id(element);
             } else {
