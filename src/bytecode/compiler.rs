@@ -1068,6 +1068,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     self.writer.pop_tmp64();
                     self.write_decref(constructor);
                 }
+                HeapRefOp::Zero => unreachable!("Invalid heap ref op")
             }
 
         }

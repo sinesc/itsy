@@ -12,10 +12,12 @@ pub enum HeapCmp {
     Gte
 }
 
+/// Allowed heap reference counting operations.
 #[derive(Copy, Clone, Debug)]
 pub enum HeapRefOp {
     Inc,
     Dec,
+    Zero,
 }
 
 /// A reference counted heap object.
@@ -69,7 +71,7 @@ impl Heap {
         position
     }
     /// Increase/decrease reference count for given heap object, optionally freeing it at count 0.
-    pub fn ref_item(self: &mut Self, index: u32, op: HeapRefOp, free: bool) {
+    pub fn ref_item(self: &mut Self, index: u32, op: HeapRefOp) {
         let refs = &mut self.objects[index as usize].refs;
         match op {
             HeapRefOp::Inc => {
@@ -77,9 +79,12 @@ impl Heap {
             }
             HeapRefOp::Dec => {
                 (*refs) -= 1;
-                if *refs == 0 && free {
+                if *refs == 0 {
                     self.free(index);
                 }
+            }
+            HeapRefOp::Zero => {
+                (*refs) -= 1;
             }
         }
     }

@@ -612,7 +612,7 @@ impl_vm!{
         incref_32(constructor: u32),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
-        self.refcount_value(item, constructor, HeapRefOp::Inc, false);
+        self.refcount_value(item, constructor, HeapRefOp::Inc);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
@@ -621,7 +621,7 @@ impl_vm!{
         decref_32(constructor: u32),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
-        self.refcount_value(item, constructor, HeapRefOp::Dec, true);
+        self.refcount_value(item, constructor, HeapRefOp::Dec);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
@@ -630,7 +630,7 @@ impl_vm!{
         zeroref_32(constructor: u32),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
-        self.refcount_value(item, constructor, HeapRefOp::Dec, false);
+        self.refcount_value(item, constructor, HeapRefOp::Zero);
     }
 
     /// Calls the given Rust function.

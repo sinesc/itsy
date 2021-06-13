@@ -204,13 +204,13 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references.
-    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: u32, op: HeapRefOp, free: bool) {
+    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: u32, op: HeapRefOp) {
         let constructor = self.read_op(&mut constructor_offset);
-        self.refcount_recurse(constructor, item, &mut constructor_offset, op, free);
+        self.refcount_recurse(constructor, item, &mut constructor_offset, op);
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
-    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut u32, op: HeapRefOp, free: bool) {
+    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut u32, op: HeapRefOp) {
         match constructor {
             Constructor::Array => {
                 let num_elements = self.read_arg(&mut constructor_offset);
@@ -221,13 +221,13 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                         // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
                         *constructor_offset = original_constructor_offset;
                         let element: HeapRef = self.heap.read_seq(&mut item);
-                        self.refcount_recurse(element_constructor, element, &mut constructor_offset, op, free);
+                        self.refcount_recurse(element_constructor, element, &mut constructor_offset, op);
                     }
                 } else {
                     // skip primitive num_bytes
                     self.read_arg(&mut constructor_offset);
                 }
-                self.heap.ref_item(item.index, op, free);
+                self.heap.ref_item(item.index, op);
             }
             Constructor::Struct => {
                 let num_fields = self.read_arg(&mut constructor_offset);
@@ -235,16 +235,16 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                     let field_constructor = self.read_op(&mut constructor_offset);
                     if field_constructor != Constructor::Primitive {
                         let field: HeapRef = self.heap.read_seq(&mut item);
-                        self.refcount_recurse(field_constructor, field, &mut constructor_offset, op, free);
+                        self.refcount_recurse(field_constructor, field, &mut constructor_offset, op);
                     } else {
                         let num_bytes = self.read_arg(&mut constructor_offset);
                         item.offset += num_bytes;
                     }
                 }
-                self.heap.ref_item(item.index, op, free);
+                self.heap.ref_item(item.index, op);
             }
             Constructor::String => {
-                self.heap.ref_item(item.index, op, free);
+                self.heap.ref_item(item.index, op);
             }
             Constructor::Primitive => {
                 panic!("Unexpected primitive constructor");
