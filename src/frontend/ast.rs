@@ -505,7 +505,7 @@ pub enum LiteralValue<'a> {
 }
 
 impl<'a> LiteralValue<'a> {
-    pub fn is_static(self: &Self) -> bool {
+    pub fn is_const(self: &Self) -> bool {
         match self {
             LiteralValue::Array(v) => !v.elements.iter().any(|e| !e.is_literal()),
             LiteralValue::Struct(v) => !v.fields.iter().any(|(_, e)| !e.is_literal()),
@@ -564,12 +564,12 @@ impl<'a> Debug for LiteralValue<'a> {
 
 #[derive(Debug)]
 pub struct ArrayLiteral<'a> {
-    pub elements: Vec<Expression<'a>>,
+    pub elements: Vec<Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
 #[derive(Debug)]
 pub struct StructLiteral<'a> {
-    pub fields: HashMap<&'a str, Expression<'a>>,
+    pub fields: HashMap<&'a str, Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
 #[derive(Debug)]

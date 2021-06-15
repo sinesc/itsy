@@ -4,7 +4,7 @@ mod locals;
 #[macro_use]
 mod macros;
 
-use std::{cell::RefCell, collections::HashMap, fmt::{self, Display}};
+use std::{cell::RefCell, cell::Cell, collections::HashMap, fmt::{self, Display}};
 use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, compute_loc, TypeContainer, Struct};
 use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
@@ -68,8 +68,10 @@ pub struct Compiler<'ty, T> where T: VMFunc<T> {
     constructors: HashMap<&'ty Type, u32>,
     // Maps functions to their call index.
     functions: RefCell<HashMap<FunctionId, CallInfo>>,
-    /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet). //TODO: rename variable
+    /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
     unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<u32>>>,
+    /// Set to true while compiling expressions within a Struct/Array constructor. Prevents writing additional constructors for nested structures. TODO: Crappy solution.
+    writing_protype_instructions: Cell<bool>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -84,6 +86,7 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
         functions   : RefCell::new(HashMap::new()),
         unfixed_function_calls: RefCell::new(HashMap::new()),
         constructors: HashMap::new(),
+        writing_protype_instructions: Cell::new(false),
     };
 
     // serialize constructors onto const pool
@@ -536,15 +539,55 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 };
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
-                if item.value.is_static() {
-                    let prototype = self.store_literal_prototype(item);
-                    let constructor = self.get_constructor(ty);
-                    self.writer.construct(constructor, prototype);
+                let constructor = self.get_constructor(ty);
+                if !self.writing_protype_instructions.get() {
+                    if item.value.is_const() {
+                        // simple constant constructor, construct from const pool prototypes
+                        let prototype = self.store_literal_prototype(item);
+                        self.writer.construct(constructor, prototype);
+                    } else {
+                        // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
+                        self.writing_protype_instructions.set(true);
+                        self.compile_prototype_instructions(item)?;
+                        self.writer.construct_dyn(constructor, self.bindings.type_size(ty)); //FIXME need to take size of references to strings into account
+                        self.writing_protype_instructions.set(false);
+                    }
                 } else {
-                    unimplemented!("Non-static array/struct literal not yet supported");
+                    // continuing non-constant constructor
+                    self.compile_prototype_instructions(item)?;
                 }
             },
         }
+        Ok(())
+    }
+
+    /// Writes instructions to assemble a prototype.
+    fn compile_prototype_instructions(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
+        use crate::frontend::ast::LiteralValue;
+        let ty = self.binding_type(item);
+        match &item.value {
+            LiteralValue::Array(array_literal) => {
+                for element in &array_literal.elements {
+                    self.compile_expression(element)?;
+                }
+            }
+            LiteralValue::Struct(struct_literal) => {
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                for (name, _) in struct_def.fields.iter() {
+                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
+                    self.compile_expression(field)?;
+                }
+            }
+            LiteralValue::String(_) => {
+                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
+                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
+                // later use a special constructor instruction that assumes strings are already on the heap.
+                let constructor = self.get_constructor(ty);
+                let prototype = self.store_literal_prototype(item);
+                self.writer.construct(constructor, prototype);
+            }
+            _ => unreachable!("Invalid prototype type")
+        };
         Ok(())
     }
 
@@ -897,7 +940,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         position
     }
 
-    /// Stores given literal on the const pool. //FIXME: this needs to be written in the order of the fields in the type constructor, not how it was laid out in the literal
+    /// Stores given literal on the const pool.
     fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> u32 {
         use crate::frontend::ast::LiteralValue;
         let ty = self.binding_type(item);
@@ -917,14 +960,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             LiteralValue::Array(array_literal) => {
                 for element in &array_literal.elements {
-                    self.store_literal_prototype(element.as_literal().unwrap()); // FIXME support expressions
+                    self.store_literal_prototype(element.as_literal().unwrap());
                 }
             }
             LiteralValue::Struct(struct_literal) => {
                 let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 for (name, _) in struct_def.fields.iter() {
                     let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
-                    self.store_literal_prototype(field.as_literal().unwrap()); // FIXME support expressions
+                    self.store_literal_prototype(field.as_literal().unwrap());
                 }
             }
         };

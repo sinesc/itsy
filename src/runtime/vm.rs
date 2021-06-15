@@ -148,7 +148,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     fn write_proto(self: &mut Self, target: CopyTarget, prototype_offset: u32, num_bytes: u32) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
-                let src = self.stack.consts();
+                let src = self.stack.data();
                 self.heap.extend_from(target_heap_ref.index, &src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
             },
             CopyTarget::Stack => self.stack.extend(prototype_offset, num_bytes),
@@ -167,7 +167,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     }
 
     /// Constructs instance from given constructor and prototype. Modifies input for internal purposes.
-    pub(crate) fn construct_value(self: &mut Self, constructor_offset: &mut u32, prototype_offset: &mut u32, target: CopyTarget) {
+    pub(crate) fn construct_value(self: &mut Self, constructor_offset: &mut u32, prototype_offset: &mut u32, target: CopyTarget, existing_strings: bool) {
         match self.read_op(constructor_offset) {
             Constructor::Primitive => {
                 let num_bytes = self.read_arg(constructor_offset);
@@ -182,7 +182,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                 for _ in 0..num_elements {
                     // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
                     *constructor_offset = original_constructor_offset;
-                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref));
+                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             }
             Constructor::Struct => {
@@ -190,15 +190,21 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                 self.write_ref(target, heap_ref);
                 let num_fields = self.read_arg(constructor_offset);
                 for _ in 0..num_fields {
-                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref));
+                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             }
             Constructor::String => {
-                let heap_ref = HeapRef { index: self.heap.alloc(Vec::new()), offset: 0 };
-                self.write_ref(target, heap_ref);
-                let num_bytes: u32 = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
-                *prototype_offset += 4;
-                self.write_proto(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
+                if existing_strings {
+                    let num_bytes = HeapRef::size() as u32;
+                    self.write_proto(target, *prototype_offset, num_bytes);
+                    *prototype_offset += num_bytes;
+                } else {
+                    let heap_ref = HeapRef { index: self.heap.alloc(Vec::new()), offset: 0 };
+                    self.write_ref(target, heap_ref);
+                    let num_bytes: u32 = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
+                    *prototype_offset += ::std::mem::size_of_val(&num_bytes) as u32;
+                    self.write_proto(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
+                }
             }
         };
     }

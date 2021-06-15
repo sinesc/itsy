@@ -1290,3 +1290,20 @@ fn temporary_heap_objects() {
     ");
     assert_all(&result, &[ "Temporary".to_string(), "Heap".to_string(), "Objects".to_string() ]);
 }
+
+#[test]
+fn dynamic_constructor() {
+    let result = run("
+        struct Test {
+            a: u32,
+            b: String,
+        }
+        fn main() {
+            let x = Test { a: 1100101, b: \"Hello\" + \"World\" };
+            ret_string(x.b);
+            ret_u32(x.a);
+        }
+    ");
+    assert(&result[0], "HelloWorld".to_string());
+    assert(&result[1], 1100101u32);
+}

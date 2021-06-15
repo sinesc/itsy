@@ -601,8 +601,16 @@ impl_vm!{
     /// Constructs an instance of a non-primitive type.
     fn construct(&mut self, constructor: u32, prototype: u32) {
         let mut constructor = constructor; // impl_vm macro does not allow mut arguments
-        let mut prototype = prototype;
-        self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack);
+        let mut prototype = prototype; //if prototype < 0 { self.stack.sp() as i32 + prototype } else { prototype } as u32;
+        self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, false);
+    }
+
+    /// Constructs an instance of a non-primitive type from a prototype that was dynamically constructed on the stack.
+    /// This opcode expects any contained strings to already be constructed on the heap and be stored as references on the stack.
+    fn construct_dyn(&mut self, constructor: u32, relative_prototype: u32) {
+        let mut constructor = constructor; // impl_vm macro does not allow mut arguments
+        let mut prototype = (self.stack.sp() as i32 - relative_prototype as i32) as u32;
+        self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, true);
     }
 
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.

@@ -65,14 +65,9 @@ impl Stack {
     pub fn frame(self: &Self) -> &[u8] {
         &self.data[self.fp as usize..]
     }
-    /// Returns the current stack as slice.
+    /// Returns the entire stack as slice.
     pub fn data(self: &Self) -> &[u8] {
-        &self.data[self.base_fp as usize..]
-    }
-    /// Returns the stacks const-pool as slice.
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    pub fn consts(self: &Self) -> &[u8] {
-        &self.data[..self.base_fp as usize]
+        &self.data[..]
     }
     /// Copies data within the stack.
     pub fn copy(self: &mut Self, from: u32, to: u32, num_bytes: u32) {
