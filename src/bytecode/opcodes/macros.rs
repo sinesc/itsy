@@ -2,34 +2,30 @@
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_vm {
 
-    // convert slices to arrays for from_le_bytes
-    (to_array 1 $slice:ident) => ( [ $slice[0] ] );
-    (to_array 2 $slice:ident) => ( [ $slice[0], $slice[1] ] );
-    (to_array 4 $slice:ident) => ( [ $slice[0], $slice[1], $slice[2], $slice[3] ] );
-    (to_array 8 $slice:ident) => ( [ $slice[0], $slice[1], $slice[2], $slice[3], $slice[4], $slice[5], $slice[6], $slice[7] ] );
-
     // perform read from slice
-    (do_read $ty:tt, $size:tt, $from:ident, $counter:expr) => ( {
-        let slice = &$from.instructions[$counter as usize..];
-        let dest: $ty = $ty::from_le_bytes( impl_vm!(to_array $size slice) );
-        $counter += $size;
+    (do_read $ty:tt, $from:ident, $counter:expr) => ( {
+        let slice = &$from.instructions[$counter as usize..$counter as usize + ::std::mem::size_of::<$ty>()];
+        let dest: $ty = $ty::from_le_bytes( slice.try_into().unwrap() );
+        $counter += ::std::mem::size_of::<$ty>() as StackAddress;
         dest
     });
 
     // wrappers for readers and writers
-    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, 2, $from, $counter) );
-    (read u8, $from:ident, $counter:expr) => ( impl_vm!(do_read u8, 1, $from, $counter) );
-    (read u16, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, 2, $from, $counter) );
-    (read u32, $from:ident, $counter:expr) => ( impl_vm!(do_read u32, 4, $from, $counter) );
-    (read u64, $from:ident, $counter:expr) => ( impl_vm!(do_read u64, 8, $from, $counter) );
-    (read i8,  $from:ident, $counter:expr) => ( impl_vm!(do_read i8, 1, $from, $counter) );
-    (read i16, $from:ident, $counter:expr) => ( impl_vm!(do_read i16, 2, $from, $counter) );
-    (read i32, $from:ident, $counter:expr) => ( impl_vm!(do_read i32, 4, $from, $counter) );
-    (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, 8, $from, $counter) );
-    (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, 4, $from, $counter) );
-    (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, 8, $from, $counter) );
+    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, $from, $counter) );
+    (read u8, $from:ident, $counter:expr) => ( impl_vm!(do_read u8, $from, $counter) );
+    (read u16, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, $from, $counter) );
+    (read u32, $from:ident, $counter:expr) => ( impl_vm!(do_read u32, $from, $counter) );
+    (read u64, $from:ident, $counter:expr) => ( impl_vm!(do_read u64, $from, $counter) );
+    (read i8,  $from:ident, $counter:expr) => ( impl_vm!(do_read i8, $from, $counter) );
+    (read i16, $from:ident, $counter:expr) => ( impl_vm!(do_read i16, $from, $counter) );
+    (read i32, $from:ident, $counter:expr) => ( impl_vm!(do_read i32, $from, $counter) );
+    (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, $from, $counter) );
+    (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, $from, $counter) );
+    (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, $from, $counter) );
+    (read StackAddress, $from:ident, $counter:expr) => ( impl_vm!(do_read StackAddress, $from, $counter) ); // FIXME: hardcoded StackAddress size
+    (read StackOffset, $from:ident, $counter:expr) => ( impl_vm!(do_read StackOffset, $from, $counter) ); // FIXME: hardcoded StackOffset size
     (read String, $from:ident, $counter:expr) => ( {
-        let len = impl_vm!(do_read u32, 4, $from, $counter);
+        let len = impl_vm!(do_read StackAddress, $from, $counter); // FIXME: hardcoded StackAddress size
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
@@ -37,7 +33,7 @@ macro_rules! impl_vm {
 
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_u16().to_le_bytes()[..]) );
     (write String, $value:expr, $to:ident) => (
-        $to.write(&($value.len() as u32).to_le_bytes()[..]);
+        $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
         $to.write(&$value.as_bytes()[..]);
     );
     (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
@@ -114,24 +110,24 @@ macro_rules! impl_vm {
                 $(
                     $(
                         #[allow(unused_imports)]
-                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_vm!(map_writer_type $variant_type) ),* ) -> u32 {
+                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_vm!(map_writer_type $variant_type) ),* ) -> StackAddress {
                             let insert_pos = self.position();
                             impl_vm!(write u8, OpCode::$variant_name as u8, self);
                             $(
                                 impl_vm!(write $variant_type, $variant_arg, self);
                             )*
-                            insert_pos as u32
+                            insert_pos as StackAddress
                         }
                     )+
                 )?
                 // single opcode
                 $(
                     #[allow(unused_imports)]
-                    pub fn $name(self: &Self, $($arg_name: impl_vm!(map_writer_type $arg_type)),* ) -> u32 {
+                    pub fn $name(self: &Self, $($arg_name: impl_vm!(map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
                         impl_vm!(write u8, OpCode::$name as u8, self);
                         $( impl_vm!(write $arg_type, $arg_name, self); )*
-                        insert_pos as u32
+                        insert_pos as StackAddress
                     }
                 )?
             )+
@@ -168,9 +164,10 @@ macro_rules! impl_vm {
             )+
 
             /// Returns disassembled opcode at given position along with the next opcode position.
-            pub(crate) fn read_instruction(self: &Self, position: u32) -> Option<(OpCode, u32)> {
+            pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<(OpCode, StackAddress)> {
+                use std::convert::TryInto;
                 let mut pc = position;
-                if pc < self.instructions.len() as u32 {
+                if pc < self.instructions.len() as StackAddress {
                     let instruction = impl_vm!(read u8, self, pc);
                     Some((OpCode::from_u8(instruction), pc))
                 } else {
@@ -181,7 +178,8 @@ macro_rules! impl_vm {
             /// Returns disassembled opcode as string at given position along with the next opcode position.
             //#[allow(unused_imports)]
             #[allow(unused_mut)]
-            pub(crate) fn describe_instruction(self: &Self, position: u32) -> Option<(String, u32)> {
+            pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
+                use std::convert::TryInto;
                 if let Some((opcode, mut pc)) = self.read_instruction(position) {
                     #[allow(unreachable_patterns)]
                     match opcode {
@@ -229,6 +227,7 @@ macro_rules! impl_vm {
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
+                use std::convert::TryInto;
                 loop {
                     let instruction = impl_vm!(read u8, self, self.pc);
                     #[allow(unreachable_patterns)]

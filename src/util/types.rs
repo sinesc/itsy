@@ -8,7 +8,7 @@ pub(crate) trait TypeContainer {
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
 
     /// Computes the size of given type.
-    fn type_size(self: &Self, ty: &Type) -> u32 {
+    fn type_size(self: &Self, ty: &Type) -> StackAddress {
         match ty {
             Type::Array(a)  => {
                 let element_type = self.type_by_id(a.type_id.unwrap());
@@ -19,7 +19,7 @@ pub(crate) trait TypeContainer {
                 s.fields.iter().fold(0, |acc, f| acc + self.type_size(self.type_by_id(f.1.unwrap())))
             },
             Type::Enum(_)   => unimplemented!("enum size"),
-            _               => ty.primitive_size() as u32
+            _               => ty.primitive_size() as StackAddress
         }
     }
 }
@@ -31,28 +31,62 @@ pub enum FnKind {
     Intrinsic(Intrinsic),
 }
 
+pub type StackAddress = usize;
+pub type StackOffset = isize;
+pub(crate) const STACK_ADDRESS_TYPE: Type = Type::u64;
+pub type HeapAddress = usize;
+const HEAP_OFFSET_BITS: usize = 36;
+pub type ItemCount = u16;
+
 /// A heap reference as it would appear on the stack
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct HeapRef {
-    pub index   : u32,
-    pub offset  : u32,
+    pub(crate) address: HeapAddress,
 }
 
 impl HeapRef {
+    /// Mask for extracting the index of HeapRef.
+    const INDEX_MASK: HeapAddress = !((1 << HEAP_OFFSET_BITS) - 1);
+
+    /// Mask for extracting the offset of HeapRef
+    const OFFSET_MASK: HeapAddress = (1 << HEAP_OFFSET_BITS) - 1;
+
+    /// Creates a new HeapRef.
+    pub fn new(index: StackAddress, offset: StackAddress) -> HeapRef {
+        Self { address: ((index as HeapAddress) << HEAP_OFFSET_BITS) | (offset as HeapAddress) }
+    }
+    /// Returns the index of this HeapRef.
+    pub fn index(self: &Self) -> StackAddress {
+        ((self.address & HeapRef::INDEX_MASK) >> HEAP_OFFSET_BITS) as StackAddress
+    }
+    /// Returns the offset of this HeapRef.
+    pub fn offset(self: &Self) -> StackAddress {
+        (self.address & HeapRef::OFFSET_MASK) as StackAddress
+    }
+    /// Adds given offset to this HeapRef.
+    pub fn add_offset(self: &mut Self, offset: StackOffset) {
+        debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
+        self.address = (self.address as StackOffset + offset) as HeapAddress;
+    }
     /// Returns a clone of this heap reference offset by the given value.
-    pub fn offset(self: Self, offset: u32) -> Self { // FIXME negative offsets, but can't use i32 or lose address space. enum arg OFFSET_MINUS, OFFSET_PLUS ?
-        Self {
-            index   : self.index,
-            offset  : self.offset + offset,
-        }
+    pub fn with_offset(self: Self, offset: StackOffset) -> Self {
+        debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
+        HeapRef::new(self.index(), (self.offset() as StackOffset + offset) as StackAddress)
     }
     /// Returns a HeapSlice of this heap reference with the given length set.
-    pub fn to_slice(self: Self, len: u32) -> HeapSlice {
+    pub fn to_slice(self: Self, len: StackAddress) -> HeapSlice {
         HeapSlice {
-            index   : self.index,
-            offset  : self.offset,
             len     : len,
+            heap_ref: self,
         }
+    }
+    /// Returns the HeapRef as byte array.
+    pub fn to_ne_bytes(self: &Self) -> [ u8; ::std::mem::size_of::<HeapAddress>() ] {
+        self.address.to_ne_bytes()
+    }
+    /// Creates a HeapRef from byte array.
+    pub fn from_ne_bytes(bytes: [ u8; ::std::mem::size_of::<HeapAddress>() ]) -> Self {
+        HeapRef { address: HeapAddress::from_ne_bytes(bytes) }
     }
     /// Returns the size of heap references.
     pub const fn size() -> u8 {
@@ -60,29 +94,39 @@ impl HeapRef {
     }
 }
 
+impl From<HeapRef> for (StackAddress, StackAddress) {
+    fn from(heap_ref: HeapRef) -> (StackAddress, StackAddress) {
+        (
+            ((heap_ref.address & HeapRef::INDEX_MASK) >> HEAP_OFFSET_BITS) as StackAddress,
+            (heap_ref.address & HeapRef::OFFSET_MASK) as StackAddress
+        )
+    }
+}
+
+impl Debug for HeapRef {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "HeapRef(index:{}, offset:{})", self.index(), self.offset())
+    }
+}
+
 /// A heap slice as it would appear on the stack
 #[derive(Debug, Copy, Clone)]
 pub struct HeapSlice {
-    pub len     : u32,
-    pub index   : u32,
-    pub offset  : u32,
+    pub len     : StackAddress,
+    pub heap_ref: HeapRef,
 }
 
 impl HeapSlice {
     /// Returns a clone of this heap reference offset by the given value.
-    pub fn offset(self: Self, offset: u32) -> Self { // FIXME negative offsets, but can't use i32 or lose address space. enum arg OFFSET_MINUS, OFFSET_PLUS ?
+    pub fn with_offset(self: Self, offset: StackOffset) -> Self {
         Self {
-            index   : self.index,
-            offset  : self.offset + offset,
+            heap_ref: self.heap_ref.with_offset(offset),
             len     : self.len,
         }
     }
     /// Returns a HeapSlice of this heap reference with the given length set.
     pub fn to_ref(self: Self) -> HeapRef {
-        HeapRef {
-            index   : self.index,
-            offset  : self.offset,
-        }
+        self.heap_ref
     }
     /// Returns the size of heap references.
     pub fn size() -> u8 {
@@ -182,7 +226,7 @@ impl Struct {
 /// Information about an array in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
-    pub len: Option<u32>,
+    pub len: Option<StackAddress>,
     pub type_id: Option<TypeId>,
 }
 
@@ -246,7 +290,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            _                                   => 8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) => ::std::mem::size_of::<HeapRef>() as u8,
         }
     }
     /// Kind of the type, e.g. Signed or Array.

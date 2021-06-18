@@ -1,7 +1,7 @@
 
 use std::fmt::{self, Display};
-use crate::frontend::ast::Positioned;
-use crate::util::{Type, Numeric, compute_loc};
+use crate::frontend::ast::{Position, Positioned};
+use crate::util::{Type, Numeric, compute_loc, ItemCount};
 
 /// Represents the various possible resolver error-kinds.
 #[derive(Clone, Debug)]
@@ -10,7 +10,7 @@ pub enum ResolveErrorKind {
     NonPrimitiveCast(Type),
     IncompatibleNumeric(Type, Numeric),
     UnknownValue(String),
-    NumberOfArguments(u32, u32),
+    NumberOfArguments(ItemCount, ItemCount),
     MutabilityEscalation,
     AssignToImmutable,
     Internal,
@@ -20,7 +20,7 @@ pub enum ResolveErrorKind {
 #[derive(Clone, Debug)]
 pub struct ResolveError {
     pub kind: ResolveErrorKind,
-    position: u32, // this is the position from the end of the input
+    position: Position, // this is the position from the end of the input
 }
 
 impl ResolveError {
@@ -29,8 +29,8 @@ impl ResolveError {
     }
     /// Computes and returns the source code location of this error. Since the AST only stores byte
     /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        compute_loc(input, input.len() as u32 - self.position)
+    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
+        compute_loc(input, input.len() as Position - self.position)
     }
 }
 

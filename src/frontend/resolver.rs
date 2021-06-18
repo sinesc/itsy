@@ -4,9 +4,10 @@ mod scopes;
 pub(crate) mod error;
 
 use std::marker::PhantomData;
+use std::collections::HashMap;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::*;
-use crate::util::{ScopeId, TypeId, BindingId, FunctionId, Type, Array, Struct, Numeric, FnKind, Intrinsic, Bindings, TypeContainer};
+use crate::util::{StackAddress, Array, BindingId, Bindings, FnKind, FunctionId, Intrinsic, ItemCount, Numeric, ScopeId, Struct, Type, TypeContainer, TypeId, STACK_ADDRESS_TYPE};
 use crate::runtime::VMFunc;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -32,6 +33,7 @@ struct Resolver<'ctx> {
     primitives      : &'ctx Primitives,
     /// Set to true once resolution cannot proceed any further, causes numeric literals to be set to their default types.
     infer_literals  : bool,
+    indexers        : &'ctx HashMap<Type, TypeId>,
 }
 
 /// Utility structure to handle primitive type information.
@@ -80,6 +82,17 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
         string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
     };
 
+    // todo: this is all pretty crappy
+    let mut indexers = HashMap::new();
+    indexers.insert(Type::i8, primitives.signed[0]);
+    indexers.insert(Type::i16, primitives.signed[1]);
+    indexers.insert(Type::i32, primitives.signed[2]);
+    indexers.insert(Type::i64, primitives.signed[3]);
+    indexers.insert(Type::u8, primitives.unsigned[0]);
+    indexers.insert(Type::u16, primitives.unsigned[1]);
+    indexers.insert(Type::u32, primitives.unsigned[2]);
+    indexers.insert(Type::u64, primitives.unsigned[3]);
+
     // insert intrinsics // todo tie methods to their struct type
     scopes.insert_intrinsic(root_scope_id, "len", Intrinsic::ArrayLen, primitives.unsigned[2], Vec::new());
 
@@ -114,6 +127,7 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
                 scopes          : &mut scopes,
                 primitives      : &primitives,
                 infer_literals  : infer_literals,
+                indexers        : &indexers,
             };
             resolver.resolve_statement(&mut statement)?; // FIXME: want a vec of errors here
         }
@@ -443,7 +457,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // argument count
             if function_types.arg_type.len() != item.args.len() {
-                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_types.arg_type.len() as u32, item.args.len() as u32)));
+                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_types.arg_type.len() as ItemCount, item.args.len() as ItemCount)));
             }
 
             // arguments
@@ -667,9 +681,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None)?;
-                self.resolve_expression(&mut item.right, Some(self.primitives.unsigned[2]))?; // u32
+                self.resolve_expression(&mut item.right, Some(self.indexers.get(&STACK_ADDRESS_TYPE).unwrap().clone()))?;
                 // left[right] : item
-                self.binding_set_type_id(&mut item.right, self.primitives.unsigned[2])?; // u32
+                self.binding_set_type_id(&mut item.right, self.indexers.get(&STACK_ADDRESS_TYPE).unwrap().clone())?;
                 self.try_create_anon_binding(item);
                 // if we know the result type, set the array element type to that
                 if let Some(result_type_id) = self.binding_type_id(item) {
@@ -699,7 +713,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     let struct_ = ty.as_struct().expect("Member access on a non-struct");
                     let field = item.right.as_member_mut().expect("Internal error: Member access using a non-field");
                     if field.index.is_none() {
-                        field.index = Some(struct_.fields.iter().position(|f| f.0 == field.ident.name).expect("Unknown struct member") as u32);
+                        field.index = Some(struct_.fields.iter().position(|f| f.0 == field.ident.name).expect("Unknown struct member") as ItemCount);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap() as usize].1 {
                         self.binding_set_type_id(item, type_id)?;
@@ -895,7 +909,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // create this level's type based on the inner type
         if self.scopes.binding_type_id(binding_id).is_none() {
             let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                len     : Some(array.elements.len() as u32),
+                len     : Some(array.elements.len() as StackAddress),
                 type_id : elements_type_id,
             }));
             *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);

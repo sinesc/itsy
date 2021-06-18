@@ -11,9 +11,9 @@ macro_rules! comment {
 macro_rules! opcode_signed {
     ($self:ident, $variant8:ident, $varian16:ident, $variant32:ident, $value:expr) => {{
         use std::{i8, i16};
-        if $value >= i8::MIN as i32 && $value <= i8::MAX as i32 {
+        if $value >= i8::MIN as StackOffset && $value <= i8::MAX as StackOffset {
             $self.writer.$variant8($value as i8)
-        } else if $value >= i16::MIN as i32 && $value <= i16::MAX as i32 {
+        } else if $value >= i16::MIN as StackOffset && $value <= i16::MAX as StackOffset {
             $self.writer.$varian16($value as i16)
         } else {
             $self.writer.$variant32($value)
@@ -25,9 +25,9 @@ macro_rules! opcode_signed {
 macro_rules! opcode_unsigned {
     ($self:ident, $variant8:ident, $varian16:ident, $variant32:ident, $value:expr) => {{
         use std::{u8, u16};
-        if $value <= u8::MAX as u32 {
+        if $value <= u8::MAX as StackAddress {
             $self.writer.$variant8($value as u8)
-        } else if $value <= u16::MAX as u32 {
+        } else if $value <= u16::MAX as StackAddress {
             $self.writer.$varian16($value as u16)
         } else {
             $self.writer.$variant32($value)

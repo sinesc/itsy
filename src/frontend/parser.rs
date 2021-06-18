@@ -5,7 +5,7 @@ use nom::types::CompleteStr as Input;
 use nom::*;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
-use crate::util::{Numeric, FnKind, compute_loc};
+use crate::util::{Numeric, FnKind, compute_loc, StackAddress};
 use crate::frontend::ast::*;
 
 /// Represents the various possible parser error-kinds.
@@ -28,16 +28,16 @@ pub enum ParseErrorKind {
 #[derive(Copy, Clone, Debug)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
-    position: u32, // this is the position from the end of the input
+    position: Position, // this is the position from the end of the input
 }
 
 impl ParseError {
-    fn new(kind: ParseErrorKind, offset: u32) -> ParseError {
+    fn new(kind: ParseErrorKind, offset: Position) -> ParseError {
         Self { kind: kind, position: offset }
     }
     /// Computes and returns the source code location of this error.
-    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        compute_loc(input, input.len() as u32 - self.position)
+    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
+        compute_loc(input, input.len() as Position - self.position)
     }
 }
 
@@ -93,7 +93,7 @@ named!(ident(Input<'_>) -> Ident, do_parse!(
     position: rest_len >>
     result: map!(label, |l| Ident {
         name: l,
-        position: position as u32,
+        position: position as Position,
     }) >>
     (result)
 ));
@@ -102,7 +102,7 @@ named!(ident(Input<'_>) -> Ident, do_parse!(
 
 named!(path(Input<'_>) -> Path, do_parse!(
     position: rest_len >>
-    result: map!(ws!(separated_nonempty_list!(tag!("::"), label)), |m| Path { position: position as u32, name: m.into_iter().collect() }) >>
+    result: map!(ws!(separated_nonempty_list!(tag!("::"), label)), |m| Path { position: position as Position, name: m.into_iter().collect() }) >>
     (result)
 ));
 
@@ -157,7 +157,7 @@ fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
     }
 }
 
-fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_>> {
+fn parse_numerical(n: Input<'_>, position: Position) -> IResult<Input<'_>, Literal<'_>> {
     let (value, type_name) = parse_numerical_suffix(n);
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
         if let Ok(float) = str::parse::<f64>(value) {
@@ -192,16 +192,16 @@ fn parse_numerical(n: Input<'_>, position: u32) -> IResult<Input<'_>, Literal<'_
         }
     }
 
-    Err(Error::Failure(Context::List(vec![(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as u32))])))
+    Err(Error::Failure(Context::List(vec![(n, ErrorKind::Custom(ParseErrorKind::InvalidNumerical as Position))])))
 }
 
 named!(numerical(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
-    result: flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), |input| parse_numerical(input, position as u32)) >>
+    result: flat_map!(recognize!(tuple!(opt_sign, digit1, opt_fract, opt_type)), |input| parse_numerical(input, position as Position)) >>
     (result)
 ));
 
-named!(static_size(Input<'_>) -> u32, map!(recognize!(digit1), |digits| str::parse::<u32>(*digits).unwrap()));
+named!(static_size(Input<'_>) -> StackAddress, map!(recognize!(digit1), |digits| str::parse::<StackAddress>(*digits).unwrap()));
 
 // literal boolean (true)
 
@@ -209,7 +209,7 @@ named!(boolean(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(alt!(tag!("true") | tag!("false")), |m| {
         Literal {
-            position    : position as u32,
+            position    : position as Position,
             value       : LiteralValue::Bool(*m == "true"),
             type_name   : None,
             binding_id  : None,
@@ -224,7 +224,7 @@ named!(string(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(delimited!(char!('"'), escaped!(none_of!("\\\""), '\\', one_of!("\"n\\")), char!('"')), |m| {
         Literal {
-            position    : position as u32,
+            position    : position as Position,
             value       : LiteralValue::String(*m),
             type_name   : None,
             binding_id  : None,
@@ -240,7 +240,7 @@ named!(array_literal_elements(Input<'_>) -> Vec<Expression<'_>>, ws!(separated_l
 named!(array_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(char!('['), array_literal_elements, opt!(char!(',')), char!(']'))), |m| Literal {
-        position    : position as u32,
+        position    : position as Position,
         value: LiteralValue::Array(ArrayLiteral {
             elements: m.1,
         }),
@@ -263,7 +263,7 @@ named!(struct_literal_fields(Input<'_>) -> HashMap<&str, Expression<'_>>, map!(w
 named!(struct_literal(Input<'_>) -> Literal<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(path, char!('{'), struct_literal_fields, opt!(char!(',')), char!('}'))), |m| Literal {
-        position    : position as u32,
+        position    : position as Position,
         value: LiteralValue::Struct(StructLiteral {
             fields: m.2,
         }),
@@ -281,12 +281,12 @@ named!(literal<Input<'_>, Literal<'_>>, ws!(alt!(boolean | string | array_litera
 
 named!(assignable(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     var_position: rest_len >>
-    init: map!(ident, |m| Expression::Variable(Variable { position: var_position as u32, ident: m, binding_id: None })) >>
+    init: map!(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None })) >>
     op_position: rest_len >>
     res: fold_many0!(
         alt!(
             map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::IndexWrite, e))
-            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as u32, ident: i, binding_id: None, index: None })))
+            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, binding_id: None, index: None })))
         ),
         init,       // todo: one of the positions must be wrong ;)
         |mut acc, (op, val)| {
@@ -301,7 +301,7 @@ named!(assignable(Input<'_>) -> Expression<'_>, ws!(do_parse!(
                 }
                 _ => {}
             }
-            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as u32, op: op, left: acc, right: val, binding_id: None }))
+            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: acc, right: val, binding_id: None }))
         }
     ) >>
     (res)
@@ -315,7 +315,7 @@ named!(assignment(Input<'_>) -> Assignment<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(assignable, assignment_operator, expression)), |m| {
         Assignment {
-            position: position as u32,
+            position: position as Position,
             op      : m.1,
             left    : m.0,
             right   : m.2,
@@ -332,7 +332,7 @@ named!(call_argument_list(Input<'_>) -> Vec<Expression<'_>>, ws!(delimited!(char
 named!(call(Input<'_>) -> Call<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(ident, call_argument_list)), |m| Call {
-        position        : position as u32,
+        position        : position as Position,
         ident           : m.0,
         args            : m.1,
         call_type       : CallType::Function,
@@ -346,9 +346,9 @@ named!(call(Input<'_>) -> Call<'_>, do_parse!(
 named!(call_static(Input<'_>) -> Call<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(path, call_argument_list)), |mut m| {
-        let ident = Ident { position: position as u32, name: m.0.pop() };
+        let ident = Ident { position: position as Position, name: m.0.pop() };
         Call {
-            position        : position as u32,
+            position        : position as Position,
             ident           : ident,
             args            : m.1,
             call_type       : CallType::Static(m.0),
@@ -372,7 +372,7 @@ named!(block(Input<'_>) -> Block<'_>, do_parse!(
             m.2 = m.1.pop().map(|s| s.into_expression().unwrap());
         }
         Block {
-            position        : position as u32,
+            position        : position as Position,
             statements      : m.1,
             result          : m.2,
             returns         : None,
@@ -388,7 +388,7 @@ named!(block_or_if(Input<'_>) -> Block<'_>, do_parse!(
     position: rest_len >>
     result: ws!(alt!(
         map!(if_block, |m| Block {
-            position        : position as u32,
+            position        : position as Position,
             statements      : Vec::new(),
             result          : Some(Expression::IfBlock(Box::new(m))),
             returns         : None,
@@ -400,17 +400,17 @@ named!(block_or_if(Input<'_>) -> Block<'_>, do_parse!(
 ));
 
 named!(if_else(Input<'_>) -> Block<'_>, preceded!(tag!("else"), return_error!(
-    ErrorKind::Custom(ParseErrorKind::SyntaxElse as u32),
+    ErrorKind::Custom(ParseErrorKind::SyntaxElse as Position),
     block_or_if
 )));
 
 named!(if_block(Input<'_>) -> IfBlock<'_>, do_parse!(
     position: rest_len >>
     result: preceded!(tag!("if"), map!(return_error!(
-            ErrorKind::Custom(ParseErrorKind::SyntaxIf as u32),
+            ErrorKind::Custom(ParseErrorKind::SyntaxIf as Position),
             tuple!(expression, block, opt!(if_else))
         ), |m| IfBlock {
-            position    : position as u32,
+            position    : position as Position,
             cond        : m.0,
             if_block    : m.1,
             else_block  : m.2,
@@ -427,7 +427,7 @@ named!(parens(Input<'_>) -> Expression<'_>, ws!(delimited!(char!('('), expressio
 named!(prefix(Input<'_>) -> UnaryOp<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(pair!(alt!(tag!("++") | tag!("--")), assignable)), |m| UnaryOp {
-        position    : position as u32,
+        position    : position as Position,
         op          : UnaryOperator::prefix_from_string(*m.0),
         expr        : m.1,
         binding_id  : None,
@@ -438,7 +438,7 @@ named!(prefix(Input<'_>) -> UnaryOp<'_>, do_parse!(
 named!(suffix(Input<'_>) -> UnaryOp<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(pair!(assignable, alt!(tag!("++") | tag!("--")))), |m| UnaryOp {
-        position    : position as u32,
+        position    : position as Position,
         op          : UnaryOperator::suffix_from_string(*m.1),
         expr        : m.0,
         binding_id  : None,
@@ -450,7 +450,7 @@ named!(unary(Input<'_>) -> Expression<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(preceded!(tag!("!"), prec6)), |m| {
         Expression::UnaryOp(Box::new(UnaryOp {
-            position    : position as u32,
+            position    : position as Position,
             op          : UnaryOperator::Not,
             expr        : m,
             binding_id  : None,
@@ -470,7 +470,7 @@ named!(operand(Input<'_>) -> Expression<'_>, do_parse!(
         | map!(prefix, |m| Expression::UnaryOp(Box::new(m)))
         | map!(call, |m| Expression::Call(m))
         | map!(call_static, |m| Expression::Call(m))
-        | map!(ident, |m| Expression::Variable(Variable { position: position as u32, ident: m, binding_id: None }))
+        | map!(ident, |m| Expression::Variable(Variable { position: position as Position, ident: m, binding_id: None }))
     )) >>
     (result)
 ));
@@ -482,7 +482,7 @@ named!(prec7(Input<'_>) -> Expression<'_>, ws!(do_parse!(
         alt!(
             map!(delimited!(tag!("["), expression, tag!("]")), |e| (BinaryOperator::Index, e))
             | map!(preceded!(tag!("."), call), |i| (BinaryOperator::Access, Expression::Call(i)))
-            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::Access, Expression::Member(Member { position: position as u32, ident: i, binding_id: None, index: None })))
+            | map!(preceded!(tag!("."), ident), |i| (BinaryOperator::Access, Expression::Member(Member { position: position as Position, ident: i, binding_id: None, index: None })))
         ),
         init, // todo: one of the position values must be wrong :)
         |acc, (op, mut val)| match &mut val {
@@ -490,7 +490,7 @@ named!(prec7(Input<'_>) -> Expression<'_>, ws!(do_parse!(
                 call.call_type = CallType::Method(Box::new(acc));
                 val
             },
-            _ => Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+            _ => Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
         }
     ) >>
     (res)
@@ -504,7 +504,7 @@ named!(prec5(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("*") | tag!("/") | tag!("%")), |o| BinaryOperator::from_string(*o)), prec6),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -515,7 +515,7 @@ named!(prec4(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("+") | tag!("-")), |o| BinaryOperator::from_string(*o)), prec5),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -526,7 +526,7 @@ named!(prec3(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!( // todo: does this work? see comment on "operand"
         pair!(map!(alt!(tag!("<=") | tag!(">=") | tag!("<") | tag!(">")), |o| BinaryOperator::from_string(*o)), prec4),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -537,7 +537,7 @@ named!(prec2(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(alt!(tag!("!=") | tag!("==")), |o| BinaryOperator::from_string(*o)), prec3),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -548,7 +548,7 @@ named!(prec1(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(tag!("&&"), |o| BinaryOperator::from_string(*o)), prec2),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -559,7 +559,7 @@ named!(prec0(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         pair!(map!(tag!("||"), |o| BinaryOperator::from_string(*o)), prec1),
         init,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as u32, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     ) >>
     (res)
 )));
@@ -570,7 +570,7 @@ named!(precn(Input<'_>) -> Expression<'_>, ws!(do_parse!(
     res: fold_many0!(
         preceded!(tag!("as"), path),
         init,
-        |acc, val| Expression::Cast(Box::new(Cast { position: position as u32, expr: acc, ty: TypeName::from_path(val), binding_id: None }))
+        |acc, val| Expression::Cast(Box::new(Cast { position: position as Position, expr: acc, ty: TypeName::from_path(val), binding_id: None }))
     ) >>
     (res)
 )));
@@ -586,11 +586,11 @@ named!(binding(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(
         preceded!(tag!("let"), return_error!(
-            ErrorKind::Custom(ParseErrorKind::SyntaxLet as u32),
+            ErrorKind::Custom(ParseErrorKind::SyntaxLet as Position),
             ws!(tuple!(opt!(tag!("mut")), ident, opt!(preceded!(char!(':'), inline_type)), opt!(preceded!(char!('='), expression)), char!(';')))
         )),
         |m| Statement::Binding(Binding {
-            position    : position as u32,
+            position    : position as Position,
             ident       : m.1,
             mutable     : m.0.is_some(),
             expr        : m.3,
@@ -621,7 +621,7 @@ named!(struct_fields(Input<'_>) -> Vec<(&str, InlineType<'_>)>, map!(ws!(separat
 named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(tag!("struct"), ident, char!('{'), struct_fields, opt!(char!(',')), char!('}'))), |tuple| Statement::Structure(Struct {
-        position    : position as u32,
+        position    : position as Position,
         ident       : tuple.1,
         fields      : tuple.3,
         binding_id  : None,
@@ -633,8 +633,8 @@ named!(struct_(Input<'_>) -> Statement<'_>, do_parse!(
 
 named!(array(Input<'_>) -> Array<'_>, do_parse!(
     position: rest_len >>
-    result: map!(delimited!(char!('['), return_error!(ErrorKind::Custom(ParseErrorKind::SyntaxInlineType as u32), ws!(tuple!(inline_type, char!(';'), static_size))), char!(']')), |tuple| Array {
-        position    : position as u32,
+    result: map!(delimited!(char!('['), return_error!(ErrorKind::Custom(ParseErrorKind::SyntaxInlineType as Position), ws!(tuple!(inline_type, char!(';'), static_size))), char!(']')), |tuple| Array {
+        position    : position as Position,
         element_type: tuple.0,
         len         : tuple.2,
         binding_id  : None,
@@ -647,7 +647,7 @@ named!(array(Input<'_>) -> Array<'_>, do_parse!(
 named!(signature_argument(Input<'_>) -> Binding<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(opt!(tag!("mut")), ident, char!(':'), inline_type)), |tuple| Binding {
-        position    : position as u32,
+        position    : position as Position,
         ident       : tuple.1,
         expr        : None,
         mutable     : tuple.0.is_some(),
@@ -663,7 +663,7 @@ named!(signature_return_part(Input<'_>) -> InlineType, ws!(preceded!(tag!("->"),
 
 named!(signature(Input<'_>) -> Signature<'_>, map!(
     preceded!(tag!("fn"), return_error!(
-        ErrorKind::Custom(ParseErrorKind::SyntaxFn as u32),
+        ErrorKind::Custom(ParseErrorKind::SyntaxFn as Position),
         ws!(tuple!(ident, signature_argument_list, opt!(signature_return_part)))
     )), |sig| Signature {
     ident   : sig.0,
@@ -674,7 +674,7 @@ named!(signature(Input<'_>) -> Signature<'_>, map!(
 named!(function(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(signature, block)), |func| Statement::Function(Function {
-        position    : position as u32,
+        position    : position as Position,
         sig         : func.0,
         block       : func.1,
         function_id : None,
@@ -689,7 +689,7 @@ named!(for_loop_range(Input<'_>) -> Expression<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(expression, alt!(tag!("..=") | tag!("..")), expression)), |m| {
         Expression::BinaryOp(Box::new(BinaryOp {
-            position    : position as u32,
+            position    : position as Position,
             op          : BinaryOperator::from_string(*m.1),
             left        : m.0,
             right       : m.2,
@@ -702,9 +702,9 @@ named!(for_loop_range(Input<'_>) -> Expression<'_>, do_parse!(
 named!(for_loop(Input<'_>) -> ForLoop<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(tuple!(tag!("for"), ident, tag!("in"), alt!(for_loop_range | expression), block)), |m| ForLoop {
-        position: position as u32,
+        position: position as Position,
         iter: Binding {
-            position    : position as u32,
+            position    : position as Position,
             ident       : m.1,
             mutable     : true,
             expr        : None,
@@ -723,7 +723,7 @@ named!(for_loop(Input<'_>) -> ForLoop<'_>, do_parse!(
 named!(while_loop(Input<'_>) -> WhileLoop<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(preceded!(tag!("while"), tuple!(expression, block))), |m| WhileLoop {
-        position: position as u32,
+        position: position as Position,
         expr    : m.0,
         block   : m.1,
         scope_id: None,
@@ -737,7 +737,7 @@ named!(return_statement(Input<'_>) -> Statement<'_>, do_parse!(
     position: rest_len >>
     result: map!(ws!(preceded!(tag!("return"), terminated!(opt!(expression), char!(';')))),
         |m| Statement::Return(Return {
-            position        : position as u32,
+            position        : position as Position,
             expr            : m,
         })
     ) >>
@@ -777,10 +777,10 @@ fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseErro
     let (remainder, error_kind) = err.unwrap();
     match error_kind {
         ErrorKind::Custom(custom) => {
-            ParseError::new(unsafe { ::std::mem::transmute(*custom) }, (input.len() - remainder.len()) as u32) // todo: figure out how to specify custom error type
+            ParseError::new(unsafe { ::std::mem::transmute(*custom) }, (input.len() - remainder.len()) as Position) // todo: figure out how to specify custom error type
         }
         _ => {
-            ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as u32)
+            ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as Position)
         }
     }
 }
@@ -791,7 +791,7 @@ pub fn parse(input: &str) -> Result<ParsedProgram<'_>, ParseError> {
     match result {
         Ok(result) => {
             if result.0.len() > 0 {
-                Err(ParseError::new(ParseErrorKind::UnexpectedEOF, input.len() as u32))
+                Err(ParseError::new(ParseErrorKind::UnexpectedEOF, input.len() as Position))
             } else {
                 Ok(ParsedProgram(result.1))
             }

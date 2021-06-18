@@ -9,8 +9,10 @@ pub use self::typed_ids::*;
 mod types;
 pub use self::types::*;
 
+use crate::frontend::ast::Position;
+
 /// Compute line/column number from absolute offset in string
-pub(crate) fn compute_loc(input: &str, offset: u32) -> (u32, u32) {
+pub(crate) fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
     let mut parsed = &input[0..offset as usize];
     let mut line = 1;
     while { // can't use let parsed.lines() here as a line-break at the end is ignored
@@ -26,7 +28,7 @@ pub(crate) fn compute_loc(input: &str, offset: u32) -> (u32, u32) {
             false
         }
     } {}
-    (line as u32, parsed.len() as u32 + 1)
+    (line as Position, parsed.len() as Position + 1)
 }
 
 /// References two elements of a slice mutably

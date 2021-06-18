@@ -2,6 +2,7 @@
 
 use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::util::{BindingId, FunctionId, ScopeId, Numeric, FnKind};
+use crate::util::{StackAddress, ItemCount};
 
 /// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {
@@ -34,17 +35,19 @@ macro_rules! impl_bindable {
     };
 }
 
+pub(crate) type Position = u32;
+
 /// Source code position handling for AST structures associated with a position.
 pub(crate) trait Positioned {
     /// Returns the structure's position.
-    fn position(self: &Self) -> u32;
+    fn position(self: &Self) -> Position;
 }
 
 /// Implements the Position trait for given structure.
 macro_rules! impl_positioned {
     ($struct_name:ident) => {
         impl<'a> Positioned for $struct_name<'a> {
-            fn position(self: &Self) -> u32 {
+            fn position(self: &Self) -> Position {
                 self.position
             }
         }
@@ -87,7 +90,7 @@ pub(crate) trait Returns {
 
 #[derive(Debug)]
 pub struct Ident<'a> {
-    pub position: u32,
+    pub position: Position,
     pub name: &'a str,
 }
 impl_positioned!(Ident);
@@ -95,7 +98,7 @@ impl_display!(Ident, "{}", name);
 
 #[derive(Debug)]
 pub struct Path<'a> {
-    pub position: u32,
+    pub position: Position,
     pub name: Vec<&'a str>,
 }
 
@@ -152,7 +155,7 @@ impl<'a> Returns for Statement<'a> {
 }
 
 impl<'a> Positioned for Statement<'a> {
-    fn position(self: &Self) -> u32 {
+    fn position(self: &Self) -> Position {
         impl_matchall!(self, Statement, item, { item.position() })
     }
 }
@@ -165,7 +168,7 @@ impl<'a> Debug for Statement<'a> {
 
 #[derive(Debug)]
 pub struct Binding<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub ident       : Ident<'a>,
     pub mutable     : bool,
     pub expr        : Option<Expression<'a>>,
@@ -177,7 +180,7 @@ impl_positioned!(Binding);
 
 #[derive(Debug)]
 pub struct Function<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub sig         : Signature<'a>,
     pub block       : Block<'a>,
     pub function_id : Option<FunctionId>,
@@ -207,7 +210,7 @@ impl<'a> TypeName<'a> {
             binding_id : None,
         }
     }
-    pub fn from_str(name: &'a str, position: u32) -> Self {
+    pub fn from_str(name: &'a str, position: Position) -> Self {
         TypeName {
             path    : Path { name: vec! [ name ], position: position },
             binding_id : None,
@@ -216,7 +219,7 @@ impl<'a> TypeName<'a> {
 }
 
 impl<'a> Positioned for TypeName<'a> {
-    fn position(self: &Self) -> u32 {
+    fn position(self: &Self) -> Position {
         self.path.position
     }
 }
@@ -258,9 +261,9 @@ impl<'a> Bindable for InlineTypeKind<'a> {
 
 #[derive(Debug)]
 pub struct Array<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub element_type: InlineType<'a>,
-    pub len         : u32,
+    pub len         : StackAddress,
     pub binding_id  : Option<BindingId>,
 }
 impl_positioned!(Array);
@@ -268,7 +271,7 @@ impl_bindable!(Array);
 
 #[derive(Debug)]
 pub struct Struct<'a> {
-    pub position: u32,
+    pub position: Position,
     pub ident   : Ident<'a>,
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub binding_id  : Option<BindingId>,
@@ -278,7 +281,7 @@ impl_bindable!(Struct);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
-    pub position: u32,
+    pub position: Position,
     pub iter    : Binding<'a>,
     pub range   : Expression<'a>,
     pub block   : Block<'a>,
@@ -288,7 +291,7 @@ impl_positioned!(ForLoop);
 
 #[derive(Debug)]
 pub struct WhileLoop<'a> {
-    pub position: u32,
+    pub position: Position,
     pub expr    : Expression<'a>,
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
@@ -298,14 +301,14 @@ impl_display!(WhileLoop, "while {} {{ ... }}", expr);
 
 #[derive(Debug)]
 pub struct Return<'a> {
-    pub position        : u32,
+    pub position        : Position,
     pub expr            : Option<Expression<'a>>,
 }
 impl_positioned!(Return);
 
 #[derive(Debug)]
 pub struct IfBlock<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub cond        : Expression<'a>,
     pub if_block    : Block<'a>,
     pub else_block  : Option<Block<'a>>,
@@ -341,7 +344,7 @@ impl<'a> Bindable for IfBlock<'a> {
 
 #[derive(Debug)]
 pub struct Block<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub statements  : Vec<Statement<'a>>,
     pub result      : Option<Expression<'a>>,
     pub returns     : Option<Expression<'a>>,
@@ -457,7 +460,7 @@ impl<'a> Bindable for Expression<'a> {
 }
 
 impl<'a> Positioned for Expression<'a> {
-    fn position(self: &Self) -> u32 {
+    fn position(self: &Self) -> Position {
         impl_matchall!(self, Expression, item, { item.position() })
     }
 }
@@ -476,7 +479,7 @@ impl<'a> Display for Expression<'a> {
 
 #[derive(Debug)]
 pub struct Literal<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub value       : LiteralValue<'a>,
     pub type_name   : Option<TypeName<'a>>, // used in e.g. 1i8, 3.1415f32
     pub binding_id  : Option<BindingId>,
@@ -574,7 +577,7 @@ pub struct StructLiteral<'a> {
 
 #[derive(Debug)]
 pub struct Variable<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
 }
@@ -584,10 +587,10 @@ impl_display!(Variable, "{}", ident);
 
 #[derive(Debug)]
 pub struct Member<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
-    pub index       : Option<u32>,
+    pub index       : Option<ItemCount>,
 }
 impl_bindable!(Member);
 impl_positioned!(Member);
@@ -602,7 +605,7 @@ pub enum CallType<'a> {
 
 #[derive(Debug)]
 pub struct Call<'a> {
-    pub position        : u32,
+    pub position        : Position,
     pub ident           : Ident<'a>,
     pub args            : Vec<Expression<'a>>,
     pub call_type       : CallType<'a>,
@@ -616,7 +619,7 @@ impl_display!(Call, "{}({:?})", ident, args);
 
 #[derive(Debug)]
 pub struct Assignment<'a> {
-    pub position: u32,
+    pub position: Position,
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
@@ -634,7 +637,7 @@ impl<'a> Returns for Assignment<'a> {
 
 #[derive(Debug)]
 pub struct Cast<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub expr        : Expression<'a>,
     pub ty          : TypeName<'a>,
     pub binding_id  : Option<BindingId>,
@@ -651,7 +654,7 @@ impl<'a> Returns for Cast<'a> {
 
 #[derive(Debug)]
 pub struct BinaryOp<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub op          : BinaryOperator,
     pub left        : Expression<'a>,
     pub right       : Expression<'a>,
@@ -669,7 +672,7 @@ impl<'a> Returns for BinaryOp<'a> {
 
 #[derive(Debug)]
 pub struct UnaryOp<'a> {
-    pub position    : u32,
+    pub position    : Position,
     pub op          : UnaryOperator,
     pub expr        : Expression<'a>,
     pub binding_id  : Option<BindingId>,

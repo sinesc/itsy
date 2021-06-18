@@ -9,11 +9,12 @@ use std::marker::PhantomData;
 pub use self::writer::*;
 pub use self::compiler::{compile, CompileError, CompileErrorKind};
 pub use self::opcodes::OpCode;
+use crate::util::{StackAddress, StackOffset};
 
-const CALLSIZE: i32 = 2 * 4; // previous FP and PC
-const ARG1: i32 = -CALLSIZE - 1 * 4;
-const ARG2: i32 = -CALLSIZE - 2 * 4;
-const ARG3: i32 = -CALLSIZE - 3 * 4;
+const CALLSIZE: StackOffset = 2 * 4; // previous FP and PC
+const ARG1: StackOffset = -CALLSIZE - 1 * 4;
+const ARG2: StackOffset = -CALLSIZE - 2 * 4;
+const ARG3: StackOffset = -CALLSIZE - 3 * 4;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -37,8 +38,8 @@ pub(crate) enum ConstEndianness {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConstDescriptor {
-    pub(crate) position    : u32,
-    pub(crate) size        : u32,
+    pub(crate) position    : StackAddress,
+    pub(crate) size        : StackAddress,
     pub(crate) endianness  : ConstEndianness,
 }
 

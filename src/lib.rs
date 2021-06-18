@@ -120,14 +120,12 @@ macro_rules! extern_rust {
         $vm.heap.string(item)
     } };
     (@handle_param $vm:ident, & $_:tt) => { { // object by reference // fixme: this won't work, structs aren't aligned
-        let heap_offset: u32 = $vm.stack.pop();
-        let heap_index: u32 = $vm.stack.pop();
-        $vm.heap.load(heap_index)
+        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        $vm.heap.load(item.index)
     } };
     (@handle_param $vm:ident, $_:tt) => { { // object by value // fixme: this won't work, structs aren't aligned
-        let heap_offset: u32 = $vm.stack.pop();
-        let heap_index: u32 = $vm.stack.pop();
-        $vm.heap.clone(heap_index)
+        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        $vm.heap.clone(item.index)
     } };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {

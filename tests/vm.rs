@@ -710,7 +710,7 @@ fn index_assign_primitive() {
 #[test]
 fn heap_compound_assign() {
     let result = run("
-        fn left() -> u32 {
+        fn left() -> u64 {
             ret_u8(9);
             0
         }
@@ -731,7 +731,7 @@ fn heap_compound_assign() {
 #[test]
 fn heap_compound_assign64() {
     let result = run("
-        fn left() -> u32 {
+        fn left() -> u64 {
             ret_u64(9);
             0
         }

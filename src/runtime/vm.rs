@@ -5,6 +5,7 @@ use std::mem::size_of;
 use crate::bytecode::{Program, ConstDescriptor, ConstEndianness};
 use crate::util::Constructor;
 use crate::runtime::*;
+use crate::util::{StackAddress, StackOffset, ItemCount};
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -29,12 +30,12 @@ pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
     context_type            : std::marker::PhantomData<U>,
     func_type               : std::marker::PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
-    pub(crate) pc           : u32,
+    pub(crate) pc           : StackAddress,
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
     pub(crate) tmp          : Stack,
-    pub(crate) tmp_fp       : u32,
+    pub(crate) tmp_fp       : StackAddress,
 }
 
 /// Public VM methods.
@@ -117,7 +118,6 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                 (CE::Integer, 2)    => stack.push(u16::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Integer, 4)    => stack.push(u32::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Integer, 8)    => stack.push(u64::from_le_bytes(consts[start..end].try_into().unwrap())),
-                (CE::Integer, 16)   => stack.push(u128::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Float, 4)      => stack.push(f32::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Float, 8)      => stack.push(f64::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::None, _)       => stack.extend_from(&consts[start..end]),
@@ -130,26 +130,26 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
 
     /// Reads a constructor opcode.
     #[inline(always)]
-    fn read_op(self: &Self, constructor_offset: &mut u32) -> Constructor {
+    fn read_op(self: &Self, constructor_offset: &mut StackAddress) -> Constructor {
         let op = Constructor::from_u8(self.stack.load(*constructor_offset));
-        *constructor_offset += size_of::<u8>() as u32;
+        *constructor_offset += size_of::<u8>() as StackAddress;
         op
     }
 
     /// Reads a constructor argument.
     #[inline(always)]
-    fn read_arg(self: &Self, constructor_offset: &mut u32) -> u32 {
-        let arg: u32 = self.stack.load(*constructor_offset);
-        *constructor_offset += size_of::<u32>() as u32;
-        arg
+    fn read_arg(self: &Self, constructor_offset: &mut StackAddress) -> StackAddress {
+        let arg: ItemCount = self.stack.load(*constructor_offset);
+        *constructor_offset += size_of::<ItemCount>() as StackAddress;
+        arg as StackAddress
     }
 
     /// Writes prototype copy to given target (stack or heap).
-    fn write_proto(self: &mut Self, target: CopyTarget, prototype_offset: u32, num_bytes: u32) {
+    fn write_proto(self: &mut Self, target: CopyTarget, prototype_offset: StackAddress, num_bytes: StackAddress) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
                 let src = self.stack.data();
-                self.heap.extend_from(target_heap_ref.index, &src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
+                self.heap.extend_from(target_heap_ref.index(), &src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
             },
             CopyTarget::Stack => self.stack.extend(prototype_offset, num_bytes),
         }
@@ -159,15 +159,14 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     fn write_ref(self: &mut Self, target: CopyTarget, heap_ref: HeapRef) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
-                self.heap.extend_from(target_heap_ref.index, &heap_ref.index.to_ne_bytes());
-                self.heap.extend_from(target_heap_ref.index, &heap_ref.offset.to_ne_bytes());
+                self.heap.extend_from(target_heap_ref.index(), &heap_ref.to_ne_bytes());
             }
             CopyTarget::Stack => self.stack.push(heap_ref),
         }
     }
 
     /// Constructs instance from given constructor and prototype. Modifies input for internal purposes.
-    pub(crate) fn construct_value(self: &mut Self, constructor_offset: &mut u32, prototype_offset: &mut u32, target: CopyTarget, existing_strings: bool) {
+    pub(crate) fn construct_value(self: &mut Self, constructor_offset: &mut StackAddress, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) {
         match self.read_op(constructor_offset) {
             Constructor::Primitive => {
                 let num_bytes = self.read_arg(constructor_offset);
@@ -175,7 +174,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                 *prototype_offset += num_bytes;
             }
             Constructor::Array => {
-                let heap_ref = HeapRef { index: self.heap.alloc(Vec::new()), offset: 0 }; // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
+                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
                 self.write_ref(target, heap_ref);
                 let num_elements = self.read_arg(constructor_offset);
                 let original_constructor_offset = *constructor_offset;
@@ -186,7 +185,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                 }
             }
             Constructor::Struct => {
-                let heap_ref = HeapRef { index: self.heap.alloc(Vec::new()), offset: 0 };
+                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0);
                 self.write_ref(target, heap_ref);
                 let num_fields = self.read_arg(constructor_offset);
                 for _ in 0..num_fields {
@@ -195,14 +194,14 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
             }
             Constructor::String => {
                 if existing_strings {
-                    let num_bytes = HeapRef::size() as u32;
+                    let num_bytes = HeapRef::size() as StackAddress;
                     self.write_proto(target, *prototype_offset, num_bytes);
                     *prototype_offset += num_bytes;
                 } else {
-                    let heap_ref = HeapRef { index: self.heap.alloc(Vec::new()), offset: 0 };
+                    let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0);
                     self.write_ref(target, heap_ref);
-                    let num_bytes: u32 = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
-                    *prototype_offset += ::std::mem::size_of_val(&num_bytes) as u32;
+                    let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
+                    *prototype_offset += ::std::mem::size_of_val(&num_bytes) as StackAddress;
                     self.write_proto(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
                 }
             }
@@ -210,13 +209,13 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references.
-    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: u32, op: HeapRefOp) {
+    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: StackAddress, op: HeapRefOp) {
         let constructor = self.read_op(&mut constructor_offset);
         self.refcount_recurse(constructor, item, &mut constructor_offset, op);
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
-    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut u32, op: HeapRefOp) {
+    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp) {
         match constructor {
             Constructor::Array => {
                 let num_elements = self.read_arg(&mut constructor_offset);
@@ -233,7 +232,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                     // skip primitive num_bytes
                     self.read_arg(&mut constructor_offset);
                 }
-                self.heap.ref_item(item.index, op);
+                self.heap.ref_item(item.index(), op);
             }
             Constructor::Struct => {
                 let num_fields = self.read_arg(&mut constructor_offset);
@@ -244,13 +243,13 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
                         self.refcount_recurse(field_constructor, field, &mut constructor_offset, op);
                     } else {
                         let num_bytes = self.read_arg(&mut constructor_offset);
-                        item.offset += num_bytes;
+                        item.add_offset(num_bytes as StackOffset);
                     }
                 }
-                self.heap.ref_item(item.index, op);
+                self.heap.ref_item(item.index(), op);
             }
             Constructor::String => {
-                self.heap.ref_item(item.index, op);
+                self.heap.ref_item(item.index(), op);
             }
             Constructor::Primitive => {
                 panic!("Unexpected primitive constructor");

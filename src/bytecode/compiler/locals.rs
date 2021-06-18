@@ -1,16 +1,17 @@
 use std::{collections::HashMap, cell::RefCell};
-use crate::util::BindingId;
+use crate::util::{BindingId, StackAddress};
+
 /// Describes a single local variable of a stack frame
 #[derive(Copy,Clone)]
 pub struct Local {
     /// The load-index for this variable.
-    pub index   : u32,
+    pub index   : StackAddress,
     /// Whether this variable is currently in scope (stack frame does not equal scope!)
     pub in_scope: bool,
 }
 
 impl Local {
-    pub fn new(index: u32) -> Self {
+    pub fn new(index: StackAddress) -> Self {
         Local { index, in_scope: false }
     }
 }
@@ -20,13 +21,13 @@ pub struct Locals { // TODO rename Frame?
     /// Maps a binding ID to a variable or argument position on the stack.
     pub map     : HashMap<BindingId, Local>,
     /// Index of the NEXT argument to be inserted.
-    pub arg_pos : u32,
+    pub arg_pos : StackAddress,
     /// Index for the NEXT variable to be inserted.
-    pub var_pos : u32,
+    pub var_pos : StackAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
     /// Addresses of forward jumps within the function that need to be replaced with the return location
-    pub unfixed_exit_jmps: Vec<u32>,
+    pub unfixed_exit_jmps: Vec<StackAddress>,
 }
 
 impl Locals {
@@ -66,7 +67,7 @@ impl LocalsStack {
         func(&mut locals);
     }
     /// Returns the argument size in bytes for the top stack frame descriptor.
-    pub fn arg_size(self: &Self) -> u32 {
+    pub fn arg_size(self: &Self) -> StackAddress {
         self.0.borrow().last().expect(Self::NO_STACK).arg_pos
     }
     /// Returns the return value size in bytes for the top stack frame descriptor.
@@ -84,7 +85,7 @@ impl LocalsStack {
         locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING).in_scope = active;
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
-    pub fn add_forward_jmp(self: &Self, address: u32) {
+    pub fn add_forward_jmp(self: &Self, address: StackAddress) {
         self.0.borrow_mut().last_mut().expect(Self::NO_STACK).unfixed_exit_jmps.push(address);
     }
 }

@@ -5,8 +5,8 @@ mod locals;
 mod macros;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap, fmt::{self, Display}};
-use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, compute_loc, TypeContainer, Struct};
-use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType}, ResolvedProgram};
+use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, compute_loc, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
+use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType, Position}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, HeapRefOp};
 use locals::{Local, Locals, LocalsStack};
@@ -21,7 +21,7 @@ pub enum CompileErrorKind {
 #[derive(Clone, Debug)]
 pub struct CompileError {
     pub kind: CompileErrorKind,
-    position: u32, // this is the position from the end of the input
+    position: Position, // this is the position from the end of the input
 }
 
 impl CompileError {
@@ -30,8 +30,8 @@ impl CompileError {
     }
     /// Computes and returns the source code location of this error. Since the AST only stores byte
     /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        compute_loc(input, input.len() as u32 - self.position)
+    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
+        compute_loc(input, input.len() as Position - self.position)
     }
 }
 
@@ -48,8 +48,8 @@ type CompileResult = Result<(), CompileError>;
 
 #[derive(Clone, Copy)]
 struct CallInfo {
-    arg_size: u32,
-    addr: u32,
+    arg_size: StackAddress,
+    addr: StackAddress,
 }
 
 impl CallInfo {
@@ -65,11 +65,11 @@ pub struct Compiler<'ty, T> where T: VMFunc<T> {
     /// Maps from binding id to load-argument for each frame.
     locals: LocalsStack,
     /// Non-primitive type constructors.
-    constructors: HashMap<&'ty Type, u32>,
+    constructors: HashMap<&'ty Type, StackAddress>,
     // Maps functions to their call index.
     functions: RefCell<HashMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<u32>>>,
+    unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<StackAddress>>>,
     /// Set to true while compiling expressions within a Struct/Array constructor. Prevents writing additional constructors for nested structures. TODO: Crappy solution.
     writing_protype_instructions: Cell<bool>,
 }
@@ -192,16 +192,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.compile_expression(&item.right)?;
                 if ty.is_ref() {
                     self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(index as i32, ty);
+                    self.write_load(index as StackOffset, ty);
                     self.write_decref(constructor);
                 }
-                self.write_store(index as i32, ty);
+                self.write_store(index as StackOffset, ty);
             },
             _ => {
-                self.write_load(index as i32, ty); // stack: L
+                self.write_load(index as StackOffset, ty); // stack: L
                 self.compile_expression(&item.right)?; // stack: L R
                 if ty.is_ref() {
-                    self.writer.store_tmp64(); // incref temporary right operand
+                    self.writer.storeref(); // incref temporary right operand
                     self.write_incref(constructor);
                 }
                 match item.op { // stack: Result
@@ -214,12 +214,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 };
                 if ty.is_ref() {
                     self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(index as i32, ty);
+                    self.write_load(index as StackOffset, ty);
                     self.write_decref(constructor);
-                    self.writer.pop_tmp64(); // decref temporary right operand
+                    self.writer.popref(); // decref temporary right operand
                     self.write_decref(constructor);
                 }
-                self.write_store(index as i32, ty); // stack -
+                self.write_store(index as StackOffset, ty); // stack -
             },
         };
         Ok(())
@@ -257,7 +257,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     self.write_heap_fetch(ty);          // stack: right &left left
                     self.write_decref(constructor);    // stack: right &left
                 }
-                self.writer.store_tmp64();              // stack: right &left, tmp: &left
+                self.writer.storeref();              // stack: right &left, tmp: &left
                 self.write_heap_fetch(ty);              // stack: right left, tmp: &left
                 self.write_swap(ty);                    // stack: left right, tmp: &left
                 match item.op {                         // stack: result, tmp: &left
@@ -268,7 +268,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     _ => unreachable!("Unsupported assignment operator encountered"),
                 };
-                self.writer.pop_tmp64();                // stack: result, &left
+                self.writer.popref();                // stack: result, &left
                 self.write_heap_put(ty);                // stack -
             },
         }
@@ -333,7 +333,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             if ty.is_ref() {
                 self.write_incref(self.get_constructor(ty));
             }
-            self.write_store(index as i32, ty);
+            self.write_store(index as StackOffset, ty);
         }
         self.locals.set_active(binding_id, true);
         Ok(())
@@ -346,7 +346,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
         };
-        self.write_load(load_index as i32, self.binding_type(item));
+        self.write_load(load_index as StackOffset, self.binding_type(item));
         Ok(())
     }
 
@@ -421,11 +421,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let (var_index, var_type) = self.range_info(item);
                 // store lower range bound in iter variable
                 self.compile_expression(&binary_op.left)?;
-                self.write_store(var_index as i32, var_type);
+                self.write_store(var_index as StackOffset, var_type);
                 // push upper range bound
                 self.compile_expression(&binary_op.right)?;
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
-                self.write_load(var_index as i32, var_type);
+                self.write_load(var_index as StackOffset, var_type);
                 self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
@@ -437,7 +437,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let start_target = self.writer.position();
                 self.compile_block(&item.block)?;
                 // load bounds, increment and compare
-                self.write_preinc(var_index as i32, var_type);
+                self.write_preinc(var_index as StackOffset, var_type);
                 self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
@@ -468,7 +468,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos));
-            frame.arg_pos += self.binding_type(arg).primitive_size() as u32;
+            frame.arg_pos += self.binding_type(arg).primitive_size() as StackAddress;
         }
         self.create_stack_frame_block(&item.block, &mut frame);
         // store call info required to compile calls to this function
@@ -613,16 +613,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         self.locals.lookup(binding_id).index
                     };
                     match item.op {
-                        UO::IncBefore => self.write_preinc(load_index as i32, &exp_type),
-                        UO::DecBefore => self.write_predec(load_index as i32, &exp_type),
-                        UO::IncAfter => self.write_postinc(load_index as i32, &exp_type),
-                        UO::DecAfter => self.write_postdec(load_index as i32, &exp_type),
+                        UO::IncBefore => self.write_preinc(load_index as StackOffset, &exp_type),
+                        UO::DecBefore => self.write_predec(load_index as StackOffset, &exp_type),
+                        UO::IncAfter => self.write_postinc(load_index as StackOffset, &exp_type),
+                        UO::DecAfter => self.write_postdec(load_index as StackOffset, &exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;
-                    self.writer.store_tmp64();
+                    self.writer.storeref();
                     self.write_heap_fetch(exp_type);
                     comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
@@ -636,7 +636,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     if item.op == UO::IncBefore || item.op == UO::DecBefore {
                         self.write_clone(exp_type, 0);
                     }
-                    self.writer.pop_tmp64();
+                    self.writer.popref();
                     self.write_heap_put(exp_type);
                 } else {
                     panic!("Operator {:?} can not be used here", item.op);
@@ -821,7 +821,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Returns constructor index for given type.
-    fn get_constructor(self: &Self, ty: &Type) -> u32 {
+    fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
     }
 
@@ -838,7 +838,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Retrieve for-in loop range variable index/type
-    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (u32, &Type) {
+    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (StackAddress, &Type) {
         let var_index = {
             let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id).index
@@ -886,13 +886,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
                 frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos));
-                frame.var_pos += self.binding_type(binding).primitive_size() as u32;
+                frame.var_pos += self.binding_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos));
-                frame.var_pos += self.binding_type(&for_loop.iter).primitive_size() as u32;
+                frame.var_pos += self.binding_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);
@@ -913,17 +913,18 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes a constructor for non-primitive types.
-    fn store_constructor(self: &Self, ty: &Type) -> u32 {
+    fn store_constructor(self: &Self, ty: &Type) -> StackAddress {
         let position = self.writer.const_len();
+        //let prototype_size = 0; // TODO track size here?
         match ty {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array as u8);
-                self.writer.store_const(array.len.unwrap() as u32);
+                self.writer.store_const(array.len.unwrap() as ItemCount);
                 self.store_constructor(self.get_type(array.type_id));
             }
             Type::Struct(structure) => {
                 self.writer.store_const(Constructor::Struct as u8);
-                self.writer.store_const(structure.fields.len() as u32);
+                self.writer.store_const(structure.fields.len() as ItemCount);
                 for field in &structure.fields {
                     self.store_constructor(self.get_type(field.1));
                 }
@@ -934,14 +935,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::Enum(_) => unimplemented!("enum constructor"),
             _ => {
                 self.writer.store_const(Constructor::Primitive as u8);
-                self.writer.store_const(ty.primitive_size() as u32);
+                self.writer.store_const(ty.primitive_size() as ItemCount);
             }
         }
         position
     }
 
     /// Stores given literal on the const pool.
-    fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> u32 {
+    fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> StackAddress {
         use crate::frontend::ast::LiteralValue;
         let ty = self.binding_type(item);
         let pos = self.writer.const_len();
@@ -975,7 +976,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Stores given numeric on the const pool.
-    fn store_numeric_prototype(self: &Self, numeric: Numeric, ty: &Type) -> u32 {
+    fn store_numeric_prototype(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
         match numeric {
             Numeric::Signed(v) => {
                 match ty {
@@ -1007,12 +1008,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Computes struct member offset in bytes.
-    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: u32) -> u32 {
+    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: ItemCount) -> StackAddress {
         let mut offset = 0;
         for index in 0 .. member_index {
             let field_type = self.get_type(struct_.fields[index as usize].1);
             // use reference size for references, otherwise shallow type size
-            offset += field_type.primitive_size() as u32;
+            offset += field_type.primitive_size() as StackAddress;
         }
         offset
     }
@@ -1077,17 +1078,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the incref instruction.
-    fn write_incref(self: &Self, constructor: u32) {
+    fn write_incref(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, incref_8, incref_16, incref_32, constructor);
     }
 
     /// Writes an appropriate variant of the decref instruction.
-    fn write_decref(self: &Self, constructor: u32) {
+    fn write_decref(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, decref_8, decref_16, decref_32, constructor);
     }
 
     /// Writes an appropriate variant of the zeroref instruction.
-    fn write_zeroref(self: &Self, constructor: u32) {
+    fn write_zeroref(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, zeroref_8, zeroref_16, zeroref_32, constructor);
     }
 
@@ -1098,11 +1099,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let constructor = self.get_constructor(ty);
             match op {
                 HeapRefOp::Inc => {
-                    self.writer.store_tmp64();
+                    self.writer.storeref();
                     self.write_incref(constructor);
                 }
                 HeapRefOp::Dec => {
-                    self.writer.pop_tmp64();
+                    self.writer.popref();
                     self.write_decref(constructor);
                 }
                 HeapRefOp::Zero => unreachable!("Invalid heap ref op")
@@ -1118,7 +1119,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let ty = self.bindings.binding_type(binding_id);
                 if ty.is_ref() {
                     let constructor = self.get_constructor(ty);
-                    self.write_load(local.index as i32, ty);
+                    self.write_load(local.index as StackOffset, ty);
                     self.write_decref(constructor);
                 }
             }
@@ -1126,20 +1127,21 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to compute member offset for access on a struct.
-    fn write_member_offset(self: &Self, offset: u32) {
+    fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset == 0 {
             // nothing to do
         } else if offset == 1 {
             self.writer.inci32();
         } else {
+            assert!(::std::mem::size_of::<StackAddress>() == ::std::mem::size_of::<u32>());
             let const_id = self.writer.store_const(offset);
-            self.write_const(const_id, &Type::u32);
-            self.writer.addi32();
+            self.write_const(const_id, &STACK_ADDRESS_TYPE);
+            self.write_add(&STACK_ADDRESS_TYPE)
         }
     }
 
-    /// Writes an appropriate variant of the load instruction.
-    fn write_const(self: &Self, index: u32, ty: &Type) {
+    /// Writes an appropriate variant of the const instruction.
+    fn write_const(self: &Self, index: StackAddress, ty: &Type) {
         match ty.primitive_size() {
             1 => opcode_unsigned!(self, const8_8, const8_16, const8_32, index),
             2 => opcode_unsigned!(self, const16_8, const16_16, const16_32, index),
@@ -1175,7 +1177,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
-    fn write_heap_fetch_member(self: &Self, ty: &Type, offset: u32) {
+    fn write_heap_fetch_member(self: &Self, ty: &Type, offset: StackAddress) {
         match ty.primitive_size() {
             1 => { self.writer.heap_fetch_member8(offset); },
             2 => { self.writer.heap_fetch_member16(offset); },
@@ -1199,7 +1201,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, index: i32, ty: &Type) {
+    fn write_store(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
             1 => opcode_signed!(self, store8_8, store8_16, store8_32, index),
             2 => opcode_signed!(self, store16_8, store16_16, store16_32, index),
@@ -1211,7 +1213,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, index: i32, ty: &Type) {
+    fn write_load(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
             1 => opcode_signed!(self, load8_8, load8_16, load8_32, index),
             2 => opcode_signed!(self, load16_8, load16_16, load16_32, index),
@@ -1267,7 +1269,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes instructions for build-in len method.
     fn write_intrinsic_len(self: &Self, ty: &Type) {
         if let Type::Array(array) = ty {
-            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &Type::u32);
+            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &STACK_ADDRESS_TYPE);
         } else {
             unimplemented!("dynamic array len");
         }
@@ -1279,12 +1281,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
             Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
             Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
 
             Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
             Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
 
             Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
             Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
 
             Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
             Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
@@ -1336,7 +1341,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, index: i32, ty: &Type) {
+    fn write_preinc(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.preinci64(index),
             Type::i32 | Type::u32 => self.writer.preinci32(index),
@@ -1347,7 +1352,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write pre-decrement instruction.
-    fn write_predec(self: &Self, index: i32, ty: &Type) {
+    fn write_predec(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index),
             Type::i32 | Type::u32 => self.writer.predeci32(index),
@@ -1358,7 +1363,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write post-increment instruction.
-    fn write_postinc(self: &Self, index: i32, ty: &Type) {
+    fn write_postinc(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postinci64(index),
             Type::i32 | Type::u32 => self.writer.postinci32(index),
@@ -1369,7 +1374,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write post-decrement instruction.
-    fn write_postdec(self: &Self, index: i32, ty: &Type) {
+    fn write_postdec(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index),
             Type::i32 | Type::u32 => self.writer.postdeci32(index),
