@@ -78,12 +78,15 @@ impl Heap {
                 (*refs) += 1;
             }
             HeapRefOp::Dec => {
-                (*refs) -= 1;
-                if *refs == 0 {
+                debug_assert!(*refs >= 1, "attempted to decrement reference count of 0");
+                if *refs == 1 {
                     self.free(index);
+                } else {
+                    (*refs) -= 1;
                 }
             }
             HeapRefOp::Zero => {
+                debug_assert!(*refs >= 1, "attempted to decrement reference count of 0");
                 (*refs) -= 1;
             }
         }

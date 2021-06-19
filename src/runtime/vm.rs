@@ -34,8 +34,7 @@ pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
-    pub(crate) tmp          : Stack,
-    pub(crate) tmp_fp       : StackAddress,
+    pub(crate) cnt          : Stack,
 }
 
 /// Public VM methods.
@@ -52,8 +51,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
             state       : VMState::Terminate,
             stack       : stack,
             heap        : Heap::new(),
-            tmp         : Stack::new(),
-            tmp_fp      : 0,
+            cnt         : Stack::new(),
         }
     }
 
@@ -73,10 +71,9 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     pub fn reset(self: &mut Self) {
         self.stack.reset();
         self.heap.reset();
-        self.tmp.reset();
+        self.cnt.reset();
         self.pc = 0;
         self.state = VMState::Terminate;
-        self.tmp_fp = 0;
     }
 
     /// Disassembles the bytecode and returns it as a string.

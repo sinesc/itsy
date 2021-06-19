@@ -31,11 +31,13 @@ pub enum FnKind {
     Intrinsic(Intrinsic),
 }
 
-pub type StackAddress = usize;
-pub type StackOffset = isize;
+pub type StackAddress = u64; // usize/isize seem to be consistently slightly faster
+pub type StackOffset = i64;
 pub(crate) const STACK_ADDRESS_TYPE: Type = Type::u64;
-pub type HeapAddress = usize;
+
+pub type HeapAddress = u64;
 const HEAP_OFFSET_BITS: usize = 36;
+
 pub type ItemCount = u16;
 
 /// A heap reference as it would appear on the stack
@@ -56,19 +58,25 @@ impl HeapRef {
         Self { address: ((index as HeapAddress) << HEAP_OFFSET_BITS) | (offset as HeapAddress) }
     }
     /// Returns the index of this HeapRef.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn index(self: &Self) -> StackAddress {
         ((self.address & HeapRef::INDEX_MASK) >> HEAP_OFFSET_BITS) as StackAddress
     }
     /// Returns the offset of this HeapRef.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn offset(self: &Self) -> StackAddress {
         (self.address & HeapRef::OFFSET_MASK) as StackAddress
     }
     /// Adds given offset to this HeapRef.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn add_offset(self: &mut Self, offset: StackOffset) {
         debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
-        self.address = (self.address as StackOffset + offset) as HeapAddress;
+        let new_offset = self.offset() as StackOffset + offset;
+        let index = self.index();
+        self.address = ((index as HeapAddress) << HEAP_OFFSET_BITS) | (new_offset as HeapAddress)
     }
     /// Returns a clone of this heap reference offset by the given value.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn with_offset(self: Self, offset: StackOffset) -> Self {
         debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
         HeapRef::new(self.index(), (self.offset() as StackOffset + offset) as StackAddress)

@@ -627,41 +627,41 @@ impl_vm!{
 
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
     fn <
-        incref_8(constructor: u8 as StackAddress),
-        incref_16(constructor: u16 as StackAddress),
-        incref_32(constructor: StackAddress),
+        cntinc_8(constructor: u8 as StackAddress),
+        cntinc_16(constructor: u16 as StackAddress),
+        cntinc_32(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
-        decref_8(constructor: u8 as StackAddress),
-        decref_16(constructor: u16 as StackAddress),
-        decref_32(constructor: StackAddress),
+        cntdec_8(constructor: u8 as StackAddress),
+        cntdec_16(constructor: u16 as StackAddress),
+        cntdec_32(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec);
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
-        zeroref_8(constructor: u8 as StackAddress),
-        zeroref_16(constructor: u16 as StackAddress),
-        zeroref_32(constructor: StackAddress),
+        cntzero_8(constructor: u8 as StackAddress),
+        cntzero_16(constructor: u16 as StackAddress),
+        cntzero_32(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Zero);
     }
 
     /// Reads the top value off the stack and pushes it onto the tmp stack.
-    fn storeref(&mut self) {
+    fn cntstore(&mut self) {
         let value: HeapRef = self.stack.top();
-        self.tmp.push(value);
+        self.cnt.push(value);
     }
 
     /// Pops the top value off the tmp stack and pushes it onto the stack.
-    fn popref(&mut self) {
-        let value: HeapRef = self.tmp.pop();
+    fn cntpop(&mut self) {
+        let value: HeapRef = self.cnt.pop();
         self.stack.push(value);
     }
 

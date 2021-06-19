@@ -191,9 +191,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
                 if ty.is_ref() {
-                    self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
                     self.write_load(index as StackOffset, ty);
-                    self.write_decref(constructor);
+                    self.write_cntdec(constructor);
                 }
                 self.write_store(index as StackOffset, ty);
             },
@@ -201,8 +201,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.write_load(index as StackOffset, ty); // stack: L
                 self.compile_expression(&item.right)?; // stack: L R
                 if ty.is_ref() {
-                    self.writer.storeref(); // incref temporary right operand
-                    self.write_incref(constructor);
+                    self.writer.cntstore(); // cntinc temporary right operand
+                    self.write_cntinc(constructor);
                 }
                 match item.op { // stack: Result
                     BO::AddAssign => self.write_add(ty),
@@ -213,11 +213,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
                 if ty.is_ref() {
-                    self.write_incref(constructor); // inc new value before dec old value (incase it is the same reference)
+                    self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
                     self.write_load(index as StackOffset, ty);
-                    self.write_decref(constructor);
-                    self.writer.popref(); // decref temporary right operand
-                    self.write_decref(constructor);
+                    self.write_cntdec(constructor);
+                    self.writer.cntpop(); // cntdec temporary right operand
+                    self.write_cntdec(constructor);
                 }
                 self.write_store(index as StackOffset, ty); // stack -
             },
@@ -235,13 +235,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;  // stack: right
                 if ty.is_ref() {
-                    self.write_incref(constructor);
+                    self.write_cntinc(constructor);
                 }
                 self.compile_expression(&item.left)?;   // stack: right &left
                 if ty.is_ref() {
                     self.write_clone(ty, 0);            // stack: right &left &left
                     self.write_heap_fetch(ty);          // stack: right &left old
-                    self.write_decref(constructor);    // stack: right &left
+                    self.write_cntdec(constructor);    // stack: right &left
                 }
                 self.write_heap_put(ty);                // stack: -
             },
@@ -249,15 +249,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 // TODO: optimize this case
                 self.compile_expression(&item.right)?;  // stack: right
                 if ty.is_ref() {
-                    self.write_incref(constructor);
+                    self.write_cntinc(constructor);
                 }
                 self.compile_expression(&item.left)?;   // stack: right &left
                 if ty.is_ref() {
                     self.write_clone(ty, 0);            // stack: right &left &left
                     self.write_heap_fetch(ty);          // stack: right &left left
-                    self.write_decref(constructor);    // stack: right &left
+                    self.write_cntdec(constructor);    // stack: right &left
                 }
-                self.writer.storeref();              // stack: right &left, tmp: &left
+                self.writer.cntstore();              // stack: right &left, tmp: &left
                 self.write_heap_fetch(ty);              // stack: right left, tmp: &left
                 self.write_swap(ty);                    // stack: left right, tmp: &left
                 match item.op {                         // stack: result, tmp: &left
@@ -268,7 +268,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     _ => unreachable!("Unsupported assignment operator encountered"),
                 };
-                self.writer.popref();                // stack: result, &left
+                self.writer.cntpop();                // stack: result, &left
                 self.write_heap_put(ty);                // stack -
             },
         }
@@ -331,7 +331,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let index = self.locals.lookup(binding_id).index;
             let ty = self.binding_type(item);
             if ty.is_ref() {
-                self.write_incref(self.get_constructor(ty));
+                self.write_cntinc(self.get_constructor(ty));
             }
             self.write_store(index as StackOffset, ty);
         }
@@ -497,11 +497,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
         });
         if let Some(constructor) = constructor {
-            self.write_incref(constructor);
+            self.write_cntinc(constructor);
         }
-        self.write_decref_all();
+        self.write_cntdec_all();
         if let Some(constructor) = constructor {
-            self.write_zeroref(constructor);
+            self.write_cntzero(constructor);
         }
         self.write_ret();
         self.locals.pop();
@@ -622,7 +622,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;
-                    self.writer.storeref();
+                    self.writer.cntstore();
                     self.write_heap_fetch(exp_type);
                     comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
@@ -636,7 +636,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     if item.op == UO::IncBefore || item.op == UO::DecBefore {
                         self.write_clone(exp_type, 0);
                     }
-                    self.writer.popref();
+                    self.writer.cntpop();
                     self.write_heap_put(exp_type);
                 } else {
                     panic!("Operator {:?} can not be used here", item.op);
@@ -1077,19 +1077,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes an appropriate variant of the incref instruction.
-    fn write_incref(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, incref_8, incref_16, incref_32, constructor);
+    /// Writes an appropriate variant of the cntinc instruction.
+    fn write_cntinc(self: &Self, constructor: StackAddress) {
+        opcode_unsigned!(self, cntinc_8, cntinc_16, cntinc_32, constructor);
     }
 
-    /// Writes an appropriate variant of the decref instruction.
-    fn write_decref(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, decref_8, decref_16, decref_32, constructor);
+    /// Writes an appropriate variant of the cntdec instruction.
+    fn write_cntdec(self: &Self, constructor: StackAddress) {
+        opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_32, constructor);
     }
 
-    /// Writes an appropriate variant of the zeroref instruction.
-    fn write_zeroref(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, zeroref_8, zeroref_16, zeroref_32, constructor);
+    /// Writes an appropriate variant of the cntzero instruction.
+    fn write_cntzero(self: &Self, constructor: StackAddress) {
+        opcode_unsigned!(self, cntzero_8, cntzero_16, cntzero_32, constructor);
     }
 
     // TODO: try to remove tmp64 handling
@@ -1099,12 +1099,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let constructor = self.get_constructor(ty);
             match op {
                 HeapRefOp::Inc => {
-                    self.writer.storeref();
-                    self.write_incref(constructor);
+                    self.writer.cntstore();
+                    self.write_cntinc(constructor);
                 }
                 HeapRefOp::Dec => {
-                    self.writer.popref();
-                    self.write_decref(constructor);
+                    self.writer.cntpop();
+                    self.write_cntdec(constructor);
                 }
                 HeapRefOp::Zero => unreachable!("Invalid heap ref op")
             }
@@ -1113,14 +1113,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes operations to unref local heap objects.
-    fn write_decref_all(self: &Self) {
+    fn write_cntdec_all(self: &Self) {
         self.locals.borrow_mut(|locals| {
             for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
                 let ty = self.bindings.binding_type(binding_id);
                 if ty.is_ref() {
                     let constructor = self.get_constructor(ty);
                     self.write_load(local.index as StackOffset, ty);
-                    self.write_decref(constructor);
+                    self.write_cntdec(constructor);
                 }
             }
         });
