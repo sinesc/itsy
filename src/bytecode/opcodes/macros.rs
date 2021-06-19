@@ -22,10 +22,10 @@ macro_rules! impl_vm {
     (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, $from, $counter) );
     (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, $from, $counter) );
     (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, $from, $counter) );
-    (read StackAddress, $from:ident, $counter:expr) => ( impl_vm!(do_read StackAddress, $from, $counter) ); // FIXME: hardcoded StackAddress size
-    (read StackOffset, $from:ident, $counter:expr) => ( impl_vm!(do_read StackOffset, $from, $counter) ); // FIXME: hardcoded StackOffset size
+    (read StackAddress, $from:ident, $counter:expr) => ( impl_vm!(do_read StackAddress, $from, $counter) );
+    (read StackOffset, $from:ident, $counter:expr) => ( impl_vm!(do_read StackOffset, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
-        let len = impl_vm!(do_read StackAddress, $from, $counter); // FIXME: hardcoded StackAddress size
+        let len = impl_vm!(do_read StackAddress, $from, $counter);
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
@@ -161,8 +161,8 @@ macro_rules! impl_vm {
             // Generate methods for executing each bytecode on VM struct.
             $(
                 $( #[ $attr ] )*
-                #[cfg_attr(not(debug_assertions), inline(always))]
                 $(
+                    #[cfg_attr(not(debug_assertions), inline(always))]
                     fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_vm!(map_reader_type $arg_type)),* ) {
                         $code
                     }
