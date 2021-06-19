@@ -133,7 +133,13 @@ macro_rules! extern_rust {
                 self as u16
             }
             fn from_u16(index: u16) -> Self {
-                unsafe { ::std::mem::transmute(index) }
+                //un safe { ::std::mem::trans mute(index) }
+                match index {
+                    $(
+                        x if x == Self::$name as u16 => Self::$name,
+                    )+
+                    _ => panic!("Invalid VMFunc index {}", index),
+                }
             }
             #[allow(unused_mut)]
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {

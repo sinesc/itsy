@@ -440,13 +440,13 @@ pub enum Constructor {
 
 impl Constructor {
     pub fn from_u8(raw: u8) -> Constructor {
+        //un safe { ::std::mem::trans mute(raw) }
         match raw {
-            174 => Self::Primitive,
-            175 => Self::Array,
-            176 => Self::Struct,
-            177 => Self::String,
+            x if x == Self::Primitive as u8 => Self::Primitive,
+            x if x == Self::Array as u8 => Self::Array,
+            x if x == Self::Struct as u8 => Self::Struct,
+            x if x == Self::String as u8 => Self::String,
             index @ _ => unreachable!("Invalid constructor type {}", index),
         }
-        //unsafe { ::std::mem::transmute(raw) }
     }
 }

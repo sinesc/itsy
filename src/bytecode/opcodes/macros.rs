@@ -97,8 +97,28 @@ macro_rules! impl_vm {
         impl OpCode {
             /// Converts u8 to bytecode.
             #[cfg_attr(not(debug_assertions), inline(always))]
-            pub(crate) fn from_u8(bytecode: u8) -> Self {
-                unsafe { ::std::mem::transmute(bytecode) }
+            pub(crate) fn from_u8(opcode: u8) -> Self {
+                // this is faster but introduces non-safe code
+                /*if (opcode <= Self::comment as u8) {
+                    un safe { ::std::mem::trans mute(opcode) }
+                } else {
+                    panic!("Invalid opcode {}", opcode);
+                }*/
+                match opcode {
+                    $(
+                        // opcode variants
+                        $(
+                            $(
+                                x if x == Self::$variant_name as u8 => Self::$variant_name,
+                            )+
+                        )?
+                        // single opcode
+                        $(
+                            x if x == Self::$name as u8 => Self::$name,
+                        )?
+                    )+
+                    _ => panic!("Invalid opcode {}", opcode),
+                }
             }
         }
 
