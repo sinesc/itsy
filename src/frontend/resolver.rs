@@ -29,27 +29,10 @@ struct Resolver<'ctx> {
     scope_id        : ScopeId,
     /// Repository of all scopes.
     scopes          : &'ctx mut scopes::Scopes,
-    /// Grouped primitive types.
-    primitives      : &'ctx Primitives,
     /// Set to true once resolution cannot proceed any further, causes numeric literals to be set to their default types.
     infer_literals  : bool,
-    indexers        : &'ctx HashMap<Type, TypeId>,
-}
-
-/// Utility structure to handle primitive type information.
-struct Primitives {
-    /// Void type
-    pub void    : TypeId,
-    /// Boolean type
-    pub bool    : TypeId,
-    /// Unsigned types ordered by bit count.
-    pub unsigned: [ TypeId; 4 ],
-    /// Signed types ordered by bit count.
-    pub signed  : [ TypeId; 4 ],
-    /// Floating point types ordered by bit count.
-    pub float   : [ TypeId; 2 ],
-    /// String type
-    pub string  : TypeId,
+    /// Primitive to type id mapping
+    primitives      : &'ctx HashMap<&'ctx Type, TypeId>,
 }
 
 /// Resolves types within the given program AST structure.
@@ -60,41 +43,23 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
     let mut scopes = scopes::Scopes::new();
     let root_scope_id = scopes::Scopes::root_id();
 
-    let primitives = Primitives {
-        void: scopes.insert_type(root_scope_id, None, Type::void),
-        bool: scopes.insert_type(root_scope_id, Some("bool"), Type::bool),
-        unsigned: [
-            scopes.insert_type(root_scope_id, Some("u8"), Type::u8),
-            scopes.insert_type(root_scope_id, Some("u16"), Type::u16),
-            scopes.insert_type(root_scope_id, Some("u32"), Type::u32),
-            scopes.insert_type(root_scope_id, Some("u64"), Type::u64),
-        ],
-        signed: [
-            scopes.insert_type(root_scope_id, Some("i8"), Type::i8),
-            scopes.insert_type(root_scope_id, Some("i16"), Type::i16),
-            scopes.insert_type(root_scope_id, Some("i32"), Type::i32),
-            scopes.insert_type(root_scope_id, Some("i64"), Type::i64),
-        ],
-        float: [
-            scopes.insert_type(root_scope_id, Some("f32"), Type::f32),
-            scopes.insert_type(root_scope_id, Some("f64"), Type::f64),
-        ],
-        string: scopes.insert_type(root_scope_id, Some("String"), Type::String),
-    };
-
-    // todo: this is all pretty crappy
-    let mut indexers = HashMap::new();
-    indexers.insert(Type::i8, primitives.signed[0]);
-    indexers.insert(Type::i16, primitives.signed[1]);
-    indexers.insert(Type::i32, primitives.signed[2]);
-    indexers.insert(Type::i64, primitives.signed[3]);
-    indexers.insert(Type::u8, primitives.unsigned[0]);
-    indexers.insert(Type::u16, primitives.unsigned[1]);
-    indexers.insert(Type::u32, primitives.unsigned[2]);
-    indexers.insert(Type::u64, primitives.unsigned[3]);
+    let mut primitives = HashMap::new();
+    primitives.insert(&Type::void, scopes.insert_type(root_scope_id, None, Type::void));
+    primitives.insert(&Type::bool, scopes.insert_type(root_scope_id, Some("bool"), Type::bool));
+    primitives.insert(&Type::u8, scopes.insert_type(root_scope_id, Some("u8"), Type::u8));
+    primitives.insert(&Type::u16, scopes.insert_type(root_scope_id, Some("u16"), Type::u16));
+    primitives.insert(&Type::u32, scopes.insert_type(root_scope_id, Some("u32"), Type::u32));
+    primitives.insert(&Type::u64, scopes.insert_type(root_scope_id, Some("u64"), Type::u64));
+    primitives.insert(&Type::i8, scopes.insert_type(root_scope_id, Some("i8"), Type::i8));
+    primitives.insert(&Type::i16, scopes.insert_type(root_scope_id, Some("i16"), Type::i16));
+    primitives.insert(&Type::i32, scopes.insert_type(root_scope_id, Some("i32"), Type::i32));
+    primitives.insert(&Type::i64, scopes.insert_type(root_scope_id, Some("i64"), Type::i64));
+    primitives.insert(&Type::f32, scopes.insert_type(root_scope_id, Some("f32"), Type::f32));
+    primitives.insert(&Type::f64, scopes.insert_type(root_scope_id, Some("f64"), Type::f64));
+    primitives.insert(&Type::String, scopes.insert_type(root_scope_id, Some("String"), Type::String));
 
     // insert intrinsics // todo tie methods to their struct type
-    scopes.insert_intrinsic(root_scope_id, "len", Intrinsic::ArrayLen, primitives.unsigned[2], Vec::new());
+    scopes.insert_intrinsic(root_scope_id, "len", Intrinsic::ArrayLen, *primitives.get(&Type::u32).unwrap(), Vec::new());
 
     // insert rust functions into root scope
     for (name, info) in T::call_info().iter() {
@@ -125,9 +90,8 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
             let mut resolver = Resolver {
                 scope_id        : root_scope_id,
                 scopes          : &mut scopes,
-                primitives      : &primitives,
                 infer_literals  : infer_literals,
-                indexers        : &indexers,
+                primitives      : &primitives,
             };
             resolver.resolve_statement(&mut statement)?; // FIXME: want a vec of errors here
         }
@@ -185,7 +149,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if type_id.is_none() {
             *type_id = Some(new_type_id);
         } else {
-            let type_id = *type_id; // todo: directly deref in args if bck ever figures this one out
+            let type_id = *type_id;
             self.check_types_match(item, type_id, Some(new_type_id))?;
         }
         Ok(())
@@ -216,14 +180,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn classify_numeric(self: &Self, value: Numeric) -> Option<TypeId> {
         if value.is_integer() {
             if Type::i32.is_compatible_numeric(value) {
-                Some(self.primitives.signed[2])
+                Some(self.primitive_type_id(Type::i32))
             } else if Type::i64.is_compatible_numeric(value) {
-                Some(self.primitives.signed[3])
+                Some(self.primitive_type_id(Type::i64))
             } else {
                 None
             }
         } else if value.is_float() {
-            Some(self.primitives.float[1])
+            Some(self.primitive_type_id(Type::f64))
         } else {
             None
         }
@@ -267,6 +231,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else {
             None
         }
+    }
+
+    /// Returns the type-id for given primitive.
+    fn primitive_type_id(self: &Self, ty: Type) -> TypeId {
+        *self.primitives.get(&ty).unwrap()
     }
 }
 
@@ -512,7 +481,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         let mut result_mutability = None;
         // resolve condition and block
-        self.resolve_expression(&mut item.cond, Some(self.primitives.bool))?;
+        self.resolve_expression(&mut item.cond, Some(self.primitive_type_id(Type::bool)))?;
         self.resolve_block(&mut item.if_block, expected_result)?;
         // optionally resolve else block
         if let Some(else_block) = &mut item.else_block {
@@ -601,7 +570,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // check result type matches expected type unless block is returned from before ever resulting
         if item.returns.is_none() && expected_result.is_some() {
             if item.result.is_none() { // no result = void
-                self.check_types_match(item, expected_result, Some(self.primitives.void))?;
+                self.check_types_match(item, expected_result, Some(self.primitive_type_id(Type::void)))?;
             } else if let Some(result_expression) = &item.result {
                 let result_type_id = self.binding_type_id(result_expression);
                 if result_type_id.is_some() {
@@ -652,16 +621,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         match item.op {
             O::And | O::Or => {
-                self.resolve_expression(&mut item.left, Some(self.primitives.bool))?;
-                self.resolve_expression(&mut item.right, Some(self.primitives.bool))?;
-                self.binding_set_type_id(item, self.primitives.bool)?;
+                self.resolve_expression(&mut item.left, Some(self.primitive_type_id(Type::bool)))?;
+                self.resolve_expression(&mut item.right, Some(self.primitive_type_id(Type::bool)))?;
+                self.binding_set_type_id(item, self.primitive_type_id(Type::bool))?;
             }
             O::Less | O::Greater | O::LessOrEq | O::GreaterOrEq | O::Equal | O::NotEqual => {
                 self.resolve_expression(&mut item.left, None)?;
                 let left_type_id = self.binding_type_id(&item.left);
                 self.resolve_expression(&mut item.right, left_type_id)?;
                 let right_type_id = self.binding_type_id(&item.right);
-                self.binding_set_type_id(item, self.primitives.bool)?;
+                self.binding_set_type_id(item, self.primitive_type_id(Type::bool))?;
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.binding_set_type_id(&mut item.left, common_type_id)?;
                     self.binding_set_type_id(&mut item.right, common_type_id)?;
@@ -681,9 +650,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             O::Index | O::IndexWrite => {
                 self.resolve_expression(&mut item.left, None)?;
-                self.resolve_expression(&mut item.right, Some(self.indexers.get(&STACK_ADDRESS_TYPE).unwrap().clone()))?;
+                self.resolve_expression(&mut item.right, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)))?;
                 // left[right] : item
-                self.binding_set_type_id(&mut item.right, self.indexers.get(&STACK_ADDRESS_TYPE).unwrap().clone())?;
+                self.binding_set_type_id(&mut item.right, self.primitive_type_id(STACK_ADDRESS_TYPE))?;
                 self.try_create_anon_binding(item);
                 // if we know the result type, set the array element type to that
                 if let Some(result_type_id) = self.binding_type_id(item) {
@@ -795,9 +764,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         match item.op {
             UO::Not => {
                 if expected_type.is_some() {
-                    self.check_types_match(item, expected_type, Some(self.primitives.bool))?;
+                    self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::bool)))?;
                 }
-                self.binding_set_type_id(item, self.primitives.bool)?;
+                self.binding_set_type_id(item, self.primitive_type_id(Type::bool))?;
             },
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
                 if let Some(type_id) = self.binding_type_id(&item.expr) {
@@ -814,14 +783,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
             if expected_type.is_some() {
-                self.check_types_match(item, expected_type, Some(self.primitives.bool))?;
+                self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::bool)))?;
             }
-            self.binding_set_type_id(item, self.primitives.bool)?;
+            self.binding_set_type_id(item, self.primitive_type_id(Type::bool))?;
         } else if let LV::String(_) = item.value {
             if expected_type.is_some() {
-                self.check_types_match(item, expected_type, Some(self.primitives.string))?;
+                self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::String)))?;
             }
-            self.binding_set_type_id(item, self.primitives.string)?;
+            self.binding_set_type_id(item, self.primitive_type_id(Type::String))?;
         } else if let LV::Array(_) = item.value {
             self.resolve_array_literal(item, expected_type)?;
         } else if let LV::Struct(_) = item.value {
@@ -928,7 +897,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 }
 
 /// Support TypeContainer for Scopes so that methods that need to follow type_ids can be implemented once and be used in both
-/// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
+/// the Resolver where types are stored in Scopes and the Compiler where types are a stored in a Vec.
 impl<'ctx> TypeContainer for Resolver<'ctx> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         self.scopes.type_ref(type_id)
