@@ -95,9 +95,13 @@ macro_rules! extern_rust {
     (@handle_ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
-    (@handle_ret $vm:ident, $_:tt, $value:ident) => { // object by value
-        let heap_index: u32 = $vm.heap.store($value);
-        $vm.stack.push(heap_index);
+    (@handle_ret $vm:ident, String, $value:ident) => { {
+        let raw_bytes = &$value.as_bytes();
+        let index = $vm.heap.alloc(raw_bytes.to_vec());
+        $vm.stack.push($crate::runtime::HeapRef::new(index, 0));
+    } };
+    (@handle_ret $vm:ident, $_:tt, $value:ident) => {
+        compile_error!("Unsupported return type");
     };
     // handle parameters
     (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
@@ -111,21 +115,19 @@ macro_rules! extern_rust {
     (@handle_param $vm:ident, f32) => { $vm.stack.pop() };
     (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
     (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
-    (@handle_param $vm:ident, String) => { { // rust String specialcase
+    (@handle_param $vm:ident, String) => { {
         let item: $crate::runtime::HeapRef = $vm.stack.pop();
         $vm.heap.string(item).to_string()
     } };
-    (@handle_param $vm:ident, & str) => { { // rust &str specialcase
+    (@handle_param $vm:ident, & str) => { {
         let item: $crate::runtime::HeapRef = $vm.stack.pop();
         $vm.heap.string(item)
     } };
-    (@handle_param $vm:ident, & $_:tt) => { { // object by reference // fixme: this won't work, structs aren't aligned
-        let item: $crate::runtime::HeapRef = $vm.stack.pop();
-        $vm.heap.load(item.index)
+    (@handle_param $vm:ident, & $_:tt) => { {
+        compile_error!("Unsupported parameter type");
     } };
-    (@handle_param $vm:ident, $_:tt) => { { // object by value // fixme: this won't work, structs aren't aligned
-        let item: $crate::runtime::HeapRef = $vm.stack.pop();
-        $vm.heap.clone(item.index)
+    (@handle_param $vm:ident, $_:tt) => { {
+        compile_error!("Unsupported parameter type");
     } };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
