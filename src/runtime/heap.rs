@@ -122,6 +122,7 @@ impl Heap {
         self.free = Vec::with_capacity(16);
     }
     /// Asserts that the given heap object exists.
+    #[cfg(debug_assertions)]
     fn assert_exists(self: &Self, index: StackAddress) {
         if let Some(pos) = self.free.iter().find(|&&pos| pos == index) {
             panic!("HEAP: double free of object {}", pos);
@@ -205,7 +206,7 @@ impl Heap {
     /// Returns a string slice for the given heap reference.
     pub fn str(self: &Self, item: HeapRef, len: StackAddress) -> &str {
         let slice = self.slice(item, len);
-        //unsafe { std::str::from_utf8_unchecked(slice) } // Todo: probably want to use this later, for now the extra check is nice
+        //un safe { std::str::from_utf8_unchecked(slice) }
         std::str::from_utf8(slice).unwrap()
     }
 
@@ -227,7 +228,7 @@ impl Heap {
     pub fn string(self: &Self, item: HeapRef) -> &str {
         let (index, offset) = item.into();
         let slice = &self.objects[index as usize].data[offset as usize..];
-        //unsafe { str::from_utf8_unchecked(&slice) } // Todo: probably want to use this later, for now the extra check is nice
+        //un safe { str::from_utf8_unchecked(&slice) }
         std::str::from_utf8(slice).unwrap()
     }
 

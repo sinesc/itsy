@@ -280,8 +280,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         comment!(self, "{}()", item.ident.name);
 
         // put args on stack, ensure temporaries are cleaned up later
-        for (index, arg) in item.args.iter().enumerate() {
-            comment!(self, "{}() arg {}", item.ident.name, index);
+        for (_index, arg) in item.args.iter().enumerate() {
+            comment!(self, "{}() arg {}", item.ident.name, _index);
             self.compile_expression(arg)?;
             self.maybe_ref_temporary(HeapRefOp::Inc, arg);
         }

@@ -66,10 +66,10 @@ impl LocalsStack {
         let mut locals = inner.last_mut().expect(Self::NO_STACK);
         func(&mut locals);
     }
-    /// Returns the argument size in bytes for the top stack frame descriptor.
-    pub fn arg_size(self: &Self) -> StackAddress {
-        self.0.borrow().last().expect(Self::NO_STACK).arg_pos
-    }
+    // /// Returns the argument size in bytes for the top stack frame descriptor.
+    //pub fn arg_size(self: &Self) -> StackAddress {
+    //    self.0.borrow().last().expect(Self::NO_STACK).arg_pos
+    //}
     /// Returns the return value size in bytes for the top stack frame descriptor.
     pub fn ret_size(self: &Self) -> u8 {
         self.0.borrow().last().expect(Self::NO_STACK).ret_size

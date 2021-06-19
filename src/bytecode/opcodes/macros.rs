@@ -104,10 +104,12 @@ macro_rules! impl_vm {
                 } else {
                     panic!("Invalid opcode {}", opcode);
                 }*/
+                // note: also tried generating contants first and then match those (to avoid the x if x match guard). turned out to be slightly slower.
                 match opcode {
                     $(
                         // opcode variants
                         $(
+
                             $(
                                 x if x == Self::$variant_name as u8 => Self::$variant_name,
                             )+
