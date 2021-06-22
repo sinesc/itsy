@@ -13,6 +13,7 @@ pub enum ResolveErrorKind {
     NumberOfArguments(ItemCount, ItemCount),
     MutabilityEscalation,
     AssignToImmutable,
+    CannotResolve,
     Internal,
 }
 
@@ -20,7 +21,7 @@ pub enum ResolveErrorKind {
 #[derive(Clone, Debug)]
 pub struct ResolveError {
     pub kind: ResolveErrorKind,
-    position: Position, // this is the position from the end of the input
+    pub(crate) position: Position, // this is the position from the end of the input
 }
 
 impl ResolveError {

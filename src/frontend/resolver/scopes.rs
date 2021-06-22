@@ -2,21 +2,24 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Intrinsic, Bindings, BindingInfo};
+use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Bindings, BindingInfo};
 
 #[derive(Clone)]
-pub struct FnSig {
+pub struct FunctionInfo {
     pub ret_type: Option<TypeId>,
-    pub arg_type: Vec<TypeId>,
-    pub kind    : FnKind,
+    pub arg_type: Vec<Option<TypeId>>,
+    pub kind    : Option<FnKind>,
 }
 
-impl FnSig {
+impl FunctionInfo {
     pub fn rust_fn_index(self: &Self) -> Option<u16> {
         match self.kind {
-            FnKind::Rust(index) => Some(index),
+            Some(FnKind::Rust(index)) => Some(index),
             _ => None,
         }
+    }
+    pub fn is_resolved(self: &Self) -> bool {
+        self.ret_type.is_some() && self.kind.is_some() && !self.arg_type.iter().any(|arg| arg.is_none())
     }
 }
 
@@ -27,7 +30,7 @@ pub struct Scopes {
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings        : Repository<BindingId, BindingInfo>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions       : Repository<FunctionId, FnSig>,
+    functions       : Repository<FunctionId, FunctionInfo>,
     /// Function scopes (the function containing this scope)
     scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -58,16 +61,21 @@ impl Scopes {
     }
 
     /// Returns the number of unresolved and total items in the Scopes.
-    pub fn state(self: &Self) -> (u32, u32) {
+    pub fn state(self: &Self, additional_unresolved: usize) -> (usize, usize) {
         (
-            self.bindings.values().fold(0, |acc, x| acc + if x.type_id.is_some() { 0 } else { 1 })
-            + self.types.values().fold(0, |acc, x| acc + match x {
+            // unresolved counts
+            self.bindings.values().fold(0, |acc, b| acc + if b.type_id.is_some() { 0 } else { 1 })
+            + self.types.values().fold(0, |acc, t| acc + match t {
                 Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
                 _ => 0,
-            }), // todo: consider functions as well
+            })
+            + self.functions.values().fold(0, |acc, f| acc + if f.is_resolved() { 0 } else { 1 })
+            + additional_unresolved,
 
-            self.bindings.len() as u32
-            + self.types.len() as u32,
+            // resolved counts
+            self.bindings.len()
+            + self.types.len()
+            + self.functions.len(),
         )
     }
 
@@ -132,18 +140,8 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, result_type_id: Option<TypeId>, arg_type_ids: Vec<TypeId>) -> FunctionId {
-        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: result_type_id, arg_type: arg_type_ids, kind: FnKind::User })
-    }
-
-    /// Insert a function into the given scope, returning a function id.
-    pub fn insert_rustfn(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, fn_index: u16, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId {
-        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Rust(fn_index) })
-    }
-
-    /// Insert an intrinsic function into the given scope, returning a function id.
-    pub fn insert_intrinsic(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, intrinsic: Intrinsic, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> FunctionId {
-        self.functions.insert(scope_id, Some(name.into()), FnSig { ret_type: Some(result_type_id), arg_type: arg_type_ids, kind: FnKind::Intrinsic(intrinsic) })
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FnKind>) -> FunctionId {
+        self.functions.insert(scope_id, Some(name.into()), FunctionInfo { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
     }
 
     /*/// Returns the id of the named function originating in exactly this scope.
@@ -156,7 +154,6 @@ impl Scopes {
         if let Some(index) = self.functions.id_of(scope_id, name) {
             Some(index)
         } else {
-            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
             let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
             if parent_scope_id != scope_id {
                 self.lookup_function_id(parent_scope_id, name)
@@ -166,9 +163,14 @@ impl Scopes {
         }
     }
 
-    /// Returns the signature of the given function id.
-    pub fn function_type(self: &Self, function_id: FunctionId) -> &FnSig {
+    /// Returns a reference to the signature of the given function id.
+    pub fn function_ref(self: &Self, function_id: FunctionId) -> &FunctionInfo {
         self.functions.by_id(function_id)
+    }
+
+    /// Returns a mutable reference to the signature of the given function id.
+    pub fn function_mut(self: &mut Self, function_id: FunctionId) -> &mut FunctionInfo {
+        self.functions.by_id_mut(function_id)
     }
 }
 
@@ -237,7 +239,6 @@ impl Scopes {
         if let Some(index) = self.types.id_of(scope_id, name) {
             Some(index)
         } else {
-            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
             let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
             if parent_scope_id != scope_id {
                 self.lookup_type_id(parent_scope_id, name)
@@ -255,10 +256,5 @@ impl Scopes {
     /// Returns a reference to the type of the given type id.
     pub fn type_ref(self: &Self, type_id: TypeId) -> &Type {
         self.types.by_id(type_id)
-    }
-
-    /// Returns the id of type void.
-    pub fn void_type(self: &Self) -> TypeId {
-        0.into() // todo: this is a little bit hacky
     }
 }
