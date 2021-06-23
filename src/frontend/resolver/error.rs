@@ -3,6 +3,8 @@ use std::fmt::{self, Display};
 use crate::frontend::ast::{Position, Positioned};
 use crate::util::{Type, Numeric, compute_loc, ItemCount};
 
+pub const ICE: &'static str = "Internal compiler error";
+
 /// Represents the various possible resolver error-kinds.
 #[derive(Clone, Debug)]
 pub enum ResolveErrorKind {
@@ -10,11 +12,13 @@ pub enum ResolveErrorKind {
     NonPrimitiveCast(Type),
     IncompatibleNumeric(Type, Numeric),
     UnknownValue(String),
+    UnknownMember(String),
     NumberOfArguments(ItemCount, ItemCount),
     MutabilityEscalation,
     AssignToImmutable,
-    CannotResolve,
-    Internal,
+    CannotResolve(String),
+    InvalidOperation(String),
+    Internal(String),
 }
 
 /// An error reported by the resolver (e.g. unknown/mismatching types).
@@ -53,15 +57,45 @@ pub type ResolveResult = Result<(), ResolveError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
 pub(crate) trait SomeOrResolveError<T> {
-    fn some_or(self: Self, item: &impl Positioned, kind: ResolveErrorKind) -> Result<T, ResolveError>;
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<T, ResolveError>;
+    fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError>;
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<Option<T>, ResolveError>;
+    fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError>;
 }
 
 impl<T> SomeOrResolveError<T> for Option<T> {
-    fn some_or(self: Self, item: &impl Positioned, kind: ResolveErrorKind) -> Result<T, ResolveError> {
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<T, ResolveError> {
         if let Some(result) = self {
             Ok(result)
         } else {
-            Err(ResolveError::new(item, kind))
+            Err(ResolveError {
+                kind: kind,
+                position: item.map_or(0, |i| i.position())
+            })
         }
     }
+    fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError> {
+        self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()))
+    }
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<Option<T>, ResolveError> {
+        if self.is_some() {
+            Ok(self)
+        } else {
+            Err(ResolveError {
+                kind: kind,
+                position: item.map_or(0, |i| i.position())
+            })
+        }
+    }
+    fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError> {
+        self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()))
+    }
+}
+
+/// Returns an internal compiler error with positional information.
+pub(crate) fn ice<T>(message: &str) -> Result<T, ResolveError> {
+    Err(ResolveError {
+        kind: ResolveErrorKind::Internal(message.to_string()),
+        position: 0
+    })
 }
