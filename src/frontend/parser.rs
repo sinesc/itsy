@@ -1,56 +1,15 @@
 //! Nom parsers used to generate the Itsy AST.
 
+pub(crate) mod error;
+
 use nom::Err as Error; // Err seems problematic given Result::Err(nom:Err::...)
 use nom::types::CompleteStr as Input;
 use nom::*;
 use std::collections::HashMap;
-use std::fmt::{self, Display};
-use crate::util::{Numeric, FnKind, compute_loc, StackAddress};
+use crate::util::{Numeric, FnKind, StackAddress};
 use crate::frontend::ast::*;
+use crate::frontend::parser::error::*;
 
-/// Represents the various possible parser error-kinds.
-#[repr(u32)]
-#[derive(Copy, Clone, Debug)]
-pub enum ParseErrorKind {
-    Unknown = 1,
-    UnexpectedEOF,
-    SyntaxError,
-    SyntaxLet,
-    SyntaxFn,
-    SyntaxIf,
-    SyntaxElse,
-    SyntaxInlineType,
-    InvalidNumerical,
-    // TODO: add error handling to all parsers where it make sense
-}
-
-/// An error reported by the parser (e.g. syntax error).
-#[derive(Copy, Clone, Debug)]
-pub struct ParseError {
-    pub kind: ParseErrorKind,
-    position: Position, // this is the position from the end of the input
-}
-
-impl ParseError {
-    fn new(kind: ParseErrorKind, offset: Position) -> ParseError {
-        Self { kind: kind, position: offset }
-    }
-    /// Computes and returns the source code location of this error.
-    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
-        compute_loc(input, input.len() as Position - self.position)
-    }
-}
-
-impl Display for ParseError {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            ParseErrorKind::SyntaxError => write!(f, "Syntax error"),
-            ParseErrorKind::InvalidNumerical => write!(f, "Invalid numeric value"),
-            // Todo: handle the others
-            _ => write!(f, "{:?}", self.kind),
-        }
-    }
-}
 
 // comment whitespace handling
 

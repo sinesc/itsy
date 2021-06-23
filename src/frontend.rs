@@ -3,7 +3,7 @@
 pub mod ast;
 
 mod parser;
-pub use crate::frontend::parser::{parse, ParsedProgram, ParseError, ParseErrorKind};
+pub use crate::frontend::parser::{parse, ParsedProgram, error::{ParseError, ParseErrorKind}};
 
 mod resolver;
 pub use crate::frontend::resolver::{resolve, ResolvedProgram, error::ResolveError, error::ResolveErrorKind};
