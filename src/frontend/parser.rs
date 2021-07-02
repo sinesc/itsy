@@ -10,26 +10,29 @@ use std::fmt::Debug;
 use crate::util::{Numeric, FnKind, StackAddress};
 use crate::frontend::ast::*;
 
-use nom::{Err, error::Error, error::ErrorKind};
+use nom::{Err, error::{ParseError, ErrorKind}};
 use nom::character::{*, complete::*};
 use nom::bytes::complete::*;
 use nom::combinator::*;
 use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::*;
 use nom::sequence::*;
-use nom::Parser;
+use nom::{Finish, Parser};
 
 // identifier ([a-z_][a-z0-9_]*)
 
 fn label(i: Input<'_>) -> Output<&str> {
-    recognize(tuple((
-        take_while1(|m| is_alphabetic(m as u8) || m == '_'),
-        take_while(|m| is_alphanumeric(m as u8) || m == '_')
-    )))(i)
+    map(
+        recognize(tuple((
+            take_while1(|m| is_alphabetic(m as u8) || m == '_'),
+            take_while(|m| is_alphanumeric(m as u8) || m == '_')
+        ))),
+        move |l: Input<'_>| *l
+    )(i)
 }
 
 fn ident(i: Input<'_>) -> Output<Ident> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         label,
         move |l| Ident {
@@ -42,7 +45,7 @@ fn ident(i: Input<'_>) -> Output<Ident> {
 // path (a::b)
 
 fn path(i: Input<'_>) -> Output<Path> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(separated_list1(ws(tag("::")), ws(label)), move |m| Path { position: position as Position, name: m.into_iter().collect() })(i)
 }
 
@@ -62,8 +65,8 @@ fn opt_type(i: Input<'_>) -> Output<Option<Input<'_>>> {
 
 fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
 
-    let position = rest_len(i)?.1 as Position;
-    let (remaining, numerical) = recognize(tuple((opt_sign, digit1, opt_fract, opt_type))).parse(i)?;
+    let position = rest_len(i.clone())?.1 as Position;
+    let (remaining, numerical) = recognize(tuple((opt_sign, digit1, opt_fract, opt_type))).parse(i.clone())?;
     let (value, type_name) = splits_numerical_suffix(numerical);
 
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
@@ -99,21 +102,21 @@ fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
         }
     }
 
-    Err(Err::Error(Error::new(i, ErrorKind::Alpha))) // Todo
+    Err(Err::Error(Error::from_error_kind(i, ErrorKind::Alpha))) // Todo
 }
 
 fn static_size(i: Input<'_>) -> Output<StackAddress> {
-    ws(map(recognize(digit1), |digits| str::parse::<StackAddress>(digits).unwrap()))(i) // FIXME: unwrap
+    ws(map(recognize(digit1), |digits: Input<'_>| str::parse::<StackAddress>(*digits).unwrap()))(i) // FIXME: unwrap
 }
 
 // literal boolean (true)
 
 fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
-    let position = rest_len(i)?.1;
-    map(alt((tag("true"), tag("false"))), move |m| {
+    let position = rest_len(i.clone())?.1;
+    map(alt((tag("true"), tag("false"))), move |m: Input<'_>| {
         Literal {
             position    : position as Position,
-            value       : LiteralValue::Bool(m == "true"),
+            value       : LiteralValue::Bool(*m == "true"),
             type_name   : None,
             binding_id  : None,
         }
@@ -123,13 +126,13 @@ fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
 // literal string ("hello world")
 
 fn string(i: Input<'_>) -> Output<Literal<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"n\\")), char('"')),
-        move |m| {
+        move |m: Input<'_>| {
             Literal {
                 position    : position as Position,
-                value       : LiteralValue::String(m),
+                value       : LiteralValue::String(*m),
                 type_name   : None,
                 binding_id  : None,
             }
@@ -144,7 +147,7 @@ fn array_literal_elements(i: Input<'_>) -> Output<Vec<Expression<'_>>> {
 }
 
 fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         tuple((ws(char('[')), array_literal_elements, opt(ws(char(','))), ws(char(']')))),
         move |m| Literal {
@@ -177,7 +180,7 @@ fn struct_literal_fields(i: Input<'_>) -> Output<HashMap<&str, Expression<'_>>> 
 }
 
 fn struct_literal(i: Input<'_>) -> Output<Literal<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         tuple((ws(path), ws(char('{')), struct_literal_fields, opt(ws(char(','))), ws(char('}')))),
         move |m| Literal {
@@ -200,9 +203,9 @@ fn literal(i: Input<'_>) -> Output<Literal<'_>> {
 // assignment
 
 fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
-    let var_position = rest_len(i)?.1;
+    let var_position = rest_len(i.clone())?.1;
     let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
-    let op_position = rest_len(init.0)?.1;
+    let op_position = rest_len(init.0.clone())?.1;
     fold_many0(
         alt((
             map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, e)),
@@ -229,14 +232,14 @@ fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
 fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
     ws(map(
         alt((tag("="), tag("+="), tag("-="), tag("*="), tag("/="), tag("%="))),
-        |o| {
-            BinaryOperator::from_string(o)
+        |o: Input<'_>| {
+            BinaryOperator::from_string(*o)
         }
     ))(i)
 }
 
 fn assignment(i: Input<'_>) -> Output<Assignment<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((assignable, assignment_operator, expression)),
         move |m| {
@@ -258,7 +261,7 @@ fn call_argument_list(i: Input<'_>) -> Output<Vec<Expression<'_>>> {
 }
 
 fn call(i: Input<'_>) -> Output<Call<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((ident, space0, call_argument_list)),
         move |m| Call {
@@ -275,7 +278,7 @@ fn call(i: Input<'_>) -> Output<Call<'_>> {
 
 
 fn call_static(i: Input<'_>) -> Output<Call<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         tuple((path, call_argument_list)),
         move |mut m| {
@@ -300,7 +303,7 @@ fn block_items(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
 }
 
 fn block(i: Input<'_>) -> Output<Block<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((char('{'), block_items, opt(expression), char('}'))),
         move |mut m| {
@@ -322,7 +325,7 @@ fn block(i: Input<'_>) -> Output<Block<'_>> {
 // if
 
 fn if_else(i: Input<'_>) -> Output<Block<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     preceded(tag("else"), alt((
         sepl(map(if_block, move |m| Block {
             position        : position as Position,
@@ -336,7 +339,7 @@ fn if_else(i: Input<'_>) -> Output<Block<'_>> {
 }
 
 fn if_block(i: Input<'_>) -> Output<IfBlock<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(preceded(sepr(tag("if")), map(
         tuple((expression, block, opt(if_else))),
         move |m| IfBlock {
@@ -356,12 +359,12 @@ fn parens(i: Input<'_>) -> Output<Expression<'_>> {
 }
 
 fn prefix(i: Input<'_>) -> Output<UnaryOp<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         pair(ws(alt((tag("++"), tag("--")))), ws(assignable)),
         move |m| UnaryOp {
             position    : position as Position,
-            op          : UnaryOperator::prefix_from_string(m.0),
+            op          : UnaryOperator::prefix_from_string(*m.0),
             expr        : m.1,
             binding_id  : None,
         }
@@ -369,12 +372,12 @@ fn prefix(i: Input<'_>) -> Output<UnaryOp<'_>> {
 }
 
 fn suffix(i: Input<'_>) -> Output<UnaryOp<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         pair(ws(assignable), ws(alt((tag("++"), tag("--"))))),
         move |m| UnaryOp {
             position    : position as Position,
-            op          : UnaryOperator::suffix_from_string(m.1),
+            op          : UnaryOperator::suffix_from_string(*m.1),
             expr        : m.0,
             binding_id  : None,
         }
@@ -382,7 +385,7 @@ fn suffix(i: Input<'_>) -> Output<UnaryOp<'_>> {
 }
 
 fn unary(i: Input<'_>) -> Output<Expression<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         preceded(ws(tag("!")), ws(prec6)),
         move |m| {
@@ -397,7 +400,7 @@ fn unary(i: Input<'_>) -> Output<Expression<'_>> {
 }
 
 fn operand(i: Input<'_>) -> Output<Expression<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(alt((
         map(literal, |m| Expression::Literal(m)),
         map(if_block, |m| Expression::IfBlock(Box::new(m))),
@@ -412,7 +415,7 @@ fn operand(i: Input<'_>) -> Output<Expression<'_>> {
 }
 
 fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
-    let init = operand(i)?;
+    let init = operand(i.clone())?;
     let position = rest_len(i)?.1;
     fold_many0(
         alt((
@@ -437,9 +440,9 @@ fn prec6(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec5(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec6(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(alt((tag("*"), tag("/"), tag("%"))), |o| BinaryOperator::from_string(o)), prec6),
+        pair(map(alt((tag("*"), tag("/"), tag("%"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec6),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -447,9 +450,9 @@ fn prec5(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec4(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec5(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(alt((tag("+"), tag("-"))), |o| BinaryOperator::from_string(o)), prec5),
+        pair(map(alt((tag("+"), tag("-"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec5),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -457,9 +460,9 @@ fn prec4(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec3(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec4(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o| BinaryOperator::from_string(o)), prec4),
+        pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec4),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -467,9 +470,9 @@ fn prec3(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec2(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec3(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(alt((tag("!="), tag("=="))), |o| BinaryOperator::from_string(o)), prec3),
+        pair(map(alt((tag("!="), tag("=="))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec3),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -477,9 +480,9 @@ fn prec2(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec1(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec2(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(tag("&&"), |o| BinaryOperator::from_string(o)), prec2),
+        pair(map(tag("&&"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec2),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -487,9 +490,9 @@ fn prec1(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn prec0(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec1(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
-        pair(map(tag("||"), |o| BinaryOperator::from_string(o)), prec1),
+        pair(map(tag("||"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec1),
         init.1,
         |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position as Position, op: op, left: acc, right: val, binding_id: None }))
     )(init.0)
@@ -497,7 +500,7 @@ fn prec0(i: Input<'_>) -> Output<Expression<'_>> {
 
 fn precn(i: Input<'_>) -> Output<Expression<'_>> {
     let init = prec0(i)?;
-    let position = rest_len(init.0)?.1;
+    let position = rest_len(init.0.clone())?.1;
     fold_many0(
         preceded(tag("as"), path),
         init.1,
@@ -515,7 +518,7 @@ fn expression(i: Input<'_>) -> Output<Expression<'_>> {
 // let
 
 fn binding(i: Input<'_>) -> Output<Statement<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         preceded(sepr(tag("let")), tuple((opt(sepr(tag("mut"))), ident, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))),
         move |m| Statement::Binding(Binding {
@@ -560,7 +563,7 @@ fn struct_fields(i: Input<'_>) -> Output<Vec<(&str, InlineType<'_>)>> {
 }
 
 fn struct_(i: Input<'_>) -> Output<Statement<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((sepr(tag("struct")), ident, ws(char('{')), struct_fields, opt(ws(char(','))), ws(char('}')))),
         move |tuple| Statement::Structure(Struct {
@@ -575,7 +578,7 @@ fn struct_(i: Input<'_>) -> Output<Statement<'_>> {
 // array definition
 
 fn array(i: Input<'_>) -> Output<Array<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         delimited(ws(char('[')), tuple((ws(inline_type), ws(char(';')), ws(static_size))), ws(char(']'))),
         move |tuple| Array {
@@ -590,7 +593,7 @@ fn array(i: Input<'_>) -> Output<Array<'_>> {
 // function definition
 
 fn signature_argument(i: Input<'_>) -> Output<Binding<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
         move |tuple| Binding {
@@ -624,7 +627,7 @@ fn signature(i: Input<'_>) -> Output<Signature<'_>> {
 }
 
 fn function(i: Input<'_>) -> Output<Statement<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((signature, block)),
         move |func| Statement::Function(Function {
@@ -640,12 +643,12 @@ fn function(i: Input<'_>) -> Output<Statement<'_>> {
 // for
 
 fn for_loop_range(i: Input<'_>) -> Output<Expression<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         tuple((ws(expression), ws(alt((tag("..="), tag("..")))), ws(expression))),
         move |m| Expression::BinaryOp(Box::new(BinaryOp {
             position    : position as Position,
-            op          : BinaryOperator::from_string(m.1),
+            op          : BinaryOperator::from_string(*m.1),
             left        : m.0,
             right       : m.2,
             binding_id  : None
@@ -654,7 +657,7 @@ fn for_loop_range(i: Input<'_>) -> Output<Expression<'_>> {
 }
 
 fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         tuple((tag("for"), sepl(ident), sepl(tag("in")), sepl(alt((for_loop_range, expression))), block)),
         move |m| ForLoop {
@@ -677,7 +680,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
 // while loop
 
 fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     ws(map(
         preceded(tag("while"), pair(sepl(expression), block)),
         move |m| WhileLoop {
@@ -692,7 +695,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
 // return
 
 fn return_statement(i: Input<'_>) -> Output<Statement<'_>> {
-    let position = rest_len(i)?.1;
+    let position = rest_len(i.clone())?.1;
     map(
         preceded(tag("return"), terminated(opt(sepl(expression)), ws(char(';')))),
         move |m| Statement::Return(Return {
@@ -721,56 +724,25 @@ fn statement(i: Input<'_>) -> Output<Statement<'_>> {
 // root
 
 fn root(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
-    ws(many0(statement))(i)
+    all_consuming(ws(many0(statement)))(i)
 }
 
 /// Parsed program AST.
 #[derive(Debug)]
 pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
-/// Attempt to return the innermost custom error, otherwise the innermost error.
-/*fn innermost_custom(input: &str, list: &[ (Input<'_>, ErrorKind) ]) -> ParseError {
-
-    let err = list.iter().find(|(_, error_kind)| match error_kind {
-        ErrorKind::Custom(_) => true,
-        _ => false,
-    }).or(list.last());
-
-    let (remainder, error_kind) = err.unwrap();
-    match error_kind {
-        ErrorKind::Custom(custom) => {
-            ParseError::new(unsafe { ::std::mem::transmute(*custom) }, (input.len() - remainder.len()) as Position) // todo: figure out how to specify custom error type
-        }
-        _ => {
-            ParseError::new(ParseErrorKind::Unknown, (input.len() - remainder.len()) as Position)
-        }
-    }
-}*/
-
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(input: &str) -> Result<ParsedProgram<'_>, error::ParseError> {
-    let result = root(input);
+pub fn parse(src: &str) -> Result<ParsedProgram<'_>, error::ParseError> {
+    let input = Input::new(src);
+    let result = root(input.clone()).finish();
     match result {
         Ok(result) => {
-            if result.0.len() > 0 {
-                Err(error::ParseError::new(error::ParseErrorKind::UnexpectedEOF, input.len() as Position))
-            } else {
-                Ok(ParsedProgram(result.1))
-            }
+            Ok(ParsedProgram(result.1))
         },
-        Err(error) => {
-            Err(error::ParseError::new(error::ParseErrorKind::UnexpectedEOF, input.len() as Position))
-            /*Err(match error {
-                Error::Incomplete(incomplete) => panic!("Unexpected Nom Incomplete({:?})", incomplete),
-                Error::Error(error) => panic!("Unexpected Nom Error({:?})", error),
-                Error::Failure(failure) => {
-                    #[allow(unreachable_patterns)]
-                    match failure {
-                        Context::List(list) => innermost_custom(input, &list[..]),
-                        _ => panic!("Incompatible Nom configuration. Verbose errors need to be enabled")
-                    }
-                }
-            })*/
+        Err(_) => {
+            // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
+            let error = input.max_parsed();
+            Err(error::ParseError::new(error::ParseErrorKind::SyntaxError, error.1 as Position))
         }
     }
 }
