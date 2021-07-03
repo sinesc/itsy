@@ -2,24 +2,20 @@
 use std::fmt::Debug;
 use std::cell::Cell;
 use std::rc::Rc;
-use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
-use std::str::CharIndices;
-use std::str::Chars;
-use std::ops::Deref;
-use nom::{Err, error::ErrorKind, error::ParseError};
-use nom::bytes::complete::*;
-use nom::combinator::*;
-use nom::multi::*;
-use nom::branch::*;
-use nom::sequence::*;
-use nom::*;
+use std::ops::{Deref, Range, RangeFrom, RangeFull, RangeTo};
+use std::str::{Chars, CharIndices};
+use nom::{Err, FindSubstring, Compare, InputTake, Parser, Needed, IResult, CompareResult, InputIter, InputLength, Offset, UnspecializedInput, Slice};
+use nom::error::{ErrorKind, ParseError};
+use nom::bytes::complete::{take, take_while, take_until, take_while1, tag};
+use nom::combinator::recognize;
+use nom::multi::{many0, many1};
+use nom::branch::alt;
+use nom::sequence::{delimited, preceded, terminated};
+use crate::frontend::ast::Position;
 
-/// default error type, only contains the error' location and code
-#[derive(Debug)] // , PartialEq
+#[derive(Debug)]
 pub struct Error<'a> {
-    /// position of the error in the input data
     pub input: Input<'a>,
-    /// nom error code
     pub code: ErrorKind,
 }
 
@@ -56,6 +52,9 @@ pub struct Input<'a> {
 impl<'a> Input<'a> {
     pub fn new(data: &'a str) -> Self {
         Input { data: data, max_parsed: Rc::new(Cell::new((None, 0))) }
+    }
+    pub fn position(self: &Self) -> Position {
+        self.input_len() as Position
     }
     pub fn max_parsed(self: &Self) -> (Option<ErrorKind>, usize) {
         self.max_parsed.get()
@@ -298,7 +297,7 @@ where
     move |input| terminated(take_until(tag.clone()), take(tag.input_len()))(input)
 }
 
-fn space0<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
+pub fn space0<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
 where
     E: nom::error::ParseError<I> + Debug,
     I: nom::InputTake
@@ -322,7 +321,7 @@ where
     ))))(input)
 }
 
-fn space1<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
+pub fn space1<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
 where
     E: nom::error::ParseError<I> + Debug,
     I: nom::InputTake
