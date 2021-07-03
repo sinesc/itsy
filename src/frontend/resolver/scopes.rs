@@ -168,10 +168,10 @@ impl Scopes {
         self.functions.by_id(function_id)
     }
 
-    /// Returns a mutable reference to the signature of the given function id.
+    /* /// Returns a mutable reference to the signature of the given function id.
     pub fn function_mut(self: &mut Self, function_id: FunctionId) -> &mut FunctionInfo {
         self.functions.by_id_mut(function_id)
-    }
+    }*/
 }
 
 /// Binding handling
