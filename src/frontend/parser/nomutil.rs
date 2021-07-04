@@ -1,4 +1,5 @@
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -11,31 +12,30 @@ use nom::combinator::recognize;
 use nom::multi::{many0, many1};
 use nom::branch::alt;
 use nom::sequence::{delimited, preceded, terminated};
-use crate::frontend::ast::Position;
+use crate::frontend::{ParseErrorKind, parser::ParserState, ast::Position};
 
 #[derive(Debug)]
-pub struct Error<'a> {
+pub(super) struct Error<'a> {
     pub input: Input<'a>,
-    pub code: ErrorKind,
+    pub kind: ParseErrorKind,
 }
 
 impl<'a> ParseError<Input<'a>> for Error<'a> {
-    fn from_error_kind(input: Input<'a>, kind: ErrorKind) -> Self {
+    fn from_error_kind(input: Input<'a>, _: ErrorKind) -> Self {
         let len = input.input_len();
         let mut state = input.max_parsed.get();
         if state.1 > len || state.0.is_none() {
-            state.0 = Some(kind);
+            state.0 = Some(ParseErrorKind::SyntaxError);
             state.1 = len;
         }
         input.max_parsed.set(state);
-        Error { input, code: kind }
+        Error { input, kind: ParseErrorKind::SyntaxError }
     }
-
     fn append(_: Input<'a>, _: ErrorKind, other: Self) -> Self {
         let len = other.input.input_len();
         let mut state = other.input.max_parsed.get();
         if state.1 > len || state.0.is_none() {
-            state.0 = Some(other.code);
+            state.0 = Some(other.kind);
             state.1 = len;
         }
         other.input.max_parsed.set(state);
@@ -44,23 +44,40 @@ impl<'a> ParseError<Input<'a>> for Error<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Input<'a> {
+pub(super) struct Input<'a> {
     data: &'a str,
-    max_parsed: Rc<Cell<(Option<ErrorKind>, usize)>>
+    max_parsed: Rc<Cell<(Option<ParseErrorKind>, usize)>>,
+    state: Rc<Cell<ParserState>>,
 }
 
 impl<'a> Input<'a> {
     pub fn new(data: &'a str) -> Self {
-        Input { data: data, max_parsed: Rc::new(Cell::new((None, 0))) }
+        Input {
+            data        : data,
+            max_parsed  : Rc::new(Cell::new((None, 0))),
+            state       : Rc::new(Cell::new(ParserState::new())),
+        }
     }
     pub fn position(self: &Self) -> Position {
         self.input_len() as Position
     }
-    pub fn max_parsed(self: &Self) -> (Option<ErrorKind>, usize) {
+    pub fn max_parsed(self: &Self) -> (Option<ParseErrorKind>, usize) {
         self.max_parsed.get()
     }
+    pub fn state_mut(self: &Self, inner: impl Fn(&mut ParserState)) {
+        let mut state = self.state.get();
+        inner(&mut state);
+        self.state.set(state);
+    }
+    pub fn state(self: &Self) -> ParserState {
+        self.state.get()
+    }
     fn from_str(self: &Self, data: &'a str) -> Self {
-        Input { data: data, max_parsed: self.max_parsed.clone() }
+        Input {
+            data        : data,
+            max_parsed  : self.max_parsed.clone(),
+            state       : self.state.clone(),
+        }
     }
 }
 
@@ -82,7 +99,7 @@ impl<'a> UnspecializedInput for Input<'a> { }
 impl<'a> InputLength for Input<'a> {
     #[inline]
     fn input_len(&self) -> usize {
-      self.data.len()
+        self.data.len()
     }
   }
 
@@ -182,7 +199,7 @@ impl<'a> Slice<RangeFull> for Input<'a> {
     }
 }
 
-pub type Output<'a, O> = nom::IResult<Input<'a>, O, Error<'a>>;
+pub(super) type Output<'a, O> = nom::IResult<Input<'a>, O, Error<'a>>;
 
 /// Utility combinator to debug nom functions.
 #[allow(dead_code)]
@@ -247,7 +264,7 @@ where
 }
 
 /// Allow optional whitespace before and after matching the inner parser.
-pub fn ws<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
+pub(super) fn ws<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
 where
     F: FnMut(Input<'a>) -> IResult<Input<'a>, O, E>,
     E: Debug
@@ -260,7 +277,7 @@ where
 }
 
 /// Expect at least one whitespace before matching the inner parser.
-pub fn sepl<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
+pub(super) fn sepl<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
 where
     F: FnMut(Input<'a>) -> IResult<Input<'a>, O, E>,
     E: Debug
@@ -272,7 +289,7 @@ where
 }
 
 /// Expect at least one whitespace after matching the inner parser.
-pub fn sepr<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
+pub(super) fn sepr<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, O, E>
 where
     F: FnMut(Input<'a>) -> IResult<Input<'a>, O, E>,
     E: Debug
@@ -347,18 +364,16 @@ where
 
 /// returns true if given character is a whitespace character
 fn is_whitespace(chr: char) -> bool {
-    //println!("is_whitespace");
     chr == ' ' || chr == '\t' || chr == '\r' || chr == '\n'
 }
 
 /// returns true if given character is not an end of line character
 fn not_eol(chr: char) -> bool {
-    //println!("noteol");
     chr != '\r' && chr != '\n'
 }
 
 /// Splits numerical value from its type suffix (if it has any)
-pub fn splits_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
+pub(super) fn splits_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
     let tail = if n.input_len() > 3 {
         let tail = &n[n.input_len() - 3 ..];
         if &tail[0..1] != "u" && &tail[0..1] != "i" && &tail[0..1] != "f" {
@@ -382,7 +397,7 @@ pub fn splits_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
 }
 
 /// Returns whether the given signed numerical is within range of the named type.
-pub fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
+pub(super) fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
     match type_name {
         Some("i8")  => num >= i8::MIN as i64 && num <= i8::MAX as i64,
         Some("i16") => num >= i16::MIN as i64 && num <= i16::MAX as i64,
@@ -394,7 +409,7 @@ pub fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
 }
 
 /// Returns whether the given unsigned numerical is within range of the named type.
-pub fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
+pub(super) fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
     match type_name {
         Some("u8")  => num >= u8::MIN as u64 && num <= u8::MAX as u64,
         Some("u16") => num >= u16::MIN as u64 && num <= u16::MAX as u64,
@@ -402,5 +417,24 @@ pub fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
         Some("u64") => true,
         None        => true,
         _           => false,
+    }
+}
+
+pub(super) fn checkpoint<'a, O1, O2, F, G>(mut first: F, second: G) -> impl FnMut(Input<'a>) -> Output<'a, O1>
+where
+    F: Parser<Input<'a>, O1, Error<'a>>,
+    G: Fn(&O2) -> Option<ParseErrorKind>,
+    O1: Borrow<O2>,
+    O2: ?Sized,
+{
+    move |input: Input<'_>| {
+        let i = input.clone();
+        let (input, o) = first.parse(input)?;
+
+        if let Some(kind) = second(o.borrow()) {
+            Err(Err::Failure(Error { input: i, kind: kind }))
+        } else {
+            Ok((input, o))
+        }
     }
 }

@@ -7,16 +7,8 @@ use crate::util::compute_loc;
 #[repr(u32)]
 #[derive(Copy, Clone, Debug)]
 pub enum ParseErrorKind {
-    Unknown = 1,
-    UnexpectedEOF,
     SyntaxError,
-    SyntaxLet,
-    SyntaxFn,
-    SyntaxIf,
-    SyntaxElse,
-    SyntaxInlineType,
     InvalidNumerical,
-    // TODO: add error handling to all parsers where it make sense
 }
 
 /// An error reported by the parser (e.g. syntax error).
