@@ -71,7 +71,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, Structure, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
     };
     ($self:ident, $struct_name:ident, $val_name:ident, $code:tt $(, $field:ident)+) => {
         match $self {
@@ -113,7 +113,7 @@ impl_positioned!(Path);
 pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
-    Structure(Struct<'a>),
+    StructDef(StructDef<'a>),
     ForLoop(ForLoop<'a>),
     WhileLoop(WhileLoop<'a>),
     IfBlock(IfBlock<'a>),
@@ -270,14 +270,14 @@ impl_positioned!(Array);
 impl_bindable!(Array);
 
 #[derive(Debug)]
-pub struct Struct<'a> {
+pub struct StructDef<'a> {
     pub position: Position,
     pub ident   : Ident<'a>,
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
     pub binding_id  : Option<BindingId>,
 }
-impl_positioned!(Struct);
-impl_bindable!(Struct);
+impl_positioned!(StructDef);
+impl_bindable!(StructDef);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {

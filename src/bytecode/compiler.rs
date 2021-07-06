@@ -122,7 +122,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.compile_function(function),
-            S::Structure(_)             => Ok(()),
+            S::StructDef(_)             => Ok(()),
             S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => {
                 self.compile_if_block(if_block)?;

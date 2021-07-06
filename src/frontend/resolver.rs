@@ -280,7 +280,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function),
-            S::Structure(structure)     => self.resolve_structure(structure),
+            S::StructDef(structure)     => self.resolve_structure(structure),
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
@@ -348,7 +348,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_structure(self: &mut Self, item: &mut ast::Struct<'ast>) -> ResolveResult {
+    fn resolve_structure(self: &mut Self, item: &mut ast::StructDef<'ast>) -> ResolveResult {
         for (_, field) in &mut item.fields {
             self.resolve_inline_type(field)?;
         }

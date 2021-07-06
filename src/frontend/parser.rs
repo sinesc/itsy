@@ -1,13 +1,11 @@
 //! Nom parsers used to generate the Itsy AST.
 
-pub(crate) mod error;
+pub(crate) mod types;
 #[macro_use] mod nomutil;
 use nomutil::*;
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 use nom::Parser;
-use nom::error::ParseError as NomParseErrorTraitInScope; // need trait in scope but conflicts with our error names and we don't want to change those
 use nom::character::{is_alphanumeric, is_alphabetic, complete::{none_of, one_of, digit0, char, digit1}};
 use nom::bytes::complete::{take_while, take_while1, tag, escaped};
 use nom::combinator::{recognize, opt, all_consuming, map, not};
@@ -16,22 +14,34 @@ use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::util::{Numeric, FnKind, StackAddress};
 use crate::frontend::ast::*;
-use error::{ParseError, ParseErrorKind};
+use types::{Input, Output, Error, ParserState, ParseError, ParseErrorKind, ParsedProgram};
 
-/// Parsed program AST.
-#[derive(Debug)]
-pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
 
-#[derive(Clone, Copy, Debug)]
-struct ParserState {
+fn check_state<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
+where
+    P: Parser<Input<'a>, O, Error<'a>>,
+    C: Fn(ParserState) -> Option<ParseErrorKind>
+{
+    move |input: Input<'_>| {
+        let before = input.clone();
+        let inner_result = parser.parse(input)?;
 
+        if let Some(kind) = checker(before.state()) {
+            Err(nom::Err::Failure(Error { input: before, kind: kind }))
+        } else {
+            Ok(inner_result)
+        }
+    }
 }
 
-impl ParserState {
-    fn new() -> Self {
-        ParserState {
-
-        }
+fn with_state<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserState), mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+    move |input: Input<'_>| {
+        let i = input.clone();
+        let state = i.state();
+        i.state_mut(s);
+        let inner_result = parser.parse(input)?;
+        i.state_mut(|s| *s = state);
+        Ok(inner_result)
     }
 }
 
@@ -67,23 +77,66 @@ fn path(i: Input<'_>) -> Output<Path> {
 
 // literal numerical (-3.14f32)
 
-fn opt_sign(i: Input<'_>) -> Output<Option<Input<'_>>> {
-    opt(recognize(one_of("+-")))(i)
-}
-
-fn opt_fract(i: Input<'_>) -> Output<Option<Input<'_>>> {
-    opt(recognize(tuple((tag("."), not(char('.')), digit0))))(i) // not(.) to avoid matching ranges
-}
-
-fn opt_type(i: Input<'_>) -> Output<Option<Input<'_>>> {
-    opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))(i)
-}
-
 fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
 
+    /// Splits numerical value from its type suffix (if it has any)
+    fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
+        let tail = if n.len() > 3 {
+            let tail = &n[n.len() - 3 ..];
+            if &tail[0..1] != "u" && &tail[0..1] != "i" && &tail[0..1] != "f" {
+                &tail[1..]
+            } else {
+                tail
+            }
+        } else if n.len() > 2 {
+            &n[n.len() - 2 ..]
+        } else {
+            ""
+        };
+
+        if tail.len() == 2 && (tail == "u8" || tail == "i8") {
+            (&n[0..n.len() - 2], Some(tail))
+        } else if tail.len() == 3 && (&tail[0..1] == "u" || &tail[0..1] == "i" || &tail[0..1] == "f") && (&tail[1..] == "16" || &tail[1..] == "32" || &tail[1..] == "64") && tail != "f16" {
+            (&n[0..n.len() - 3], Some(tail))
+        } else {
+            (n, None)
+        }
+    }
+
+    /// Returns whether the given signed numerical is within range of the named type.
+    fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
+        match type_name {
+            Some("i8")  => num >= i8::MIN as i64 && num <= i8::MAX as i64,
+            Some("i16") => num >= i16::MIN as i64 && num <= i16::MAX as i64,
+            Some("i32") => num >= i32::MIN as i64 && num <= i32::MAX as i64,
+            Some("i64") => true,
+            None        => true,
+            _           => false,
+        }
+    }
+
+    /// Returns whether the given unsigned numerical is within range of the named type.
+    fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
+        match type_name {
+            Some("u8")  => num >= u8::MIN as u64 && num <= u8::MAX as u64,
+            Some("u16") => num >= u16::MIN as u64 && num <= u16::MAX as u64,
+            Some("u32") => num >= u32::MIN as u64 && num <= u32::MAX as u64,
+            Some("u64") => true,
+            None        => true,
+            _           => false,
+        }
+    }
+
     let position = i.position();
-    let (remaining, numerical) = recognize(tuple((opt_sign, digit1, opt_fract, opt_type))).parse(i.clone())?;
-    let (value, type_name) = splits_numerical_suffix(numerical);
+
+    let (remaining, numerical) = recognize(tuple((
+        opt(recognize(one_of("+-"))),
+        digit1,
+        opt(recognize(tuple((tag("."), not(char('.')), digit0)))), // not(.) to avoid matching ranges
+        opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
+    ))).parse(i.clone())?;
+
+    let (value, type_name) = splits_numerical_suffix(*numerical);
 
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
         if let Ok(float) = str::parse::<f64>(value) {
@@ -118,7 +171,7 @@ fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
         }
     }
 
-    Err(nom::Err::Error(Error::from_error_kind(i, nom::error::ErrorKind::Alpha))) // Todo
+    Err(nom::Err::Failure(Error { input: i, kind: ParseErrorKind::InvalidNumerical }))
 }
 
 fn static_size(i: Input<'_>) -> Output<StackAddress> {
@@ -158,14 +211,10 @@ fn string(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal array ([ 1, 2, 3 ])
 
-fn array_literal_elements(i: Input<'_>) -> Output<Vec<Expression<'_>>> {
-    ws(separated_list0(char(','), expression))(i)
-}
-
 fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
     let position = i.position();
     map(
-        tuple((ws(char('[')), array_literal_elements, opt(ws(char(','))), ws(char(']')))),
+        tuple((ws(char('[')), separated_list0(ws(char(',')), expression), opt(ws(char(','))), ws(char(']')))),
         move |m| Literal {
             position    : position,
             value: LiteralValue::Array(ArrayLiteral {
@@ -179,26 +228,28 @@ fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal struct (MyStruct { a: 1 })
 
-fn struct_literal_field(i: Input<'_>) -> Output<(&str, Expression<'_>)> {
-    map(
-        tuple((ws(label), ws(char(':')), expression)),
-        |tuple| (tuple.0, tuple.2)
-    )(i)
-}
-
-fn struct_literal_fields(i: Input<'_>) -> Output<HashMap<&str, Expression<'_>>> {
-    map(
-        separated_list0(char(','), struct_literal_field),
-        |list| {
-            list.into_iter().map(|item| (item.0, item.1)).collect()
-        }
-    )(i)
-}
-
 fn struct_literal(i: Input<'_>) -> Output<Literal<'_>> {
+
+    fn field(i: Input<'_>) -> Output<(&str, Expression<'_>)> {
+        map(
+            tuple((ws(label), ws(char(':')), expression)),
+            |tuple| (tuple.0, tuple.2)
+        )(i)
+    }
+
+    fn fields(i: Input<'_>) -> Output<HashMap<&str, Expression<'_>>> {
+        map(
+            separated_list0(char(','), field),
+            |list| {
+                list.into_iter().map(|item| (item.0, item.1)).collect()
+            }
+        )(i)
+    }
+
     let position = i.position();
+
     map(
-        tuple((ws(path), ws(char('{')), struct_literal_fields, opt(ws(char(','))), ws(char('}')))),
+        tuple((ws(path), ws(char('{')), fields, opt(ws(char(','))), ws(char('}')))),
         move |m| Literal {
             position    : position,
             value: LiteralValue::Struct(StructLiteral {
@@ -314,23 +365,23 @@ fn call_static(i: Input<'_>) -> Output<Call<'_>> {
 
 // block
 
-fn block_items(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
-    ws(many0(statement))(i)
-}
-
 fn block(i: Input<'_>) -> Output<Block<'_>> {
     let position = i.position();
     ws(map(
-        tuple((char('{'), block_items, opt(expression), char('}'))),
+        delimited(
+            ws(char('{')),
+            pair(many0(statement), opt(expression)),
+            ws(char('}'))
+        ),
         move |mut m| {
             // move last block item into result if it could be an expression and no result was matched
-            if m.2.is_none() && m.1.last().map_or(false, |l| l.maybe_expression()) {
-                m.2 = m.1.pop().map(|s| s.into_expression().unwrap());
+            if m.1.is_none() && m.0.last().map_or(false, |l| l.maybe_expression()) {
+                m.1 = m.0.pop().map(|s| s.into_expression().unwrap());
             }
             Block {
                 position        : position,
-                statements      : m.1,
-                result          : m.2,
+                statements      : m.0,
+                result          : m.1,
                 returns         : None,
                 scope_id        : None,
             }
@@ -340,32 +391,40 @@ fn block(i: Input<'_>) -> Output<Block<'_>> {
 
 // if
 
-fn if_else(i: Input<'_>) -> Output<Block<'_>> {
-    let position = i.position();
-    preceded(tag("else"), alt((
-        sepl(map(if_block, move |m| Block {
-            position        : position,
-            statements      : Vec::new(),
-            result          : Some(Expression::IfBlock(Box::new(m))),
-            returns         : None,
-            scope_id        : None,
-        })),
-        block
-    )))(i)
-}
-
 fn if_block(i: Input<'_>) -> Output<IfBlock<'_>> {
+
+    fn else_block(i: Input<'_>) -> Output<Block<'_>> {
+        let position = i.position();
+        ws(preceded(
+            tag("else"),
+            alt((
+                sepl(map(if_block, move |m| Block {
+                    position        : position,
+                    statements      : Vec::new(),
+                    result          : Some(Expression::IfBlock(Box::new(m))),
+                    returns         : None,
+                    scope_id        : None,
+                })),
+                block
+            ))
+        ))(i)
+    }
+
     let position = i.position();
-    ws(preceded(sepr(tag("if")), map(
-        tuple((expression, block, opt(if_else))),
-        move |m| IfBlock {
-            position    : position,
-            cond        : m.0,
-            if_block    : m.1,
-            else_block  : m.2,
-            scope_id    : None,
-        }
-    )))(i)
+
+    ws(preceded(
+        check_state(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        map(
+            tuple((expression, block, opt(else_block))),
+            move |m| IfBlock {
+                    position    : position,
+                    cond        : m.0,
+                    if_block    : m.1,
+                    else_block  : m.2,
+                    scope_id    : None,
+                }
+            )
+    ))(i)
 }
 
 // expression
@@ -533,18 +592,21 @@ fn expression(i: Input<'_>) -> Output<Expression<'_>> {
 
 // let
 
-fn binding(i: Input<'_>) -> Output<Statement<'_>> {
+fn binding(i: Input<'_>) -> Output<Binding<'_>> {
     let position = i.position();
     ws(map(
-        preceded(sepr(tag("let")), tuple((opt(sepr(tag("mut"))), ident, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))),
-        move |m| Statement::Binding(Binding {
+        preceded(
+            check_state(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((opt(sepr(tag("mut"))), ident, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
+        ),
+        move |m| Binding {
             position    : position,
             ident       : m.1,
             mutable     : m.0.is_some(),
             expr        : m.3,
             ty          : m.2,
             binding_id  : None,
-        })
+        }
     ))(i)
 }
 
@@ -562,32 +624,37 @@ fn inline_type(i: Input<'_>) -> Output<InlineType<'_>> {
 
 // struct definition
 
-fn struct_field(i: Input<'_>) -> Output<(&str, InlineType<'_>)> {
-    map(
-        tuple((ws(label), ws(char(':')), ws(inline_type))),
-        |tuple| (tuple.0, tuple.2)
-    )(i)
-}
+fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
 
-fn struct_fields(i: Input<'_>) -> Output<Vec<(&str, InlineType<'_>)>> {
-    map(
-        separated_list1(ws(char(',')), ws(struct_field)),
-        |list| {
-            list.into_iter().map(|item| (item.0, item.1)).collect()
-        }
-    )(i)
-}
+    fn field(i: Input<'_>) -> Output<(&str, InlineType<'_>)> {
+        map(
+            tuple((ws(label), ws(char(':')), ws(inline_type))),
+            |tuple| (tuple.0, tuple.2)
+        )(i)
+    }
 
-fn struct_(i: Input<'_>) -> Output<Statement<'_>> {
+    fn fields(i: Input<'_>) -> Output<Vec<(&str, InlineType<'_>)>> {
+        map(
+            separated_list1(ws(char(',')), field),
+            |list| {
+                list.into_iter().map(|item| (item.0, item.1)).collect()
+            }
+        )(i)
+    }
+
     let position = i.position();
+
     ws(map(
-        tuple((sepr(tag("struct")), ident, ws(char('{')), struct_fields, opt(ws(char(','))), ws(char('}')))),
-        move |tuple| Statement::Structure(Struct {
+        preceded(
+            check_state(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None }),
+            tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
+        ),
+        move |tuple| StructDef {
             position    : position,
-            ident       : tuple.1,
-            fields      : tuple.3,
+            ident       : tuple.0,
+            fields      : tuple.2,
             binding_id  : None,
-        })
+        }
     ))(i)
 }
 
@@ -608,44 +675,49 @@ fn array(i: Input<'_>) -> Output<Array<'_>> {
 
 // function definition
 
-fn signature_argument(i: Input<'_>) -> Output<Binding<'_>> {
-    let position = i.position();
-    ws(map(
-        tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-        move |tuple| Binding {
-            position    : position,
-            ident       : tuple.1,
-            expr        : None,
-            mutable     : tuple.0.is_some(),
-            ty          : Some(tuple.3),
-            binding_id  : None,
-        }
-    ))(i)
-}
-
-fn signature_argument_list(i: Input<'_>) -> Output<Vec<Binding<'_>>> {
-    delimited(ws(char('(')), separated_list0(ws(char(',')), ws(signature_argument)), ws(char(')')))(i)
-}
-
-fn signature_return_part(i: Input<'_>) -> Output<InlineType> {
-    preceded(ws(tag("->")), inline_type)(i)
-}
-
-fn signature(i: Input<'_>) -> Output<Signature<'_>> {
-    ws(map(
-        preceded(sepr(tag("fn")), tuple((ident, ws(signature_argument_list), opt(ws(signature_return_part))))),
-        |sig| Signature {
-            ident   : sig.0,
-            args    : sig.1,
-            ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
-        },
-    ))(i)
-}
-
 fn function(i: Input<'_>) -> Output<Function<'_>> {
+
+    fn signature_argument(i: Input<'_>) -> Output<Binding<'_>> {
+        let position = i.position();
+        ws(map(
+            tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
+            move |tuple| Binding {
+                position    : position,
+                ident       : tuple.1,
+                expr        : None,
+                mutable     : tuple.0.is_some(),
+                ty          : Some(tuple.3),
+                binding_id  : None,
+            }
+        ))(i)
+    }
+
+    fn signature_argument_list(i: Input<'_>) -> Output<Vec<Binding<'_>>> {
+        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(signature_argument)), ws(char(')')))(i)
+    }
+
+    fn signature_return_part(i: Input<'_>) -> Output<InlineType> {
+        preceded(ws(tag("->")), inline_type)(i)
+    }
+
+    fn signature(i: Input<'_>) -> Output<Signature<'_>> {
+        ws(map(
+            preceded(
+                check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None }),
+                tuple((ident, ws(signature_argument_list), opt(ws(signature_return_part))))
+            ),
+            |sig| Signature {
+                ident   : sig.0,
+                args    : sig.1,
+                ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
+            },
+        ))(i)
+    }
+
     let position = i.position();
+
     ws(map(
-        tuple((signature, block)),
+        tuple((signature, with_state(&|state: &mut ParserState| state.in_function = true, block))),
         move |func| Function {
             position    : position,
             sig         : func.0,
@@ -653,41 +725,46 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
             function_id : None,
             scope_id    : None,
         }
-    ))(i)
+    ))(i.clone())
 }
 
 // for
 
-fn for_loop_range(i: Input<'_>) -> Output<Expression<'_>> {
-    let position = i.position();
-    map(
-        tuple((ws(expression), ws(alt((tag("..="), tag("..")))), ws(expression))),
-        move |m| Expression::BinaryOp(Box::new(BinaryOp {
-            position    : position,
-            op          : BinaryOperator::from_string(*m.1),
-            left        : m.0,
-            right       : m.2,
-            binding_id  : None
-        }))
-    )(i)
-}
-
 fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
+
+    fn loop_range(i: Input<'_>) -> Output<Expression<'_>> {
+        let position = i.position();
+        map(
+            tuple((ws(expression), ws(alt((tag("..="), tag("..")))), ws(expression))),
+            move |m| Expression::BinaryOp(Box::new(BinaryOp {
+                position    : position,
+                op          : BinaryOperator::from_string(*m.1),
+                left        : m.0,
+                right       : m.2,
+                binding_id  : None
+            }))
+        )(i)
+    }
+
     let position = i.position();
+
     ws(map(
-        tuple((tag("for"), sepl(ident), sepl(tag("in")), sepl(alt((for_loop_range, expression))), block)),
+        preceded(
+            check_state(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
+            tuple((sepl(ident), sepl(tag("in")), sepl(alt((loop_range, expression))), block))
+        ),
         move |m| ForLoop {
             position: position,
             iter: Binding {
                 position    : position,
-                ident       : m.1,
+                ident       : m.0,
                 mutable     : true,
                 expr        : None,
                 ty          : None,
                 binding_id  : None,
             },
-            range   : m.3,
-            block   : m.4,
+            range   : m.2,
+            block   : m.3,
             scope_id: None,
         }
     ))(i)
@@ -698,7 +775,10 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
 fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
     let position = i.position();
     ws(map(
-        preceded(tag("while"), pair(sepl(expression), block)),
+        preceded(
+            check_state(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
+            pair(sepl(expression), block)
+        ),
         move |m| WhileLoop {
             position: position,
             expr    : m.0,
@@ -710,14 +790,17 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
 
 // return
 
-fn return_statement(i: Input<'_>) -> Output<Statement<'_>> {
+fn return_statement(i: Input<'_>) -> Output<Return<'_>> {
     let position = i.position();
     map(
-        preceded(tag("return"), terminated(opt(sepl(expression)), ws(char(';')))),
-        move |m| Statement::Return(Return {
+        preceded(
+            check_state(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
+            terminated(opt(sepl(expression)), ws(char(';')))
+        ),
+        move |m| Return {
             position    : position,
             expr        : m,
-        })
+        }
     )(i)
 }
 
@@ -725,13 +808,13 @@ fn return_statement(i: Input<'_>) -> Output<Statement<'_>> {
 
 fn statement(i: Input<'_>) -> Output<Statement<'_>> {
     ws(alt((
-        binding,
+        map(binding,|m| Statement::Binding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(function, |m| Statement::Function(m)),
-        struct_,
+        map(struct_def, |m| Statement::StructDef(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
-        return_statement,
+        map(return_statement, |m| Statement::Return(m)),
         map(terminated(expression, char(';')), |m| Statement::Expression(m)),
         map(block, |m| Statement::Block(m)),
     )))(i)

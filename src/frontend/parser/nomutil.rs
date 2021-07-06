@@ -1,9 +1,5 @@
-
-use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::cell::Cell;
-use std::rc::Rc;
-use std::ops::{Deref, Range, RangeFrom, RangeFull, RangeTo};
+use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use std::str::{Chars, CharIndices};
 use nom::{Err, FindSubstring, Compare, InputTake, Parser, Needed, IResult, CompareResult, InputIter, InputLength, Offset, UnspecializedInput, Slice};
 use nom::error::{ErrorKind, ParseError};
@@ -12,85 +8,28 @@ use nom::combinator::recognize;
 use nom::multi::{many0, many1};
 use nom::branch::alt;
 use nom::sequence::{delimited, preceded, terminated};
-use crate::frontend::{ParseErrorKind, parser::ParserState, ast::Position};
-
-#[derive(Debug)]
-pub(super) struct Error<'a> {
-    pub input: Input<'a>,
-    pub kind: ParseErrorKind,
-}
+use crate::frontend::parser::{Input, Error, ParseErrorKind};
 
 impl<'a> ParseError<Input<'a>> for Error<'a> {
     fn from_error_kind(input: Input<'a>, _: ErrorKind) -> Self {
         let len = input.input_len();
-        let mut state = input.max_parsed.get();
-        if state.1 > len || state.0.is_none() {
-            state.0 = Some(ParseErrorKind::SyntaxError);
-            state.1 = len;
-        }
-        input.max_parsed.set(state);
+        input.max_parsed_mut(|max_parsed| {
+            if max_parsed.1 > len || max_parsed.0.is_none() {
+                max_parsed.0 = Some(ParseErrorKind::SyntaxError);
+                max_parsed.1 = len;
+            }
+        });
         Error { input, kind: ParseErrorKind::SyntaxError }
     }
     fn append(_: Input<'a>, _: ErrorKind, other: Self) -> Self {
         let len = other.input.input_len();
-        let mut state = other.input.max_parsed.get();
-        if state.1 > len || state.0.is_none() {
-            state.0 = Some(other.kind);
-            state.1 = len;
-        }
-        other.input.max_parsed.set(state);
+        other.input.max_parsed_mut(|max_parsed| {
+            if max_parsed.1 > len || max_parsed.0.is_none() {
+                max_parsed.0 = Some(ParseErrorKind::SyntaxError);
+                max_parsed.1 = len;
+            }
+        });
         other
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct Input<'a> {
-    data: &'a str,
-    max_parsed: Rc<Cell<(Option<ParseErrorKind>, usize)>>,
-    state: Rc<Cell<ParserState>>,
-}
-
-impl<'a> Input<'a> {
-    pub fn new(data: &'a str) -> Self {
-        Input {
-            data        : data,
-            max_parsed  : Rc::new(Cell::new((None, 0))),
-            state       : Rc::new(Cell::new(ParserState::new())),
-        }
-    }
-    pub fn position(self: &Self) -> Position {
-        self.input_len() as Position
-    }
-    pub fn max_parsed(self: &Self) -> (Option<ParseErrorKind>, usize) {
-        self.max_parsed.get()
-    }
-    pub fn state_mut(self: &Self, inner: impl Fn(&mut ParserState)) {
-        let mut state = self.state.get();
-        inner(&mut state);
-        self.state.set(state);
-    }
-    pub fn state(self: &Self) -> ParserState {
-        self.state.get()
-    }
-    fn from_str(self: &Self, data: &'a str) -> Self {
-        Input {
-            data        : data,
-            max_parsed  : self.max_parsed.clone(),
-            state       : self.state.clone(),
-        }
-    }
-}
-
-impl<'a> Deref for Input<'a> {
-    type Target = &'a str;
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl<'a> PartialEq for Input<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
     }
 }
 
@@ -198,8 +137,6 @@ impl<'a> Slice<RangeFull> for Input<'a> {
         self.from_str(&self.data[range])
     }
 }
-
-pub(super) type Output<'a, O> = nom::IResult<Input<'a>, O, Error<'a>>;
 
 /// Utility combinator to debug nom functions.
 #[allow(dead_code)]
@@ -370,71 +307,4 @@ fn is_whitespace(chr: char) -> bool {
 /// returns true if given character is not an end of line character
 fn not_eol(chr: char) -> bool {
     chr != '\r' && chr != '\n'
-}
-
-/// Splits numerical value from its type suffix (if it has any)
-pub(super) fn splits_numerical_suffix(n: Input<'_>) -> (&str, Option<&str>) {
-    let tail = if n.input_len() > 3 {
-        let tail = &n[n.input_len() - 3 ..];
-        if &tail[0..1] != "u" && &tail[0..1] != "i" && &tail[0..1] != "f" {
-            &tail[1..]
-        } else {
-            tail
-        }
-    } else if n.input_len() > 2 {
-        &n[n.input_len() - 2 ..]
-    } else {
-        ""
-    };
-
-    if tail.input_len() == 2 && (tail == "u8" || tail == "i8") {
-        (&n[0..n.input_len() - 2], Some(tail))
-    } else if tail.input_len() == 3 && (&tail[0..1] == "u" || &tail[0..1] == "i" || &tail[0..1] == "f") && (&tail[1..] == "16" || &tail[1..] == "32" || &tail[1..] == "64") && tail != "f16" {
-        (&n[0..n.input_len() - 3], Some(tail))
-    } else {
-        (*n, None)
-    }
-}
-
-/// Returns whether the given signed numerical is within range of the named type.
-pub(super) fn check_signed_range(num: i64, type_name: Option<&str>) -> bool {
-    match type_name {
-        Some("i8")  => num >= i8::MIN as i64 && num <= i8::MAX as i64,
-        Some("i16") => num >= i16::MIN as i64 && num <= i16::MAX as i64,
-        Some("i32") => num >= i32::MIN as i64 && num <= i32::MAX as i64,
-        Some("i64") => true,
-        None        => true,
-        _           => false,
-    }
-}
-
-/// Returns whether the given unsigned numerical is within range of the named type.
-pub(super) fn check_unsigned_range(num: u64, type_name: Option<&str>) -> bool {
-    match type_name {
-        Some("u8")  => num >= u8::MIN as u64 && num <= u8::MAX as u64,
-        Some("u16") => num >= u16::MIN as u64 && num <= u16::MAX as u64,
-        Some("u32") => num >= u32::MIN as u64 && num <= u32::MAX as u64,
-        Some("u64") => true,
-        None        => true,
-        _           => false,
-    }
-}
-
-pub(super) fn checkpoint<'a, O1, O2, F, G>(mut first: F, second: G) -> impl FnMut(Input<'a>) -> Output<'a, O1>
-where
-    F: Parser<Input<'a>, O1, Error<'a>>,
-    G: Fn(&O2) -> Option<ParseErrorKind>,
-    O1: Borrow<O2>,
-    O2: ?Sized,
-{
-    move |input: Input<'_>| {
-        let i = input.clone();
-        let (input, o) = first.parse(input)?;
-
-        if let Some(kind) = second(o.borrow()) {
-            Err(Err::Failure(Error { input: i, kind: kind }))
-        } else {
-            Ok((input, o))
-        }
-    }
 }
