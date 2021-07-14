@@ -1,5 +1,5 @@
 {
-    "lldb.displayFormat": "decimal",
+    //"lldb.displayFormat": "decimal",
     //"lldb.dereferencePointers": true,
     //"lldb.showDisassembly": "always",
     "rust-analyzer.files.excludeDirs": [
