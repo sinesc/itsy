@@ -71,7 +71,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
     };
     ($self:ident, $struct_name:ident, $val_name:ident, $code:tt $(, $field:ident)+) => {
         match $self {
@@ -93,8 +93,33 @@ pub struct Ident<'a> {
     pub position: Position,
     pub name: &'a str,
 }
+
+impl<'a> Ident<'a> {
+    /// Computes fully qualified path
+    pub fn qualified(self: &Self, base: &[ impl Into<String> + Clone ], type_name: Option<String>) -> String {
+        if self.name == "Self" {
+            self.name.to_string()
+        } else {
+            let mut result: Vec<String> = Vec::new();
+            for v in base {
+                result.push((v.clone()).into());
+            }
+            if let Some(type_name) = type_name {
+                result.push(type_name);
+            }
+            result.push(self.name.to_string());
+            result.join("::")
+        }
+    }
+}
+
+impl<'a> Display for Ident<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.qualified(&[ "" ], None))
+    }
+}
+
 impl_positioned!(Ident);
-impl_display!(Ident, "{}", name);
 
 #[derive(Debug)]
 pub struct Path<'a> {
@@ -106,6 +131,27 @@ impl<'a> Path<'a> {
     pub fn pop(self: &mut Self) -> &'a str {
         self.name.pop().unwrap()
     }
+    /// Computes fully qualified path
+    pub fn qualified(self: &Self, base: &[ impl Into<String> + Clone ]) -> String {
+        if self.name.len() == 1 && self.name[0] == "Self" {
+            self.name[0].to_string()
+        } else {
+            let mut result: Vec<String> = Vec::new();
+            for v in base {
+                result.push((v.clone()).into());
+            }
+            for v in &self.name {
+                result.push(v.to_string());
+            }
+            result.join("::")
+        }
+    }
+}
+
+impl<'a> Display for Path<'a> {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.qualified(&[ "" ]))
+    }
 }
 
 impl_positioned!(Path);
@@ -114,6 +160,7 @@ pub enum Statement<'a> {
     Binding(Binding<'a>),
     Function(Function<'a>),
     StructDef(StructDef<'a>),
+    ImplBlock(ImplBlock<'a>),
     ForLoop(ForLoop<'a>),
     WhileLoop(WhileLoop<'a>),
     IfBlock(IfBlock<'a>),
@@ -185,8 +232,10 @@ pub struct Function<'a> {
     pub block       : Block<'a>,
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
+    pub binding_id  : Option<BindingId>,
 }
 impl_positioned!(Function);
+impl_bindable!(Function);
 
 #[derive(Debug)]
 pub struct Signature<'a> {
@@ -278,6 +327,17 @@ pub struct StructDef<'a> {
 }
 impl_positioned!(StructDef);
 impl_bindable!(StructDef);
+
+#[derive(Debug)]
+pub struct ImplBlock<'a> {
+    pub position    : Position,
+    pub ident       : Ident<'a>,
+    pub functions   : Vec<Function<'a>>,
+    pub binding_id  : Option<BindingId>,
+    pub scope_id    : Option<ScopeId>,
+}
+impl_positioned!(ImplBlock);
+impl_bindable!(ImplBlock);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -599,7 +659,7 @@ impl_display!(Member, "{}", ident);
 #[derive(Debug)]
 pub enum CallType<'a> {
     Function,
-    Method(Box<Expression<'a>>), // todo: maybe box call in expression instead?
+    Method,
     Static(Path<'a>),
 }
 

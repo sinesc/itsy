@@ -92,7 +92,7 @@ impl Scopes {
     }
 
     #[allow(dead_code)]
-    pub fn dump_parents(self: &Self, start_scope_id: ScopeId) {
+    pub fn dump_parents(self: &Self, start_scope_id: ScopeId) { // TODO: remove
         print!("self({:?})", start_scope_id);
         let mut scope_id = start_scope_id;
         loop {
@@ -151,7 +151,7 @@ impl Scopes {
 
     /// Finds the id of the named function within the scope or its parent scopes. // todo: generalize lookup functions, then integrate into resolver
     pub fn lookup_function_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<FunctionId> {
-        if let Some(index) = self.functions.id_of(scope_id, name) {
+        if let Some(index) = self.functions.id_by_name(scope_id, name) {
             Some(index)
         } else {
             let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
@@ -165,7 +165,7 @@ impl Scopes {
 
     /// Returns a reference to the signature of the given function id.
     pub fn function_ref(self: &Self, function_id: FunctionId) -> &FunctionInfo {
-        self.functions.by_id(function_id)
+        self.functions.value_by_id(function_id)
     }
 
     /* /// Returns a mutable reference to the signature of the given function id.
@@ -184,12 +184,12 @@ impl Scopes {
 
     /// Returns the id of the named binding originating in exactly this scope.
     pub fn binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        self.bindings.id_of(scope_id, name)
+        self.bindings.id_by_name(scope_id, name)
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
     pub fn lookup_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        if let Some(index) = self.bindings.id_of(scope_id, name) {
+        if let Some(index) = self.bindings.id_by_name(scope_id, name) {
             Some(index)
         } else {
             // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
@@ -204,20 +204,20 @@ impl Scopes {
 
     /// Returns a mutable reference to the type-id of the given binding id.
     pub fn binding_type_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
-        &mut self.bindings.by_id_mut(binding_id).type_id
+        &mut self.bindings.value_by_id_mut(binding_id).type_id
     }
 
     /// Returns a copy of the type-id of the given binding id.
     pub fn binding_type_id(self: &Self, binding_id: BindingId) -> Option<TypeId> {
-        self.bindings.by_id(binding_id).type_id
+        self.bindings.value_by_id(binding_id).type_id
     }
 
     pub fn binding_mutable_mut(self: &mut Self, binding_id: BindingId) -> &mut bool {
-        &mut self.bindings.by_id_mut(binding_id).mutable
+        &mut self.bindings.value_by_id_mut(binding_id).mutable
     }
 
     pub fn binding_mutable(self: &Self, binding_id: BindingId) -> bool {
-        self.bindings.by_id(binding_id).mutable
+        self.bindings.value_by_id(binding_id).mutable
     }
 }
 
@@ -229,14 +229,19 @@ impl Scopes {
         self.types.insert(scope_id, name.map(|n| n.into()), ty)
     }
 
+    /// Aliases an existing type into the given scope, returning a type id.
+    pub fn alias_type(self: &mut Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> TypeId {
+        self.types.alias(scope_id, name.into(), type_id)
+    }
+
     /// Returns the id of the named type originating in exactly this scope.
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        self.types.id_of(scope_id, name)
+        self.types.id_by_name(scope_id, name)
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
     pub fn lookup_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        if let Some(index) = self.types.id_of(scope_id, name) {
+        if let Some(index) = self.types.id_by_name(scope_id, name) {
             Some(index)
         } else {
             let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
@@ -248,13 +253,18 @@ impl Scopes {
         }
     }
 
+    /// Returns the id of the named type originating in exactly this scope.
+    pub fn lookup_type_name(self: &Self, type_id: TypeId) -> Option<&str> { //FIXME: not actually recursive
+        self.types.name_by_id(type_id, "Self".to_string()) // todo ugly
+    }
+
     /// Returns a mutable reference to the type of the given type id.
     pub fn type_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
-        self.types.by_id_mut(type_id)
+        self.types.value_by_id_mut(type_id)
     }
 
     /// Returns a reference to the type of the given type id.
     pub fn type_ref(self: &Self, type_id: TypeId) -> &Type {
-        self.types.by_id(type_id)
+        self.types.value_by_id(type_id)
     }
 }

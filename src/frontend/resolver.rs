@@ -37,6 +37,8 @@ struct Resolver<'ctx> {
     primitives      : &'ctx HashMap<&'ctx Type, TypeId>,
     /// Count unresolved calls. These are not trackable by Scopes
     unresolved_calls: usize,
+    /// Current fully qualified path
+    path            : &'ctx mut Vec<String>,
 }
 
 /// Resolves types within the given program AST structure.
@@ -89,6 +91,7 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
     let mut prev_unresolved;
     let mut infer_literals = false;
     let mut must_resolve = false;
+    let mut path = Vec::new();
 
     loop {
         let unresolved_calls = {
@@ -99,6 +102,7 @@ pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) ->
                 must_resolve    : must_resolve,
                 primitives      : &primitives,
                 unresolved_calls: 0,
+                path            : &mut path,
             };
             for mut statement in program.0.iter_mut() {
                 resolver.resolve_statement(&mut statement)?; // todo: want a vec of errors here
@@ -181,6 +185,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns a reference to the type of the given binding.
     fn binding_type(self: &mut Self, item: &impl Bindable) -> Option<&Type> {
         self.binding_type_id(item).map(move |type_id| self.type_by_id(type_id))
+    }
+
+    /// Returns the type name for a given binding.
+    fn binding_type_name(self: &Self, item: &impl Bindable) -> Option<&str> {
+        let type_id = self.binding_type_id(item)?;
+        Some(self.scopes.lookup_type_name(type_id)?)
     }
 
     /// Sets mutability for given binding.
@@ -279,8 +289,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_statement(self: &mut Self, item: &mut ast::Statement<'ast>) -> ResolveResult  {
         use self::ast::Statement as S;
         match item {
-            S::Function(function)       => self.resolve_function(function),
-            S::StructDef(structure)     => self.resolve_structure(structure),
+            S::Function(function)       => self.resolve_function(function, None),
+            S::StructDef(structure)     => self.resolve_struct_def(structure),
+            S::ImplBlock(impl_block)     => self.resolve_impl_block(impl_block),
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
@@ -320,7 +331,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &mut Self, item: &mut ast::TypeName<'ast>, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
         if self.binding_type_id(item).is_none() {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.name[0]) { // fixme: handle path segments
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.qualified(self.path)) {
                 self.binding_set_type_id(item, new_type_id)?;
             }
         }
@@ -348,7 +359,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_structure(self: &mut Self, item: &mut ast::StructDef<'ast>) -> ResolveResult {
+    fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef<'ast>) -> ResolveResult {
         for (_, field) in &mut item.fields {
             self.resolve_inline_type(field)?;
         }
@@ -365,6 +376,31 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved_or_err(item, None)
     }
 
+    /// Resolves a struct definition.
+    fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock<'ast>) -> ResolveResult {
+        if self.binding_type_id(item).is_none() {
+            if let Some(type_id) = self.scopes.lookup_type_id(self.scope_id, &item.ident.qualified(self.path, None)) {
+                self.binding_set_type_id(item, type_id)?;
+            }
+        }
+        if let Some(binding_id) = item.binding_id() {
+            let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+
+            if let Some(type_id) = self.scopes.binding_type_id(binding_id) {
+                if self.scopes.type_id(self.scope_id, "Self").is_none() {
+                    self.scopes.alias_type(self.scope_id, "Self", type_id);
+                }
+                let type_name = self.binding_type_name(item).unwrap_or_ice(ICE)?.to_string();
+                for function in &mut item.functions {
+                    self.resolve_function(function, Some((parent_scope_id, type_name.clone())))?;
+                }
+            }
+
+            self.scope_id = parent_scope_id;
+        }
+        Ok(())
+    }
+
     /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'ast>) -> ResolveResult {
         // resolve arguments
@@ -379,10 +415,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>) -> ResolveResult {
-
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-        self.resolve_signature(&mut item.sig)?;
+    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>, struct_scope: Option<(ScopeId, String)>) -> ResolveResult {
 
         fn ret_resolved<'ast>(me: &mut Resolver, item: &ast::Signature<'ast>) -> bool {
             item.ret.as_ref().map_or(true, |ret| me.binding_type_id(ret).is_some())
@@ -399,11 +432,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             item.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| me.binding_type_id(type_name))).collect()
         }
 
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+
+        self.resolve_signature(&mut item.sig)?;
+
         //let signature_scope_id = self.try_create_scope(&mut item.scope_id); // todo: put body into separate scope so signature can't access body
         if item.function_id.is_none() && ret_resolved(self, &item.sig) && args_resolved(self, &item.sig) {
             let result_type_id = ret_type_id(self, &item.sig);
             let arg_type_ids: Vec<_> = arg_type_ids(self, &item.sig);
-            let function_id = self.scopes.insert_function(parent_scope_id, item.sig.ident.name, result_type_id, arg_type_ids, Some(FnKind::User));
+            let (target_scope_id, type_name) = if let Some(scope) = struct_scope {
+                (scope.0, Some(scope.1))
+            } else {
+                (parent_scope_id, None)
+            };
+            let function_id = self.scopes.insert_function(target_scope_id, item.sig.ident.qualified(self.path, type_name), result_type_id, arg_type_ids, Some(FnKind::User));
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
@@ -443,10 +485,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // locate function definition
         if item.function_id.is_none() {
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, item.ident.name);
+            let path = match &item.call_type { // TODO: wow this got ugly
+                CallType::Method => {
+                    if item.args.len() >= 1 {
+                        if self.binding_type_id(&item.args[0]) == None {
+                            self.resolve_expression(&mut item.args[0], None)?;
+                        }
+                        self.binding_type_name(&item.args[0]).unwrap().to_string()
+                    } else {
+                        return Err(Error::new(item, ErrorKind::Internal(ICE.to_string())));
+                    }
+                },
+                CallType::Static(path) => path.qualified(self.path),
+                CallType::Function => self.path.join("::"),
+            };
+            let fn_name = if path != "" { vec![&path[..], item.ident.name].join("::") } else { item.ident.name.to_string() }; // TODO: hot garbage
+            item.function_id = self.scopes.lookup_function_id(self.scope_id, &fn_name);
             if item.function_id.is_none() {
                 if self.must_resolve {
-                    return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", item.ident.name))));
+                    return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", fn_name))));
                 } else {
                     self.unresolved_calls += 1
                 }
@@ -489,16 +546,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // rustcall?
             if let Some(rust_fn_index) = function_info.rust_fn_index() {
                 item.call_kind = FnKind::Rust(rust_fn_index);
-            }
-
-            // is this a method? resolve self argument
-            if let CallType::Method(self_arg) = &mut item.call_type {
-                self.resolve_expression(self_arg, None)?;
-                if let Some(ty) = self.binding_type(&**self_arg) { // todo: intrinsics needs a more generic approach. can't implement them all individually here
-                    if ty.is_array() && item.ident.name == "len" { // need to be in scope like rust_fns
-                        item.call_kind = FnKind::Intrinsic(Intrinsic::ArrayLen);
-                    }
-                }
             }
         }
 
@@ -624,7 +671,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         self.scope_id = parent_scope_id;
-        self.resolved_or_err(item, expected_result)
+        Ok(())
     }
 
     /// Resolves an assignment expression.

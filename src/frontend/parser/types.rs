@@ -17,6 +17,7 @@ pub enum ParseErrorKind {
     InvalidNumerical,
     IllegalReturn,
     IllegalFunction,
+    IllegalImplBlock,
     IllegalForLoop,
     IllegalWhileLoop,
     IllegalStructDef,

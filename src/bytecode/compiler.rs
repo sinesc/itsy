@@ -123,6 +123,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match item {
             S::Function(function)       => self.compile_function(function),
             S::StructDef(_)             => Ok(()),
+            S::ImplBlock(impl_block) => {
+                for function in &impl_block.functions {
+                    self.compile_function(function)?;
+                }
+                Ok(())
+            }
             S::Binding(binding)         => self.compile_binding(binding),
             S::IfBlock(if_block)        => {
                 self.compile_if_block(if_block)?;
@@ -291,13 +297,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             // rust function
             self.writer.rustcall(T::from_u16(rust_fn_index));
 
-        } else if let FnKind::Intrinsic(_intrinsic) = &item.call_kind {
+        } else if let FnKind::Intrinsic(_intrinsic) = &item.call_kind { //FIXME: fix intrinsics
 
             // intrinsics // TODO: actually check which one once there are some
-            if let CallType::Method(exp) = &item.call_type {
+            /* if let CallType::Method(exp) = &item.call_type {
                 let ty = self.binding_type(&**exp);
                 self.write_intrinsic_len(ty);
-            }
+            } */
 
         } else {
 

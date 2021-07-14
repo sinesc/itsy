@@ -501,7 +501,9 @@ fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
         init.1,
         move |acc, (op, mut val)| match &mut val {
             Expression::Call(call) if op == BinaryOperator::Access => {
-                call.call_type = CallType::Method(Box::new(acc));
+                // prepend object notation argument
+                call.args.insert(0, acc);
+                call.call_type = CallType::Method;
                 val
             },
             _ => Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
@@ -658,6 +660,25 @@ fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
     ))(i)
 }
 
+// impl block
+
+fn impl_block(i: Input<'_>) -> Output<ImplBlock<'_>> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
+        ),
+        move |tuple| ImplBlock {
+            position    : position,
+            ident       : tuple.0,
+            functions   : tuple.2,
+            binding_id  : None,
+            scope_id    : None,
+        }
+    ))(i)
+}
+
 // array definition
 
 fn array(i: Input<'_>) -> Output<Array<'_>> {
@@ -724,6 +745,7 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
             block       : func.1,
             function_id : None,
             scope_id    : None,
+            binding_id  : None,
         }
     ))(i.clone())
 }
@@ -812,6 +834,7 @@ fn statement(i: Input<'_>) -> Output<Statement<'_>> {
         map(if_block, |m| Statement::IfBlock(m)),
         map(function, |m| Statement::Function(m)),
         map(struct_def, |m| Statement::StructDef(m)),
+        map(impl_block,|m| Statement::ImplBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
