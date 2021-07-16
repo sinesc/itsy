@@ -247,7 +247,8 @@ impl Heap {
     }
 }
 
-pub trait HeapIO<T> {
+/// Generic heap operations.
+pub trait HeapOp<T> {
     fn read(self: &Self, item: HeapRef) -> T;
     fn write(self: &mut Self, item: HeapRef, value: T);
     /// Reads from the given HeapRef and increments its offset by the number of read bytes.
@@ -265,7 +266,7 @@ pub trait HeapIO<T> {
 
 macro_rules! impl_heap {
     (single, $type:ident) => (
-        impl HeapIO<$type> for Heap {
+        impl HeapOp<$type> for Heap {
             fn read(self: &Self, item: HeapRef) -> $type {
                 let (index, offset) = item.into();
                 self.objects[index as usize].data[offset as usize]
@@ -277,7 +278,7 @@ macro_rules! impl_heap {
         }
     );
     (multi, $type:ident) => (
-        impl HeapIO<$type> for Heap {
+        impl HeapOp<$type> for Heap {
             fn read(self: &Self, item: HeapRef) -> $type {
                 let (index, offset) = item.into();
                 let offset = offset as usize;

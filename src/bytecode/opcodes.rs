@@ -5,7 +5,7 @@ mod macros;
 
 use std::mem::size_of;
 use crate::bytecode::{ARG1, ARG2, ARG3};
-use crate::runtime::{StackOp, StackOffsetOp, HeapIO, HeapCmp, VMState, CopyTarget, HeapRefOp};
+use crate::runtime::{StackOp, StackRelativeOp, HeapOp, HeapCmp, VMState, CopyTarget, HeapRefOp};
 use crate::util::{HeapRef, StackAddress, StackOffset};
 
 type Data8 = u8;

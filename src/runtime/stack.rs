@@ -110,7 +110,7 @@ impl IndexMut<StackAddress> for Stack {
     }
 }
 
-/// Trait for generic stack operations.
+/// Generic stack operations.
 pub trait StackOp<T> {
     /// Push given value onto the stack.
     fn push(self: &mut Self, value: T);
@@ -124,16 +124,16 @@ pub trait StackOp<T> {
     fn top(self: &Self) -> T;
 }
 
-/// Trait for stack frame pointer.
-pub trait StackOffsetBase<T> {
+/// Stack offset-computations to support stack relative operations.
+pub trait StackOffsetOp<T> {
     /// Offset given value by the current frame pointer
     fn offset_fp(self: &Self, offset: StackOffset) -> StackAddress;
     /// Offset given value by the current stack pointer
     fn offset_sp(self: &Self, offset: StackOffset) -> StackAddress;
 }
 
-/// Trait for generic stack operations relative to the frame pointer.
-pub trait StackOffsetOp<T>: StackOffsetBase<T> + StackOp<T> {
+/// Generic stack operations relative to the stack or frame pointer.
+pub trait StackRelativeOp<T>: StackOffsetOp<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
     fn store_fp(self: &mut Self, offset: StackOffset, value: T) {
         let pos = self.offset_fp(offset);
@@ -156,7 +156,7 @@ pub trait StackOffsetOp<T>: StackOffsetBase<T> + StackOp<T> {
     }
 }
 
-impl<T> StackOffsetBase<T> for Stack {
+impl<T> StackOffsetOp<T> for Stack {
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn offset_fp(self: &Self, offset: StackOffset) -> StackAddress {
         (self.fp as i64 + offset as i64) as StackAddress
@@ -167,7 +167,7 @@ impl<T> StackOffsetBase<T> for Stack {
     }
 }
 
-impl<T> StackOffsetOp<T> for Stack where Stack: StackOp<T> + StackOffsetBase<T> { }
+impl<T> StackRelativeOp<T> for Stack where Stack: StackOp<T> + StackOffsetOp<T> { }
 
 /// Implements Stack operations.
 #[allow(unused_macros)]
