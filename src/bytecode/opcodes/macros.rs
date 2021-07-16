@@ -246,7 +246,7 @@ macro_rules! impl_vm {
                 }
             }
 
-            /// Execute the next bytecode from the VMs code buffer.
+            /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
             #[allow(unused_imports)]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use std::convert::TryInto;
@@ -277,6 +277,39 @@ macro_rules! impl_vm {
                             )?
                         ),+
                     }
+                }
+            }
+
+            /// Execute the next bytecode from the VMs code buffer.
+            #[allow(unused_imports)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
+            pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
+                use std::convert::TryInto;
+                let instruction = impl_vm!(read u8, self, self.pc);
+                #[allow(unreachable_patterns)]
+                match OpCode::from_u8(instruction) {
+                    $(
+                        // handle single opcode
+                        $(
+                            OpCode::$name => {
+                                let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
+                                $(let $context: &mut U = context;)?
+                                self.$name( $($context,)? $( $arg_name ),* );
+                                $( $ret; )?
+                            }
+                        )?
+                        // handle opcode variants
+                        $(
+                            $(
+                                OpCode::$variant_name => {
+                                    $(
+                                        let $variant_arg: $variant_type = impl_vm!(read $variant_type, self, self.pc);
+                                    )*
+                                    self.$variant_name( $( $variant_arg ),* );
+                                }
+                            )+
+                        )?
+                    ),+
                 }
             }
         }

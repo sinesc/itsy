@@ -7,7 +7,7 @@ mod heap;
 mod traits;
 
 pub use self::vm::VM;
-pub(crate) use self::vm::VMState;
+pub use self::vm::VMState;
 pub(crate) use self::vm::CopyTarget;
 pub use self::stack::*;
 pub use self::heap::*;

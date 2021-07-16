@@ -10,11 +10,13 @@ use crate::util::{StackAddress, StackOffset, ItemCount};
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum VMState {
-    /// Yield after current instruction. The program can be resumed after a yield.
-    Yield,
-    /// Terminate after current instruction. The program state will be reset.
-    Terminate,
-    /// A runtime error was encountered.
+    /// The program is ready to run.
+    Ready,
+    /// The program has yielded. It can be resumed.
+    Yielded,
+    /// The program has terminated and must be reset before it can be run again.
+    Terminated,
+    /// The program encountered a runtime error and must be reset before it can be run again.
     RuntimeError,
 }
 
@@ -48,7 +50,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
             func_type   : std::marker::PhantomData,
             instructions: instructions,
             pc          : 0,
-            state       : VMState::Terminate,
+            state       : VMState::Ready,
             stack       : stack,
             heap        : Heap::new(),
             cnt         : Stack::new(),
@@ -56,15 +58,27 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self, context: &mut U) -> &mut Self {
-        self.exec(context);
-        if self.state == VMState::Terminate {
-            if self.heap.len() > 0 {
-                panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
-            }
-            self.reset();
+    pub fn run(self: &mut Self, context: &mut U) -> VMState {
+        if self.state != VMState::Ready && self.state != VMState::Yielded {
+            panic!("Attempted to run in non-ready state");
         }
-        self
+        self.exec(context);
+        if self.state == VMState::Terminated && self.heap.len() > 0 {
+            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
+        }
+        self.state
+    }
+
+    /// Executes single bytecode instruction.
+    pub fn step(self: &mut Self, context: &mut U) -> VMState {
+        if self.state != VMState::Ready && self.state != VMState::Yielded {
+            panic!("Attempted to run in non-ready state");
+        }
+        self.exec_step(context);
+        if self.state == VMState::Terminated && self.heap.len() > 0 {
+            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
+        }
+        self.state
     }
 
     /// Resets the VM, keeping only code and constants.
@@ -73,7 +87,7 @@ impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T,
         self.heap.reset();
         self.cnt.reset();
         self.pc = 0;
-        self.state = VMState::Terminate;
+        self.state = VMState::Ready;
     }
 
     /// Disassembles the bytecode and returns it as a string.

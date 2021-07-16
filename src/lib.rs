@@ -56,8 +56,10 @@ pub use {frontend::{parse, resolve}, bytecode::compile};
 ///     let mut state = MyGameState { lives: 3 };
 ///     println!("lives started with: {:?}", state.lives);
 ///     vm.run(&mut state);
+///     vm.reset();
 ///     println!("lives after first run: {:?}", state.lives);
 ///     vm.run(&mut state);
+///     vm.reset();
 ///     println!("lives after second run: {:?}", state.lives);
 /// }
 /// ```

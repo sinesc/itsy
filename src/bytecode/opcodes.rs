@@ -808,11 +808,11 @@ impl_vm!{
 
     /// Yield program execution.
     fn yld(&mut self) return {
-        self.state = VMState::Yield;
+        self.state = VMState::Yielded;
     }
     /// Terminate program execution.
     fn exit(&mut self) return {
-        self.state = VMState::Terminate;
+        self.state = VMState::Terminated;
     }
 
     /// Does nothing. Written as comment into the opcode stream.
