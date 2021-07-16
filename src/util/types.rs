@@ -35,7 +35,7 @@ pub type StackAddress = u64; // usize/isize seem to be consistently slightly fas
 pub type StackOffset = i64;
 pub(crate) const STACK_ADDRESS_TYPE: Type = Type::u64;
 
-pub type HeapAddress = u64;
+type HeapAddress = u64;
 const HEAP_OFFSET_BITS: usize = 36;
 
 pub type ItemCount = u16;
@@ -176,11 +176,11 @@ impl Bindings {
         let type_id = self.binding_type_id(binding_id);
         &self.type_map[Into::<usize>::into(type_id)]
     }
-    /// Returns the mutability of the given binding.
-    pub fn binding_mut(self: &Self, binding_id: BindingId) -> bool {
+    /*/// Returns the mutability of the given binding.
+    pub fn binding_mutable(self: &Self, binding_id: BindingId) -> bool {
         let binding_index = Into::<usize>::into(binding_id);
         self.binding_map[binding_index].mutable
-    }
+    }*/
     pub fn types(self: &Self) -> &[Type] {
         &self.type_map
     }

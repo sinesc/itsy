@@ -1,60 +1,19 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 mod locals;
-#[macro_use]
-mod macros;
+#[macro_use] mod macros;
+pub mod error;
+mod util;
 
-use std::{cell::RefCell, cell::Cell, collections::HashMap, fmt::{self, Display}};
-use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, compute_loc, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::frontend::{ast::{self, Bindable, Returns, Positioned, CallType, Position}, ResolvedProgram};
+use std::{cell::RefCell, cell::Cell, collections::HashMap};
+use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
+use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
 use crate::runtime::{VMFunc, HeapRefOp};
 use locals::{Local, Locals, LocalsStack};
+use error::{CompileError, CompileErrorKind, CompileResult};
+use util::CallInfo;
 
-/// Represents the various possible compiler error-kinds.
-#[derive(Clone, Debug)]
-pub enum CompileErrorKind {
-    Error
-}
-
-/// An error reported by the compiler.
-#[derive(Clone, Debug)]
-pub struct CompileError {
-    pub kind: CompileErrorKind,
-    position: Position, // this is the position from the end of the input
-}
-
-impl CompileError {
-    fn new(item: &impl Positioned, kind: CompileErrorKind) -> CompileError {
-        Self { kind: kind, position: item.position() }
-    }
-    /// Computes and returns the source code location of this error. Since the AST only stores byte
-    /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
-        compute_loc(input, input.len() as Position - self.position)
-    }
-}
-
-impl Display for CompileError {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            CompileErrorKind::Error => write!(f, "Internal error"),
-            //_ => write!(f, "{:?}", self.kind),
-        }
-    }
-}
-
-type CompileResult = Result<(), CompileError>;
-
-#[derive(Clone, Copy)]
-struct CallInfo {
-    arg_size: StackAddress,
-    addr: StackAddress,
-}
-
-impl CallInfo {
-    const PLACEHOLDER: Self = Self { addr: 123, arg_size: 0 };
-}
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<'ty, T> where T: VMFunc<T> {

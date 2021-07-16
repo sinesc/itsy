@@ -7,7 +7,7 @@ mod optimizer;
 
 use std::marker::PhantomData;
 pub use self::writer::*;
-pub use self::compiler::{compile, CompileError, CompileErrorKind};
+pub use self::compiler::{compile, error::{CompileError, CompileErrorKind}};
 pub use self::opcodes::OpCode;
 use crate::util::{StackAddress, StackOffset};
 
