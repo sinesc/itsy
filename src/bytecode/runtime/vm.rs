@@ -2,10 +2,8 @@
 
 use std::convert::TryInto;
 use std::mem::size_of;
-use crate::bytecode::{Program, ConstDescriptor, ConstEndianness};
-use crate::util::Constructor;
-use crate::runtime::*;
-use crate::util::{StackAddress, StackOffset, ItemCount};
+use crate::bytecode::{Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
+use crate::shared::types::{Constructor, HeapRef, StackAddress, StackOffset, ItemCount};
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -28,7 +26,7 @@ pub enum CopyTarget {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
+pub struct VM<T, U> where T: VMFunc<T> {
     context_type            : std::marker::PhantomData<U>,
     func_type               : std::marker::PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
@@ -40,7 +38,7 @@ pub struct VM<T, U> where T: crate::runtime::VMFunc<T> {
 }
 
 /// Public VM methods.
-impl<T, U> VM<T, U> where T: crate::runtime::VMFunc<T>+crate::runtime::VMData<T, U> {
+impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self {
         let Program { instructions, consts, const_descriptors, .. } = program;

@@ -1,8 +1,9 @@
 //! Nom parsers used to generate the Itsy AST.
 
-pub(crate) mod types;
-#[macro_use] mod nomutil;
-use nomutil::*;
+pub mod error;
+#[macro_use]
+mod nomutil;
+pub mod types;
 
 use std::collections::HashMap;
 use nom::Parser;
@@ -12,10 +13,11 @@ use nom::combinator::{recognize, opt, all_consuming, map, not};
 use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
-use crate::util::{Numeric, FnKind, StackAddress};
+use crate::shared::{numeric::Numeric, types::FnKind, types::StackAddress};
 use crate::frontend::ast::*;
-use types::{Input, Output, Error, ParserState, ParseError, ParseErrorKind, ParsedProgram};
-
+use types::{Input, Output, Error, ParserState, ParsedProgram};
+use error::{ParseError, ParseErrorKind};
+use nomutil::*;
 
 fn check_state<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
 where

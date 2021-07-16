@@ -1,18 +1,14 @@
-//! Misc. utility code.
+//! Shared code for frontend and bytecode
 
-mod numeric;
-pub use self::numeric::*;
-
-mod typed_ids;
-pub use self::typed_ids::*;
-
-mod types;
-pub use self::types::*;
+pub mod numeric;
+pub mod typed_ids;
+pub mod types;
+pub mod error;
 
 use crate::frontend::ast::Position;
 
 /// Compute line/column number from absolute offset in string
-pub(crate) fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
+pub fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
     let mut parsed = &input[0..offset as usize];
     let mut line = 1;
     while { // can't use let parsed.lines() here as a line-break at the end is ignored
@@ -32,7 +28,7 @@ pub(crate) fn compute_loc(input: &str, offset: Position) -> (Position, Position)
 }
 
 /// References two elements of a slice mutably
-pub(crate) fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
     if a == b {
         panic!("tried to index element {} twice", a);
     } else if a >= slice.len() || b >= slice.len() {

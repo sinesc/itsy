@@ -1,7 +1,9 @@
 
 use std::fmt::{self, Display};
 use crate::frontend::ast::{Position, Positioned};
-use crate::util::{Type, Numeric, compute_loc, ItemCount};
+use crate::shared::types::{Type, ItemCount};
+use crate::shared::numeric::Numeric;
+use crate::shared::compute_loc;
 
 pub const ICE: &'static str = "Internal compiler error";
 

@@ -1,21 +1,26 @@
 //! AST type checker and resolver.
 
+#[path="scopes/scopes.rs"]
 mod scopes;
-pub(crate) mod error;
+pub mod error;
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
-use crate::util::{StackAddress, Array, BindingId, Bindings, FnKind, FunctionId, Intrinsic, ItemCount, Numeric, ScopeId, Struct, Type, TypeContainer, TypeId, STACK_ADDRESS_TYPE};
-use crate::runtime::VMFunc;
+use crate::shared::types::{StackAddress, Array, Bindings, FnKind, Intrinsic, ItemCount, Struct, Type, TypeContainer, STACK_ADDRESS_TYPE};
+use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
+use crate::shared::numeric::Numeric;
+
+use crate::bytecode::VMFunc;
+use crate::frontend::parser::types::ParsedProgram;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
 pub struct ResolvedProgram<'ast, T> where T: VMFunc<T> {
     /// Programs are generic over their Rust API
     ty: PhantomData<T>,
     /// Program AST with resolved `BindingId`s.
-    pub ast: super::ParsedProgram<'ast>,
+    pub ast: ParsedProgram<'ast>,
     /// Type and mutability data for each binding.
     pub bindings: Bindings,
     /// `FunctionId` of the entry/main function.
@@ -43,7 +48,7 @@ struct Resolver<'ctx> {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'ast, T>(mut program: super::ParsedProgram<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
+pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();

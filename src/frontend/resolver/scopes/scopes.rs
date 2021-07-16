@@ -2,7 +2,8 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
-use crate::util::{TypeId, Type, ScopeId, BindingId, FunctionId, FnKind, Bindings, BindingInfo};
+use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
+use crate::shared::types::{Type, FnKind, Bindings, BindingInfo};
 
 #[derive(Clone)]
 pub struct FunctionInfo {

@@ -1,12 +1,8 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-#[macro_use]
-mod macros;
-
 use std::mem::size_of;
-use crate::bytecode::{ARG1, ARG2, ARG3};
-use crate::runtime::{StackOp, StackRelativeOp, HeapOp, HeapCmp, VMState, CopyTarget, HeapRefOp};
-use crate::util::{HeapRef, StackAddress, StackOffset};
+use crate::bytecode::{ARG1, ARG2, ARG3, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
+use crate::shared::types::{HeapRef, StackAddress, StackOffset};
 
 type Data8 = u8;
 type Data16 = u16;

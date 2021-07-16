@@ -1,7 +1,7 @@
 use itsy::*;
 use std::fs;
 
-extern_rust!(MyFns, (), {
+vm_func!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
         println!("{}i8", value);
     }

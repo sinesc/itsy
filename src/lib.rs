@@ -3,35 +3,42 @@
 //!
 //! Look at the [`vm()` Examples](fn.vm.html#examples) to get started.
 
-use std::fmt::{self, Display};
-pub mod frontend;
-pub mod runtime;
-#[macro_use]
-pub mod bytecode;
-mod util;
+#[path="frontend/frontend.rs"]
+mod frontend;
 
-pub use {frontend::{parse, resolve}, bytecode::compile};
+#[macro_use]
+#[path="bytecode/bytecode.rs"]
+mod bytecode;
+
+#[path="shared/shared.rs"]
+mod shared;
+mod interface;
+
+pub use interface::*;
+
+use bytecode::{compiler::compile, runtime::vm::VM, VMFunc, VMData};
+use frontend::{parser::parse, resolver::resolve};
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
 /// The VM is generic over `VMFunc` and `VMData`. Parser and Resolver are generic over `VMFunc`.
 ///
-/// `extern_rust!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
+/// `vm_func!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
 /// # Examples
 ///
 /// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
 ///
 /// ```
-/// use itsy::{extern_rust, vm};
+/// use itsy::{vm_func, vm};
 ///
 /// struct MyGameState {
 ///     lives: i32,
 ///     // ...
 /// }
 ///
-/// extern_rust!(MyFns, MyGameState, {
+/// vm_func!(MyFns, MyGameState, {
 ///     // Retrieve some game state.
 ///     fn get_lives(&mut context) -> i32 {
 ///         context.lives
@@ -71,7 +78,7 @@ pub use {frontend::{parse, resolve}, bytecode::compile};
 /// lives after second run: 1
 /// ```
 #[macro_export]
-macro_rules! extern_rust {
+macro_rules! vm_func {
     (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[repr(u16)]
@@ -118,11 +125,11 @@ macro_rules! extern_rust {
     (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
     (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param $vm:ident, String) => { {
-        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
         $vm.heap.string(item).to_string()
     } };
     (@handle_param $vm:ident, & str) => { {
-        let item: $crate::runtime::HeapRef = $vm.stack.pop();
+        let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
         $vm.heap.string(item)
     } };
     (@handle_param $vm:ident, & $_:tt) => { {
@@ -158,7 +165,7 @@ macro_rules! extern_rust {
             #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
-                use $crate::runtime::StackOp;
+                use $crate::runtime::stack::StackOp;
                 match self {
                     $(
                         $type_name::$name => {
@@ -166,14 +173,14 @@ macro_rules! extern_rust {
                             // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = extern_rust!(@handle_param vm, $($arg_type)+);
+                                    let $arg_name: $($arg_type)+ = vm_func!(@handle_param vm, $($arg_type)+);
                                 )*
                                 $code
                             };
                             // set return value, if any
                             $(
                                 let ret_typed: $ret_type = ret;
-                                extern_rust!(@handle_ret vm, $ret_type, ret_typed);
+                                vm_func!(@handle_ret vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -188,56 +195,10 @@ macro_rules! extern_rust {
             fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle_ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
         )* }
     ) => {
-        /// Rust function mapping. Generated from function signatures defined via the `extern_rust!` macro.
-        extern_rust!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
-        extern_rust!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
+        /// Rust function mapping. Generated from function signatures defined via the `vm_func!` macro.
+        vm_func!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
+        vm_func!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
     };
-}
-
-/// An error generated during program compilation or execution.
-#[derive(Clone, Debug)]
-pub enum ItsyError {
-    ParseError(frontend::ParseError),
-    ResolveError(frontend::ResolveError),
-    CompileError(bytecode::CompileError),
-}
-
-impl ItsyError {
-    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        match self {
-            Self::ParseError(e) => e.loc(input),
-            Self::ResolveError(e) => e.loc(input),
-            Self::CompileError(e) => e.loc(input),
-        }
-    }
-}
-
-impl Display for ItsyError {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ParseError(e) => write!(f, "{}", e),
-            Self::ResolveError(e) => write!(f, "{}", e),
-            Self::CompileError(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl From<frontend::ParseError> for ItsyError {
-    fn from(error: frontend::ParseError) -> ItsyError {
-        ItsyError::ParseError(error)
-    }
-}
-
-impl From<frontend::ResolveError> for ItsyError {
-    fn from(error: frontend::ResolveError) -> ItsyError {
-        ItsyError::ResolveError(error)
-    }
-}
-
-impl From<bytecode::CompileError> for ItsyError {
-    fn from(error: bytecode::CompileError) -> ItsyError {
-        ItsyError::CompileError(error)
-    }
 }
 
 /// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a `VM` for it.
@@ -248,12 +209,12 @@ impl From<bytecode::CompileError> for ItsyError {
 /// # Examples
 ///
 /// The following code calls the Rust function `print` from Itsy code. It uses an empty tuple as context.
-/// For an example on how to share more useful data with Itsy code, have a look at the [`extern_rust!`](macro.extern_rust.html) documentation.
+/// For an example on how to share more useful data with Itsy code, have a look at the [`vm_func!`](macro.vm_func.html) documentation.
 ///
 /// ```
-/// use itsy::{extern_rust, vm};
+/// use itsy::{vm_func, vm};
 ///
-/// extern_rust!(MyFns, (), {
+/// vm_func!(MyFns, (), {
 ///     /// prints given string
 ///     fn print(&mut context, value: &str) {
 ///         println!("print:{}", value);
@@ -270,8 +231,7 @@ impl From<bytecode::CompileError> for ItsyError {
 ///     vm.run(&mut ());
 /// }
 /// ```
-pub fn vm<T, U>(program: &str) -> Result<runtime::VM<T, U>, ItsyError> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> {
-    use crate::runtime::VM;
+pub fn vm<T, U>(program: &str) -> Result<VM<T, U>, Error> where T: VMFunc<T> + VMData<T, U> {
     let parsed = parse(program)?;
     let resolved = resolve::<T>(parsed, "main")?;
     let program = compile(resolved)?;

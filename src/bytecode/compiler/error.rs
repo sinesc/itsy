@@ -1,5 +1,5 @@
 use std::fmt::{self, Display};
-use crate::util::compute_loc;
+use crate::shared::compute_loc;
 use crate::frontend::ast::{Positioned, Position};
 
 /// Represents the various possible compiler error-kinds.

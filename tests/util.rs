@@ -1,11 +1,11 @@
-pub use itsy::{vm, frontend::parse};
+pub use itsy::{vm, parser::parse};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
 pub type ContextElement = Box<dyn Any>;
 pub type Context = Vec<ContextElement>;
 
-use itsy::extern_rust;
+use itsy::vm_func;
 
 /// Compare a ContextElement with given value.
 #[allow(dead_code)]
@@ -31,7 +31,7 @@ pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debu
 }
 
 // Implement some VM methods to write values of specific types to the VM context.
-extern_rust!(TestFns, Context, {
+vm_func!(TestFns, Context, {
     fn ret_u8(&mut context, value: u8) {
         context.push(Box::new(value));
     }

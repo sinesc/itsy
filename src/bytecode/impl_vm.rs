@@ -1,4 +1,3 @@
-
 /// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_vm {
 
@@ -125,7 +124,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
-        impl<T> crate::bytecode::Writer<T> where T: crate::runtime::VMFunc<T> {
+        impl<T> crate::bytecode::Writer<T> where T: crate::bytecode::VMFunc<T> {
             $(
                 $( #[ $attr ] )*
                 // opcode variants
@@ -156,7 +155,7 @@ macro_rules! impl_vm {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
-        impl<T, U> crate::runtime::VM<T, U> where T: crate::runtime::VMFunc<T> + crate::runtime::VMData<T, U> {
+        impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
 
             // Generate methods for executing each bytecode on VM struct.
             $(

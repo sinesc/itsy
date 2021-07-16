@@ -6,10 +6,10 @@ pub mod error;
 mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
-use crate::util::{Numeric, FunctionId, Type, TypeId, FnKind, Bindings, Constructor, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::frontend::{ast::{self, Bindable, Returns}, ResolvedProgram};
-use crate::bytecode::{Writer, StoreConst, Program, ARG1, ARG2, ARG3};
-use crate::runtime::{VMFunc, HeapRefOp};
+use crate::shared::types::{Type, FnKind, Bindings, Constructor, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
+use crate::shared::{numeric::Numeric, typed_ids::{FunctionId, TypeId}};
+use crate::frontend::{ast::{self, Bindable, Returns}, resolver::ResolvedProgram};
+use crate::bytecode::{Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;

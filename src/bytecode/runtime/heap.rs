@@ -1,6 +1,6 @@
 use std::{convert::TryInto, mem::size_of};
 use std::collections::HashMap;
-use crate::util::{HeapRef, HeapSlice, index_twice, StackAddress, StackOffset};
+use crate::shared::{index_twice, types::{HeapRef, HeapSlice, StackAddress, StackOffset}};
 
 /// Allowed operator for compare.
 pub enum HeapCmp {

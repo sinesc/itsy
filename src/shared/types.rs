@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use crate::util::{TypeId, BindingId, Numeric};
-
+use crate::shared::typed_ids::{TypeId, BindingId};
+use crate::shared::numeric::{Numeric, Signed, Unsigned};
 pub(crate) trait TypeContainer {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
@@ -318,7 +318,6 @@ impl Type {
     /// Whether the given numeric is compatible with this type.
     pub fn is_compatible_numeric(self: &Self, value: Numeric) -> bool {
         use std::{u8, u16, u32, u64, i8, i16, i32, i64};
-        use crate::util::{Signed, Unsigned};
         if value.is_float() && self.is_float() {
             true
         } else if value.is_integer() && self.is_integer() {

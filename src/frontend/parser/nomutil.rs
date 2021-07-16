@@ -8,7 +8,7 @@ use nom::combinator::recognize;
 use nom::multi::{many0, many1};
 use nom::branch::alt;
 use nom::sequence::{delimited, preceded, terminated};
-use crate::frontend::parser::{Input, Error, ParseErrorKind};
+use crate::frontend::parser::{Input, Error, error::ParseErrorKind};
 
 impl<'a> ParseError<Input<'a>> for Error<'a> {
     fn from_error_kind(input: Input<'a>, _: ErrorKind) -> Self {
