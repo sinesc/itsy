@@ -299,8 +299,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.write_cntinc(self.get_constructor(ty));
             }
             self.write_store(index as StackOffset, ty);
+            self.locals.set_active(binding_id, true);
         }
-        self.locals.set_active(binding_id, true);
         Ok(())
     }
 
