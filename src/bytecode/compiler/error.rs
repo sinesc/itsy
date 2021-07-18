@@ -5,7 +5,8 @@ use crate::frontend::ast::{Positioned, Position};
 /// Represents the various possible compiler error-kinds.
 #[derive(Clone, Debug)]
 pub enum CompileErrorKind {
-    Error
+    Uninitialized,
+    Internal,
 }
 
 /// An error reported by the compiler.
@@ -29,8 +30,8 @@ impl CompileError {
 impl Display for CompileError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            CompileErrorKind::Error => write!(f, "Internal error"),
-            //_ => write!(f, "{:?}", self.kind),
+            CompileErrorKind::Internal => write!(f, "Internal error"),
+            _ => write!(f, "{:?}", self.kind),
         }
     }
 }

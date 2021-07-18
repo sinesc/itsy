@@ -5,14 +5,14 @@ use crate::shared::{typed_ids::BindingId, types::StackAddress};
 #[derive(Copy,Clone)]
 pub struct Local {
     /// The load-index for this variable.
-    pub index   : StackAddress,
+    pub index: StackAddress,
     /// Whether this variable is currently in scope (stack frame does not equal scope!)
-    pub in_scope: bool,
+    pub active: bool,
 }
 
 impl Local {
-    pub fn new(index: StackAddress) -> Self {
-        Local { index, in_scope: false }
+    pub fn new(index: StackAddress, active: bool) -> Self {
+        Local { index, active }
     }
 }
 
@@ -42,7 +42,7 @@ impl Locals {
     }
 }
 
-/// A stack Locals mappings for nested structures.
+/// A stack of Locals mappings.
 pub struct LocalsStack(RefCell<Vec<Locals>>); // TODO rename Frames?
 
 impl LocalsStack {
@@ -78,11 +78,13 @@ impl LocalsStack {
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         *self.0.borrow().last().expect(Self::NO_STACK).map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
-    /// Sets whether the given local variable is currently in scope.
-    pub fn set_active(self: &Self, binding_id: BindingId, active: bool) {
+    /// Marks the the given local variable as initialized and returns its index.
+    pub fn make_active(self: &Self, binding_id: BindingId) -> StackAddress {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING).in_scope = active;
+        let local = locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
+        local.active = true;
+        local.index
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
     pub fn add_forward_jmp(self: &Self, address: StackAddress) {

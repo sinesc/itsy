@@ -8,7 +8,7 @@ mod util;
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::shared::types::{Type, FnKind, Bindings, Constructor, TypeContainer, Struct, StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
 use crate::shared::{numeric::Numeric, typed_ids::{FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Bindable, Returns}, resolver::ResolvedProgram};
+use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -149,7 +149,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
         let binding_id = item.left.binding_id().unwrap();
-        let index = self.locals.lookup(binding_id).index;
+        let local = self.locals.lookup(binding_id);
         let ty = self.binding_type(&item.left);
         let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
@@ -157,13 +157,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.compile_expression(&item.right)?;
                 if ty.is_ref() {
                     self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(index as StackOffset, ty);
-                    self.write_cntdec(constructor);
+                    self.write_load(local.index as StackOffset, ty);
+                    if local.active {
+                        self.write_cntdec(constructor);
+                    }
                 }
-                self.write_store(index as StackOffset, ty);
+                self.write_store(local.index as StackOffset, ty);
+                self.locals.make_active(binding_id);
             },
             _ => {
-                self.write_load(index as StackOffset, ty); // stack: L
+                if !local.active {
+                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
+                }
+                self.write_load(local.index as StackOffset, ty); // stack: L
                 self.compile_expression(&item.right)?; // stack: L R
                 if ty.is_ref() {
                     self.writer.cntstore(); // cntinc temporary right operand
@@ -179,12 +185,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 };
                 if ty.is_ref() {
                     self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(index as StackOffset, ty);
+                    self.write_load(local.index as StackOffset, ty);
                     self.write_cntdec(constructor);
                     self.writer.cntpop(); // cntdec temporary right operand
                     self.write_cntdec(constructor);
                 }
-                self.write_store(index as StackOffset, ty); // stack -
+                self.write_store(local.index as StackOffset, ty); // stack -
             },
         };
         Ok(())
@@ -293,13 +299,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
-            let index = self.locals.lookup(binding_id).index;
+            let index = self.locals.make_active(binding_id);
             let ty = self.binding_type(item);
             if ty.is_ref() {
                 self.write_cntinc(self.get_constructor(ty));
             }
             self.write_store(index as StackOffset, ty);
-            self.locals.set_active(binding_id, true);
         }
         Ok(())
     }
@@ -309,7 +314,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         comment!(self, "variable {}", item);
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            self.locals.lookup(binding_id).index
+            let local = self.locals.lookup(binding_id);
+            if !local.active {
+                return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
+            }
+            local.index
         };
         self.write_load(load_index as StackOffset, self.binding_type(item));
         Ok(())
@@ -382,15 +391,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
             if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
                 comment!(self, "for-loop");
-                // todo: refactor this mess
-                let (var_index, var_type) = self.range_info(item);
+                // activate iter variable
+                let var_index = {
+                    let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
+                    self.locals.make_active(binding_id) as StackOffset
+                };
+                let var_type = self.binding_type(&item.iter);
                 // store lower range bound in iter variable
                 self.compile_expression(&binary_op.left)?;
-                self.write_store(var_index as StackOffset, var_type);
+                self.write_store(var_index, var_type);
                 // push upper range bound
                 self.compile_expression(&binary_op.right)?;
                 // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
-                self.write_load(var_index as StackOffset, var_type);
+                self.write_load(var_index, var_type);
                 self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
@@ -402,7 +415,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let start_target = self.writer.position();
                 self.compile_block(&item.block)?;
                 // load bounds, increment and compare
-                self.write_preinc(var_index as StackOffset, var_type);
+                self.write_preinc(var_index, var_type);
                 self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
                 if binary_op.op == ast::BinaryOperator::Range {
                     self.write_lt(var_type);
@@ -415,11 +428,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
                 Ok(())
             } else {
-                Err(CompileError::new(item, CompileErrorKind::Error))
+                Err(CompileError::new(item, CompileErrorKind::Internal))
             }
 
         } else {
-            Err(CompileError::new(item, CompileErrorKind::Error))
+            Err(CompileError::new(item, CompileErrorKind::Internal))
         }
     }
 
@@ -432,7 +445,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let mut frame = Locals::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos));
+            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, true));
             frame.arg_pos += self.binding_type(arg).primitive_size() as StackAddress;
         }
         self.create_stack_frame_block(&item.block, &mut frame);
@@ -850,13 +863,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos));
+                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos, false));
                 frame.var_pos += self.binding_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos));
+                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos, false));
                 frame.var_pos += self.binding_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -1080,7 +1093,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes operations to unref local heap objects.
     fn write_cntdec_all(self: &Self) {
         self.locals.borrow_mut(|locals| {
-            for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.in_scope) {
+            for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.active) {
                 let ty = self.bindings.binding_type(binding_id);
                 if ty.is_ref() {
                     let constructor = self.get_constructor(ty);
