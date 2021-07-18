@@ -133,7 +133,7 @@ impl Heap {
         self.objects[index as usize].data.len() as StackAddress
     }
     /// Returns a vector of unfreed heap objects.
-    pub(crate) fn data(self: &Self) -> HashMap<StackAddress, (StackAddress, &Vec<u8>)> {
+    pub fn data(self: &Self) -> HashMap<StackAddress, (StackAddress, &Vec<u8>)> {
         self.objects.iter().enumerate().filter(|&(i, _)| !self.free.contains(&(i as StackAddress))).map(|(i, h)| (i as StackAddress, (h.refs, &h.data))).collect()
     }
     /// Returns a byte slice for the given heap reference.

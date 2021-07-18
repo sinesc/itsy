@@ -34,7 +34,7 @@ pub struct VM<T, U> where T: VMFunc<T> {
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
-    pub(crate) cnt          : Stack,
+    pub cnt                 : Stack,
 }
 
 /// Public VM methods.
