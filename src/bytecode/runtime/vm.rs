@@ -40,13 +40,13 @@ pub struct VM<T, U> where T: VMFunc<T> {
 /// Public VM methods.
 impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     /// Create a new VM instance with the given Program.
-    pub fn new(program: Program<T>) -> Self {
+    pub fn new(program: &Program<T>) -> Self {
         let Program { instructions, consts, const_descriptors, .. } = program;
         let stack = Self::init_consts(consts, const_descriptors);
         VM {
             context_type: std::marker::PhantomData,
             func_type   : std::marker::PhantomData,
-            instructions: instructions,
+            instructions: instructions.clone(),
             pc          : 0,
             state       : VMState::Ready,
             stack       : stack,
@@ -116,7 +116,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Pushes program const pool onto the stack, converting them from Little Endian to native endianness.
-    fn init_consts(consts: Vec<u8>, const_descriptors: Vec<ConstDescriptor>) -> Stack {
+    fn init_consts(consts: &Vec<u8>, const_descriptors: &Vec<ConstDescriptor>) -> Stack {
         use ConstEndianness as CE;
         let mut stack = Stack::new();
         for descriptor in const_descriptors {

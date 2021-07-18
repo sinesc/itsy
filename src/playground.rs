@@ -47,12 +47,12 @@ vm_func!(MyFns, (), {
 #[allow(overflowing_literals)]
 fn main() {
     let source = fs::read_to_string("itsy/test.itsy").unwrap();
-    let vm = vm::<MyFns, ()>(&source);
-    if let Ok(mut vm) = vm {
+    let program = build::<MyFns>(&source);
+    if let Ok(program) = program {
         let vm_start = std::time::Instant::now();
-        vm.run(&mut ());
+        run(&program, &mut ()).unwrap();
         println!("vm time: {:.4}s", (std::time::Instant::now() - vm_start).as_millis() as f32 / 1000.);
-    } else if let Err(err) = vm {
+    } else if let Err(err) = program {
         let loc =  err.loc(&source);
         println!("Error: {} in line {}, column {}.", err, loc.0, loc.1);
     }

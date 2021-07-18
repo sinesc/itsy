@@ -1,7 +1,9 @@
+#![doc(html_favicon_url = "https://sinesc.github.io/images/itsy/favicon.png")]
+#![doc(html_logo_url = "https://sinesc.github.io/images/itsy/logo.png")]
 
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
-//! Look at the [`vm()` Examples](fn.vm.html#examples) to get started.
+//! Look at the [build] or [run] examples to get started.
 
 #[path="frontend/frontend.rs"]
 mod frontend;
@@ -16,7 +18,7 @@ mod interface;
 
 pub use interface::*;
 
-use bytecode::{compiler::compile, runtime::vm::VM, VMFunc, VMData};
+use bytecode::{compiler::compile, runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 use frontend::{parser::parse, resolver::resolve};
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
@@ -26,57 +28,59 @@ use frontend::{parser::parse, resolver::resolve};
 ///
 /// `vm_func!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
+/// Currently supported parameter types are rust primitives as well as String and &str.
+///
 /// # Examples
 ///
-/// The following example defines a VM with a custom context and some Rust function bindings and runs it a few times.
+/// The following example defines a few Rust function and calls them from itsy code.
 ///
 /// ```
-/// use itsy::{vm_func, vm};
+/// use itsy::{vm_func, build, runtime::VM};
 ///
-/// struct MyGameState {
-///     lives: i32,
+/// struct MyContext {
 ///     // ...
 /// }
 ///
-/// vm_func!(MyFns, MyGameState, {
-///     // Retrieve some game state.
-///     fn get_lives(&mut context) -> i32 {
-///         context.lives
+/// vm_func!(MyFns, MyContext, {
+///     // Rust function that does something
+///     fn intense_computation(&mut context, a: i16, b: i16) -> i16 {
+///         a * b
 ///     }
-///     // Set some game state.
-///     fn set_lives(&mut context, value: i32) {
-///         context.lives = value;
+///     fn print(&mut context, val: i16) {
+///         println!("{}", val);
 ///     }
+///     //... more functions ...
 /// });
 ///
 /// fn main() {
-///     // Create a VM for the given context and set of rust functions
-///     // and compile the given source code.
-///     let mut vm = vm::<MyFns, MyGameState>("
+///     let mut context = MyContext { /* ... */ };
+///
+///     let program = build::<MyFns>("
 ///         fn main() {
-///             let lives = get_lives();
-///             set_lives(lives - 1);
+///             print(intense_computation(4, 5));
 ///         }
 ///     ").unwrap();
 ///
-///     // Create some application state and run the VM a few times on it.
-///     let mut state = MyGameState { lives: 3 };
-///     println!("lives started with: {:?}", state.lives);
-///     vm.run(&mut state);
-///     vm.reset();
-///     println!("lives after first run: {:?}", state.lives);
-///     vm.run(&mut state);
-///     vm.reset();
-///     println!("lives after second run: {:?}", state.lives);
+///     let mut vm = VM::new(&program);
+///     vm.run(&mut context);
 /// }
 /// ```
 ///
 /// Output:
 /// ```text
-/// lives started with: 3
-/// lives after first run: 2
-/// lives after second run: 1
+/// 20
 /// ```
+#[cfg(doc)]
+#[macro_export]
+macro_rules! vm_func {
+    ($vis:vis $type_name:ident, $context_type:ty, {
+        $(
+            fn $name:tt(&mut $context:ident $(, $arg_name:ident: $($arg_type:tt)+)*) $(-> $ret_type:ident)? $code:block
+        )*
+    } ) => { }
+}
+
+#[cfg(not(doc))]
 #[macro_export]
 macro_rules! vm_func {
     (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
@@ -207,39 +211,70 @@ macro_rules! vm_func {
     };
 }
 
-/// One stop shop to `parse`, `resolve` and `compile` given Itsy source code and create a `VM` for it.
-/// Program execution starts from the `main` function.
+/// Parses, resolves and compiles given Itsy source code. The name of the
+/// entry function must be `main`. For more control, see [parser::parse],
+/// [resolver::resolve] and [compiler::compile].
+/// Use [run] or [VM] to execute the given program.
 ///
-/// Call `run` on the returned `VM` struct to execute the program.
-///
-/// # Examples
-///
-/// The following code calls the Rust function `print` from Itsy code. It uses an empty tuple as context.
-/// For an example on how to share more useful data with Itsy code, have a look at the [`vm_func!`](macro.vm_func.html) documentation.
-///
+/// The following example builds and runs a program:
 /// ```
-/// use itsy::{vm_func, vm};
+/// use itsy::{vm_func, build, run};
 ///
 /// vm_func!(MyFns, (), {
-///     /// prints given string
+///     /// a rust function that prints given string
 ///     fn print(&mut context, value: &str) {
-///         println!("print:{}", value);
+///         println!("print: {}", value);
 ///     }
 /// });
 ///
 /// fn main() {
-///     let mut vm = vm::<MyFns, ()>("
+///     let program = build::<MyFns>("
+///         /// an itsy function that calls a rust function
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
 ///         }
 ///     ").unwrap();
 ///
-///     vm.run(&mut ());
+///     run(&program, &mut ()).unwrap();
 /// }
 /// ```
-pub fn vm<T, U>(program: &str) -> Result<VM<T, U>, Error> where T: VMFunc<T> + VMData<T, U> {
-    let parsed = parse(program)?;
-    let resolved = resolve::<T>(parsed, "main")?;
-    let program = compile(resolved)?;
-    Ok(VM::new(program))
+pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
+    let parsed = parse(source)?;
+    let resolved = resolve::<F>(parsed, "main")?;
+    Ok(compile(resolved)?)
+}
+
+/// Runs the given compiled program. The name of the entry function must be `main`.
+/// See [VM] for more control about running a program.
+///
+/// The following example builds and runs a program:
+/// ```
+/// use itsy::{vm_func, build, run};
+///
+/// vm_func!(MyFns, (), {
+///     /// a rust function that prints given string
+///     fn print(&mut context, value: &str) {
+///         println!("print: {}", value);
+///     }
+/// });
+///
+/// fn main() {
+///     let program = build::<MyFns>("
+///         /// an itsy function that calls a rust function
+///         fn main() {
+///             print(\"Hello from Itsy!\");
+///         }
+///     ").unwrap();
+///
+///     run(&program, &mut ()).unwrap();
+/// }
+/// ```
+pub fn run<F, D>(program: &Program<F>, context: &mut D) -> Result<VM<F, D>, Error> where F: VMFunc<F> + VMData<F, D> {
+    let mut vm = VM::new(program);
+    match vm.run(context) {
+        VMState::Ready => Err(Error::RuntimeError), // TODO: or maybe panic? if this happens its an itsy bug
+        VMState::Terminated => Ok(vm),
+        VMState::Yielded => Ok(vm),
+        VMState::RuntimeError => Err(Error::RuntimeError),
+    }
 }

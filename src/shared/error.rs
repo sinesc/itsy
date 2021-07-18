@@ -9,6 +9,7 @@ pub enum Error {
     ParseError(ParseError),
     ResolveError(ResolveError),
     CompileError(CompileError),
+    RuntimeError, // TODO: details
 }
 
 impl Error {
@@ -17,6 +18,7 @@ impl Error {
             Self::ParseError(e) => e.loc(input),
             Self::ResolveError(e) => e.loc(input),
             Self::CompileError(e) => e.loc(input),
+            Self::RuntimeError => (0, 0),
         }
     }
 }
@@ -27,6 +29,7 @@ impl Display for Error {
             Self::ParseError(e) => write!(f, "{}", e),
             Self::ResolveError(e) => write!(f, "{}", e),
             Self::CompileError(e) => write!(f, "{}", e),
+            Self::RuntimeError => write!(f, "Runtime error"),
         }
     }
 }

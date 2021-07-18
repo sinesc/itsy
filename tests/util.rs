@@ -1,4 +1,4 @@
-pub use itsy::{vm, parser::parse};
+pub use itsy::{build, run as itsy_run, parser::parse};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
@@ -76,12 +76,12 @@ vm_func!(TestFns, Context, {
 /// Run a bit of itsy code and return the vm's custom field (populated by the code).
 #[allow(dead_code)]
 pub fn run(code: &str) -> Context {
-    let mut vm = if code.find("fn main()").is_some() {
-        vm::<TestFns, Context>(code).unwrap()
+    let program = if code.find("fn main()").is_some() {
+        build::<TestFns>(code).unwrap()
     } else {
-        vm::<TestFns, Context>(&format!("fn main() {{ {} }}", code)).unwrap()
+        build::<TestFns>(&format!("fn main() {{ {} }}", code)).unwrap()
     };
     let mut context = Vec::new();
-    vm.run(&mut context);
+    itsy_run(&program, &mut context).unwrap();
     context
 }

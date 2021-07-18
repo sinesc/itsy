@@ -1,7 +1,4 @@
 
-pub use crate::frontend::parser::parse;
-pub use crate::frontend::resolver::resolve;
-pub use crate::bytecode::compiler::compile;
 pub use crate::shared::error::Error;
 
 pub mod parser {
