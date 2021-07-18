@@ -128,7 +128,7 @@ macro_rules! vm_func {
         let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
         $vm.heap.string(item).to_string()
     } };
-    (@handle_param $vm:ident, & str) => { {
+    (@handle_param $vm:ident, str) => { {
         let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
         $vm.heap.string(item)
     } };
@@ -138,7 +138,9 @@ macro_rules! vm_func {
     (@handle_param $vm:ident, $_:tt) => { {
         compile_error!("Unsupported parameter type");
     } };
-    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $($arg_type:tt)+ ),* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+    (@handle_str str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
+    (@handle_str $other:ident) => { $other };
+    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
             fn into_u16(self: Self) -> u16 {
                 self as u16
@@ -156,7 +158,7 @@ macro_rules! vm_func {
             fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($type_name::$name.into_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $($arg_type)+ )),* ]));
+                    map.insert(stringify!($name), ($type_name::$name.into_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
                 )*
                 map
             }
@@ -173,7 +175,7 @@ macro_rules! vm_func {
                             // set rust function arguments, insert function body
                             let ret = {
                                 $(
-                                    let $arg_name: $($arg_type)+ = vm_func!(@handle_param vm, $($arg_type)+);
+                                    let $arg_name: vm_func!(@handle_str $arg_type) = vm_func!(@handle_param vm, $arg_type);
                                 )*
                                 $code
                             };
@@ -192,12 +194,16 @@ macro_rules! vm_func {
     (
         $vis:vis $type_name:ident, $context_type:ty, { $(
             $( #[ $attr:meta ] )*
-            fn $name:tt ( & mut $context:ident $(, $arg_name:ident : $($arg_type:tt)+ )* ) $( -> $ret_type:ident )? $code:block // ret_type cannot be ty as that can't be matched by handle_ret-val (macro shortcoming), or tt as that is ambiguous with $code. We'll just accept simple return types for now.
+            // FIXME: ret_type is simple ident only (ambiguity issues)
+            // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
+            // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
+            // components using push down accumulation to transform them into a non-ambiguous format
+            fn $name:tt ( & mut $context:ident $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `vm_func!` macro.
         vm_func!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
-        vm_func!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $($arg_type)+ ),* ] [ $( $ret_type )? ] $code )* );
+        vm_func!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
