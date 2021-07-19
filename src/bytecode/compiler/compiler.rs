@@ -7,7 +7,8 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::shared::types::{Type, Bindings, TypeContainer, Struct};
+use crate::shared::TypeContainer;
+use crate::shared::types::{Type, Bindings, Struct};
 use crate::shared::{info::FunctionKind, numeric::Numeric, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};

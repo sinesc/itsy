@@ -2,30 +2,10 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use crate::{StackAddress, HeapAddress};
+use crate::shared::TypeContainer;
 use crate::shared::info::{BindingInfo};
 use crate::shared::typed_ids::{TypeId, BindingId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
-
-pub(crate) trait TypeContainer {
-    fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
-    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
-
-    /// Computes the size of given type.
-    fn type_size(self: &Self, ty: &Type) -> StackAddress {
-        match ty {
-            Type::Array(a)  => {
-                let element_type = self.type_by_id(a.type_id.unwrap());
-                let element_size = self.type_size(element_type);
-                element_size * a.len.unwrap()
-            },
-            Type::Struct(s) => {
-                s.fields.iter().fold(0, |acc, f| acc + self.type_size(self.type_by_id(f.1.unwrap())))
-            },
-            Type::Enum(_)   => unimplemented!("enum size"),
-            _               => ty.primitive_size() as StackAddress
-        }
-    }
-}
 
 /// Program binding data.
 pub struct Bindings {

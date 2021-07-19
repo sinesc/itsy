@@ -7,6 +7,29 @@ pub mod error;
 pub mod info;
 
 use crate::frontend::ast::Position;
+use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
+
+/// A container holding type id to type mappings
+pub(crate) trait TypeContainer {
+    fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
+    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
+
+    /// Computes the size of given type.
+    fn type_size(self: &Self, ty: &Type) -> StackAddress { // FIXME: remove this and its usages. cannot be correct anymore due to type storage changes
+        match ty {
+            Type::Array(a)  => {
+                let element_type = self.type_by_id(a.type_id.unwrap());
+                let element_size = self.type_size(element_type);
+                element_size * a.len.unwrap()
+            },
+            Type::Struct(s) => {
+                s.fields.iter().fold(0, |acc, f| acc + self.type_size(self.type_by_id(f.1.unwrap())))
+            },
+            Type::Enum(_)   => unimplemented!("enum size"),
+            _               => ty.primitive_size() as StackAddress
+        }
+    }
+}
 
 /// Compute line/column number from absolute offset in string
 pub fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
