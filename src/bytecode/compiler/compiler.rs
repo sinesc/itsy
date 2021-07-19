@@ -7,10 +7,10 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::shared::types::{Type, FnKind, Bindings, Constructor, TypeContainer, Struct};
+use crate::shared::types::{Type, FnKind, Bindings, TypeContainer, Struct};
 use crate::shared::{numeric::Numeric, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
-use crate::bytecode::{Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;

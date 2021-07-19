@@ -3,8 +3,7 @@
 use std::convert::TryInto;
 use std::mem::size_of;
 use crate::{StackAddress, StackOffset, ItemCount};
-use crate::bytecode::{HeapRef, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
-use crate::shared::types::Constructor;
+use crate::bytecode::{HeapRef, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]

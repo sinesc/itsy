@@ -39,22 +39,6 @@ pub trait VMData<T, U> where T: VMFunc<T> {
     fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(u8)]
-pub(crate) enum ConstEndianness {
-    None    = 0,
-    Integer = 1,
-    // architectures may use differing endianesses for floats and integers, so we have to differentiate here
-    Float   = 2,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ConstDescriptor {
-    pub(crate) position    : StackAddress,
-    pub(crate) size        : StackAddress,
-    pub(crate) endianness  : ConstEndianness,
-}
-
 /// An Itsy bytecode program. Programs can be created using the bytecode [`Writer`](struct.Writer.html).
 #[derive(Clone, Debug)]
 pub struct Program<T> where T: VMFunc<T> {
@@ -71,6 +55,44 @@ impl<T> Program<T> where T: VMFunc<T> {
             instructions        : Vec::new(),
             consts              : Vec::new(),
             const_descriptors   : Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub(crate) enum ConstEndianness {
+    None    = 0,
+    Integer = 1,
+    // architectures may use differing endianesses for floats and integers, so we have to differentiate here
+    Float   = 2,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ConstDescriptor {
+    pub(crate) position    : StackAddress,
+    pub(crate) size        : StackAddress,
+    pub(crate) endianness  : ConstEndianness,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Constructor {
+    Primitive   = 174,  // Primitive(num_bytes): copies primitive data
+    Array       = 175,  // Array(num_elements, element constructor): copies an array
+    Struct      = 176,  // Struct(num_fields, field constructor, field constructor, ...): copies a struct
+    String      = 177,  // String: copies a string
+}
+
+impl Constructor {
+    pub fn from_u8(raw: u8) -> Constructor {
+        //un safe { ::std::mem::trans mute(raw) }
+        match raw {
+            x if x == Self::Primitive as u8 => Self::Primitive,
+            x if x == Self::Array as u8 => Self::Array,
+            x if x == Self::Struct as u8 => Self::Struct,
+            x if x == Self::String as u8 => Self::String,
+            index @ _ => unreachable!("Invalid constructor type {}", index),
         }
     }
 }

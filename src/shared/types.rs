@@ -318,25 +318,3 @@ impl Type {
 pub enum Intrinsic {
     ArrayLen,
 }
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Constructor {
-    Primitive   = 174,  // Primitive(num_bytes): copies primitive data
-    Array       = 175,  // Array(num_elements, element constructor): copies an array
-    Struct      = 176,  // Struct(num_fields, field constructor, field constructor, ...): copies a struct
-    String      = 177,  // String: copies a string
-}
-
-impl Constructor {
-    pub fn from_u8(raw: u8) -> Constructor {
-        //un safe { ::std::mem::trans mute(raw) }
-        match raw {
-            x if x == Self::Primitive as u8 => Self::Primitive,
-            x if x == Self::Array as u8 => Self::Array,
-            x if x == Self::Struct as u8 => Self::Struct,
-            x if x == Self::String as u8 => Self::String,
-            index @ _ => unreachable!("Invalid constructor type {}", index),
-        }
-    }
-}
