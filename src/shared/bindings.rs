@@ -1,4 +1,4 @@
-use crate::shared::{TypeContainer, types::Type, info::BindingInfo, typed_ids::{TypeId, BindingId}};
+use crate::shared::{TypeContainer, types::Type, infos::BindingInfo, typed_ids::{TypeId, BindingId}};
 
 /// Program binding data.
 pub struct Bindings {

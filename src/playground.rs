@@ -1,15 +1,4 @@
 use itsy::*;
-use std::fs;
-
-pub fn log(filename: &str, append: bool, data: &str) {
-    use std::io::prelude::*;
-    if append {
-        let mut file = std::fs::OpenOptions::new().append(true).open(filename).unwrap();
-        writeln!(file, "{}", data).unwrap();
-    } else {
-        std::fs::write(filename, data).unwrap();
-    }
-}
 
 vm_func!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
@@ -54,8 +43,8 @@ vm_func!(MyFns, (), {
 });
 
 fn main() {
-    let source = fs::read_to_string("itsy/test.itsy").unwrap();
-    match build::<MyFns>(&source) {
+    let source = std::fs::read_to_string("itsy/test.itsy").unwrap();
+    match build(&source) {
         Ok(program) => {
             let mut vm = runtime::VM::new(&program);
             log("logs/bytecode.ini", false, &vm.format_program());
@@ -74,4 +63,21 @@ fn main() {
             println!("Error: {} in line {}, column {}.", err, loc.0, loc.1);
         }
     }
+}
+
+fn log(filename: &str, append: bool, data: &str) {
+    use std::io::prelude::*;
+    if append {
+        let mut file = std::fs::OpenOptions::new().append(true).open(filename).unwrap();
+        writeln!(file, "{}", data).unwrap();
+    } else {
+        std::fs::write(filename, data).unwrap();
+    }
+}
+
+fn build(source: &str) -> Result<compiler::Program<MyFns>, Error> {
+    let parsed = parser::parse(source)?;
+    let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
+    log("logs/ast.c", false, &format!("{:?}", resolved.ast));
+    Ok(compiler::compile(resolved)?)
 }

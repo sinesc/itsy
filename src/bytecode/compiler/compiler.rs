@@ -7,7 +7,7 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::shared::{TypeContainer, bindings::Bindings, info::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
+use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
@@ -813,16 +813,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             }
             self.writer.set_position(backup_position);
         }
-    }
-
-    /// Retrieve for-in loop range variable index/type
-    fn range_info(self: &Self, item: &ast::ForLoop<'ast>) -> (StackAddress, &Type) {
-        let var_index = {
-            let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-            self.locals.lookup(binding_id).index
-        };
-        let var_type = self.binding_type(&item.iter);
-        (var_index, var_type)
     }
 
     /// Creates stack frame variables for expressions.

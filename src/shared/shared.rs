@@ -4,7 +4,7 @@ pub mod numeric;
 pub mod typed_ids;
 pub mod types;
 pub mod error;
-pub mod info;
+pub mod infos;
 pub mod bindings;
 
 use crate::frontend::ast::Position;

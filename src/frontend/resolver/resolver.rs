@@ -11,7 +11,7 @@ use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::shared::TypeContainer;
 use crate::shared::bindings::Bindings;
-use crate::shared::info::{FunctionKind, Intrinsic};
+use crate::shared::infos::{FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
@@ -433,8 +433,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             item.ret.as_ref().map_or(Some(TypeId::void()), |ret| me.binding_type_id(ret))
         }
         fn args_resolved<'ast>(me: &mut Resolver, item: &ast::Signature<'ast>) -> bool {
-            //item.args.iter().fold(true, |acc, arg| acc && arg.ty.as_ref().map_or(false, |type_name| me.binding_type_id(type_name).is_some()))
-            // todo: test this instead:
             !item.args.iter().any(|arg| arg.ty.as_ref().map_or(true, |type_name| me.binding_type_id(type_name).is_none()))
         }
         fn arg_type_ids<'ast>(me: &Resolver, item: &ast::Signature<'ast>) -> Vec<Option<TypeId>> {

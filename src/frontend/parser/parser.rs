@@ -14,7 +14,7 @@ use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
-use crate::shared::{numeric::Numeric, info::FunctionKind};
+use crate::shared::{numeric::Numeric, infos::FunctionKind};
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedProgram};
 use error::{ParseError, ParseErrorKind};

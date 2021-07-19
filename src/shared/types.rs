@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use crate::{StackAddress, HeapAddress};
-use crate::shared::TypeContainer;
-use crate::shared::info::{BindingInfo};
-use crate::shared::typed_ids::{TypeId, BindingId};
+use crate::shared::typed_ids::TypeId;
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 
 /// Information about an enum in a resolved program.

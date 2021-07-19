@@ -4,7 +4,7 @@ use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
 use crate::shared::bindings::Bindings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
-use crate::shared::info::{BindingInfo, FunctionInfo, FunctionKind};
+use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
 use crate::shared::types::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.

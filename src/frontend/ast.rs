@@ -4,7 +4,7 @@ use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{StackAddress, ItemCount};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId};
 use crate::shared::numeric::Numeric;
-use crate::shared::info::FunctionKind;
+use crate::shared::infos::FunctionKind;
 
 /// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {

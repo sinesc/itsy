@@ -27,7 +27,7 @@ macro_rules! impl_typed_id {
         }
         impl Debug for $name {
             fn fmt(self: &Self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                write!(f, "{}({})", stringify!($name), Into::<usize>::into(self.0) - 1)
+                write!(f, "{}({})", stringify!($name), Into::<usize>::into(self.0))
             }
         }
         impl Default for $name {
