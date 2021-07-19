@@ -952,52 +952,60 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array literal and creates the required array types.
-    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type: Option<TypeId>) -> ResolveResult {
+    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type_id: Option<TypeId>) -> ResolveResult {
 
-        let binding_id = self.try_create_anon_binding(item);
-
-        // apply expected type if known
-        if let Some(expected_type) = expected_type {
-            self.binding_set_type_id(item, expected_type)?;
-        }
-
-        let array = item.value.as_array_mut().unwrap_or_ice("Expected array type, got something else")?;
-
-        // apply the same binding id to all elements
-        let element_binding_id = self.try_create_anon_binding(array.elements.first_mut().unwrap_or_ice(ICE)?);
         let mut elements_type_id = None;
 
-        for element in &mut array.elements {
-            *element.binding_id_mut() = Some(element_binding_id);
-            self.resolve_expression(element, None)?;
-            if elements_type_id == None {
-                elements_type_id = self.binding_type_id(element);
-            } else {
-                let this_type_id = self.binding_type_id(element);
-                if this_type_id.is_some() {
-                    self.check_types_match(element, elements_type_id, this_type_id)?;
+        // apply expected type if known. if we already have a known type, binding_set_type_id will check that it matches the one we're trying to set
+        if let Some(expected_type_id) = expected_type_id {
+            self.binding_set_type_id(item, expected_type_id)?;
+        }
+
+        // if we have a type for the array, check if we also have an inner type. if so we want to apply it to all contained literals later.
+        if let Some(&Type::Array(Array { type_id: Some(type_id), ..})) = self.binding_type(item) {
+            elements_type_id = Some(type_id);
+        }
+
+        // grab our binding id before the mutable self borrow for the array literal
+        let binding_id = self.try_create_anon_binding(item);
+        let array_literal = item.value.as_array_mut().unwrap_or_ice("Expected array type, got something else")?;
+
+        // try to get inner type from element literals
+        if elements_type_id.is_none() {
+            for element in &mut array_literal.elements {
+                self.resolve_expression(element, None)?;
+                if let Some(type_id) = self.binding_type_id(element) {
+                    elements_type_id = Some(type_id);
+                    break;
                 }
             }
         }
 
-        // create this level's type based on the inner type
-        if self.scopes.binding_type_id(binding_id).is_none() {
-            let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                len     : Some(array.elements.len() as StackAddress),
-                type_id : elements_type_id,
-            }));
-            *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);
-        }
-
-        // set inner type based on this level's type
-        if let Some(type_id) = self.scopes.binding_type_id(binding_id) {
-            let ty = self.type_by_id(type_id);
-            if let Some(elements_type_id) = ty.as_array().unwrap_or_ice(ICE)?.type_id {
-                self.binding_set_type_id(array.elements.first_mut().unwrap_or_ice(ICE)?, elements_type_id)?; // all elements have the same binding id, so set only first item type
+        // if we have a known inner type, resolve contained literals with it to help with their inference
+        if elements_type_id.is_some() {
+            for element in &mut array_literal.elements {
+                self.resolve_expression(element, elements_type_id)?;
             }
         }
 
-        self.resolved_or_err(item, expected_type)
+        // if we don't yet have one, create type based on the inner type, otherwise check types all match
+        if self.scopes.binding_type_id(binding_id).is_none() {
+            let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
+                len     : Some(array_literal.elements.len() as StackAddress),
+                type_id : elements_type_id,
+            }));
+            *self.scopes.binding_type_id_mut(binding_id) = Some(new_type_id);
+        } else if elements_type_id.is_some() {
+            let array_type_id = self.scopes.binding_type_id(binding_id).unwrap_or_ice(ICE)?;
+            let array_ty = self.scopes.type_mut(array_type_id).as_array_mut().unwrap_or_ice(ICE)?;
+            if let Some(current_element_type_id) = array_ty.type_id {
+                self.check_types_match(item, Some(current_element_type_id), elements_type_id)?;
+            } else {
+                array_ty.type_id = elements_type_id;
+            }
+        }
+
+        self.resolved_or_err(item, expected_type_id)
     }
 }
 

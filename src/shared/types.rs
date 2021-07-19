@@ -105,7 +105,7 @@ impl Type {
         }
     }
     /// Kind of the type, e.g. Signed or Array.
-    pub(crate) fn kind(self: &Self) -> TypeKind {
+    fn kind(self: &Self) -> TypeKind {
         match self {
             Type::void => TypeKind::Void,
             Type::u8 | Type::u16 | Type::u32 | Type::u64 => TypeKind::Unsigned,
@@ -147,7 +147,7 @@ impl Type {
             _ => false
         }
     }
-    /// Whether the type is referenced when wrapped.
+    /// Whether the type is a reference type.
     pub fn is_ref(self: &Self) -> bool {
         match self {
             Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) => true,
@@ -163,6 +163,13 @@ impl Type {
     }
     /// Returns the type as an array.
     pub fn as_array(self: &Self) -> Option<&Array> {
+        match self {
+            Type::Array(array) => Some(array),
+            _ => None
+        }
+    }
+    /// Returns the type as an array.
+    pub fn as_array_mut(self: &mut Self) -> Option<&mut Array> {
         match self {
             Type::Array(array) => Some(array),
             _ => None
