@@ -2,7 +2,7 @@ use std::ops::{Index, IndexMut};
 use std::mem::size_of;
 use std::convert::TryInto;
 use crate::{StackAddress, StackOffset};
-use crate::shared::types::HeapRef;
+use crate::bytecode::HeapRef;
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]

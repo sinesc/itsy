@@ -2,8 +2,7 @@
 
 use std::mem::size_of;
 use crate::{StackAddress, StackOffset};
-use crate::bytecode::{ARG1, ARG2, ARG3, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
-use crate::shared::types::HeapRef;
+use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
 type Data16 = u16;
