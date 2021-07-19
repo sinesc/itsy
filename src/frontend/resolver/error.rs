@@ -1,7 +1,8 @@
 
 use std::fmt::{self, Display};
+use crate::ItemCount;
 use crate::frontend::ast::{Position, Positioned};
-use crate::shared::types::{Type, ItemCount};
+use crate::shared::types::Type;
 use crate::shared::numeric::Numeric;
 use crate::shared::compute_loc;
 

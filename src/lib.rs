@@ -21,6 +21,18 @@ pub use interface::*;
 use bytecode::{compiler::compile, runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 use frontend::{parser::parse, resolver::resolve};
 
+// configure pointer sizes
+
+type StackAddress = u64; // usize/isize seem to be consistently slightly faster
+type StackOffset = i64;
+const STACK_ADDRESS_TYPE: shared::types::Type = shared::types::Type::u64;
+
+type HeapAddress = u64;
+const HEAP_OFFSET_BITS: usize = 36;
+
+type ItemCount = u16;
+
+
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).

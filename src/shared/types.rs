@@ -3,6 +3,8 @@ use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use crate::shared::typed_ids::{TypeId, BindingId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
+use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS};
+
 pub(crate) trait TypeContainer {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
@@ -30,15 +32,6 @@ pub enum FnKind {
     Rust(u16),
     Intrinsic(Intrinsic),
 }
-
-pub type StackAddress = u64; // usize/isize seem to be consistently slightly faster
-pub type StackOffset = i64;
-pub(crate) const STACK_ADDRESS_TYPE: Type = Type::u64;
-
-type HeapAddress = u64;
-const HEAP_OFFSET_BITS: usize = 36;
-
-pub type ItemCount = u16;
 
 /// A heap reference as it would appear on the stack
 #[derive(Copy, Clone)]

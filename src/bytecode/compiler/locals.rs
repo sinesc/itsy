@@ -1,5 +1,6 @@
 use std::{collections::HashMap, cell::RefCell};
-use crate::shared::{typed_ids::BindingId, types::StackAddress};
+use crate::StackAddress;
+use crate::shared::typed_ids::BindingId;
 
 /// Describes a single local variable of a stack frame
 #[derive(Copy,Clone)]

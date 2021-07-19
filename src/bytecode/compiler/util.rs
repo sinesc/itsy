@@ -1,5 +1,5 @@
 
-use crate::shared::types::StackAddress;
+use crate::StackAddress;
 
 #[derive(Clone, Copy)]
 pub struct CallInfo {

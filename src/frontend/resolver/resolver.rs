@@ -6,9 +6,10 @@ pub mod error;
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
+use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
-use crate::shared::types::{StackAddress, Array, Bindings, FnKind, Intrinsic, ItemCount, Struct, Type, TypeContainer, STACK_ADDRESS_TYPE};
+use crate::shared::types::{Array, Bindings, FnKind, Intrinsic, Struct, Type, TypeContainer};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 

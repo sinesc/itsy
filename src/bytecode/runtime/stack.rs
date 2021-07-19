@@ -1,7 +1,8 @@
 use std::ops::{Index, IndexMut};
 use std::mem::size_of;
 use std::convert::TryInto;
-use crate::shared::types::{HeapRef, StackAddress, StackOffset};
+use crate::{StackAddress, StackOffset};
+use crate::shared::types::HeapRef;
 
 /// A stack holding temporary bytecode operation results and inputs.
 #[derive(Debug)]

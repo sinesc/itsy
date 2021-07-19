@@ -13,7 +13,7 @@ use std::fmt::Debug;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use writer::*;
-use crate::shared::types::{StackAddress, StackOffset};
+use crate::{StackAddress, StackOffset};
 use crate::bytecode::runtime::vm::VM;
 
 const CALLSIZE: StackOffset = 2 * 4; // previous FP and PC

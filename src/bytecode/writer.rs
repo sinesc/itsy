@@ -1,8 +1,8 @@
 //! Bytecode buffer and writer.
 
 use std::cell::{Cell, RefCell, RefMut};
+use crate::StackAddress;
 use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor};
-use crate::shared::types::StackAddress;
 
 /// Bytecode buffer and writer.
 ///
