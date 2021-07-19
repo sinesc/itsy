@@ -10,8 +10,9 @@ use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::shared::TypeContainer;
+use crate::shared::bindings::Bindings;
 use crate::shared::info::{FunctionKind, Intrinsic};
-use crate::shared::types::{Array, Bindings, Struct, Type};
+use crate::shared::types::{Array, Struct, Type};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 

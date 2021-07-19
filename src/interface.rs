@@ -17,7 +17,7 @@ pub mod resolver {
     pub mod resolved {
         //! Resolved information to be used by the bytecode generator.
         pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
-        pub use crate::shared::types::Bindings;
+        pub use crate::shared::bindings::Bindings;
         pub mod types {
             //! Resolved program type information.
             pub use crate::shared::types::{Type, Struct, Enum, Array};
