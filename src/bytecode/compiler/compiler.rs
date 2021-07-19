@@ -7,8 +7,8 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
-use crate::shared::types::{Type, FnKind, Bindings, TypeContainer, Struct};
-use crate::shared::{numeric::Numeric, typed_ids::{FunctionId, TypeId}};
+use crate::shared::types::{Type, Bindings, TypeContainer, Struct};
+use crate::shared::{info::FunctionKind, numeric::Numeric, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
@@ -258,12 +258,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             self.maybe_ref_temporary(HeapRefOp::Inc, arg);
         }
 
-        if let FnKind::Rust(rust_fn_index) = item.call_kind {
+        if let FunctionKind::Rust(rust_fn_index) = item.call_kind {
 
             // rust function
             self.writer.rustcall(T::from_u16(rust_fn_index));
 
-        } else if let FnKind::Intrinsic(_intrinsic) = &item.call_kind { //FIXME: fix intrinsics
+        } else if let FunctionKind::Intrinsic(_intrinsic) = &item.call_kind { //FIXME: fix intrinsics
 
             // intrinsics // TODO: actually check which one once there are some
             /* if let CallType::Method(exp) = &item.call_type {

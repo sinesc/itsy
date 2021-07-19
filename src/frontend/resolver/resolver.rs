@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
-use crate::shared::types::{Array, Bindings, FnKind, Intrinsic, Struct, Type, TypeContainer};
+use crate::shared::info::{FunctionKind, Intrinsic};
+use crate::shared::types::{Array, Bindings, Struct, Type, TypeContainer};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 
@@ -71,7 +72,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
     primitives.insert(&Type::String, scopes.insert_type(root_scope_id, Some("String"), Type::String));
 
     // insert intrinsics // todo tie methods to their struct type
-    scopes.insert_function(root_scope_id, "len", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FnKind::Intrinsic(Intrinsic::ArrayLen)));
+    scopes.insert_function(root_scope_id, "len", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FunctionKind::Intrinsic(Intrinsic::ArrayLen)));
 
     // insert rust functions into root scope
     for (name, info) in T::call_info().iter() {
@@ -89,7 +90,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
-        scopes.insert_function(root_scope_id, *name, ret_type, arg_type_id?, Some(FnKind::Rust(*index)));
+        scopes.insert_function(root_scope_id, *name, ret_type, arg_type_id?, Some(FunctionKind::Rust(*index)));
     }
 
     // repeatedly try to resolve items until no more progress is made
@@ -451,7 +452,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             } else {
                 (parent_scope_id, None)
             };
-            let function_id = self.scopes.insert_function(target_scope_id, item.sig.ident.qualified(self.path, type_name), result_type_id, arg_type_ids, Some(FnKind::User));
+            let function_id = self.scopes.insert_function(target_scope_id, item.sig.ident.qualified(self.path, type_name), result_type_id, arg_type_ids, Some(FunctionKind::User));
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
@@ -551,7 +552,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // rustcall?
             if let Some(rust_fn_index) = function_info.rust_fn_index() {
-                item.call_kind = FnKind::Rust(rust_fn_index);
+                item.call_kind = FunctionKind::Rust(rust_fn_index);
             }
         }
 

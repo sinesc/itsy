@@ -4,6 +4,7 @@ pub mod numeric;
 pub mod typed_ids;
 pub mod types;
 pub mod error;
+pub mod info;
 
 use crate::frontend::ast::Position;
 

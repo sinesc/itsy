@@ -4,7 +4,7 @@ use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{StackAddress, ItemCount};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId};
 use crate::shared::numeric::Numeric;
-use crate::shared::types::FnKind;
+use crate::shared::info::FunctionKind;
 
 /// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {
@@ -671,7 +671,7 @@ pub struct Call<'a> {
     pub ident           : Ident<'a>,
     pub args            : Vec<Expression<'a>>,
     pub call_type       : CallType<'a>,
-    pub call_kind       : FnKind,
+    pub call_kind       : FunctionKind,
     pub function_id     : Option<FunctionId>,
     pub binding_id      : Option<BindingId>,
 }

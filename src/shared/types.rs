@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use crate::{StackAddress, HeapAddress};
+use crate::shared::info::{BindingInfo};
 use crate::shared::typed_ids::{TypeId, BindingId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 
@@ -24,19 +25,6 @@ pub(crate) trait TypeContainer {
             _               => ty.primitive_size() as StackAddress
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum FnKind {
-    User,
-    Rust(u16),
-    Intrinsic(Intrinsic),
-}
-
-/// Binding meta information
-pub struct BindingInfo {
-    pub mutable: bool,
-    pub type_id: Option<TypeId>,
 }
 
 /// Program binding data.
@@ -312,9 +300,4 @@ impl Type {
             _ => false
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Intrinsic {
-    ArrayLen,
 }

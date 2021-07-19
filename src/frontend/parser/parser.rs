@@ -14,7 +14,7 @@ use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
-use crate::shared::{numeric::Numeric, types::FnKind};
+use crate::shared::{numeric::Numeric, info::FunctionKind};
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedProgram};
 use error::{ParseError, ParseErrorKind};
@@ -339,7 +339,7 @@ fn call(i: Input<'_>) -> Output<Call<'_>> {
             ident           : m.0,
             args            : m.2,
             call_type       : CallType::Function,
-            call_kind       : FnKind::User,
+            call_kind       : FunctionKind::User,
             function_id     : None,
             binding_id      : None,
         }
@@ -358,7 +358,7 @@ fn call_static(i: Input<'_>) -> Output<Call<'_>> {
                 ident           : ident,
                 args            : m.1,
                 call_type       : CallType::Static(m.0),
-                call_kind       : FnKind::User,
+                call_kind       : FunctionKind::User,
                 function_id     : None,
                 binding_id      : None,
             }

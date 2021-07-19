@@ -3,26 +3,9 @@ mod repository;
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
-use crate::shared::types::{Type, FnKind, Bindings, BindingInfo};
+use crate::shared::info::{BindingInfo, FunctionInfo, FunctionKind};
+use crate::shared::types::{Type, Bindings};
 
-#[derive(Clone)]
-pub struct FunctionInfo {
-    pub ret_type: Option<TypeId>,
-    pub arg_type: Vec<Option<TypeId>>,
-    pub kind    : Option<FnKind>,
-}
-
-impl FunctionInfo {
-    pub fn rust_fn_index(self: &Self) -> Option<u16> {
-        match self.kind {
-            Some(FnKind::Rust(index)) => Some(index),
-            _ => None,
-        }
-    }
-    pub fn is_resolved(self: &Self) -> bool {
-        self.ret_type.is_some() && self.kind.is_some() && !self.arg_type.iter().any(|arg| arg.is_none())
-    }
-}
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub struct Scopes {
@@ -141,7 +124,7 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FnKind>) -> FunctionId {
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: impl Into<String>, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> FunctionId {
         self.functions.insert(scope_id, Some(name.into()), FunctionInfo { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
     }
 
