@@ -1,5 +1,11 @@
 use itsy::*;
 
+/*
+    This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/test.itsy
+    To enable logging, create a "logs" directoy parallel to the "src" directory. To disable logging again, simply delete the directory.
+    Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
+*/
+
 vm_func!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
         println!("{}i8", value);
@@ -44,15 +50,22 @@ vm_func!(MyFns, (), {
 
 fn main() {
     let source = std::fs::read_to_string("itsy/test.itsy").unwrap();
-    match build(&source) {
+    let write_logs = std::path::Path::new("./logs/").is_dir();
+    match build(&source, write_logs) {
         Ok(program) => {
             let mut vm = runtime::VM::new(&program);
-            log("logs/bytecode.ini", false, &vm.format_program());
-            log("logs/run.ini", false, "");
+            if write_logs {
+                log("logs/bytecode.ini", false, &vm.format_program());
+                log("logs/run.ini", false, "");
+            }
             loop {
-                log("logs/run.ini", true, &format!("{}", &vm.format_instruction().unwrap_or("-".to_string())));
+                if write_logs {
+                    log("logs/run.ini", true, &format!("{}", &vm.format_instruction().unwrap_or("-".to_string())));
+                }
                 let vmstate = vm.step(&mut ());
-                log("logs/run.ini", true, &format!(";    stack {:?}\n;    cnt   {:?}\n;    heap  {:?}", vm.stack.frame(), vm.cnt.frame(), vm.heap.data()));
+                if write_logs {
+                    log("logs/run.ini", true, &format!(";    stack {:?}\n;    cnt   {:?}\n;    heap  {:?}", vm.stack.frame(), vm.cnt.frame(), vm.heap.data()));
+                }
                 if vmstate != runtime::VMState::Ready {
                     break;
                 }
@@ -75,9 +88,11 @@ fn log(filename: &str, append: bool, data: &str) {
     }
 }
 
-fn build(source: &str) -> Result<compiler::Program<MyFns>, Error> {
+fn build(source: &str, write_logs: bool) -> Result<compiler::Program<MyFns>, Error> {
     let parsed = parser::parse(source)?;
     let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
-    log("logs/ast.c", false, &format!("{:?}", resolved.ast));
+    if write_logs {
+        log("logs/ast.c", false, &format!("{:?}", resolved.ast));
+    }
     Ok(compiler::compile(resolved)?)
 }

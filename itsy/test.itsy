@@ -1,9 +1,5 @@
 
 
 fn main() {
-    let mut x: u32 = 1;
-    for i in 0..100000000 {
-        x += 1;
-    }
-    printu32(x);
+    prints("Hello, world");
 }
