@@ -1,5 +1,7 @@
 
 
 fn main() {
-    prints("Hello, world");
+    for _ in 0..3 {
+        prints("Hello, world");
+    }
 }
