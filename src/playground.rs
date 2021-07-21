@@ -73,7 +73,7 @@ fn main() {
         }
         Err(err) => {
             let loc =  err.loc(&source);
-            println!("Error: {} in line {}, column {}.", err, loc.0, loc.1);
+            println!("{} in line {}, column {}.", err, loc.0, loc.1);
         }
     }
 }

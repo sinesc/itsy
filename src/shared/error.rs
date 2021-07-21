@@ -26,9 +26,9 @@ impl Error {
 impl Display for Error {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ParseError(e) => write!(f, "{}", e),
-            Self::ResolveError(e) => write!(f, "{}", e),
-            Self::CompileError(e) => write!(f, "{}", e),
+            Self::ParseError(e) => write!(f, "Parser error: {}", e),
+            Self::ResolveError(e) => write!(f, "Resolver error: {}", e),
+            Self::CompileError(e) => write!(f, "Compiler error: {}", e),
             Self::RuntimeError => write!(f, "Runtime error"),
         }
     }
