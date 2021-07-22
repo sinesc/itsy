@@ -23,11 +23,12 @@ use frontend::{parser::parse, resolver::resolve};
 
 // configure pointer sizes
 
-type StackAddress = u64; // usize/isize seem to be consistently slightly faster
-type StackOffset = i64;
-const STACK_ADDRESS_TYPE: shared::types::Type = shared::types::Type::u64;
+type StackAddress = usize;
+type StackOffset = isize;
+#[doc(hidden)]
+pub const STACK_ADDRESS_TYPE: shared::types::Type = shared::types::Type::u64; // TODO: assumes usize is 64 bit
 
-type HeapAddress = u64;
+type HeapAddress = usize;
 const HEAP_OFFSET_BITS: usize = 36;
 
 type ItemCount = u16;

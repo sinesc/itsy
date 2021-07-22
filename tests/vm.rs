@@ -709,37 +709,37 @@ fn index_assign_primitive() {
 
 #[test]
 fn heap_compound_assign() {
-    let result = run("
-        fn left() -> u64 {
+    let result = run(&format!("
+        fn left() -> {:?} {{
             ret_u8(9);
             0
-        }
-        fn right() -> u8 {
+        }}
+        fn right() -> u8 {{
             ret_u8(6);
             1
-        }
-        fn main() {
+        }}
+        fn main() {{
             let test = [ 0u8 ];
             ret_u8(test[0]);
             test[left()] += right();
             ret_u8(test[0]);
-        }
-    ");
+        }}
+    ", itsy::STACK_ADDRESS_TYPE));
     assert_all(&result, &[ 0u8, 6, 9, 1 ]);
 }
 
 #[test]
 fn heap_compound_assign64() {
-    let result = run("
-        fn left() -> u64 {
+    let result = run(&format!("
+        fn left() -> {:?} {{
             ret_u64(9);
             0
-        }
-        fn right() -> u64 {
+        }}
+        fn right() -> u64 {{
             ret_u64(6);
             1
-        }
-        fn main() {
+        }}
+        fn main() {{
             let test = [ 0u64 ];
             ret_u64(test[0]);
             test[left()] += right();
@@ -748,8 +748,8 @@ fn heap_compound_assign64() {
             ret_u64(test[0]);
             test[left()] -= right();
             ret_u64(test[0]);
-        }
-    ");
+        }}
+    ", itsy::STACK_ADDRESS_TYPE));
     assert_all(&result, &[ 0u64, 6, 9, 1, 6, 9, 2, 6, 9, 1 ]);
 }
 
