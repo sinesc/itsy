@@ -606,6 +606,21 @@ impl_vm!{
         }
     }
 
+    /// Jumps to given address if the StackAddress sized stack-top equals 0.
+    fn j0_sa_top(&mut self, addr: StackAddress) {
+        let a: StackAddress = self.stack.top();
+        if a == 0 {
+            self.pc = addr;
+        }
+    }
+    /// Jumps to given address if the StackAddress sized stack-top does not equal 0.
+    fn jn0_sa_top(&mut self, addr: StackAddress) {
+        let a: StackAddress = self.stack.top();
+        if a != 0 {
+            self.pc = addr;
+        }
+    }
+
     /// Constructs an instance of a non-primitive type.
     fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
         let mut constructor = constructor; // impl_vm macro does not allow mut arguments
@@ -799,6 +814,20 @@ impl_vm!{
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item.with_offset((size_of::<T>() as StackAddress * element_index) as StackOffset));
+        self.stack.push(data);
+    }
+
+    /// Read an element index (at top) and heap object (just below) and push the heap value at element index onto the stack.
+    fn <
+        heap_tail_element8_top<T: Data8>(),
+        heap_tail_element16_top<T: Data16>(),
+        heap_tail_element32_top<T: Data32>(),
+        heap_tail_element64_top<T: Data64>(),
+    >(&mut self) {
+        let element_index: StackAddress = self.stack.top();
+        let item: HeapRef = self.stack.load_sp(-(STACK_ADDRESS_TYPE.primitive_size() as StackOffset + HeapRef::primitive_size() as StackOffset));
+        let offset = self.heap.size_of(item.index()) as StackAddress - size_of::<T>() as StackAddress * (element_index + 1);
+        let data: T = self.heap.read(item.with_offset(offset as StackOffset));
         self.stack.push(data);
     }
 

@@ -163,7 +163,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     }
                 }
                 self.write_store(local.index as StackOffset, ty);
-                self.locals.make_active(binding_id);
+                self.locals.set_active(binding_id, true);
             },
             _ => {
                 if !local.active {
@@ -299,7 +299,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
-            let index = self.locals.make_active(binding_id);
+            let index = self.locals.set_active(binding_id, true);
             let ty = self.binding_type(item);
             if ty.is_ref() {
                 self.write_cntinc(self.get_constructor(ty));
@@ -385,55 +385,100 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
+    fn compile_for_loop_range(self: &Self, item: &ast::ForLoop<'ast>, iter_index: StackOffset, iter_ty: &Type) -> CompileResult {
+        comment!(self, "for in range");
+        // store lower range bound in iter variable
+        let binary_op = item.expr.as_binary_op().unwrap();
+        self.compile_expression(&binary_op.left)?;
+        self.write_store(iter_index, iter_ty);
+        // push upper range bound
+        self.compile_expression(&binary_op.right)?;
+        // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
+        self.write_load(iter_index, iter_ty);
+        self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        if binary_op.op == ast::BinaryOperator::Range {
+            self.write_lt(iter_ty);
+        } else {
+            self.write_lte(iter_ty);
+        }
+        let exit_jump = self.writer.j0(123);
+        // compile block
+        let start_target = self.writer.position();
+        self.compile_block(&item.block)?;
+        // load bounds, increment and compare
+        self.write_preinc(iter_index, iter_ty);
+        self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        if binary_op.op == ast::BinaryOperator::Range {
+            self.write_lt(iter_ty);
+        } else {
+            self.write_lte(iter_ty);
+        }
+        self.writer.jn0(start_target);
+        // exit position
+        let exit_target = self.writer.position();
+        self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        Ok(())
+    }
+
+    fn compile_for_loop_array(self: &Self, item: &ast::ForLoop<'ast>, element_var_index: StackOffset, element_ty: &Type) -> CompileResult {
+        comment!(self, "for in array");
+        let array_ty = self.binding_type(&item.expr);
+        let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
+        let array_constructor = self.get_constructor(array_ty);
+
+        self.compile_expression(&item.expr)?;   // stack &array
+        self.write_cntinc(array_constructor);
+        self.write_intrinsic_len(array_ty);             // stack &array len
+        let exit_jump = self.writer.j0_sa_top(123);
+        let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index
+
+        // TODO: consuming heap fetch would need this too
+        //self.write_clone(array_ty, STACK_ADDRESS_TYPE.primitive_size());    // stack &array index &array
+        //self.write_clone(&STACK_ADDRESS_TYPE, array_ty.primitive_size());    // stack &array index &array index
+
+        self.write_heap_tail_element_top(element_ty);   // stack &array index element
+
+        if element_ty.is_ref() {
+            self.write_clone(element_ty, 0);       // stack &array index element element
+            self.write_cntinc(element_constructor);
+        }
+
+        self.write_store(element_var_index, element_ty);      // stack &array index <is_ref ? element>
+        self.compile_block(&item.block)?;       // stack &array index <is_ref ? element>
+
+        if element_ty.is_ref() {
+            self.write_cntdec(element_constructor);         // stack &array index
+        }
+
+        self.writer.jn0_sa_top(loop_start);
+
+        // exit position
+        let exit_target = self.writer.position();
+        self.writer.overwrite(exit_jump, |w| w.j0_sa_top(exit_target));
+        self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
+        self.write_cntdec(array_constructor);         // stack --
+        Ok(())
+    }
+
     /// Compiles a for - in loop
     fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) -> CompileResult {
-        if let Some(binary_op) = item.range.as_binary_op() {
-
-            if binary_op.op == ast::BinaryOperator::Range || binary_op.op == ast::BinaryOperator::RangeInclusive {
-                comment!(self, "for-loop");
-                // activate iter variable
-                let var_index = {
-                    let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-                    self.locals.make_active(binding_id) as StackOffset
-                };
-                let var_type = self.binding_type(&item.iter);
-                // store lower range bound in iter variable
-                self.compile_expression(&binary_op.left)?;
-                self.write_store(var_index, var_type);
-                // push upper range bound
-                self.compile_expression(&binary_op.right)?;
-                // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
-                self.write_load(var_index, var_type);
-                self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
-                if binary_op.op == ast::BinaryOperator::Range {
-                    self.write_lt(var_type);
-                } else {
-                    self.write_lte(var_type);
-                }
-                let exit_jump = self.writer.j0(123);
-                // compile block
-                let start_target = self.writer.position();
-                self.compile_block(&item.block)?;
-                // load bounds, increment and compare
-                self.write_preinc(var_index, var_type);
-                self.write_clone(var_type, var_type.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
-                if binary_op.op == ast::BinaryOperator::Range {
-                    self.write_lt(var_type);
-                } else {
-                    self.write_lte(var_type);
-                }
-                self.writer.jn0(start_target);
-                // exit position
-                let exit_target = self.writer.position();
-                self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
-                Ok(())
-            } else {
-                Err(CompileError::new(item, CompileErrorKind::Internal))
-            }
-
-        } else {
-            Err(CompileError::new(item, CompileErrorKind::Internal))
-        }
+        use ast::{Expression, BinaryOperator as Op};
+        // activate iter variable
+        let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
+        let iter_index = self.locals.set_active(binding_id, true) as StackOffset;
+        let iter_ty = self.binding_type(&item.iter);
+        // handle ranges or arrays
+        let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
+            Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
+                self.compile_for_loop_range(item, iter_index, iter_ty)
+            },
+            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
+                self.compile_for_loop_array(item, iter_index, iter_ty)
+            },
+            _ => Err(CompileError::new(item, CompileErrorKind::Internal))
+        };
+        self.locals.set_active(binding_id, false) as StackOffset;
+        result
     }
 
     /// Compiles the given function.
@@ -1168,6 +1213,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
+    /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
+    fn write_heap_tail_element_top(self: &Self, ty: &Type) {
+        match ty.primitive_size() {
+            1 => { self.writer.heap_tail_element8_top(); },
+            2 => { self.writer.heap_tail_element16_top(); },
+            4 => { self.writer.heap_tail_element32_top(); },
+            8 => { self.writer.heap_tail_element64_top(); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
@@ -1223,7 +1279,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Clone stack value at (negative of) given offset to the top of the stack.
-    fn write_clone(self: &Self, ty: &Type, offset: u8) {
+    fn write_clone(self: &Self, ty: &Type, offset: u8) -> StackAddress {
         match ty.primitive_size() {
             1 => self.writer.clone8(offset),
             2 => self.writer.clone16(offset),
@@ -1231,7 +1287,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             8 => self.writer.clone64(offset),
             //16 => self.writer.clone128(offset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        };
+        }
     }
 
     /// Writes instructions for build-in len method.
@@ -1287,25 +1343,25 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write increment instruction.
-    fn write_inc(self: &Self, ty: &Type) {
+    fn write_inc(self: &Self, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.inci64(),
             Type::i32 | Type::u32 => self.writer.inci32(),
             Type::i16 | Type::u16 => self.writer.inci16(),
             Type::i8 | Type::u8 => self.writer.inci8(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write decrement instruction.
-    fn write_dec(self: &Self, ty: &Type) {
+    fn write_dec(self: &Self, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.deci64(),
             Type::i32 | Type::u32 => self.writer.deci32(),
             Type::i16 | Type::u16 => self.writer.deci16(),
             Type::i8 | Type::u8 => self.writer.deci8(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write pre-increment instruction.

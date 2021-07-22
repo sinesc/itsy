@@ -345,7 +345,7 @@ impl_bindable!(ImplBlock);
 pub struct ForLoop<'a> {
     pub position: Position,
     pub iter    : Binding<'a>,
-    pub range   : Expression<'a>,
+    pub expr    : Expression<'a>,
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
 }
@@ -450,7 +450,7 @@ pub enum Expression<'a> {
 impl<'a> Expression<'a> {
     pub fn is_literal(self: &Self) -> bool {
         match self {
-            Expression::Literal(_) => true,
+            Self::Literal(_) => true,
             _ => false,
         }
     }

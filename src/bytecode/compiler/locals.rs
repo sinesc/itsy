@@ -80,11 +80,11 @@ impl LocalsStack {
         *self.0.borrow().last().expect(Self::NO_STACK).map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
     /// Marks the the given local variable as initialized and returns its index.
-    pub fn make_active(self: &Self, binding_id: BindingId) -> StackAddress {
+    pub fn set_active(self: &Self, binding_id: BindingId, active: bool) -> StackAddress {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
         let local = locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
-        local.active = true;
+        local.active = active;
         local.index
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)

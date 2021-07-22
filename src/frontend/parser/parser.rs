@@ -788,7 +788,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
                 ty          : None,
                 binding_id  : None,
             },
-            range   : m.2,
+            expr   : m.2,
             block   : m.3,
             scope_id: None,
         }

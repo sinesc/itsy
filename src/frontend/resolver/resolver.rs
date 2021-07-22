@@ -605,15 +605,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'ast>) -> ResolveResult {
+        use ast::{Expression, BinaryOperator as Op};
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
         self.resolve_binding(&mut item.iter)?;
-        // resolve the range type using the type of the iterator variable, if possible, then apply range type back to iter
-        let type_id = self.binding_type_id(&item.iter);
-        self.resolve_expression(&mut item.range, type_id)?;
-        if let Some(type_id) = self.binding_type_id(&item.range) {
-            self.binding_set_type_id(&mut item.iter, type_id)?;
-        }
+        match &item.expr { // NOTE: these need to match Compiler::compile_for_loop
+            Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
+                let type_id = self.binding_type_id(&item.iter);
+                self.resolve_expression(&mut item.expr, type_id)?;
+                if let Some(type_id) = self.binding_type_id(&item.expr) {
+                    self.binding_set_type_id(&mut item.iter, type_id)?;
+                }
+            },
+            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
+                self.resolve_expression(&mut item.expr, None)?;
+                if let Some(&Type::Array(Array { type_id: Some(elements_type_id), ..})) = self.binding_type(&item.expr) {
+                    self.binding_set_type_id(&mut item.iter, elements_type_id)?;
+                }
+            },
+            _ => return Err(Error::new(&item.iter, ErrorKind::InvalidOperation("Unsupported for in operand".to_string()))),
+        };
         // handle block
         self.resolve_block(&mut item.block, None)?;
         self.scope_id = parent_scope_id;

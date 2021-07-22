@@ -901,6 +901,54 @@ fn for_in_inference_assign() {
 }
 
 #[test]
+fn for_in_array() {
+    let result = run("
+        for x in [ 7u8, 11, 13, 17 ] {
+            ret_u8(x);
+        }
+    ");
+    assert_all(&result, &[ 7u8, 11, 13, 17 ]);
+}
+
+#[test]
+fn for_in_array_var() {
+    let result = run("
+        let array = [ 7u8, 11, 13, 17 ];
+        for x in array {
+            ret_u8(x);
+        }
+    ");
+    assert_all(&result, &[ 7u8, 11, 13, 17 ]);
+}
+
+#[test]
+fn for_in_array_struct() {
+    let result = run("
+        struct Test {
+            inner: u8,
+        }
+        fn main() {
+            let array = [ Test { inner: 7 }, Test { inner: 17 }];
+            for x in array {
+                ret_u8(x.inner);
+            }
+        }
+    ");
+    assert_all(&result, &[ 7u8, 17 ]);
+}
+
+#[test]
+fn for_in_array_string() {
+    let result = run("
+        let array = [ \"Hello\", \"World\" ];
+        for x in array {
+            ret_string(x);
+        }
+    ");
+    assert_all(&result, &[ "Hello".to_string(), "World".to_string() ]);
+}
+
+#[test]
 fn recursion() {
     let result = run("
         fn fib(n: i32) -> i32 {
