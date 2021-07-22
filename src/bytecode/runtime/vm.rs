@@ -212,6 +212,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                     let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
                     *prototype_offset += ::std::mem::size_of_val(&num_bytes) as StackAddress;
                     self.write_proto(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
+                    *prototype_offset += num_bytes;
                 }
             }
         };
