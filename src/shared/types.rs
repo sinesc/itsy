@@ -94,7 +94,7 @@ pub(crate) enum TypeKind {
 
 impl Type {
     /// Size of the primitive type in bytes, otherwise size of the reference.
-    pub fn primitive_size(self: &Self) -> u8 {
+    pub const fn primitive_size(self: &Self) -> u8 {
         match self {
             Type::void                          => 0,
             Type::u8 | Type::i8 | Type::bool    => 1,

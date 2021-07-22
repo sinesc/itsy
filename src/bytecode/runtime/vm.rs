@@ -203,7 +203,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
             }
             Constructor::String => {
                 if existing_strings {
-                    let num_bytes = HeapRef::size() as StackAddress;
+                    let num_bytes = HeapRef::primitive_size() as StackAddress;
                     self.write_proto(target, *prototype_offset, num_bytes);
                     *prototype_offset += num_bytes;
                 } else {

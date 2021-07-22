@@ -1,7 +1,7 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use std::mem::size_of;
-use crate::{StackAddress, StackOffset};
+use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE};
 use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
@@ -101,16 +101,16 @@ impl_vm!{
     fn <
         const8_8<T: Data8>(offset: u8 as StackAddress),
         const8_16<T: Data8>(offset: u16 as StackAddress),
-        const8_32<T: Data8>(offset: StackAddress),
+        const8_sa<T: Data8>(offset: StackAddress),
         const16_8<T: Data16>(offset: u8 as StackAddress),
         const16_16<T: Data16>(offset: u16 as StackAddress),
-        const16_32<T: Data16>(offset: StackAddress),
+        const16_sa<T: Data16>(offset: StackAddress),
         const32_8<T: Data32>(offset: u8 as StackAddress),
         const32_16<T: Data32>(offset: u16 as StackAddress),
-        const32_32<T: Data32>(offset: StackAddress),
+        const32_sa<T: Data32>(offset: StackAddress),
         const64_8<T: Data64>(offset: u8 as StackAddress),
         const64_16<T: Data64>(offset: u16 as StackAddress),
-        const64_32<T: Data64>(offset: StackAddress),
+        const64_sa<T: Data64>(offset: StackAddress),
     >(&mut self) {
         let local: T = self.stack.load(offset);
         self.stack.push(local);
@@ -120,16 +120,16 @@ impl_vm!{
     fn <
         load8_8<T: Data8>(offset: i8 as StackOffset),
         load8_16<T: Data8>(offset: i16 as StackOffset),
-        load8_32<T: Data8>(offset: StackOffset),
+        load8_sa<T: Data8>(offset: StackOffset),
         load16_8<T: Data16>(offset: i8 as StackOffset),
         load16_16<T: Data16>(offset: i16 as StackOffset),
-        load16_32<T: Data16>(offset: StackOffset),
+        load16_sa<T: Data16>(offset: StackOffset),
         load32_8<T: Data32>(offset: i8 as StackOffset),
         load32_16<T: Data32>(offset: i16 as StackOffset),
-        load32_32<T: Data32>(offset: StackOffset),
+        load32_sa<T: Data32>(offset: StackOffset),
         load64_8<T: Data64>(offset: i8 as StackOffset),
         load64_16<T: Data64>(offset: i16 as StackOffset),
-        load64_32<T: Data64>(offset: StackOffset),
+        load64_sa<T: Data64>(offset: StackOffset),
     >(&mut self) {
         let abs = (offset + if offset >= 0 { self.stack.fp as StackOffset } else { self.stack.sp() as StackOffset }) as StackAddress; // fp+offset or sp-offset
         let local: T = self.stack.load(abs);
@@ -140,16 +140,16 @@ impl_vm!{
     fn <
         store8_8<T: Data8>(offset: i8 as StackOffset),
         store8_16<T: Data8>(offset: i16 as StackOffset),
-        store8_32<T: Data8>(offset: StackOffset),
+        store8_sa<T: Data8>(offset: StackOffset),
         store16_8<T: Data16>(offset: i8 as StackOffset),
         store16_16<T: Data16>(offset: i16 as StackOffset),
-        store16_32<T: Data16>(offset: StackOffset),
+        store16_sa<T: Data16>(offset: StackOffset),
         store32_8<T: Data32>(offset: i8 as StackOffset),
         store32_16<T: Data32>(offset: i16 as StackOffset),
-        store32_32<T: Data32>(offset: StackOffset),
+        store32_sa<T: Data32>(offset: StackOffset),
         store64_8<T: Data64>(offset: i8 as StackOffset),
         store64_16<T: Data64>(offset: i16 as StackOffset),
-        store64_32<T: Data64>(offset: StackOffset),
+        store64_sa<T: Data64>(offset: StackOffset),
     >(&mut self) {
         let abs = (offset + if offset >= 0 { self.stack.fp as StackOffset } else { self.stack.sp() as StackOffset }) as StackAddress; // fp+offset or sp-offset
         let local: T = self.stack.pop();
@@ -183,7 +183,7 @@ impl_vm!{
         self.stack.store(pos_b, a);
     }
 
-    /// Pop u32 "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
+    /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
     fn index(&mut self, element_size: u8) {
         let element_index: StackAddress = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
@@ -625,7 +625,7 @@ impl_vm!{
     fn <
         cntinc_8(constructor: u8 as StackAddress),
         cntinc_16(constructor: u16 as StackAddress),
-        cntinc_32(constructor: StackAddress),
+        cntinc_sa(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc);
@@ -634,7 +634,7 @@ impl_vm!{
     fn <
         cntdec_8(constructor: u8 as StackAddress),
         cntdec_16(constructor: u16 as StackAddress),
-        cntdec_32(constructor: StackAddress),
+        cntdec_sa(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec);
@@ -643,7 +643,7 @@ impl_vm!{
     fn <
         cntzero_8(constructor: u8 as StackAddress),
         cntzero_16(constructor: u16 as StackAddress),
-        cntzero_32(constructor: StackAddress),
+        cntzero_sa(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Zero);

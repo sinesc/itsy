@@ -154,7 +154,7 @@ impl HeapRef {
         HeapRef { address: HeapAddress::from_ne_bytes(bytes) }
     }
     /// Returns the size of heap references.
-    pub const fn size() -> u8 {
+    pub const fn primitive_size() -> u8 {
         std::mem::size_of::<Self>() as u8
     }
 }

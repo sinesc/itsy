@@ -1047,17 +1047,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes an appropriate variant of the cntinc instruction.
     fn write_cntinc(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntinc_8, cntinc_16, cntinc_32, constructor);
+        opcode_unsigned!(self, cntinc_8, cntinc_16, cntinc_sa, constructor);
     }
 
     /// Writes an appropriate variant of the cntdec instruction.
     fn write_cntdec(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_32, constructor);
+        opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
     }
 
     /// Writes an appropriate variant of the cntzero instruction.
     fn write_cntzero(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntzero_8, cntzero_16, cntzero_32, constructor);
+        opcode_unsigned!(self, cntzero_8, cntzero_16, cntzero_sa, constructor);
     }
 
     // TODO: try to remove tmp64 handling
@@ -1111,11 +1111,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the const instruction.
     fn write_const(self: &Self, index: StackAddress, ty: &Type) {
         match ty.primitive_size() {
-            1 => opcode_unsigned!(self, const8_8, const8_16, const8_32, index),
-            2 => opcode_unsigned!(self, const16_8, const16_16, const16_32, index),
-            4 => opcode_unsigned!(self, const32_8, const32_16, const32_32, index),
-            8 => opcode_unsigned!(self, const64_8, const64_16, const64_32, index),
-            //16 => opcode_unsigned!(self, const128_8, const128_16, const128_32, index),
+            1 => opcode_unsigned!(self, const8_8, const8_16, const8_sa, index),
+            2 => opcode_unsigned!(self, const16_8, const16_16, const16_sa, index),
+            4 => opcode_unsigned!(self, const32_8, const32_16, const32_sa, index),
+            8 => opcode_unsigned!(self, const64_8, const64_16, const64_sa, index),
+            //16 => opcode_unsigned!(self, const128_8, const128_16, const128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
     }
@@ -1171,11 +1171,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
-            1 => opcode_signed!(self, store8_8, store8_16, store8_32, index),
-            2 => opcode_signed!(self, store16_8, store16_16, store16_32, index),
-            4 => opcode_signed!(self, store32_8, store32_16, store32_32, index),
-            8 => opcode_signed!(self, store64_8, store64_16, store64_32, index),
-            //16 => opcode_signed!(self, store128_8, store128_16, store128_32, index),
+            1 => opcode_signed!(self, store8_8, store8_16, store8_sa, index),
+            2 => opcode_signed!(self, store16_8, store16_16, store16_sa, index),
+            4 => opcode_signed!(self, store32_8, store32_16, store32_sa, index),
+            8 => opcode_signed!(self, store64_8, store64_16, store64_sa, index),
+            //16 => opcode_signed!(self, store128_8, store128_16, store128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
     }
@@ -1183,16 +1183,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
-            1 => opcode_signed!(self, load8_8, load8_16, load8_32, index),
-            2 => opcode_signed!(self, load16_8, load16_16, load16_32, index),
+            1 => opcode_signed!(self, load8_8, load8_16, load8_sa, index),
+            2 => opcode_signed!(self, load16_8, load16_16, load16_sa, index),
             4 => match index {
                 ARG1 => self.writer.load_arg1(),
                 ARG2 => self.writer.load_arg2(),
                 ARG3 => self.writer.load_arg3(),
-                _ => opcode_signed!(self, load32_8, load32_16, load32_32, index),
+                _ => opcode_signed!(self, load32_8, load32_16, load32_sa, index),
             },
-            8 => opcode_signed!(self, load64_8, load64_16, load64_32, index),
-            //16 => opcode_signed!(self, load128_8, load128_16, load128_32, index),
+            8 => opcode_signed!(self, load64_8, load64_16, load64_sa, index),
+            //16 => opcode_signed!(self, load128_8, load128_16, load128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
     }
