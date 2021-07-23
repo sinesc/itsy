@@ -172,7 +172,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.write_load(local.index as StackOffset, ty); // stack: L
                 self.compile_expression(&item.right)?; // stack: L R
                 if ty.is_ref() {
-                    self.writer.cntstore(); // cntinc temporary right operand
+                    self.writer.cntstore_nc(); // cntinc temporary right operand
                     self.write_cntinc(constructor);
                 }
                 match item.op { // stack: Result
@@ -228,7 +228,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     self.write_heap_fetch(ty);          // stack: right &left left
                     self.write_cntdec(constructor);    // stack: right &left
                 }
-                self.writer.cntstore();              // stack: right &left, tmp: &left
+                self.writer.cntstore_nc();              // stack: right &left, tmp: &left
                 self.write_heap_fetch(ty);              // stack: right left, tmp: &left
                 self.write_swap(ty);                    // stack: left right, tmp: &left
                 match item.op {                         // stack: result, tmp: &left
@@ -429,14 +429,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.compile_expression(&item.expr)?;   // stack &array
         self.write_cntinc(array_constructor);
         self.write_intrinsic_len(array_ty);             // stack &array len
-        let exit_jump = self.writer.j0_sa_top(123);
+        let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index
 
         // TODO: consuming heap fetch would need this too
         //self.write_clone(array_ty, STACK_ADDRESS_TYPE.primitive_size());    // stack &array index &array
         //self.write_clone(&STACK_ADDRESS_TYPE, array_ty.primitive_size());    // stack &array index &array index
 
-        self.write_heap_tail_element_top(element_ty);   // stack &array index element
+        self.write_heap_tail_element_nc(element_ty);   // stack &array index element
 
         if element_ty.is_ref() {
             self.write_clone(element_ty, 0);       // stack &array index element element
@@ -450,11 +450,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             self.write_cntdec(element_constructor);         // stack &array index
         }
 
-        self.writer.jn0_sa_top(loop_start);
+        self.writer.jn0_sa_nc(loop_start);
 
         // exit position
         let exit_target = self.writer.position();
-        self.writer.overwrite(exit_jump, |w| w.j0_sa_top(exit_target));
+        self.writer.overwrite(exit_jump, |w| w.j0_sa_nc(exit_target));
         self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
         self.write_cntdec(array_constructor);         // stack --
         Ok(())
@@ -645,7 +645,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;
-                    self.writer.cntstore();
+                    self.writer.cntstore_nc();
                     self.write_heap_fetch(exp_type);
                     comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
@@ -711,19 +711,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match item.op {
             BO::And => {
                 self.compile_expression(&item.left)?;
-                let exit_jump = self.writer.j0_top(123); // left is false, result cannot ever be true, skip right
+                let exit_jump = self.writer.j0_nc(123); // left is false, result cannot ever be true, skip right
                 self.compile_expression(&item.right)?;
                 self.writer.and();
                 let exit_target = self.writer.position();
-                self.writer.overwrite(exit_jump, |w| w.j0_top(exit_target));
+                self.writer.overwrite(exit_jump, |w| w.j0_nc(exit_target));
             },
             BO::Or => {
                 self.compile_expression(&item.left)?;
-                let exit_jump = self.writer.jn0_top(123); // left is true, result cannot ever be false, skip right
+                let exit_jump = self.writer.jn0_nc(123); // left is true, result cannot ever be false, skip right
                 self.compile_expression(&item.right)?;
                 self.writer.or();
                 let exit_target = self.writer.position();
-                self.writer.overwrite(exit_jump, |w| w.jn0_top(exit_target));
+                self.writer.overwrite(exit_jump, |w| w.jn0_nc(exit_target));
             },
             _ => unreachable!("Invalid shortcircuit-operation {:?} in compile_binary_op", item.op),
         }
@@ -1092,7 +1092,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes an appropriate variant of the cntinc instruction.
     fn write_cntinc(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntinc_8, cntinc_16, cntinc_sa, constructor);
+        opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
     }
 
     /// Writes an appropriate variant of the cntdec instruction.
@@ -1102,7 +1102,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes an appropriate variant of the cntzero instruction.
     fn write_cntzero(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntzero_8, cntzero_16, cntzero_sa, constructor);
+        opcode_unsigned!(self, cntzero_8_nc, cntzero_16_nc, cntzero_sa_nc, constructor);
     }
 
     // TODO: try to remove tmp64 handling
@@ -1112,7 +1112,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let constructor = self.get_constructor(ty);
             match op {
                 HeapRefOp::Inc => {
-                    self.writer.cntstore();
+                    self.writer.cntstore_nc();
                     self.write_cntinc(constructor);
                 }
                 HeapRefOp::Dec => {
@@ -1214,12 +1214,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
-    fn write_heap_tail_element_top(self: &Self, ty: &Type) {
+    fn write_heap_tail_element_nc(self: &Self, ty: &Type) {
         match ty.primitive_size() {
-            1 => { self.writer.heap_tail_element8_top(); },
-            2 => { self.writer.heap_tail_element16_top(); },
-            4 => { self.writer.heap_tail_element32_top(); },
-            8 => { self.writer.heap_tail_element64_top(); },
+            1 => { self.writer.heap_tail_element8_nc(); },
+            2 => { self.writer.heap_tail_element16_nc(); },
+            4 => { self.writer.heap_tail_element32_nc(); },
+            8 => { self.writer.heap_tail_element64_nc(); },
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1295,7 +1295,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Type::Array(array) = ty {
             self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &STACK_ADDRESS_TYPE);
         } else {
-            unimplemented!("dynamic array len");
+            unreachable!("Unsupported type {:?} for intrinsic len", ty);
         }
     }
 
@@ -1304,14 +1304,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match numeric { // todo: try to refactor this mess
 
             Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
             Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
             Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
 
             Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
             Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
             Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
 
             Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
             Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
             Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
 

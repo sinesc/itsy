@@ -29,56 +29,43 @@ impl_vm!{
         self.stack.truncate(self.stack.sp() - size_of::<T>() as StackAddress);
     }
 
-    /// Pushes 8 bit 0 onto stack.
-    fn zero8(&mut self) {
-        self.stack.push(0u8);
-    }
-    /// Pushes 32 bit 0 onto stack.
-    fn zero32(&mut self) {
-        self.stack.push(0u32);
-    }
-    /// Pushes 64 bit 0 onto stack.
-    fn zero64(&mut self) {
-        self.stack.push(0u64);
+    /// Pushes 0 onto stack.
+    fn <
+        zero8<T: Data8>(),
+        zero16<T: Data16>(),
+        zero32<T: Data32>(),
+        zero64<T: Data64>(),
+    >(&mut self) {
+        self.stack.push(0 as T);
     }
 
-    /// Pushes 8 bit 1 onto stack.
-    fn one8(&mut self) {
-        self.stack.push(1u8);
-    }
-    /// Pushes 32 bit 1 onto stack.
-    fn one32(&mut self) {
-        self.stack.push(1u32);
-    }
-    /// Pushes 64 bit 1 onto stack.
-    fn one64(&mut self) {
-        self.stack.push(1u64);
+    /// Pushes 1 onto stack.
+    fn <
+        one8<T: Data8>(),
+        one16<T: Data16>(),
+        one32<T: Data32>(),
+        one64<T: Data64>(),
+    >(&mut self) {
+        self.stack.push(1 as T);
     }
 
-    /// Pushes 8 bit -1 onto stack.
-    fn fill8(&mut self) {
-        self.stack.push(-1i8);
-    }
-    /// Pushes 32 bit -1 onto stack.
-    fn fill32(&mut self) {
-        self.stack.push(-1i32);
-    }
-    /// Pushes 64 bit -1 onto stack.
-    fn fill64(&mut self) {
-        self.stack.push(-1i64);
+    /// Pushes -1 onto stack.
+    fn <
+        fill8<T: i8>(),
+        fill16<T: i16>(),
+        fill32<T: i32>(),
+        fill64<T: i64>(),
+    >(&mut self) {
+        self.stack.push(-1 as T);
     }
 
-    /// Pushes 8 bit value onto stack.
-    fn literali8(&mut self, value: u8) {
+    /// Pushes 8 bit value as an 8 or 32 bit value onto stack.
+    fn <
+        literali8(value: u8),
+        literalu32(value: u8 as u32),
+        literals32(value: i8 as i32),
+    >(&mut self) {
         self.stack.push(value);
-    }
-    /// Pushes 32 bit unsigned value onto stack.
-    fn literalu32(&mut self, value: u8) {
-        self.stack.push(value as u32);
-    }
-    /// Pushes 32 bit signed value onto stack (sign extended).
-    fn literals32(&mut self, value: i8) {
-        self.stack.push(value as i32);
     }
 
     /// Loads 32 bit function argument 1 and pushes it onto the stack. Equals load32(ARG1).
@@ -222,14 +209,11 @@ impl_vm!{
         i64_to_f32<F: i64, T: f32>(),
         u64_to_f32<F: u64, T: f32>(),
         f64_to_f32<F: f64, T: f32>(),
-
         i64_to_f64<F: i64, T: f64>(),
         u64_to_f64<F: u64, T: f64>(),
         f32_to_f64<F: f32, T: f64>(),
-
         f32_to_i64<F: f32, T: i64>(),
         f64_to_i64<F: f64, T: i64>(),
-
         f32_to_u64<F: f32, T: u64>(),
         f64_to_u64<F: f64, T: u64>(),
     >(&mut self) {
@@ -592,14 +576,14 @@ impl_vm!{
         }
     }
     /// Jumps to given address if the 8 bit stack-top is 0.
-    fn j0_top(&mut self, addr: StackAddress) {
+    fn j0_nc(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.top();
         if a == 0 {
             self.pc = addr;
         }
     }
     /// Jumps to given address if the 8 bit stack-top is not 0.
-    fn jn0_top(&mut self, addr: StackAddress) {
+    fn jn0_nc(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.top();
         if a != 0 {
             self.pc = addr;
@@ -607,14 +591,14 @@ impl_vm!{
     }
 
     /// Jumps to given address if the StackAddress sized stack-top equals 0.
-    fn j0_sa_top(&mut self, addr: StackAddress) {
+    fn j0_sa_nc(&mut self, addr: StackAddress) {
         let a: StackAddress = self.stack.top();
         if a == 0 {
             self.pc = addr;
         }
     }
     /// Jumps to given address if the StackAddress sized stack-top does not equal 0.
-    fn jn0_sa_top(&mut self, addr: StackAddress) {
+    fn jn0_sa_nc(&mut self, addr: StackAddress) {
         let a: StackAddress = self.stack.top();
         if a != 0 {
             self.pc = addr;
@@ -638,9 +622,9 @@ impl_vm!{
 
     /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
     fn <
-        cntinc_8(constructor: u8 as StackAddress),
-        cntinc_16(constructor: u16 as StackAddress),
-        cntinc_sa(constructor: StackAddress),
+        cntinc_8_nc(constructor: u8 as StackAddress),
+        cntinc_16_nc(constructor: u16 as StackAddress),
+        cntinc_sa_nc(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc);
@@ -656,16 +640,16 @@ impl_vm!{
     }
     /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
-        cntzero_8(constructor: u8 as StackAddress),
-        cntzero_16(constructor: u16 as StackAddress),
-        cntzero_sa(constructor: StackAddress),
+        cntzero_8_nc(constructor: u8 as StackAddress),
+        cntzero_16_nc(constructor: u16 as StackAddress),
+        cntzero_sa_nc(constructor: StackAddress),
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Zero);
     }
 
     /// Reads the top value off the stack and pushes it onto the tmp stack.
-    fn cntstore(&mut self) {
+    fn cntstore_nc(&mut self) {
         let value: HeapRef = self.stack.top();
         self.cnt.push(value);
     }
@@ -819,14 +803,14 @@ impl_vm!{
 
     /// Read an element index (at top) and heap object (just below) and push the heap value at element index onto the stack.
     fn <
-        heap_tail_element8_top<T: Data8>(),
-        heap_tail_element16_top<T: Data16>(),
-        heap_tail_element32_top<T: Data32>(),
-        heap_tail_element64_top<T: Data64>(),
+        heap_tail_element8_nc<T: Data8>(),
+        heap_tail_element16_nc<T: Data16>(),
+        heap_tail_element32_nc<T: Data32>(),
+        heap_tail_element64_nc<T: Data64>(),
     >(&mut self) {
         let element_index: StackAddress = self.stack.top();
-        let item: HeapRef = self.stack.load_sp(-(STACK_ADDRESS_TYPE.primitive_size() as StackOffset + HeapRef::primitive_size() as StackOffset));
-        let offset = self.heap.size_of(item.index()) as StackAddress - size_of::<T>() as StackAddress * (element_index + 1);
+        let item: HeapRef = self.stack.load_sp(-((STACK_ADDRESS_TYPE.primitive_size() + HeapRef::primitive_size()) as StackOffset));
+        let offset = self.heap.size_of(item.index()) - size_of::<T>() as StackAddress * (element_index + 1);
         let data: T = self.heap.read(item.with_offset(offset as StackOffset));
         self.stack.push(data);
     }

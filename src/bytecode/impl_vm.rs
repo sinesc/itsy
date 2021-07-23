@@ -64,18 +64,19 @@ macro_rules! impl_vm {
         /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_vm!` macro.
         /// # Naming
         ///
-        /// `<op><suffix1>_<suffix2>`
+        /// `<op><suffix1>[_<suffix2>[_nc]]`
         ///
         /// `suffix1` refers to stack inputs/outputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
         ///
-        /// `f`/`s`/`u`/`i`     float/signed/unsigned/any integer
-        /// `8`/`16`/`32`/`64`  size
+        /// `f`/`s`/`u`/`i`          float/signed/unsigned/any integer
+        /// `8`/`16`/`32`/`64`/`sa`  size in bits, sa=StackAddress sized
+        /// `nc`                     operation is non-consuming, meaning stack arguments will be read but not removed
         ///
         /// # Examples
-        /// `addi32`            add two 32 bit integer\
-        /// `addf64`            add two 64 bit floats\
-        /// `const_fetch_16`    load 32 bit from constpool at given 16 bit address
+        /// `addi32`    add two 32 bit integer\
+        /// `addf64`    add two 64 bit floats\
+        /// `const64_8` load 64 bit from constpool at given 8 bit address
         #[allow(non_camel_case_types)]
         #[repr(u8)]
         #[derive(PartialEq)]
