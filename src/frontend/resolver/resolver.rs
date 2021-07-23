@@ -626,7 +626,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             _ => return Err(Error::new(&item.iter, ErrorKind::InvalidOperation("Unsupported for in operand".to_string()))),
         };
         // handle block
-        self.resolve_block(&mut item.block, None)?;
+        self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
         self.scope_id = parent_scope_id;
         Ok(())
     }
