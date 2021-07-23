@@ -515,6 +515,17 @@ fn array_inference2() {
 }
 
 #[test]
+fn array_mixed_construction() {
+    let result = run("
+        let x = \"Hello\";
+        for w in [ x, \"World\" ] {
+            ret_str(w);
+        }
+    ");
+    assert_all(&result, &[ "Hello".to_string(), "World".to_string() ]);
+}
+
+#[test]
 fn struct_access() {
     let result = run("
         struct Test {
