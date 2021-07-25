@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
-use std::ops::{Add, Sub, Mul, Div, Rem};
+//use std::ops::{Add, Sub, Mul, Div, Rem};
 //use std::{i64, u64, f64};
 
 /// Signed integer value.
@@ -24,64 +24,64 @@ pub enum Numeric {
 }
 
 impl Numeric {
-    pub fn is_integer(self: &Self) -> bool {
+    pub const fn is_integer(self: &Self) -> bool {
         match self {
             Numeric::Signed(_) => true,
             Numeric::Unsigned(_) => true,
             _ => false,
         }
     }
-    pub fn is_signed(self: &Self) -> bool {
+    /*pub const fn is_signed(self: &Self) -> bool {
         match self {
             Numeric::Signed(_) => true,
             _ => false,
         }
     }
-    pub fn is_unsigned(self: &Self) -> bool {
+    pub const fn is_unsigned(self: &Self) -> bool {
         match self {
             Numeric::Unsigned(_) => true,
             _ => false,
         }
-    }
-    pub fn is_float(self: &Self) -> bool {
+    }*/
+    pub const fn is_float(self: &Self) -> bool {
         match self {
             Numeric::Float(_) => true,
             _ => false,
         }
     }
-    pub fn as_signed(self: &Self) -> Option<i64> {
+    /*pub const fn as_signed(self: &Self) -> Option<i64> {
         match self {
             Numeric::Signed(v) => Some(*v as i64),
             Numeric::Unsigned(v) => Some(*v as i64),
             _ => None,
         }
     }
-    pub fn as_unsigned(self: &Self) -> Option<u64> {
+    pub const fn as_unsigned(self: &Self) -> Option<u64> {
         match self {
             Numeric::Signed(v) => Some(*v as u64),
             Numeric::Unsigned(v) => Some(*v as u64),
             _ => None,
         }
     }
-    pub fn as_float(self: &Self) -> Option<f64> {
+    pub const fn as_float(self: &Self) -> Option<f64> {
         match self {
             Numeric::Float(v) => Some(*v as f64),
             _ => None,
         }
     }
-    fn as_f64(self: &Self) -> Option<f64> {
+    const fn as_f64(self: &Self) -> Option<f64> {
         match self {
             Numeric::Float(v) => Some(*v as f64),
             _ => None,
         }
     }
-    fn as_i128(self: &Self) -> Option<i128> {
+    const fn as_i128(self: &Self) -> Option<i128> {
         match self {
             Numeric::Signed(v) => Some(*v as i128),
             Numeric::Unsigned(v) => Some(*v as i128),
             _ => None,
         }
-    }
+    }*/
 }
 
 impl PartialEq for Numeric {
@@ -148,6 +148,9 @@ impl Ord for Numeric {
     }
 }
 
+// these were used for compiletime evaluation which is not currently implemented anymore.
+
+/*
 impl Add for Numeric {
     type Output = Numeric;
     fn add(self: Self, other: Numeric) -> Numeric {
@@ -237,7 +240,7 @@ impl Rem for Numeric {
         }
     }
 }
-
+*/
 impl Debug for Numeric {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

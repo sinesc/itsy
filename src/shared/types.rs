@@ -79,19 +79,6 @@ impl Debug for Type {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TypeKind {
-    Void,
-    Unsigned,
-    Signed,
-    Float,
-    Bool,
-    String,
-    Array,
-    Enum,
-    Struct,
-}
-
 impl Type {
     /// Size of the primitive type in bytes, otherwise size of the reference.
     pub const fn primitive_size(self: &Self) -> u8 {
@@ -102,20 +89,6 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) => ::std::mem::size_of::<HeapAddress>() as u8,
-        }
-    }
-    /// Kind of the type, e.g. Signed or Array.
-    fn kind(self: &Self) -> TypeKind {
-        match self {
-            Type::void => TypeKind::Void,
-            Type::u8 | Type::u16 | Type::u32 | Type::u64 => TypeKind::Unsigned,
-            Type::i8 | Type::i16 | Type::i32 | Type::i64 => TypeKind::Signed,
-            Type::f32 | Type::f64 => TypeKind::Float,
-            Type::bool => TypeKind::Bool,
-            Type::String => TypeKind::String,
-            Type::Enum(_) => TypeKind::Enum,
-            Type::Struct(_) => TypeKind::Struct,
-            Type::Array(_) => TypeKind::Array,
         }
     }
     /// Whether the given numeric is compatible with this type.
@@ -140,29 +113,58 @@ impl Type {
             false
         }
     }
-    /// Whether the type is a primitive.
-    pub fn is_primitive(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Unsigned | TypeKind::Signed | TypeKind::Float | TypeKind::Bool => true,
-            _ => false
-        }
-    }
     /// Whether the type is a reference type.
-    pub fn is_ref(self: &Self) -> bool {
+    pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) => true,
             _ => false,
         }
     }
+    /// Whether the type is a primitive.
+    pub const fn is_primitive(self: &Self) -> bool {
+        !self.is_ref()
+    }
+    /// Whether the type is void.
+    pub const fn is_void(self: &Self) -> bool {
+        match self {
+            Type::void => true,
+            _ => false
+        }
+    }
+    /// Whether the type is unsigned
+    pub const fn is_unsigned(self: &Self) -> bool {
+        match self {
+            Type::u8 | Type::u16 |  Type::u32 |  Type::u64 => true,
+            _ => false
+        }
+    }
+    /// Whether the type is signed.
+    pub const fn is_signed(self: &Self) -> bool {
+        match self {
+            Type::i8 |  Type::i16 |  Type::i32 |  Type::i64 => true,
+            _ => false
+        }
+    }
+    /// Whether the type is an integer.
+    pub const fn is_integer(self: &Self) -> bool {
+        self.is_unsigned() || self.is_signed()
+    }
+    /// Whether the type is a float.
+    pub const fn is_float(self: &Self) -> bool {
+        match self {
+            Type::f32 | Type::f64 => true,
+            _ => false
+        }
+    }
     /// Whether the type is an array.
-    pub fn is_array(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Array => true,
+    pub const fn is_array(self: &Self) -> bool {
+        match self {
+            Type::Array(_) => true,
             _ => false
         }
     }
     /// Returns the type as an array.
-    pub fn as_array(self: &Self) -> Option<&Array> {
+    pub const fn as_array(self: &Self) -> Option<&Array> {
         match self {
             Type::Array(array) => Some(array),
             _ => None
@@ -176,58 +178,23 @@ impl Type {
         }
     }
     /// Whether the type is a struct.
-    pub fn is_struct(self: &Self) -> bool {
+    pub const fn is_struct(self: &Self) -> bool {
         match self {
             Type::Struct(_) => true,
             _ => false
         }
     }
     /// Returns the type as a struct.
-    pub fn as_struct(self: &Self) -> Option<&Struct> {
+    pub const fn as_struct(self: &Self) -> Option<&Struct> {
         match self {
             Type::Struct(struct_) => Some(struct_),
             _ => None
         }
     }
-    /// Whether the type is an integer.
-    pub fn is_integer(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Unsigned | TypeKind::Signed => true,
-            _ => false
-        }
-    }
-    /// Whether the type is unsigned
-    pub fn is_unsigned(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Unsigned => true,
-            _ => false
-        }
-    }
-    /// Whether the type is signed.
-    pub fn is_signed(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Signed => true,
-            _ => false
-        }
-    }
-    /// Whether the type is a float.
-    pub fn is_float(self: &Self) -> bool {
-        match self.kind() {
-            TypeKind::Float => true,
-            _ => false
-        }
-    }
     /// Whether the type is a string.
-    pub fn is_string(self: &Self) -> bool {
+    pub const fn is_string(self: &Self) -> bool {
         match self {
             Type::String => true,
-            _ => false
-        }
-    }
-    /// Whether the type is void.
-    pub fn is_void(self: &Self) -> bool {
-        match self {
-            Type::void => true,
             _ => false
         }
     }
