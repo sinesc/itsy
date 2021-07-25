@@ -185,17 +185,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right)?;  // stack: right
-                if ty.is_ref() {
-                    self.write_cntinc(constructor);
-                }
-                self.compile_expression(&item.left)?;   // stack: right &left
-                if ty.is_ref() {
-                    self.write_clone(ty, 0);            // stack: right &left &left
-                    self.write_heap_fetch(ty);          // stack: right &left old
-                    self.write_cntdec(constructor);    // stack: right &left
-                }
-                self.write_heap_put(ty);                // stack: -
+                self.compile_expression(&item.right)?;      // stack: right
+                self.compile_expression(&item.left)?;       // stack: right &left
+                self.write_heap_putx(ty, false);    // stack: --
             },
             _ => {
                 // TODO: optimize this case
@@ -1164,6 +1156,22 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             4 => self.writer.heap_put32(),
             8 => self.writer.heap_put64(),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
+    /// Writes instructions to put a value of the given type at the target of the top heap reference on the stack.
+    /// If the value being written is a heap reference itself, its refcount will be increased and unless is_new_heap_ref is true
+    /// and the replaced value will have its refcount decreased.
+    fn write_heap_putx(self: &Self, ty: &Type, is_new_heap_ref: bool) -> StackAddress {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            if !is_new_heap_ref {
+                self.writer.heap_putx_replace(constructor)
+            } else {
+                self.writer.heap_putx_new(constructor)
+            }
+        } else {
+            self.write_heap_put(ty)
         }
     }
 

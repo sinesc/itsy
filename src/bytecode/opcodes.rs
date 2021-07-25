@@ -796,6 +796,28 @@ impl_vm!{
         self.heap.write(item, value);
     }
 
+    /// Pop a heap reference and a value and store the value at current offset in the heap.
+    /// Increases refcount of the new value.
+    fn heap_putx_new(&mut self, constructor: StackAddress) {
+        let item: HeapRef = self.stack.pop();
+        let value: HeapRef = self.stack.pop();
+        self.heap.write(item, value);
+        self.refcount_value(value, constructor, HeapRefOp::Inc);
+    }
+
+    /// Pop a heap reference and a value and store the value at current offset in the heap.
+    /// Decreses refcount of the previous contents and increases refcount of the new value.
+    fn heap_putx_replace(&mut self, constructor: StackAddress) {
+        let item: HeapRef = self.stack.pop();
+        let next: HeapRef = self.stack.pop();
+        let prev: HeapRef = self.heap.read(item);
+        self.heap.write(item, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            self.refcount_value(prev, constructor, HeapRefOp::Dec);
+        }
+    }
+
     /// Pop a heap reference and push the heap value at its current offset + given offset onto the stack.
     fn <
         heap_fetch_member8<T: Data8>(offset: StackAddress),
