@@ -151,18 +151,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let binding_id = item.left.binding_id().unwrap();
         let local = self.locals.lookup(binding_id);
         let ty = self.binding_type(&item.left);
-        let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                if ty.is_ref() {
-                    self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(local.index as StackOffset, ty);
-                    if local.active {
-                        self.write_cntdec(constructor);
-                    }
-                }
-                self.write_store(local.index as StackOffset, ty);
+                self.write_storex(local, ty);
                 self.locals.set_active(binding_id, true);
             },
             _ => {
@@ -171,10 +163,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: L
                 self.compile_expression(&item.right)?; // stack: L R
-                if ty.is_ref() {
-                    self.writer.cntstore_nc(); // cntinc temporary right operand
-                    self.write_cntinc(constructor);
-                }
                 match item.op { // stack: Result
                     BO::AddAssign => self.write_add(ty),
                     BO::SubAssign => self.write_sub(ty),
@@ -183,14 +171,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                if ty.is_ref() {
-                    self.write_cntinc(constructor); // inc new value before dec old value (incase it is the same reference)
-                    self.write_load(local.index as StackOffset, ty);
-                    self.write_cntdec(constructor);
-                    self.writer.cntpop(); // cntdec temporary right operand
-                    self.write_cntdec(constructor);
-                }
-                self.write_store(local.index as StackOffset, ty); // stack -
+                self.write_storex(local, ty); // stack -
             },
         };
         Ok(())
@@ -299,12 +280,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
-            let index = self.locals.set_active(binding_id, true);
+            let local = self.locals.lookup(binding_id);
             let ty = self.binding_type(item);
-            if ty.is_ref() {
-                self.write_cntinc(self.get_constructor(ty));
-            }
-            self.write_store(index as StackOffset, ty);
+            self.write_storex(local, ty);
+            self.locals.set_active(binding_id, true);
         }
         Ok(())
     }
@@ -385,16 +364,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_range(self: &Self, item: &ast::ForLoop<'ast>, iter_index: StackOffset, iter_ty: &Type) -> CompileResult {
+    fn compile_for_loop_range(self: &Self, item: &ast::ForLoop<'ast>, iter_local: Local, iter_ty: &Type) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
         self.compile_expression(&binary_op.left)?;
-        self.write_store(iter_index, iter_ty);
+        self.write_store(iter_local, iter_ty);
         // push upper range bound
         self.compile_expression(&binary_op.right)?;
         // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
-        self.write_load(iter_index, iter_ty);
+        self.write_load(iter_local.index as StackOffset, iter_ty);
         self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         if binary_op.op == ast::BinaryOperator::Range {
             self.write_lt(iter_ty);
@@ -406,7 +385,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let start_target = self.writer.position();
         self.compile_block(&item.block)?;
         // load bounds, increment and compare
-        self.write_preinc(iter_index, iter_ty);
+        self.write_preinc(iter_local.index as StackOffset, iter_ty);
         self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         if binary_op.op == ast::BinaryOperator::Range {
             self.write_lt(iter_ty);
@@ -420,7 +399,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_array(self: &Self, item: &ast::ForLoop<'ast>, element_var_index: StackOffset, element_ty: &Type) -> CompileResult {
+    fn compile_for_loop_array(self: &Self, item: &ast::ForLoop<'ast>, element_local: Local, element_ty: &Type) -> CompileResult {
         comment!(self, "for in array");
         let array_ty = self.binding_type(&item.expr);
         let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
@@ -443,7 +422,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             self.write_cntinc(element_constructor);
         }
 
-        self.write_store(element_var_index, element_ty);      // stack &array index <is_ref ? element>
+        self.write_store(element_local, element_ty);      // stack &array index <is_ref ? element>
         self.compile_block(&item.block)?;       // stack &array index <is_ref ? element>
 
         if element_ty.is_ref() {
@@ -465,19 +444,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         use ast::{Expression, BinaryOperator as Op};
         // activate iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-        let iter_index = self.locals.set_active(binding_id, true) as StackOffset;
+        let iter_local = self.locals.set_active(binding_id, true);
         let iter_ty = self.binding_type(&item.iter);
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
             Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
-                self.compile_for_loop_range(item, iter_index, iter_ty)
+                self.compile_for_loop_range(item, iter_local, iter_ty)
             },
             Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
-                self.compile_for_loop_array(item, iter_index, iter_ty)
+                self.compile_for_loop_array(item, iter_local, iter_ty)
             },
             _ => Err(CompileError::new(item, CompileErrorKind::Internal))
         };
-        self.locals.set_active(binding_id, false) as StackOffset;
+        self.locals.set_active(binding_id, false);
         result
     }
 
@@ -1177,14 +1156,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes instructions to put a value of the given size at the target of the top heap reference on the stack.
-    fn write_heap_put(self: &Self, ty: &Type) {
+    /// Writes instructions to put a value of the given type at the target of the top heap reference on the stack.
+    fn write_heap_put(self: &Self, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => { self.writer.heap_put8(); },
-            2 => { self.writer.heap_put16(); },
-            4 => { self.writer.heap_put32(); },
-            8 => { self.writer.heap_put64(); },
-            //16 => { self.writer.heap_put128(); },
+            1 => self.writer.heap_put8(),
+            2 => self.writer.heap_put16(),
+            4 => self.writer.heap_put32(),
+            8 => self.writer.heap_put64(),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1225,15 +1203,30 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, index: StackOffset, ty: &Type) {
+    fn write_store(self: &Self, local: Local, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => opcode_signed!(self, store8_8, store8_16, store8_sa, index),
-            2 => opcode_signed!(self, store16_8, store16_16, store16_sa, index),
-            4 => opcode_signed!(self, store32_8, store32_16, store32_sa, index),
-            8 => opcode_signed!(self, store64_8, store64_16, store64_sa, index),
-            //16 => opcode_signed!(self, store128_8, store128_16, store128_sa, index),
+            1 => opcode_signed!(self, store8_8, store8_16, store8_sa, local.index as StackOffset),
+            2 => opcode_signed!(self, store16_8, store16_16, store16_sa, local.index as StackOffset),
+            4 => opcode_signed!(self, store32_8, store32_16, store32_sa, local.index as StackOffset),
+            8 => opcode_signed!(self, store64_8, store64_16, store64_sa, local.index as StackOffset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        };
+        }
+    }
+
+    /// Writes an appropriate variant of the store instruction.
+    /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
+    /// and the replaced value will have its refcount decreased.
+    fn write_storex(self: &Self, local: Local, ty: &Type) -> StackAddress {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            if local.active {
+                self.writer.storex_replace(local.index as StackOffset, constructor)
+            } else {
+                self.writer.storex_new(local.index as StackOffset, constructor)
+            }
+        } else {
+            self.write_store(local, ty)
+        }
     }
 
     /// Writes an appropriate variant of the load instruction.

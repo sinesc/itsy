@@ -143,6 +143,26 @@ impl_vm!{
         self.stack.store(abs, local);
     }
 
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Increases refcount of the new value.
+    fn storex_new(&mut self, index: StackOffset, constructor: StackAddress) {
+        let value: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, value);
+        self.refcount_value(value, constructor, HeapRefOp::Inc);
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Decreses refcount of the previous contents and increases refcount of the new value.
+    fn storex_replace(&mut self, index: StackOffset, constructor: StackAddress) {
+        let prev: HeapRef = self.stack.load_fp(index);
+        let next: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            self.refcount_value(prev, constructor, HeapRefOp::Dec);
+        }
+    }
+
     /// Reads value from the n-th stack element relative to the top of the stack and pushes it.
     /// n=0 is the topmost stack value, n=sizeof(value) the previous value.
     fn <

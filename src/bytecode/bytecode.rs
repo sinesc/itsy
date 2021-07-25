@@ -168,6 +168,12 @@ impl From<HeapRef> for (StackAddress, StackAddress) {
     }
 }
 
+impl PartialEq for HeapRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address
+    }
+}
+
 impl Debug for HeapRef {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "HeapRef(index:{}, offset:{})", self.index(), self.offset())
