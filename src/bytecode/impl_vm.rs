@@ -69,7 +69,7 @@ macro_rules! impl_vm {
         /// `suffix1` refers to stack inputs/outputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
         ///
-        /// `f`/`s`/`u`/`i`          float/signed/unsigned/any integer
+        /// `f`/`s`/`u`/`i`/`x`      float/signed/unsigned/any integer/heap reference (instruction performs refcounting)
         /// `8`/`16`/`32`/`64`/`sa`  size in bits, sa=StackAddress sized
         /// `nc`                     operation is non-consuming, meaning stack arguments will be read but not removed
         ///

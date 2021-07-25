@@ -620,7 +620,7 @@ impl_vm!{
         self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, true);
     }
 
-    /// Increase reference count for the top heap object on the stack. Does not pop the object off the stack.
+    /// Increase reference count for the top heap reference on the stack. Does not pop the object off the stack.
     fn <
         cntinc_8_nc(constructor: u8 as StackAddress),
         cntinc_16_nc(constructor: u16 as StackAddress),
@@ -629,7 +629,7 @@ impl_vm!{
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc);
     }
-    /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
+    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
         cntdec_8(constructor: u8 as StackAddress),
         cntdec_16(constructor: u16 as StackAddress),
@@ -638,7 +638,7 @@ impl_vm!{
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec);
     }
-    /// Pops a heap object off the stack and decreases its reference count by 1, freeing it on 0.
+    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
         cntzero_8_nc(constructor: u8 as StackAddress),
         cntzero_16_nc(constructor: u16 as StackAddress),
@@ -690,21 +690,21 @@ impl_vm!{
         self.pc = self.stack.pop_frame();
     }
 
-    /// Pops 2 heap objects dest and src and copies num_bytes bytes from src to dest.
+    /// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
     fn heap_copy(&mut self, num_bytes: StackAddress) {
         let dest: HeapRef = self.stack.pop();
         let src: HeapRef = self.stack.pop();
         self.heap.copy(dest, src, num_bytes);
     }
 
-    /// Pops 2 heap objects and compares num_bytes bytes.
+    /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_ceq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Eq);
         self.stack.push(equals as Data8);
     }
-    /// Pops 2 heap objects and compares num_bytes bytes.
+    /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_cneq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
@@ -712,35 +712,35 @@ impl_vm!{
         self.stack.push(equals as Data8);
     }
 
-    /// Pops 2 heap string slices, compares them for equality and pushes the result.
+    /// Pops 2 heap references to strings, compares the strings for equality and pushes the result.
     fn string_ceq(&mut self) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Eq);
         self.stack.push(equals as Data8);
     }
-    /// Pops 2 heap string slices, compares them for inequality and pushes the result.
+    /// Pops 2 heap references to strings, compares the strings for inequality and pushes the result.
     fn string_cneq(&mut self) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Neq);
         self.stack.push(equals as Data8);
     }
-    /// Pops 2 heap string slices, compares them lexicographically and pushes the result.
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
     fn string_clt(&mut self) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lt);
         self.stack.push(equals as Data8);
     }
-    /// Pops 2 heap string slices, compares them lexicographically and pushes the result.
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
     fn string_clte(&mut self) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
         self.stack.push(equals as Data8);
     }
-    /// Pops two heap slices, concatenates the heap objects into a new object and pushes its heap slice.
+    /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference. // TODO refcounting!
     fn string_concat(&mut self) {
         let src_b: HeapRef = self.stack.pop();
         let src_b_len = self.heap.size_of(src_b.index());
@@ -752,7 +752,7 @@ impl_vm!{
         self.stack.push(HeapRef::new(dest_index, 0));
     }
 
-    /// Pop a heap object and push the heap value at its current offset onto the stack.
+    /// Pop a heap reference and push the heap value at its current offset onto the stack.
     fn <
         heap_fetch8<T: Data8>(),
         heap_fetch16<T: Data16>(),
@@ -764,7 +764,7 @@ impl_vm!{
         self.stack.push(data);
     }
 
-    /// Pop a heap object and a value and store the value at current offset in the heap.
+    /// Pop a heap reference and a value and store the value at current offset in the heap.
     fn <
         heap_put8<T: Data8>(),
         heap_put16<T: Data16>(),
@@ -776,7 +776,7 @@ impl_vm!{
         self.heap.write(item, value);
     }
 
-    /// Pop a heap object and push the heap value at its current offset + given offset onto the stack.
+    /// Pop a heap reference and push the heap value at its current offset + given offset onto the stack.
     fn <
         heap_fetch_member8<T: Data8>(offset: StackAddress),
         heap_fetch_member16<T: Data16>(offset: StackAddress),
@@ -788,7 +788,7 @@ impl_vm!{
         self.stack.push(data);
     }
 
-    /// Pop an element index and heap object and push the heap value at element index onto the stack.
+    /// Pop an element index and heap reference and push the heap value at element index onto the stack.
     fn <
         heap_fetch_element8<T: Data8>(),
         heap_fetch_element16<T: Data16>(),
@@ -801,7 +801,7 @@ impl_vm!{
         self.stack.push(data);
     }
 
-    /// Read an element index (at top) and heap object (just below) and push the heap value at element index onto the stack.
+    /// Read an element index (at top) and heap reference (just below) and push the heap value at element index onto the stack.
     fn <
         heap_tail_element8_nc<T: Data8>(),
         heap_tail_element16_nc<T: Data16>(),
