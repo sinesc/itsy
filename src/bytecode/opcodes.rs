@@ -760,16 +760,23 @@ impl_vm!{
         let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
         self.stack.push(equals as Data8);
     }
-    /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference. // TODO refcounting!
-    fn string_concat(&mut self) {
+    /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
+    fn string_concatx(&mut self, compound_assign: u8) {
         let src_b: HeapRef = self.stack.pop();
         let src_b_len = self.heap.size_of(src_b.index());
         let src_a: HeapRef = self.stack.pop();
         let src_a_len = self.heap.size_of(src_a.index());
+
         let dest_index: StackAddress = self.heap.alloc(Vec::new());
         self.heap.copy(HeapRef::new(dest_index, 0), src_a, src_a_len);
         self.heap.copy(HeapRef::new(dest_index, src_a_len), src_b, src_b_len);
         self.stack.push(HeapRef::new(dest_index, 0));
+
+        if compound_assign != 0 {
+            self.heap.ref_item(src_a.index(), HeapRefOp::Dec);
+            self.heap.ref_item(src_b.index(), HeapRefOp::Dec);
+            self.heap.ref_item(dest_index, HeapRefOp::Inc);
+        }
     }
 
     /// Pop a heap reference and push the heap value at its current offset onto the stack.
@@ -784,32 +791,32 @@ impl_vm!{
         self.stack.push(data);
     }
 
-    /// Pop a heap reference and a value and store the value at current offset in the heap.
+    /// Pop a value and a heap reference and store the value at current offset in the heap.
     fn <
         heap_put8<T: Data8>(),
         heap_put16<T: Data16>(),
         heap_put32<T: Data32>(),
         heap_put64<T: Data64>(),
     >(&mut self) {
-        let item: HeapRef = self.stack.pop();
         let value: T = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         self.heap.write(item, value);
     }
 
-    /// Pop a heap reference and a value and store the value at current offset in the heap.
+    /// Pop a value and a heap reference and store the value at current offset in the heap.
     /// Increases refcount of the new value.
     fn heap_putx_new(&mut self, constructor: StackAddress) {
-        let item: HeapRef = self.stack.pop();
         let value: HeapRef = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         self.heap.write(item, value);
         self.refcount_value(value, constructor, HeapRefOp::Inc);
     }
 
-    /// Pop a heap reference and a value and store the value at current offset in the heap.
+    /// Pop a value and a heap reference and store the value at current offset in the heap.
     /// Decreses refcount of the previous contents and increases refcount of the new value.
     fn heap_putx_replace(&mut self, constructor: StackAddress) {
-        let item: HeapRef = self.stack.pop();
         let next: HeapRef = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
         let prev: HeapRef = self.heap.read(item);
         self.heap.write(item, next);
         if next != prev {

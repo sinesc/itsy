@@ -161,17 +161,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 if !local.active {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
                 }
-                self.write_load(local.index as StackOffset, ty); // stack: L
-                self.compile_expression(&item.right)?; // stack: L R
-                match item.op { // stack: Result
-                    BO::AddAssign => self.write_add(ty),
+                self.write_load(local.index as StackOffset, ty); // stack: left
+                self.write_cntinc2(ty);
+                self.compile_expression(&item.right)?; // stack: left right
+                self.write_cntinc2(ty);
+                match item.op { // stack: result
+                    BO::AddAssign => self.write_add(ty, true),
                     BO::SubAssign => self.write_sub(ty),
                     BO::MulAssign => self.write_mul(ty),
                     BO::DivAssign => self.write_div(ty),
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_storex(local, ty); // stack -
+                self.write_storex(local, ty); // stack --
             },
         };
         Ok(())
@@ -182,38 +184,28 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "offset assignment");
         let ty = self.binding_type(&item.left);
-        let constructor = if ty.is_ref() { self.get_constructor(ty) } else { 0 };
         match item.op {
             BO::Assign => {
-                self.compile_expression(&item.right)?;      // stack: right
-                self.compile_expression(&item.left)?;       // stack: right &left
+                self.compile_expression(&item.left)?;       // stack: &left
+                self.compile_expression(&item.right)?;      // stack: &left right
                 self.write_heap_putx(ty, false);    // stack: --
             },
             _ => {
-                // TODO: optimize this case
-                self.compile_expression(&item.right)?;  // stack: right
-                if ty.is_ref() {
-                    self.write_cntinc(constructor);
-                }
-                self.compile_expression(&item.left)?;   // stack: right &left
-                if ty.is_ref() {
-                    self.write_clone(ty, 0);            // stack: right &left &left
-                    self.write_heap_fetch(ty);          // stack: right &left left
-                    self.write_cntdec(constructor);    // stack: right &left
-                }
-                self.writer.cntstore_nc();              // stack: right &left, tmp: &left
-                self.write_heap_fetch(ty);              // stack: right left, tmp: &left
-                self.write_swap(ty);                    // stack: left right, tmp: &left
-                match item.op {                         // stack: result, tmp: &left
-                    BO::AddAssign => self.write_add(ty),
+                self.compile_expression(&item.left)?;       // stack: &left
+                self.write_clone(&Type::HeapRefSize, 0);       // stack: &left &left
+                self.write_heap_fetch(ty);                      // stack: &left left
+                self.write_cntinc2(ty);
+                self.compile_expression(&item.right)?;      // stack: &left left right
+                self.write_cntinc2(ty);
+                match item.op {                                 // stack: &left result
+                    BO::AddAssign => self.write_add(ty, true),
                     BO::SubAssign => self.write_sub(ty),
                     BO::MulAssign => self.write_mul(ty),
                     BO::DivAssign => self.write_div(ty),
                     BO::RemAssign => self.write_rem(ty),
                     _ => unreachable!("Unsupported assignment operator encountered"),
                 };
-                self.writer.cntpop();                // stack: result, &left
-                self.write_heap_put(ty);                // stack -
+                self.write_heap_putx(ty, false); // stack -
             },
         }
         Ok(())
@@ -614,24 +606,25 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
+                    // TODO: try refactoring heap_put to target first
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
-                    self.compile_expression(&item.expr)?;
-                    self.writer.cntstore_nc();
-                    self.write_heap_fetch(exp_type);
+                    self.compile_expression(&item.expr)?; // stack: &left
+                    self.writer.cntstore_nc();                  // stack: &left, tmp: &left
+                    self.write_heap_fetch(exp_type);        // stack: left, tmp: &left
                     comment!(self, "{}", item);
                     if item.op == UO::IncAfter || item.op == UO::DecAfter {
-                        self.write_clone(exp_type, 0);
+                        self.write_clone(exp_type, 0); // stack for after: left left
                     }
                     match item.op {
-                        UO::IncBefore | UO::IncAfter => self.write_inc(&exp_type),
+                        UO::IncBefore | UO::IncAfter => self.write_inc(&exp_type), // stack for after: left left+1, stack for before: left+1
                         UO::DecBefore | UO::DecAfter => self.write_dec(&exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
                     if item.op == UO::IncBefore || item.op == UO::DecBefore {
-                        self.write_clone(exp_type, 0);
+                        self.write_clone(exp_type, 0);  // stack for before: left+1 left+1, stack for after: left left+1
                     }
-                    self.writer.cntpop();
-                    self.write_heap_put(exp_type);
+                    self.writer.cntpop();               // stack for before: left+1 left+1 &left, stack for after: left left+1 &left
+                    self.write_heap_put(exp_type); // stack for before: left+1, stack for after: left
                 } else {
                     panic!("Operator {:?} can not be used here", item.op);
                 }
@@ -656,7 +649,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         match item.op {
             // arithmetic/concat
-            BO::Add => self.write_add(ty_result),
+            BO::Add => self.write_add(ty_result, false),
             BO::Sub => self.write_sub(ty_result),
             BO::Mul => self.write_mul(ty_result),
             BO::Div => self.write_div(ty_result),
@@ -1061,6 +1054,32 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
+
+    /// Writes an appropriate variant of the cntinc instruction.
+    fn write_cntinc2(self: &Self, ty: &Type) {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
+        }
+    }
+
+    /// Writes an appropriate variant of the cntdec instruction.
+    fn write_cntdec2(self: &Self, ty: &Type) {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
+        }
+    }
+
+    /// Writes an appropriate variant of the cntzero instruction.
+    fn write_cntzero2(self: &Self, ty: &Type) {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            opcode_unsigned!(self, cntzero_8_nc, cntzero_16_nc, cntzero_sa_nc, constructor);
+        }
+    }
+
+
     /// Writes an appropriate variant of the cntinc instruction.
     fn write_cntinc(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
@@ -1120,7 +1139,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             assert!(::std::mem::size_of::<StackAddress>() == ::std::mem::size_of::<u32>());
             let const_id = self.writer.store_const(offset);
             self.write_const(const_id, &STACK_ADDRESS_TYPE);
-            self.write_add(&STACK_ADDRESS_TYPE)
+            self.write_add(&STACK_ADDRESS_TYPE, false)
         }
     }
 
@@ -1426,7 +1445,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write addition instruction.
-    fn write_add(self: &Self, ty: &Type) {
+    fn write_add(self: &Self, ty: &Type, compound_assign: bool) {
         match ty {
             Type::i8 | Type::u8 => self.writer.addi8(),
             Type::i16 | Type::u16 => self.writer.addi16(),
@@ -1434,7 +1453,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::i64 | Type::u64 => self.writer.addi64(),
             Type::f32 => self.writer.addf32(),
             Type::f64 => self.writer.addf64(),
-            Type::String => self.writer.string_concat(),
+            Type::String => self.writer.string_concatx(compound_assign as u8),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }

@@ -736,7 +736,7 @@ fn heap_compound_assign() {
             ret_u8(test[0]);
         }}
     ", itsy::STACK_ADDRESS_TYPE));
-    assert_all(&result, &[ 0u8, 6, 9, 1 ]);
+    assert_all(&result, &[ 0u8, 9, 6, 1 ]);
 }
 
 #[test]
@@ -761,7 +761,7 @@ fn heap_compound_assign64() {
             ret_u64(test[0]);
         }}
     ", itsy::STACK_ADDRESS_TYPE));
-    assert_all(&result, &[ 0u64, 6, 9, 1, 6, 9, 2, 6, 9, 1 ]);
+    assert_all(&result, &[ 0u64, 9, 6, 1, 9, 6, 2, 9, 6, 1 ]);
 }
 
 #[test]
