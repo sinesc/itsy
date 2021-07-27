@@ -445,76 +445,40 @@ impl_vm!{
         self.stack.push(a % b);
     }
 
-    /// Increments the value at the top of the stack.
-    fn <
-        inci8<T: Data8>(),
-        inci16<T: Data16>(),
-        inci32<T: Data32>(),
-        inci64<T: Data64>()
-    >(&mut self) {
-        let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_add(a, 1));
-    }
-
     /// Decrements the value at the top of the stack.
     fn <
-        deci8<T: Data8>(),
-        deci16<T: Data16>(),
-        deci32<T: Data32>(),
-        deci64<T: Data64>()
+        deci8<T: i8>(decr: i8),
+        deci16<T: i16>(decr: i8),
+        deci32<T: i32>(decr: i8),
+        deci64<T: i64>(decr: i8)
     >(&mut self) {
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_sub(a, 1));
-    }
-
-    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
-    fn <
-        preinci8<T: Data8>(offset: StackOffset),
-        preinci16<T: Data16>(offset: StackOffset),
-        preinci32<T: Data32>(offset: StackOffset),
-        preinci64<T: Data64>(offset: StackOffset)
-    >(&mut self) {
-        let mut local: T = self.stack.load_fp(offset);
-        local = T::wrapping_add(local, 1);
-        self.stack.store_fp(offset, local);
-        self.stack.push(local);
+        self.stack.push(T::wrapping_sub(a, decr as T));
     }
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn <
-        predeci8<T: Data8>(offset: StackOffset),
-        predeci16<T: Data16>(offset: StackOffset),
-        predeci32<T: Data32>(offset: StackOffset),
-        predeci64<T: Data64>(offset: StackOffset)
+        predeci8<T: i8>(offset: StackOffset, decr: i8),
+        predeci16<T: i16>(offset: StackOffset, decr: i8),
+        predeci32<T: i32>(offset: StackOffset, decr: i8),
+        predeci64<T: i64>(offset: StackOffset, decr: i8)
     >(&mut self) {
-        let mut local: T = self.stack.load_fp(offset);
-        local = T::wrapping_sub(local, 1);
-        self.stack.store_fp(offset, local);
-        self.stack.push(local);
-    }
-
-    /// Increments the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
-    fn <
-        postinci8<T: Data8>(offset: StackOffset),
-        postinci16<T: Data16>(offset: StackOffset),
-        postinci32<T: Data32>(offset: StackOffset),
-        postinci64<T: Data64>(offset: StackOffset)
-    >(&mut self) {
-        let local: T = self.stack.load_fp(offset);
-        self.stack.store_fp(offset, T::wrapping_add(local, 1));
-        self.stack.push(local);
+        let mut value: T = self.stack.load_fp(offset);
+        value = T::wrapping_sub(value, decr as T);
+        self.stack.store_fp(offset, value);
+        self.stack.push(value);
     }
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
     fn <
-        postdeci8<T: Data8>(offset: StackOffset),
-        postdeci16<T: Data16>(offset: StackOffset),
-        postdeci32<T: Data32>(offset: StackOffset),
-        postdeci64<T: Data64>(offset: StackOffset)
+        postdeci8<T: i8>(offset: StackOffset, decr: i8),
+        postdeci16<T: i16>(offset: StackOffset, decr: i8),
+        postdeci32<T: i32>(offset: StackOffset, decr: i8),
+        postdeci64<T: i64>(offset: StackOffset, decr: i8)
     >(&mut self) {
-        let local: T = self.stack.load_fp(offset);
-        self.stack.store_fp(offset, T::wrapping_sub(local, 1));
-        self.stack.push(local);
+        let value: T = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, T::wrapping_sub(value, decr as T));
+        self.stack.push(value);
     }
 
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
@@ -777,6 +741,34 @@ impl_vm!{
             self.heap.ref_item(src_b.index(), HeapRefOp::Dec);
             self.heap.ref_item(dest_index, HeapRefOp::Inc);
         }
+    }
+
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
+    fn <
+        heap_predeci8<T: i8>(decr: i8),
+        heap_predeci16<T: i16>(decr: i8),
+        heap_predeci32<T: i32>(decr: i8),
+        heap_predeci64<T: i64>(decr: i8)
+    >(&mut self) {
+        let item: HeapRef = self.stack.pop();
+        let mut value: T = self.heap.read(item);
+        value = T::wrapping_sub(value, decr as T);
+        self.heap.write(item, value);
+        self.stack.push(value); // push after inc/dec
+    }
+
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
+    fn <
+        heap_postdeci8<T: i8>(decr: i8),
+        heap_postdeci16<T: i16>(decr: i8),
+        heap_postdeci32<T: i32>(decr: i8),
+        heap_postdeci64<T: i64>(decr: i8)
+    >(&mut self) {
+        let item: HeapRef = self.stack.pop();
+        let mut value: T = self.heap.read(item);
+        self.stack.push(value); // push before inc/dec
+        value = T::wrapping_sub(value, decr as T);
+        self.heap.write(item, value);
     }
 
     /// Pop a heap reference and push the heap value at its current offset onto the stack.

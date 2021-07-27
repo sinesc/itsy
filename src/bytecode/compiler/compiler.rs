@@ -606,25 +606,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
-                    // TODO: try refactoring heap_put to target first
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
-                    self.compile_expression(&item.expr)?; // stack: &left
-                    self.writer.cntstore_nc();                  // stack: &left, tmp: &left
-                    self.write_heap_fetch(exp_type);        // stack: left, tmp: &left
+                    self.compile_expression(&item.expr)?;           // stack: &left
                     comment!(self, "{}", item);
-                    if item.op == UO::IncAfter || item.op == UO::DecAfter {
-                        self.write_clone(exp_type, 0); // stack for after: left left
-                    }
                     match item.op {
-                        UO::IncBefore | UO::IncAfter => self.write_inc(&exp_type), // stack for after: left left+1, stack for before: left+1
-                        UO::DecBefore | UO::DecAfter => self.write_dec(&exp_type),
+                        UO::IncBefore => self.write_heap_preinc(&exp_type),
+                        UO::DecBefore => self.write_heap_predec(&exp_type),
+                        UO::IncAfter => self.write_heap_postinc(&exp_type),
+                        UO::DecAfter => self.write_heap_postdec(&exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
-                    if item.op == UO::IncBefore || item.op == UO::DecBefore {
-                        self.write_clone(exp_type, 0);  // stack for before: left+1 left+1, stack for after: left left+1
-                    }
-                    self.writer.cntpop();               // stack for before: left+1 left+1 &left, stack for after: left left+1 &left
-                    self.write_heap_put(exp_type); // stack for before: left+1, stack for after: left
                 } else {
                     panic!("Operator {:?} can not be used here", item.op);
                 }
@@ -1134,7 +1125,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if offset == 0 {
             // nothing to do
         } else if offset == 1 {
-            self.writer.inci32();
+            self.write_inc(&STACK_ADDRESS_TYPE);
         } else {
             assert!(::std::mem::size_of::<StackAddress>() == ::std::mem::size_of::<u32>());
             let const_id = self.writer.store_const(offset);
@@ -1368,10 +1359,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write increment instruction.
     fn write_inc(self: &Self, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.inci64(),
-            Type::i32 | Type::u32 => self.writer.inci32(),
-            Type::i16 | Type::u16 => self.writer.inci16(),
-            Type::i8 | Type::u8 => self.writer.inci8(),
+            Type::i64 | Type::u64 => self.writer.deci64(-1),
+            Type::i32 | Type::u32 => self.writer.deci32(-1),
+            Type::i16 | Type::u16 => self.writer.deci16(-1),
+            Type::i8 | Type::u8 => self.writer.deci8(-1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
@@ -1379,10 +1370,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write decrement instruction.
     fn write_dec(self: &Self, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.deci64(),
-            Type::i32 | Type::u32 => self.writer.deci32(),
-            Type::i16 | Type::u16 => self.writer.deci16(),
-            Type::i8 | Type::u8 => self.writer.deci8(),
+            Type::i64 | Type::u64 => self.writer.deci64(1),
+            Type::i32 | Type::u32 => self.writer.deci32(1),
+            Type::i16 | Type::u16 => self.writer.deci16(1),
+            Type::i8 | Type::u8 => self.writer.deci8(1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
@@ -1390,10 +1381,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write pre-increment instruction.
     fn write_preinc(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
-            Type::i64 | Type::u64 => self.writer.preinci64(index),
-            Type::i32 | Type::u32 => self.writer.preinci32(index),
-            Type::i16 | Type::u16 => self.writer.preinci16(index),
-            Type::i8 | Type::u8 => self.writer.preinci8(index),
+            Type::i64 | Type::u64 => self.writer.predeci64(index, -1),
+            Type::i32 | Type::u32 => self.writer.predeci32(index, -1),
+            Type::i16 | Type::u16 => self.writer.predeci16(index, -1),
+            Type::i8 | Type::u8 => self.writer.predeci8(index, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
@@ -1401,10 +1392,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write pre-decrement instruction.
     fn write_predec(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
-            Type::i64 | Type::u64 => self.writer.predeci64(index),
-            Type::i32 | Type::u32 => self.writer.predeci32(index),
-            Type::i16 | Type::u16 => self.writer.predeci16(index),
-            Type::i8 | Type::u8 => self.writer.predeci8(index),
+            Type::i64 | Type::u64 => self.writer.predeci64(index, 1),
+            Type::i32 | Type::u32 => self.writer.predeci32(index, 1),
+            Type::i16 | Type::u16 => self.writer.predeci16(index, 1),
+            Type::i8 | Type::u8 => self.writer.predeci8(index, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
@@ -1412,10 +1403,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write post-increment instruction.
     fn write_postinc(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
-            Type::i64 | Type::u64 => self.writer.postinci64(index),
-            Type::i32 | Type::u32 => self.writer.postinci32(index),
-            Type::i16 | Type::u16 => self.writer.postinci16(index),
-            Type::i8 | Type::u8 => self.writer.postinci8(index),
+            Type::i64 | Type::u64 => self.writer.postdeci64(index, -1),
+            Type::i32 | Type::u32 => self.writer.postdeci32(index, -1),
+            Type::i16 | Type::u16 => self.writer.postdeci16(index, -1),
+            Type::i8 | Type::u8 => self.writer.postdeci8(index, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
@@ -1423,12 +1414,56 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Write post-decrement instruction.
     fn write_postdec(self: &Self, index: StackOffset, ty: &Type) {
         match ty {
-            Type::i64 | Type::u64 => self.writer.postdeci64(index),
-            Type::i32 | Type::u32 => self.writer.postdeci32(index),
-            Type::i16 | Type::u16 => self.writer.postdeci16(index),
-            Type::i8 | Type::u8 => self.writer.postdeci8(index),
+            Type::i64 | Type::u64 => self.writer.postdeci64(index, 1),
+            Type::i32 | Type::u32 => self.writer.postdeci32(index, 1),
+            Type::i16 | Type::u16 => self.writer.postdeci16(index, 1),
+            Type::i8 | Type::u8 => self.writer.postdeci8(index, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
+    }
+
+    /// Write heap pre-increment instruction.
+    fn write_heap_preinc(self: &Self, ty: &Type) -> StackAddress {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.heap_predeci64(-1),
+            Type::i32 | Type::u32 => self.writer.heap_predeci32(-1),
+            Type::i16 | Type::u16 => self.writer.heap_predeci16(-1),
+            Type::i8 | Type::u8 => self.writer.heap_predeci8(-1),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        }
+    }
+
+    /// Write heap pre-decrement instruction.
+    fn write_heap_predec(self: &Self, ty: &Type) -> StackAddress {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.heap_predeci64(1),
+            Type::i32 | Type::u32 => self.writer.heap_predeci32(1),
+            Type::i16 | Type::u16 => self.writer.heap_predeci16(1),
+            Type::i8 | Type::u8 => self.writer.heap_predeci8(1),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        }
+    }
+
+    /// Write heap post-increment instruction.
+    fn write_heap_postinc(self: &Self, ty: &Type) -> StackAddress {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.heap_postdeci64(-1),
+            Type::i32 | Type::u32 => self.writer.heap_postdeci32(-1),
+            Type::i16 | Type::u16 => self.writer.heap_postdeci16(-1),
+            Type::i8 | Type::u8 => self.writer.heap_postdeci8(-1),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        }
+    }
+
+    /// Write heap post-decrement instruction.
+    fn write_heap_postdec(self: &Self, ty: &Type) -> StackAddress {
+        match ty {
+            Type::i64 | Type::u64 => self.writer.heap_postdeci64(1),
+            Type::i32 | Type::u32 => self.writer.heap_postdeci32(1),
+            Type::i16 | Type::u16 => self.writer.heap_postdeci16(1),
+            Type::i8 | Type::u8 => self.writer.heap_postdeci8(1),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        }
     }
 
     /// Write subtraction instruction.
