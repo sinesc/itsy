@@ -499,12 +499,12 @@ fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
         alt((
             map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, e)),
             map(preceded(ws(tag(".")), call), |i| (BinaryOperator::Access, Expression::Call(i))),
-            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, binding_id: None, index: None })))
+            map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, binding_id: None, index: None })))
         )),
         init.1,
         move |acc, (op, mut val)| match &mut val {
             Expression::Call(call) if op == BinaryOperator::Access => {
-                // prepend object notation argument
+                // prepend object argument
                 call.args.insert(0, acc);
                 call.call_type = CallType::Method;
                 val
