@@ -59,12 +59,16 @@ fn main() {
                 log("logs/run.ini", false, "");
             }
             loop {
+                let mut instruction = None;
                 if write_logs {
-                    log("logs/run.ini", true, &format!("{}", &vm.format_instruction().unwrap_or("-".to_string())));
+                    instruction = Some(vm.format_instruction().unwrap_or("-".to_string()));
+                    log("logs/run.ini", true, &format!("{}", instruction.as_ref().unwrap()));
                 }
                 let vmstate = vm.step(&mut ());
-                if write_logs {
-                    log("logs/run.ini", true, &format!(";    stack {:?}\n;    cnt   {:?}\n;    heap  {:?}", vm.stack.frame(), vm.cnt.frame(), vm.heap.data()));
+                if let Some(instruction) = instruction {
+                    if instruction.starts_with("[") == false {
+                        log("logs/run.ini", true, &format!(";    stack {:?}\n;    cnt   {:?}\n;    heap  {:?}", vm.stack.frame(), vm.cnt.frame(), vm.heap.data()));
+                    }
                 }
                 if vmstate != runtime::VMState::Ready {
                     break;
