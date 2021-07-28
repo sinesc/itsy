@@ -75,10 +75,10 @@ macro_rules! impl_matchall {
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
     };
-    ($self:ident, $struct_name:ident, $val_name:ident, $code:tt $(, $field:ident)+) => {
+    ($self:ident, $enum_name:ident, $val_name:ident, $code:tt $(, $variant_name:ident)+) => {
         match $self {
             $(
-                $struct_name::$field($val_name) => $code,
+                $enum_name::$variant_name($val_name) => $code,
             )+
         }
     };
@@ -98,13 +98,13 @@ pub struct Ident<'a> {
 
 impl<'a> Ident<'a> {
     /// Computes fully qualified path
-    pub fn qualified(self: &Self, base: &[ impl Into<String> + Clone ], type_name: Option<String>) -> String {
+    pub fn qualified(self: &Self, base: &[ String ], type_name: Option<String>) -> String {
         if self.name == "Self" {
             self.name.to_string()
         } else {
             let mut result: Vec<String> = Vec::new();
             for v in base {
-                result.push((v.clone()).into());
+                result.push(v.clone());
             }
             if let Some(type_name) = type_name {
                 result.push(type_name);
@@ -117,7 +117,7 @@ impl<'a> Ident<'a> {
 
 impl<'a> Display for Ident<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.qualified(&[ "" ], None))
+        write!(f, "{}", self.qualified(&[ ], None))
     }
 }
 
@@ -134,15 +134,15 @@ impl<'a> Path<'a> {
         self.name.pop().unwrap()
     }
     /// Computes fully qualified path
-    pub fn qualified(self: &Self, base: &[ impl Into<String> + Clone ]) -> String {
+    pub fn qualified(self: &Self, base: &[ String ]) -> String {
         if self.name.len() == 1 && self.name[0] == "Self" {
             self.name[0].to_string()
         } else {
             let mut result: Vec<String> = Vec::new();
             for v in base {
-                result.push((v.clone()).into());
+                result.push(v.clone());
             }
-            for v in &self.name {
+            for &v in &self.name {
                 result.push(v.to_string());
             }
             result.join("::")
@@ -152,7 +152,7 @@ impl<'a> Path<'a> {
 
 impl<'a> Display for Path<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.qualified(&[ "" ]))
+        write!(f, "{}", self.qualified(&[ ]))
     }
 }
 
