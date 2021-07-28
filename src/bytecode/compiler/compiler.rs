@@ -192,7 +192,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => {
                 self.compile_expression(&item.left)?;       // stack: &left
-                self.write_clone(&Type::HeapRefSize, 0);       // stack: &left &left
+                self.write_clone(&Type::HeapRefSize);       // stack: &left &left
                 self.write_heap_fetch(ty);                      // stack: &left left
                 self.write_cntinc2(ty);
                 self.compile_expression(&item.right)?;      // stack: &left left right
@@ -213,7 +213,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &Self, item: &ast::Call<'ast>) -> CompileResult {
-        comment!(self, "{}()", item.ident.name);
+        if item.args.len() == 0 {
+            comment!(self, "{}()", item.ident.name);
+        }
 
         // put args on stack, ensure temporaries are cleaned up later
         for (_index, arg) in item.args.iter().enumerate() {
@@ -358,7 +360,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.compile_expression(&binary_op.right)?;
         // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
         self.write_load(iter_local.index as StackOffset, iter_ty);
-        self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
             self.write_lt(iter_ty);
         } else {
@@ -370,7 +373,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.compile_block(&item.block)?;
         // load bounds, increment and compare
         self.write_preinc(iter_local.index as StackOffset, iter_ty);
-        self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
+        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
             self.write_lt(iter_ty);
         } else {
@@ -402,7 +406,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.write_heap_tail_element_nc(element_ty);   // stack &array index element
 
         if element_ty.is_ref() {
-            self.write_clone(element_ty, 0);       // stack &array index element element
+            self.write_clone(element_ty);       // stack &array index element element
             self.write_cntinc(element_constructor);
         }
 
@@ -1290,12 +1294,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Clone stack value at (negative of) given offset to the top of the stack.
-    fn write_clone(self: &Self, ty: &Type, offset: u8) -> StackAddress {
+    fn write_clone(self: &Self, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => self.writer.clone8(offset),
-            2 => self.writer.clone16(offset),
-            4 => self.writer.clone32(offset),
-            8 => self.writer.clone64(offset),
+            1 => self.writer.clone8(),
+            2 => self.writer.clone16(),
+            4 => self.writer.clone32(),
+            8 => self.writer.clone64(),
             //16 => self.writer.clone128(offset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }

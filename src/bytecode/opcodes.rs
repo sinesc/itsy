@@ -163,15 +163,14 @@ impl_vm!{
         }
     }
 
-    /// Reads value from the n-th stack element relative to the top of the stack and pushes it.
-    /// n=0 is the topmost stack value, n=sizeof(value) the previous value.
+    /// Clones the topmost stack value.
     fn <
-        clone8<T: Data8>(n: u8),
-        clone16<T: Data16>(n: u8),
-        clone32<T: Data32>(n: u8),
-        clone64<T: Data64>(n: u8),
+        clone8<T: Data8>(),
+        clone16<T: Data16>(),
+        clone32<T: Data32>(),
+        clone64<T: Data64>(),
     >(&mut self) {
-        let data: T = self.stack.load_sp(- (size_of::<T>() as StackOffset) - n as StackOffset);
+        let data: T = self.stack.load_sp(- (size_of::<T>() as StackOffset));
         self.stack.push(data);
     }
 
@@ -188,6 +187,42 @@ impl_vm!{
         let b: T = self.stack.load(pos_b);
         self.stack.store(pos_a, b);
         self.stack.store(pos_b, a);
+    }
+
+    /// Decrements the value at the top of the stack.
+    fn <
+        deci8<T: i8>(decr: i8),
+        deci16<T: i16>(decr: i8),
+        deci32<T: i32>(decr: i8),
+        deci64<T: i64>(decr: i8)
+    >(&mut self) {
+        let a: T = self.stack.pop();
+        self.stack.push(T::wrapping_sub(a, decr as T));
+    }
+
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
+    fn <
+        predeci8<T: i8>(offset: StackOffset, decr: i8),
+        predeci16<T: i16>(offset: StackOffset, decr: i8),
+        predeci32<T: i32>(offset: StackOffset, decr: i8),
+        predeci64<T: i64>(offset: StackOffset, decr: i8)
+    >(&mut self) {
+        let mut value: T = self.stack.load_fp(offset);
+        value = T::wrapping_sub(value, decr as T);
+        self.stack.store_fp(offset, value);
+        self.stack.push(value);
+    }
+
+    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
+    fn <
+        postdeci8<T: i8>(offset: StackOffset, decr: i8),
+        postdeci16<T: i16>(offset: StackOffset, decr: i8),
+        postdeci32<T: i32>(offset: StackOffset, decr: i8),
+        postdeci64<T: i64>(offset: StackOffset, decr: i8)
+    >(&mut self) {
+        let value: T = self.stack.load_fp(offset);
+        self.stack.store_fp(offset, T::wrapping_sub(value, decr as T));
+        self.stack.push(value);
     }
 
     /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
@@ -443,42 +478,6 @@ impl_vm!{
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
         self.stack.push(a % b);
-    }
-
-    /// Decrements the value at the top of the stack.
-    fn <
-        deci8<T: i8>(decr: i8),
-        deci16<T: i16>(decr: i8),
-        deci32<T: i32>(decr: i8),
-        deci64<T: i64>(decr: i8)
-    >(&mut self) {
-        let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_sub(a, decr as T));
-    }
-
-    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
-    fn <
-        predeci8<T: i8>(offset: StackOffset, decr: i8),
-        predeci16<T: i16>(offset: StackOffset, decr: i8),
-        predeci32<T: i32>(offset: StackOffset, decr: i8),
-        predeci64<T: i64>(offset: StackOffset, decr: i8)
-    >(&mut self) {
-        let mut value: T = self.stack.load_fp(offset);
-        value = T::wrapping_sub(value, decr as T);
-        self.stack.store_fp(offset, value);
-        self.stack.push(value);
-    }
-
-    /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the previous value onto the stack.
-    fn <
-        postdeci8<T: i8>(offset: StackOffset, decr: i8),
-        postdeci16<T: i16>(offset: StackOffset, decr: i8),
-        postdeci32<T: i32>(offset: StackOffset, decr: i8),
-        postdeci64<T: i64>(offset: StackOffset, decr: i8)
-    >(&mut self) {
-        let value: T = self.stack.load_fp(offset);
-        self.stack.store_fp(offset, T::wrapping_sub(value, decr as T));
-        self.stack.push(value);
     }
 
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
