@@ -738,7 +738,6 @@ impl_vm!{
         if compound_assign != 0 {
             self.heap.ref_item(src_a.index(), HeapRefOp::Dec);
             self.heap.ref_item(src_b.index(), HeapRefOp::Dec);
-            self.heap.ref_item(dest_index, HeapRefOp::Inc);
         }
     }
 

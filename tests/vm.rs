@@ -1304,6 +1304,35 @@ fn string_concat() {
 }
 
 #[test]
+fn string_compound_concat() {
+    let result = run("
+        let mut result = \"Hello\";
+        result += \"World\";
+        ret_bool(result == \"HelloWorld\");
+        ret_bool(result != \"Something else\");
+        ret_bool(result != \"HelloWorld\");
+    ");
+    assert_all(&result, &[ true, true, false ]);
+}
+
+#[test]
+fn string_compound_heap_concat() {
+    let result = run("
+        struct Test {
+            s: String
+        }
+        fn main() {
+            let mut result = Test { s: \"Hello\" };
+            result.s += \"World\";
+            ret_bool(result.s == \"HelloWorld\");
+            ret_bool(result.s != \"Something else\");
+            ret_bool(result.s != \"HelloWorld\");
+        }
+    ");
+    assert_all(&result, &[ true, true, false ]);
+}
+
+#[test]
 fn dead_code_result() {
     let result = run("
         fn result() -> u32 {
