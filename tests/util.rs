@@ -76,12 +76,22 @@ vm_func!(TestFns, Context, {
 /// Run a bit of itsy code and return the vm's custom field (populated by the code).
 #[allow(dead_code)]
 pub fn run(code: &str) -> Context {
-    let program = if code.find("fn main()").is_some() {
-        build::<TestFns>(code).unwrap()
-    } else {
-        build::<TestFns>(&format!("fn main() {{ {} }}", code)).unwrap()
+    let tmp;
+    let input = if code.find("fn main()").is_some() { code } else { tmp = format!("fn main() {{ {} }}", code); &tmp };
+    let program = match build::<TestFns>(input) {
+        Ok(program) => program,
+        Err(err) => {
+            let loc =  err.loc(&input);
+            panic!("{} in line {}, column {}.", err, loc.0, loc.1);
+        }
     };
     let mut context = Vec::new();
-    itsy_run(&program, &mut context).unwrap();
+    match itsy_run(&program, &mut context) {
+        Ok(_) => { },
+        Err(err) => {
+            let loc =  err.loc(&input);
+            panic!("{} in line {}, column {}.", err, loc.0, loc.1);
+        }
+    }
     context
 }
