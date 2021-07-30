@@ -1,5 +1,4 @@
-use std::{convert::TryInto, mem::size_of};
-use std::collections::HashMap;
+use std::{convert::TryInto, collections::HashMap, mem::{size_of, replace}};
 use crate::{StackAddress, StackOffset};
 use crate::bytecode::{HeapRef, HeapSlice};
 use crate::shared::index_twice;
@@ -27,13 +26,15 @@ pub enum HeapRefOp {
 pub(crate) struct HeapObject {
     refs: StackAddress,
     data: Vec<u8>,
+    epoch: u8,
 }
 
 impl HeapObject {
-    fn new() -> Self {
+    fn new(data: Vec<u8>, epoch: u8) -> Self {
         Self {
             refs: 0,
-            data: Vec::new(),
+            data: data,
+            epoch: epoch
         }
     }
 }
@@ -43,6 +44,7 @@ impl HeapObject {
 pub struct Heap {
     objects: Vec<HeapObject>,
     free: Vec<StackAddress>,
+    epoch: u8,
 }
 
 impl Heap {
@@ -51,26 +53,32 @@ impl Heap {
         Self {
             objects: Vec::with_capacity(128),
             free: Vec::with_capacity(16),
+            epoch: 0,
         }
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc(self: &mut Self, data: Vec<u8>) -> StackAddress {
-        //let tmp = format!("{:?}", &data[..]);
-        let index = if let Some(index) = self.free.pop() {
-            self.objects[index as usize] = HeapObject { refs: 0, data: data };
+        if let Some(index) = self.free.pop() {
+            self.objects[index as usize] = HeapObject::new(data, self.epoch);
             index
         } else {
             let index = self.objects.len();
-            self.objects.push(HeapObject { refs: 0, data: data });
+            self.objects.push(HeapObject::new(data, self.epoch));
             index as StackAddress
-        };
-        index
+        }
     }
     /// Extends heap item with given data.
     pub fn extend_from(self: &mut Self, index: StackAddress, slice: &[u8]) -> StackAddress {
         let position = self.objects[index as usize].data.len() as StackAddress;
         self.objects[index as usize].data.extend_from_slice(slice);
         position
+    }
+    pub fn new_epoch(self: &mut Self) -> u8 {
+        self.epoch = self.epoch.wrapping_add(1);
+        self.epoch
+    }
+    pub fn item_epoch(self: &Self, index: StackAddress) -> u8 {
+        self.objects[index as usize].epoch
     }
     /// Increase/decrease reference count for given heap object, optionally freeing it at count 0.
     pub fn ref_item(self: &mut Self, index: StackAddress, op: HeapRefOp) {
@@ -103,7 +111,7 @@ impl Heap {
     pub fn remove(self: &mut Self, index: StackAddress) -> Vec<u8> {
         #[cfg(debug_assertions)]
         self.assert_exists(index);
-        let object = ::std::mem::replace(&mut self.objects[index as usize], HeapObject::new());
+        let object = replace(&mut self.objects[index as usize], HeapObject::new(Vec::new(), self.epoch));
         self.free.push(index);
         object.data
     }
@@ -111,7 +119,7 @@ impl Heap {
     pub fn purge(self: &mut Self) {
         // todo: truncate if len=0 or items are consecutive
         for v in self.free.iter() {
-            let _drop = ::std::mem::replace(&mut self.objects[*v as usize], HeapObject::new());
+            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), self.epoch));
         }
     }
     /// Number of active heap elements.
@@ -136,7 +144,11 @@ impl Heap {
     }
     /// Returns a vector of unfreed heap objects.
     pub fn data(self: &Self) -> HashMap<StackAddress, (StackAddress, &Vec<u8>)> {
-        self.objects.iter().enumerate().filter(|&(i, _)| !self.free.contains(&(i as StackAddress))).map(|(i, h)| (i as StackAddress, (h.refs, &h.data))).collect()
+        self.objects.iter()
+            .enumerate()
+            .filter(|&(i, _)| !self.free.contains(&(i as StackAddress)))
+            .map(|(i, h)| (i as StackAddress, (h.refs, &h.data)))
+            .collect()
     }
     /// Returns a byte slice for the given heap reference.
     pub fn slice(self: &Self, item: HeapRef, len: StackAddress) -> &[u8] {
