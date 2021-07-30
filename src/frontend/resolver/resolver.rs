@@ -6,6 +6,7 @@ pub mod error;
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
+use crate::ast::Resolved;
 use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
@@ -289,6 +290,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Ok(())
         }
     }
+    fn definition_resolved_or_err(self: &Self, item: &(impl Resolved+Positioned)) -> ResolveResult {
+        if self.must_resolve {
+            if item.is_resolved() {
+                Ok(())
+            } else {
+                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string())))
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Methods to resolve individual AST structures.
@@ -369,20 +381,29 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a struct definition.
     fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef<'ast>) -> ResolveResult {
-        for (_, field) in &mut item.fields {
-            self.resolve_inline_type(field)?;
-        }
-        if self.binding_type_id(item).is_none() {
+        if item.is_resolved() {
+            Ok(())
+        } else {
+            // resolve ast fields
+            for (_, field) in &mut item.fields {
+                self.resolve_inline_type(field)?;
+            }
+            // assemble type field list
             let mut fields = Vec::new();
             for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
                 let field_type_id = self.binding_type_id(field_type);
                 fields.push((field_name.to_string(), field_type_id));
             }
-            let ty = Type::Struct(Struct { fields: fields });
-            let item_type_id = self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty);
-            self.binding_set_type_id(item, item_type_id)?;
+            // insert or update type
+            if let Some(type_id) = item.type_id {
+                let ty = self.scopes.type_mut(type_id);
+                ty.as_struct_mut().unwrap().fields = fields;
+            } else {
+                let ty = Type::Struct(Struct { fields: fields });
+                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
+            }
+            self.definition_resolved_or_err(item)
         }
-        self.resolved_or_err(item, None)
     }
 
     /// Resolves a struct definition.

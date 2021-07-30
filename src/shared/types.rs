@@ -182,7 +182,7 @@ impl Type {
             _ => None
         }
     }
-    /// Returns the type as an array.
+    /// Returns the type as a mutable array.
     pub fn as_array_mut(self: &mut Self) -> Option<&mut Array> {
         match self {
             Type::Array(array) => Some(array),
@@ -198,6 +198,13 @@ impl Type {
     }
     /// Returns the type as a struct.
     pub const fn as_struct(self: &Self) -> Option<&Struct> {
+        match self {
+            Type::Struct(struct_) => Some(struct_),
+            _ => None
+        }
+    }
+    /// Returns the type as a mutable struct.
+    pub fn as_struct_mut(self: &mut Self) -> Option<&mut Struct> {
         match self {
             Type::Struct(struct_) => Some(struct_),
             _ => None

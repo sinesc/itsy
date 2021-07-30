@@ -655,10 +655,10 @@ fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
             tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
         ),
         move |tuple| StructDef {
-            position    : position,
-            ident       : tuple.0,
-            fields      : tuple.2,
-            binding_id  : None,
+            position: position,
+            ident   : tuple.0,
+            fields  : tuple.2,
+            type_id : None,
         }
     ))(i)
 }

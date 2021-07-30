@@ -2,7 +2,7 @@
 
 use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{StackAddress, ItemCount};
-use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId};
+use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 use crate::shared::infos::FunctionKind;
 
@@ -88,6 +88,10 @@ macro_rules! impl_matchall {
 pub(crate) trait Returns {
     /// Returns true if this structure unconditionally causes the parent function to return.
     fn returns(self: &Self) -> bool;
+}
+
+pub(crate) trait Resolved {
+    fn is_resolved(self: &Self) -> bool;
 }
 
 #[derive(Debug)]
@@ -253,6 +257,12 @@ pub struct TypeName<'a> {
 }
 impl_bindable!(TypeName);
 
+impl<'a> Resolved for TypeName<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        self.binding_id.is_some() // FIXME: temporary!
+    }
+}
+
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
     pub fn from_path(path: Path<'a>) -> Self {
@@ -276,8 +286,17 @@ impl<'a> Positioned for TypeName<'a> {
 }
 
 #[derive(Debug)]
-pub struct InlineType<'a> {
-    pub kind        : InlineTypeKind<'a>,
+pub struct InlineType<'a> { // TODO: directly use enum instead
+    pub kind: InlineTypeKind<'a>,
+}
+
+impl<'a> Resolved for InlineType<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        match &self.kind {
+            InlineTypeKind::Array(array) => array.is_resolved(),
+            InlineTypeKind::TypeName(type_name) => type_name.is_resolved(),
+        }
+    }
 }
 
 impl<'a> Bindable for InlineType<'a> {
@@ -320,15 +339,31 @@ pub struct Array<'a> {
 impl_positioned!(Array);
 impl_bindable!(Array);
 
+impl<'a> Resolved for Array<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        self.binding_id.is_some() // FIXME: temporary!
+    }
+}
+
 #[derive(Debug)]
 pub struct StructDef<'a> {
     pub position: Position,
     pub ident   : Ident<'a>,
     pub fields  : Vec<(&'a str, InlineType<'a>)>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id : Option<TypeId>,
 }
 impl_positioned!(StructDef);
-impl_bindable!(StructDef);
+
+impl<'a> Resolved for StructDef<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        for (_, inline_type) in &self.fields {
+            if !inline_type.is_resolved() {
+                return false;
+            }
+        }
+        return self.type_id.is_some();
+    }
+}
 
 #[derive(Debug)]
 pub struct ImplBlock<'a> {
