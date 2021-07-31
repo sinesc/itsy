@@ -253,13 +253,12 @@ pub struct Signature<'a> {
 #[derive(Debug)]
 pub struct TypeName<'a> {
     pub path    : Path<'a>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id : Option<TypeId>,
 }
-impl_bindable!(TypeName);
 
 impl<'a> Resolved for TypeName<'a> {
     fn is_resolved(self: &Self) -> bool {
-        self.binding_id.is_some() // FIXME: temporary!
+        self.type_id.is_some()
     }
 }
 
@@ -268,13 +267,13 @@ impl<'a> TypeName<'a> {
     pub fn from_path(path: Path<'a>) -> Self {
         TypeName {
             path    : path,
-            binding_id : None,
+            type_id : None,
         }
     }
     pub fn from_str(name: &'a str, position: Position) -> Self {
         TypeName {
             path    : Path { name: vec! [ name ], position: position },
-            binding_id : None,
+            type_id : None,
         }
     }
 }
@@ -286,45 +285,25 @@ impl<'a> Positioned for TypeName<'a> {
 }
 
 #[derive(Debug)]
-pub struct InlineType<'a> { // TODO: directly use enum instead
-    pub kind: InlineTypeKind<'a>,
-}
-
-impl<'a> Resolved for InlineType<'a> {
-    fn is_resolved(self: &Self) -> bool {
-        match &self.kind {
-            InlineTypeKind::Array(array) => array.is_resolved(),
-            InlineTypeKind::TypeName(type_name) => type_name.is_resolved(),
-        }
-    }
-}
-
-impl<'a> Bindable for InlineType<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        self.kind.binding_id_mut()
-    }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        self.kind.binding_id()
-    }
-}
-
-#[derive(Debug)]
-pub enum InlineTypeKind<'a> {
+pub enum InlineType<'a> {
     TypeName(TypeName<'a>),
     Array(Box<Array<'a>>),
 }
 
-impl<'a> Bindable for InlineTypeKind<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
+impl<'a> InlineType<'a> {
+    pub fn type_id(self: &Self) -> Option<TypeId> {
         match self {
-            Self::TypeName(v)   => v.binding_id_mut(),
-            Self::Array(v)     => v.binding_id_mut(),
+            Self::TypeName(typename) => typename.type_id,
+            Self::Array(array) => array.type_id,
         }
     }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        match self {
-            Self::TypeName(v)   => v.binding_id(),
-            Self::Array(v)     => v.binding_id(),
+}
+
+impl<'a> Resolved for InlineType<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        match &self {
+            InlineType::Array(array) => array.is_resolved(),
+            InlineType::TypeName(type_name) => type_name.is_resolved(),
         }
     }
 }
@@ -334,14 +313,13 @@ pub struct Array<'a> {
     pub position    : Position,
     pub element_type: InlineType<'a>,
     pub len         : StackAddress,
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
 impl_positioned!(Array);
-impl_bindable!(Array);
 
 impl<'a> Resolved for Array<'a> {
     fn is_resolved(self: &Self) -> bool {
-        self.binding_id.is_some() // FIXME: temporary!
+        self.type_id.is_some()
     }
 }
 

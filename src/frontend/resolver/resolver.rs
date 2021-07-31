@@ -342,41 +342,39 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     // Resolves an inline type definition.
     fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Result<Option<TypeId>, Error> {
-        use ast::InlineTypeKind as ITK;
-        match &mut item.kind {
-            ITK::TypeName(type_name) => self.resolve_type(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
-            ITK::Array(array) => self.resolve_array(array),
+        match item {
+            ast::InlineType::TypeName(type_name) => self.resolve_type(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
+            ast::InlineType::Array(array) => self.resolve_array(array),
         }
     }
 
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &mut Self, item: &mut ast::TypeName<'ast>, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
-        if self.binding_type_id(item).is_none() {
+        if item.type_id.is_none() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.qualified(self.path)) {
-                self.binding_set_type_id(item, new_type_id)?;
+                item.type_id = Some(new_type_id);
             }
         }
-        let item_type_id = self.binding_type_id(item);
-        if item_type_id.is_some() && expected_result.is_some() {
-            self.check_types_match(item, expected_result, item_type_id)?;
+        if item.type_id.is_some() && expected_result.is_some() {
+            self.check_types_match(item, expected_result, item.type_id)?;
         }
-        self.resolved_or_err(item, expected_result)?;
-        Ok(item_type_id)
+        self.definition_resolved_or_err(item)?;
+        Ok(item.type_id)
     }
 
     /// Resolves an array definition
     fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Result<Option<TypeId>, Error> {
         let inner_type_id = self.resolve_inline_type(&mut item.element_type)?;
-        if self.binding_type_id(item).is_none() {
+        if item.type_id.is_none() { //FIXME needs to update inner type if it is none
             let ty = Type::Array(Array {
                 len     : Some(item.len),
                 type_id : inner_type_id,
             });
             let new_type_id = self.scopes.insert_type(self.scope_id, None, ty);
-            self.binding_set_type_id(item, new_type_id)?;
+            item.type_id = Some(new_type_id);
         }
-        self.resolved_or_err(item, None)?;
-        Ok(self.binding_type_id(item))
+        self.definition_resolved_or_err(item)?;
+        Ok(item.type_id)
     }
 
     /// Resolves a struct definition.
@@ -391,8 +389,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // assemble type field list
             let mut fields = Vec::new();
             for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
-                let field_type_id = self.binding_type_id(field_type);
-                fields.push((field_name.to_string(), field_type_id));
+                fields.push((field_name.to_string(), field_type.type_id()));
             }
             // insert or update type
             if let Some(type_id) = item.type_id {
@@ -447,17 +444,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>, struct_scope: Option<(ScopeId, String)>) -> ResolveResult {
 
-        fn ret_resolved<'ast>(me: &mut Resolver, item: &ast::Signature<'ast>) -> bool {
-            item.ret.as_ref().map_or(true, |ret| me.binding_type_id(ret).is_some())
+        fn ret_resolved<'ast>(item: &ast::Signature<'ast>) -> bool {
+            item.ret.as_ref().map_or(true, |ret| ret.type_id().is_some())
         }
-        fn ret_type_id<'ast>(me: &Resolver, item: &ast::Signature<'ast>) -> Option<TypeId> {
-            item.ret.as_ref().map_or(Some(TypeId::void()), |ret| me.binding_type_id(ret))
+        fn ret_type_id<'ast>(item: &ast::Signature<'ast>) -> Option<TypeId> {
+            item.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id())
         }
-        fn args_resolved<'ast>(me: &mut Resolver, item: &ast::Signature<'ast>) -> bool {
-            !item.args.iter().any(|arg| arg.ty.as_ref().map_or(true, |type_name| me.binding_type_id(type_name).is_none()))
+        fn args_resolved<'ast>(item: &ast::Signature<'ast>) -> bool {
+            !item.args.iter().any(|arg| arg.ty.as_ref().map_or(true, |type_name| type_name.type_id().is_none()))
         }
-        fn arg_type_ids<'ast>(me: &Resolver, item: &ast::Signature<'ast>) -> Vec<Option<TypeId>> {
-            item.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| me.binding_type_id(type_name))).collect()
+        fn arg_type_ids<'ast>(item: &ast::Signature<'ast>) -> Vec<Option<TypeId>> {
+            item.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id())).collect()
         }
 
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
@@ -465,9 +462,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_signature(&mut item.sig)?;
 
         //let signature_scope_id = self.try_create_scope(&mut item.scope_id); // todo: put body into separate scope so signature can't access body
-        if item.function_id.is_none() && ret_resolved(self, &item.sig) && args_resolved(self, &item.sig) {
-            let result_type_id = ret_type_id(self, &item.sig);
-            let arg_type_ids: Vec<_> = arg_type_ids(self, &item.sig);
+        if item.function_id.is_none() && ret_resolved(&item.sig) && args_resolved(&item.sig) {
+            let result_type_id = ret_type_id(&item.sig);
+            let arg_type_ids: Vec<_> = arg_type_ids(&item.sig);
             let (target_scope_id, type_name) = if let Some(scope) = struct_scope {
                 (scope.0, Some(scope.1))
             } else {
@@ -482,7 +479,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_block(&mut item.block, ret_type)?;
         }
         self.scope_id = parent_scope_id;
-        if self.must_resolve && (!args_resolved(self, &item.sig) || !ret_resolved(self, &item.sig)) {
+        if self.must_resolve && (!args_resolved(&item.sig) || !ret_resolved(&item.sig)) {
             Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name))))
         } else {
             Ok(())
@@ -731,7 +728,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_cast(self: &mut Self, item: &mut ast::Cast<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
         self.resolve_type(&mut item.ty/*, 0*/, expected_result)?; // FIXME hardcoded ref arg
         self.resolve_expression(&mut item.expr, None)?;
-        if let Some(type_id) = self.binding_type_id(&item.ty) {
+        if let Some(type_id) = item.ty.type_id {
             self.binding_set_type_id(item, type_id)?;
             let ty = self.type_by_id(type_id);
             if !ty.is_primitive() && !ty.is_string() {

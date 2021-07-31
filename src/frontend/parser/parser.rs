@@ -618,13 +618,10 @@ fn binding(i: Input<'_>) -> Output<Binding<'_>> {
 // inline type
 
 fn inline_type(i: Input<'_>) -> Output<InlineType<'_>> {
-    ws(map(
-        alt((
-            map(path, |t| InlineTypeKind::TypeName(TypeName::from_path(t))),
-            map(array, |a| InlineTypeKind::Array(Box::new(a)))
-        )),
-        |pair| InlineType { kind: pair }
-    ))(i)
+    ws(alt((
+        map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
+        map(array, |a| InlineType::Array(Box::new(a)))
+    )))(i)
 }
 
 // struct definition
@@ -692,7 +689,7 @@ fn array(i: Input<'_>) -> Output<Array<'_>> {
             position    : position,
             element_type: tuple.0,
             len         : tuple.2,
-            binding_id  : None,
+            type_id     : None,
         }
     ))(i)
 }

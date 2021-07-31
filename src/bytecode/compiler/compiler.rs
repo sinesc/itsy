@@ -8,7 +8,7 @@ mod util;
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Bindable, Positioned, Returns}, resolver::ResolvedProgram};
+use crate::frontend::{ast::{self, Bindable, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -19,7 +19,7 @@ use util::CallInfo;
 pub struct Compiler<'ty, T> where T: VMFunc<T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
-    /// Type and mutability data for each binding.
+    /// Type and mutability data.
     bindings: Bindings,
     /// Maps from binding id to load-argument for each frame.
     locals: LocalsStack,
@@ -455,7 +455,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         comment!(self, "\nfn {}", item.sig.ident.name);
         // create local environment
         let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.binding_type(ret).primitive_size());
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.bindings.type_by_id(ret.type_id().unwrap()).primitive_size());
         for arg in item.sig.args.iter() {
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, true));
             frame.arg_pos += self.binding_type(arg).primitive_size() as StackAddress;
@@ -483,7 +483,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // handle exit
         comment!(self, "fn exiting");
         let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
-            let ty = self.binding_type(ret);
+            let ty = self.bindings.type_by_id(ret.type_id().unwrap());
             if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
         });
         if let Some(constructor) = constructor {
@@ -746,7 +746,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.compile_expression(&item.expr)?;
 
         let from = self.binding_type(&item.expr);
-        let to = self.binding_type(&item.ty);
+        let to = self.bindings.type_by_id(item.ty.type_id.unwrap());
 
         if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
             self.write_zclamp(from);

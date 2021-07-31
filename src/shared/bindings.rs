@@ -1,6 +1,6 @@
 use crate::shared::{TypeContainer, types::Type, infos::BindingInfo, typed_ids::{TypeId, BindingId}};
 
-/// Program binding data.
+/// Program binding data. // FIXME: naming is bad. this is type information
 pub struct Bindings {
     /// Maps binding ids to binding info descriptors.
     binding_map : Vec<BindingInfo>,  // HashMap<BindingId, BindingInfo>
