@@ -1,14 +1,15 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 //use std::fmt::{Debug, Formatter, Result};
 use crate::shared::typed_ids::ScopeId;
 
 /// A datastructure that stores items by name and index.
-pub(super) struct Repository<I, V> {
-    map     : HashMap<(String, ScopeId), I>,
+pub(super) struct Repository<K, I, V> {
+    map     : HashMap<(K, ScopeId), I>,
     data    : Vec<(V, ScopeId)>,
 }
 
-impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
+impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: Hash + Eq {
     /// Creates a new repository.
     pub fn new() -> Self {
         Repository {
@@ -17,7 +18,7 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
         }
     }
     /// Inserts an item into the repository and returns its index.
-    pub fn insert(self: &mut Self, scope_id: ScopeId, name: Option<String>, element: V) -> I {
+    pub fn insert(self: &mut Self, scope_id: ScopeId, name: Option<K>, element: V) -> I {
         let index = I::from(self.data.len());
         self.data.push((element, scope_id));
         if let Some(name) = name {
@@ -26,7 +27,7 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
         index
     }
     /// Aliases an item with a new new.
-    pub fn alias(self: &mut Self, alias_scope_id: ScopeId, alias_name: String, source_index: I) -> I {
+    pub fn alias(self: &mut Self, alias_scope_id: ScopeId, alias_name: K, source_index: I) -> I {
         self.map.insert((alias_name, alias_scope_id), source_index);
         source_index
     }
@@ -39,12 +40,12 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
         &mut self.data[index.into()].0
     }
     /// Returns the id of the named item.
-    pub fn id_by_name(self: &Self, scope_id: ScopeId, name: &str) -> Option<I> {
-        self.map.get(&(name.to_string(), scope_id)).map(|i| *i)
+    pub fn id_by_name(self: &Self, scope_id: ScopeId, name: K) -> Option<I> {
+        self.map.get(&(name, scope_id)).map(|i| *i)
     }
     /// Returns the name of the given id.
-    pub fn name_by_id(self: &Self, index: I, exclude: String) -> Option<&str> where I: PartialEq  { // TODO: option exclude?
-        self.map.iter().find(|&item| *item.1 == index && item.0.0 != exclude).map(|item| &*(item.0).0)
+    pub fn name_by_id(self: &Self, index: I, exclude: K) -> Option<&K> where I: PartialEq  { // TODO: option exclude?
+        self.map.iter().find(|&item| *item.1 == index && item.0.0 != exclude).map(|item| &(item.0).0)
     }
     /// Returns an iterator over the items.
     pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {
@@ -87,7 +88,7 @@ impl<I, V> Repository<I, V> where I: Copy + Into<usize> + From<usize> {
     */
 }
 
-impl<I, V> Into<Vec<V>> for Repository<I, V> {
+impl<K, I, V> Into<Vec<V>> for Repository<K, I, V> {
     fn into(self: Self) -> Vec<V> {
         self.data.into_iter().map(|item| item.0).collect()
     }

@@ -138,7 +138,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
         }
     }
 
-    let entry_fn = scopes.lookup_function_id(root_scope_id, entry).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry)))?;
+    let entry_fn = scopes.lookup_function_id(root_scope_id, (entry, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry)))?;
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
@@ -301,6 +301,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Ok(())
         }
     }
+
+    fn make_path(self: &Self, append: &[ &str ]) -> String {
+        let mut result = self.path.clone();
+        for part in append {
+            result.push(part.to_string());
+        }
+        result.join("::")
+    }
 }
 
 /// Methods to resolve individual AST structures.
@@ -351,7 +359,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a type (name) to a type_id.
     fn resolve_type(self: &mut Self, item: &mut ast::TypeName<'ast>, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
         if item.type_id.is_none() {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &item.path.qualified(self.path)) {
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&item.path.name)) {
                 item.type_id = Some(new_type_id);
             }
         }
@@ -405,22 +413,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a struct definition.
     fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock<'ast>) -> ResolveResult {
-        if self.binding_type_id(item).is_none() {
-            if let Some(type_id) = self.scopes.lookup_type_id(self.scope_id, &item.ident.qualified(self.path, None)) {
-                self.binding_set_type_id(item, type_id)?;
-            }
+        if item.ty.type_id().is_none() {
+            self.resolve_inline_type(&mut item.ty)?;
         }
-        if let Some(binding_id) = item.binding_id() {
+        if let Some(type_id) = item.ty.type_id() {
             let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
-            if let Some(type_id) = self.scopes.binding_type_id(binding_id) {
-                if self.scopes.type_id(self.scope_id, "Self").is_none() {
-                    self.scopes.alias_type(self.scope_id, "Self", type_id);
-                }
-                let type_name = self.binding_type_name(item).unwrap_or_ice(ICE)?.to_string();
-                for function in &mut item.functions {
-                    self.resolve_function(function, Some((parent_scope_id, type_name.clone())))?;
-                }
+            if self.scopes.type_id(self.scope_id, "Self").is_none() {
+                self.scopes.alias_type(self.scope_id, "Self", type_id);
+            }
+            for function in &mut item.functions {
+                self.resolve_function(function, Some((parent_scope_id, type_id)))?;
             }
 
             self.scope_id = parent_scope_id;
@@ -442,7 +445,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>, struct_scope: Option<(ScopeId, String)>) -> ResolveResult {
+    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>, struct_scope: Option<(ScopeId, TypeId)>) -> ResolveResult {
 
         fn ret_resolved<'ast>(item: &ast::Signature<'ast>) -> bool {
             item.ret.as_ref().map_or(true, |ret| ret.type_id().is_some())
@@ -465,12 +468,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.function_id.is_none() && ret_resolved(&item.sig) && args_resolved(&item.sig) {
             let result_type_id = ret_type_id(&item.sig);
             let arg_type_ids: Vec<_> = arg_type_ids(&item.sig);
-            let (target_scope_id, type_name) = if let Some(scope) = struct_scope {
-                (scope.0, Some(scope.1))
+            // function/method switch
+            let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
+                let type_name = self.scopes.lookup_type_name(scope.1).unwrap();
+                let path = self.make_path(&[ type_name, item.sig.ident.name ]);
+                if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
+                    (scope.0, FunctionKind::Function, path)
+                } else {
+                    (scope.0, FunctionKind::Method(scope.1), path)
+                }
             } else {
-                (parent_scope_id, None)
+                let path = self.make_path(&[ item.sig.ident.name ]);
+                (parent_scope_id, FunctionKind::Function, path)
             };
-            let function_id = self.scopes.insert_function(target_scope_id, item.sig.ident.qualified(self.path, type_name), result_type_id, arg_type_ids, Some(FunctionKind::User));
+            let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
@@ -510,25 +521,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // locate function definition
         if item.function_id.is_none() {
-            let path = match &item.call_type { // TODO: wow this got ugly
+            let (path, type_id) = match &item.call_type {
                 CallType::Method => {
-                    if item.args.len() >= 1 {
-                        if self.binding_type_id(&item.args[0]) == None {
-                            self.resolve_expression(&mut item.args[0], None)?;
-                        }
-                        self.binding_type_name(&item.args[0]).unwrap().to_string()
-                    } else {
-                        return Err(Error::new(item, ErrorKind::Internal(ICE.to_string())));
-                    }
+                    let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
+                    self.resolve_expression(arg, None)?;
+                    let type_id = self.binding_type_id(arg).unwrap_or_ice("Unresolved self binding in method call")?;
+                    let type_name = self.binding_type_name(arg).unwrap_or_ice("Unnamed type")?;
+                    (self.make_path(&[ type_name, item.ident.name ]), type_id)
                 },
-                CallType::Static(path) => path.qualified(self.path),
-                CallType::Function => self.path.join("::"),
+                CallType::Function => {
+                    (self.make_path(&[ item.ident.name ]), TypeId::void())
+                },
+                CallType::Static(path) => {
+                    (self.make_path(&[ &path.name.join("::"), item.ident.name ]), TypeId::void())
+                },
             };
-            let fn_name = if path != "" { vec![&path[..], item.ident.name].join("::") } else { item.ident.name.to_string() }; // TODO: hot garbage
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, &fn_name);
+            item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
             if item.function_id.is_none() {
                 if self.must_resolve {
-                    return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", fn_name))));
+                    return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", &path))));
                 } else {
                     self.unresolved_calls += 1
                 }
@@ -566,11 +577,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 } else if actual_type.is_some() {
                     self.check_types_match(&item.args[index], expected_type, actual_type)?;
                 }
-            }
-
-            // rustcall?
-            if let Some(rust_fn_index) = function_info.rust_fn_index() {
-                item.call_kind = FunctionKind::Rust(rust_fn_index);
             }
         }
 

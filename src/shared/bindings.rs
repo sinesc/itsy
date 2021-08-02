@@ -1,21 +1,27 @@
-use crate::shared::{TypeContainer, types::Type, infos::BindingInfo, typed_ids::{TypeId, BindingId}};
+use crate::shared::{TypeContainer, types::Type, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, TypeId, BindingId}};
 
 /// Program binding data. // FIXME: naming is bad. this is type information
 pub struct Bindings {
     /// Maps binding ids to binding info descriptors.
-    binding_map : Vec<BindingInfo>,  // HashMap<BindingId, BindingInfo>
+    binding_map : Vec<BindingInfo>,
     /// Maps type ids to types.
-    type_map    : Vec<Type>,    // HashMap<TypeId, Type>
+    type_map    : Vec<Type>,
+    /// Maps function ids to functions.
+    function_map: Vec<FunctionInfo>,
 }
 
 impl Bindings {
-    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>) -> Self {
+    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<FunctionInfo>) -> Self {
         for info in binding_map.iter() {
             info.type_id.expect("Unresolved binding type encountered.");
         }
+        for info in function_map.iter() {
+            if !info.is_resolved() { panic!("Unresolved binding type encountered."); }
+        }
         Self {
             binding_map,
-            type_map
+            type_map,
+            function_map,
         }
     }
     /// Returns the TypeId of the given binding.
@@ -36,8 +42,8 @@ impl Bindings {
     pub fn types(self: &Self) -> &[Type] {
         &self.type_map
     }
-    pub fn len(self: &Self) -> usize {
-        self.binding_map.len()
+    pub fn function(self: &Self, function_id: FunctionId) -> &FunctionInfo {
+        &self.function_map[Into::<usize>::into(function_id)]
     }
 }
 

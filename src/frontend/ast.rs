@@ -4,7 +4,6 @@ use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{StackAddress, ItemCount};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
-use crate::shared::infos::FunctionKind;
 
 /// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {
@@ -100,28 +99,9 @@ pub struct Ident<'a> {
     pub name: &'a str,
 }
 
-impl<'a> Ident<'a> {
-    /// Computes fully qualified path
-    pub fn qualified(self: &Self, base: &[ String ], type_name: Option<String>) -> String {
-        if self.name == "Self" {
-            self.name.to_string()
-        } else {
-            let mut result: Vec<String> = Vec::new();
-            for v in base {
-                result.push(v.clone());
-            }
-            if let Some(type_name) = type_name {
-                result.push(type_name);
-            }
-            result.push(self.name.to_string());
-            result.join("::")
-        }
-    }
-}
-
 impl<'a> Display for Ident<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.qualified(&[ ], None))
+        write!(f, "{}", self.name)
     }
 }
 
@@ -137,26 +117,11 @@ impl<'a> Path<'a> {
     pub fn pop(self: &mut Self) -> &'a str {
         self.name.pop().unwrap()
     }
-    /// Computes fully qualified path
-    pub fn qualified(self: &Self, base: &[ String ]) -> String {
-        if self.name.len() == 1 && self.name[0] == "Self" {
-            self.name[0].to_string()
-        } else {
-            let mut result: Vec<String> = Vec::new();
-            for v in base {
-                result.push(v.clone());
-            }
-            for &v in &self.name {
-                result.push(v.to_string());
-            }
-            result.join("::")
-        }
-    }
 }
 
 impl<'a> Display for Path<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.qualified(&[ ]))
+        write!(f, "{}", self.name.join("::"))
     }
 }
 
@@ -238,10 +203,8 @@ pub struct Function<'a> {
     pub block       : Block<'a>,
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
-    pub binding_id  : Option<BindingId>,
 }
 impl_positioned!(Function);
-impl_bindable!(Function);
 
 #[derive(Debug)]
 pub struct Signature<'a> {
@@ -346,13 +309,11 @@ impl<'a> Resolved for StructDef<'a> {
 #[derive(Debug)]
 pub struct ImplBlock<'a> {
     pub position    : Position,
-    pub ident       : Ident<'a>,
     pub functions   : Vec<Function<'a>>,
-    pub binding_id  : Option<BindingId>,
     pub scope_id    : Option<ScopeId>,
+    pub ty          : InlineType<'a>,
 }
 impl_positioned!(ImplBlock);
-impl_bindable!(ImplBlock);
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -684,7 +645,6 @@ pub struct Call<'a> {
     pub ident           : Ident<'a>,
     pub args            : Vec<Expression<'a>>,
     pub call_type       : CallType<'a>,
-    pub call_kind       : FunctionKind,
     pub function_id     : Option<FunctionId>,
     pub binding_id      : Option<BindingId>,
 }

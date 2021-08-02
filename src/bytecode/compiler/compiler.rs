@@ -224,33 +224,31 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             self.maybe_ref_temporary(HeapRefOp::Inc, arg);
         }
 
-        if let FunctionKind::Rust(rust_fn_index) = item.call_kind {
+        let function_info = self.bindings.function(item.function_id.unwrap());
 
-            // rust function
-            self.writer.rustcall(T::from_u16(rust_fn_index));
+        match function_info.kind.unwrap() {
+            FunctionKind::Rust(rust_fn_index) => {
+                self.writer.rustcall(T::from_u16(rust_fn_index));
+            },
+            FunctionKind::Intrinsic(_intrinsic) => {
+                /* if let CallType::Method(exp) = &item.call_type {
+                    let ty = self.binding_type(&**exp);
+                    self.write_intrinsic_len(ty);
+                } */
+            },
+            FunctionKind::Method(_) | FunctionKind::Function => {
+                let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
+                let call_position = self.writer.position();
 
-        } else if let FunctionKind::Intrinsic(_intrinsic) = &item.call_kind { //FIXME: fix intrinsics
+                let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
+                    target
+                } else {
+                    self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                    CallInfo::PLACEHOLDER
+                };
 
-            // intrinsics // TODO: actually check which one once there are some
-            /* if let CallType::Method(exp) = &item.call_type {
-                let ty = self.binding_type(&**exp);
-                self.write_intrinsic_len(ty);
-            } */
-
-        } else {
-
-            // normal function: identify call target or write dummy
-            let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
-            let call_position = self.writer.position();
-
-            let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
-                target
-            } else {
-                self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
-                CallInfo::PLACEHOLDER
-            };
-
-            self.writer.call(target.addr, target.arg_size);
+                self.writer.call(target.addr, target.arg_size);
+            },
         }
 
         for arg in item.args.iter().rev() {

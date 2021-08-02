@@ -8,9 +8,9 @@ pub struct BindingInfo {
 
 #[derive(Clone)]
 pub struct FunctionInfo {
-    pub ret_type: Option<TypeId>,
-    pub arg_type: Vec<Option<TypeId>>,
     pub kind    : Option<FunctionKind>,
+    pub arg_type: Vec<Option<TypeId>>,
+    pub ret_type: Option<TypeId>,
 }
 
 impl FunctionInfo {
@@ -27,7 +27,8 @@ impl FunctionInfo {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FunctionKind {
-    User,
+    Function,
+    Method(TypeId),
     Rust(u16),
     Intrinsic(Intrinsic),
 }

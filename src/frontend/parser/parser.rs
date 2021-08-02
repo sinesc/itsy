@@ -14,7 +14,7 @@ use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
-use crate::shared::{numeric::Numeric, infos::FunctionKind};
+use crate::shared::numeric::Numeric;
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedProgram};
 use error::{ParseError, ParseErrorKind};
@@ -339,7 +339,6 @@ fn call(i: Input<'_>) -> Output<Call<'_>> {
             ident           : m.0,
             args            : m.2,
             call_type       : CallType::Function,
-            call_kind       : FunctionKind::User,
             function_id     : None,
             binding_id      : None,
         }
@@ -358,7 +357,6 @@ fn call_static(i: Input<'_>) -> Output<Call<'_>> {
                 ident           : ident,
                 args            : m.1,
                 call_type       : CallType::Static(m.0),
-                call_kind       : FunctionKind::User,
                 function_id     : None,
                 binding_id      : None,
             }
@@ -667,14 +665,13 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock<'_>> {
     ws(map(
         preceded(
             check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
+            tuple((inline_type, ws(char('{')), many0(function), ws(char('}'))))
         ),
         move |tuple| ImplBlock {
             position    : position,
-            ident       : tuple.0,
             functions   : tuple.2,
-            binding_id  : None,
             scope_id    : None,
+            ty          : tuple.0,
         }
     ))(i)
 }
@@ -745,7 +742,6 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
             block       : func.1,
             function_id : None,
             scope_id    : None,
-            binding_id  : None,
         }
     ))(i.clone())
 }
