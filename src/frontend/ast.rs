@@ -36,6 +36,56 @@ macro_rules! impl_bindable {
     };
 }
 
+/// TypeId handling for typeable AST structures.
+pub(crate) trait Typeable {
+    /// Returns a mutable reference to the type_id.
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId>;
+    /// Returns the type_id.
+    fn type_id(self: &Self) -> Option<TypeId>;
+}
+
+/// Implements the Typeable trait for given structure.
+macro_rules! impl_typeable {
+    ($struct_name:ident) => {
+        impl<'a> Typeable for $struct_name<'a> {
+            fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+                &mut self.type_id
+            }
+            fn type_id(self: &Self) -> Option<TypeId> {
+                self.type_id
+            }
+        }
+    };
+}
+
+/// Resolvable AST structures.
+pub(crate) trait Resolvable {
+    /// Number of resolved and total items
+    fn num_resolved(self: &Self) -> (usize, usize);
+    /// Whether the structure is fully resolved
+    fn is_resolved(self: &Self) -> bool {
+        let num_resolved = self.num_resolved();
+        num_resolved.0 == num_resolved.1
+    }
+}
+
+/// Marker trait for Typeable AST structures that should automatically implement Resolvable
+pub(crate) trait AutoImplementResolvable { }
+
+/// Implement Resolvable for all Typeable AST structures that have the AutoImplementResolvable marker.
+impl<T> Resolvable for T where T: Typeable+AutoImplementResolvable {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        (if self.type_id().is_some() { 1 } else { 0 }, 1)
+    }
+}
+
+macro_rules! impl_resolvable {
+    ($struct_name:ident) => {
+        impl<'a> AutoImplementResolvable for $struct_name<'a> { }
+    };
+}
+
+/// A position in the source code.
 pub(crate) type Position = u32;
 
 /// Source code position handling for AST structures associated with a position.
@@ -87,10 +137,6 @@ macro_rules! impl_matchall {
 pub(crate) trait Returns {
     /// Returns true if this structure unconditionally causes the parent function to return.
     fn returns(self: &Self) -> bool;
-}
-
-pub(crate) trait Resolved {
-    fn is_resolved(self: &Self) -> bool;
 }
 
 #[derive(Debug)]
@@ -178,6 +224,12 @@ impl<'a> Positioned for Statement<'a> {
     }
 }
 
+impl<'a> Resolvable for Statement<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        impl_matchall!(self, Statement, item, { item.num_resolved() })
+    }
+}
+
 impl<'a> Debug for Statement<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Statement, item, { write!(f, "{:#?}", item) })
@@ -193,8 +245,18 @@ pub struct Binding<'a> {
     pub ty          : Option<InlineType<'a>>,
     pub binding_id  : Option<BindingId>,
 }
+
 impl_bindable!(Binding);
 impl_positioned!(Binding);
+
+impl<'a> Resolvable for Binding<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (expr_resolved, expr_total) = self.expr.as_ref().map_or((0, 0), |expr| expr.num_resolved());
+        let (ty_resolved, ty_total) = self.ty.as_ref().map_or((0, 0), |ty| ty.num_resolved());
+        let (binding_resolved, binding_total) = self.binding_id.map_or((0, 1), |_| (1, 1));
+        (expr_resolved + ty_resolved + binding_resolved, expr_total + ty_total + binding_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct Function<'a> {
@@ -204,7 +266,21 @@ pub struct Function<'a> {
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
 }
+
 impl_positioned!(Function);
+
+impl<'a> Resolvable for Function<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (args_resolved, args_total) = self.sig.args.iter().fold((0, 0), |acc, arg| {
+            let (arg_resolved, arg_total) = arg.num_resolved();
+            (acc.0 + arg_resolved, acc.1 + arg_total)
+        });
+        let (ret_resolved, ret_total) = self.sig.ret.as_ref().map_or((0, 0), |ret| ret.num_resolved());
+        let (block_resolved, block_total) = self.block.num_resolved();
+        let (function_resolved, function_total) = self.function_id.map_or((0usize, 1usize), |_| (1, 1));
+        (args_resolved + ret_resolved + block_resolved + function_resolved, args_total + ret_total + block_total + function_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct Signature<'a> {
@@ -219,11 +295,8 @@ pub struct TypeName<'a> {
     pub type_id : Option<TypeId>,
 }
 
-impl<'a> Resolved for TypeName<'a> {
-    fn is_resolved(self: &Self) -> bool {
-        self.type_id.is_some()
-    }
-}
+impl_typeable!(TypeName);
+impl_resolvable!(TypeName);
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
@@ -262,11 +335,26 @@ impl<'a> InlineType<'a> {
     }
 }
 
-impl<'a> Resolved for InlineType<'a> {
-    fn is_resolved(self: &Self) -> bool {
+impl<'a> Typeable for InlineType<'a> {
+    fn type_id(self: &Self) -> Option<TypeId> {
         match &self {
-            InlineType::Array(array) => array.is_resolved(),
-            InlineType::TypeName(type_name) => type_name.is_resolved(),
+            InlineType::Array(array) => array.type_id(),
+            InlineType::TypeName(type_name) => type_name.type_id(),
+        }
+    }
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+        match self {
+            InlineType::Array(array) => array.type_id_mut(),
+            InlineType::TypeName(type_name) => type_name.type_id_mut(),
+        }
+    }
+}
+
+impl<'a> Resolvable for InlineType<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        match self {
+            Self::TypeName(typename) => typename.num_resolved(),
+            Self::Array(array) => array.num_resolved(),
         }
     }
 }
@@ -278,11 +366,15 @@ pub struct Array<'a> {
     pub len         : StackAddress,
     pub type_id     : Option<TypeId>,
 }
-impl_positioned!(Array);
 
-impl<'a> Resolved for Array<'a> {
-    fn is_resolved(self: &Self) -> bool {
-        self.type_id.is_some()
+impl_positioned!(Array);
+impl_typeable!(Array);
+
+impl<'a> Resolvable for Array<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (element_resolved, element_total) = self.element_type.num_resolved();
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (element_resolved + type_resolved, element_total + type_total)
     }
 }
 
@@ -295,14 +387,23 @@ pub struct StructDef<'a> {
 }
 impl_positioned!(StructDef);
 
-impl<'a> Resolved for StructDef<'a> {
-    fn is_resolved(self: &Self) -> bool {
-        for (_, inline_type) in &self.fields {
-            if !inline_type.is_resolved() {
-                return false;
-            }
-        }
-        return self.type_id.is_some();
+impl<'a> Typeable for StructDef<'a> {
+    fn type_id(self: &Self) -> Option<TypeId> {
+        self.type_id
+    }
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+        &mut self.type_id
+    }
+}
+
+impl<'a> Resolvable for StructDef<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (fields_resolved, fields_total) = self.fields.iter().fold((0, 0), |acc, (_, field)| {
+            let (field_resolved, field_total) = field.num_resolved();
+            (acc.0 + field_resolved, acc.1 + field_total)
+        });
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (fields_resolved + type_resolved, fields_total + type_total)
     }
 }
 
@@ -313,7 +414,19 @@ pub struct ImplBlock<'a> {
     pub scope_id    : Option<ScopeId>,
     pub ty          : InlineType<'a>,
 }
+
 impl_positioned!(ImplBlock);
+
+impl<'a> Resolvable for ImplBlock<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (functions_resolved, functions_total) = self.functions.iter().fold((0, 0), |acc, function| {
+            let (function_resolved, function_total) = function.num_resolved();
+            (acc.0 + function_resolved, acc.1 + function_total)
+        });
+        let (type_resolved, type_total) = self.ty.num_resolved();
+        (functions_resolved + type_resolved, functions_total + type_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct ForLoop<'a> {
@@ -323,7 +436,17 @@ pub struct ForLoop<'a> {
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
 }
+
 impl_positioned!(ForLoop);
+
+impl<'a> Resolvable for ForLoop<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (iter_resolved, iter_total) = self.iter.num_resolved();
+        let (expr_resolved, expr_total) = self.expr.num_resolved();
+        let (block_resolved, block_total) = self.block.num_resolved();
+        (iter_resolved + expr_resolved + block_resolved, iter_total + expr_total + block_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct WhileLoop<'a> {
@@ -332,15 +455,31 @@ pub struct WhileLoop<'a> {
     pub block   : Block<'a>,
     pub scope_id: Option<ScopeId>,
 }
+
 impl_positioned!(WhileLoop);
 impl_display!(WhileLoop, "while {} {{ ... }}", expr);
+
+impl<'a> Resolvable for WhileLoop<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (expr_resolved, expr_total) = self.expr.num_resolved();
+        let (block_resolved, block_total) = self.block.num_resolved();
+        (expr_resolved + block_resolved, expr_total + block_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct Return<'a> {
     pub position        : Position,
     pub expr            : Option<Expression<'a>>,
 }
+
 impl_positioned!(Return);
+
+impl<'a> Resolvable for Return<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        self.expr.as_ref().map_or((0, 0), |e| e.num_resolved())
+    }
+}
 
 #[derive(Debug)]
 pub struct IfBlock<'a> {
@@ -350,8 +489,18 @@ pub struct IfBlock<'a> {
     pub else_block  : Option<Block<'a>>,
     pub scope_id    : Option<ScopeId>,
 }
+
 impl_positioned!(IfBlock);
 impl_display!(IfBlock, "if {} {{ ... }}", cond);
+
+impl<'a> Resolvable for IfBlock<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (cond_resolved, cond_total) = self.cond.num_resolved();
+        let (if_block_resolved, if_block_total) = self.if_block.num_resolved();
+        let (else_block_resolved, else_block_total) = self.else_block.as_ref().map_or((0, 0), |e| e.num_resolved());
+        (cond_resolved + if_block_resolved + else_block_resolved, cond_total + if_block_total + else_block_total)
+    }
+}
 
 impl<'a> Returns for IfBlock<'a> {
     fn returns(self: &Self) -> bool {
@@ -365,16 +514,16 @@ impl<'a> Returns for IfBlock<'a> {
     }
 }
 
-impl<'a> Bindable for IfBlock<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        if let Some(result) = &mut self.if_block.result {
-            result.binding_id_mut()
-        } else {
-            panic!("attempted to set return type of if statement")
-        }
+impl<'a> Typeable for IfBlock<'a> {
+    fn type_id(self: &Self) -> Option<TypeId> {
+        self.if_block.result.as_ref().map_or(None, |e| e.type_id())
     }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        self.if_block.result.as_ref().map_or(None, |e| e.binding_id())
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+        if let Some(result) = &mut self.if_block.result {
+            result.type_id_mut()
+        } else {
+            panic!("attempted to set return type of if statement (not an expression)")
+        }
     }
 }
 
@@ -386,8 +535,34 @@ pub struct Block<'a> {
     pub returns     : Option<Expression<'a>>,
     pub scope_id    : Option<ScopeId>,
 }
+
 impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
+
+impl<'a> Resolvable for Block<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (statements_resolved, statements_total) = self.statements.iter().fold((0, 0), |acc, statement| {
+            let (statment_resolved, statement_total) = statement.num_resolved();
+            (acc.0 + statment_resolved, acc.1 + statement_total)
+        });
+        let (result_resolved, result_total) = self.result.as_ref().map_or((0, 0), |result| result.num_resolved());
+        let (returns_resolved, returns_total) = self.result.as_ref().map_or((0, 0), |returns| returns.num_resolved());
+        (statements_resolved + result_resolved + returns_resolved, statements_total + result_total + returns_total)
+    }
+}
+
+impl<'a> Typeable for Block<'a> {
+    fn type_id(self: &Self) -> Option<TypeId> {
+        self.result.as_ref().map_or(None, |e| e.type_id())
+    }
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+        if let Some(result) = &mut self.result {
+            result.type_id_mut()
+        } else {
+            panic!("attempted to set return type of block statement (not an expression)")
+        }
+    }
+}
 
 impl<'a> Returns for Block<'a> {
     fn returns(self: &Self) -> bool {
@@ -395,24 +570,11 @@ impl<'a> Returns for Block<'a> {
     }
 }
 
-impl<'a> Bindable for Block<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        if let Some(result) = &mut self.result {
-            result.binding_id_mut()
-        } else {
-            panic!("attempted to set return binding of block statement (not an expression)")
-        }
-    }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        self.result.as_ref().map_or(None, |e| e.binding_id())
-    }
-}
-
 pub enum Expression<'a> {
     Literal(Literal<'a>),
     Variable(Variable<'a>),
     Call(Call<'a>),
-    Member(Member<'a>),
+    Member(Member<'a>), //FIXME this shouldn't be here. either implement an Operand enum for BinaryOp that contains it or change to MemberAccess and store left+right (more in line with Cast)
     Assignment(Box<Assignment<'a>>),
     BinaryOp(Box<BinaryOp<'a>>),
     UnaryOp(Box<UnaryOp<'a>>),
@@ -446,6 +608,12 @@ impl<'a> Expression<'a> {
             _ => false,
         }
     }
+    pub fn as_variable(self: &Self) -> Option<&Variable<'a>> {
+        match self {
+            Self::Variable(variable) => Some(variable),
+            _ => None,
+        }
+    }
     pub fn as_literal(self: &Self) -> Option<&Literal<'a>> {
         match self {
             Expression::Literal(literal) => Some(literal),
@@ -472,6 +640,24 @@ impl<'a> Expression<'a> {
     }
 }
 
+impl<'a> Typeable for Expression<'a> {
+    fn type_id_mut(self: &mut Self) -> &mut Option<TypeId> {
+        impl_matchall!(self, Expression, item, { item.type_id_mut() })
+    }
+    fn type_id(self: &Self) -> Option<TypeId> {
+        impl_matchall!(self, Expression, item, { item.type_id() })
+    }
+}
+
+impl<'a> Resolvable for Expression<'a> {
+    fn is_resolved(self: &Self) -> bool {
+        impl_matchall!(self, Expression, item, { item.is_resolved() })
+    }
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        impl_matchall!(self, Expression, item, { item.num_resolved() })
+    }
+}
+
 impl<'a> Returns for Expression<'a> {
     fn returns(self: &Self) -> bool {
         match self {
@@ -483,15 +669,6 @@ impl<'a> Returns for Expression<'a> {
             Expression::IfBlock(v)      => v.returns(),
             _                           => false,
         }
-    }
-}
-
-impl<'a> Bindable for Expression<'a> {
-    fn binding_id_mut(self: &mut Self) -> &mut Option<BindingId> {
-        impl_matchall!(self, Expression, item, { item.binding_id_mut() })
-    }
-    fn binding_id(self: &Self) -> Option<BindingId> {
-        impl_matchall!(self, Expression, item, { item.binding_id() })
     }
 }
 
@@ -518,10 +695,19 @@ pub struct Literal<'a> {
     pub position    : Position,
     pub value       : LiteralValue<'a>,
     pub type_name   : Option<TypeName<'a>>, // used in e.g. 1i8, 3.1415f32
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
-impl_bindable!(Literal);
+
+impl_typeable!(Literal);
 impl_positioned!(Literal);
+
+impl<'a> Resolvable for Literal<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (resolved, total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        let (value_resolved, value_total) = self.value.num_resolved();
+        (resolved + value_resolved, total + value_total)
+    }
+}
 
 impl<'a> Display for Literal<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -589,6 +775,16 @@ impl<'a> LiteralValue<'a> {
     }
 }
 
+impl<'a> Resolvable for LiteralValue<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        match self {
+            Self::Array(array) => array.num_resolved(),
+            Self::Struct(struct_) => struct_.num_resolved(),
+            _ => (1, 1),
+        }
+    }
+}
+
 impl<'a> Debug for LiteralValue<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -606,9 +802,27 @@ pub struct ArrayLiteral<'a> {
     pub elements: Vec<Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
+impl<'a> Resolvable for ArrayLiteral<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        self.elements.iter().fold((0, 0), |acc, element| {
+            let (element_resolved, element_total) = element.num_resolved();
+            (acc.0 + element_resolved, acc.1 + element_total)
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct StructLiteral<'a> {
     pub fields: HashMap<&'a str, Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
+}
+
+impl<'a> Resolvable for StructLiteral<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        self.fields.iter().fold((0, 0), |acc, (_, field)| {
+            let (field_resolved, field_total) = field.num_resolved();
+            (acc.0 + field_resolved, acc.1 + field_total)
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -616,19 +830,32 @@ pub struct Variable<'a> {
     pub position    : Position,
     pub ident       : Ident<'a>,
     pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
+
+impl_typeable!(Variable);
 impl_bindable!(Variable);
 impl_positioned!(Variable);
 impl_display!(Variable, "{}", ident);
+
+impl<'a> Resolvable for Variable<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        let (binding_resolved, binding_total) = self.binding_id.map_or((0usize, 1usize), |_| (1, 1));
+        (type_resolved + binding_resolved, type_total + binding_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct Member<'a> {
     pub position    : Position,
     pub ident       : Ident<'a>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
     pub index       : Option<ItemCount>,
 }
-impl_bindable!(Member);
+
+impl_typeable!(Member);
+impl_resolvable!(Member);
 impl_positioned!(Member);
 impl_display!(Member, "{}", ident);
 
@@ -646,11 +873,24 @@ pub struct Call<'a> {
     pub args            : Vec<Expression<'a>>,
     pub call_type       : CallType<'a>,
     pub function_id     : Option<FunctionId>,
-    pub binding_id      : Option<BindingId>,
+    pub type_id         : Option<TypeId>,
 }
-impl_bindable!(Call);
+
+impl_typeable!(Call);
 impl_positioned!(Call);
 impl_display!(Call, "{}({:?})", ident, args);
+
+impl<'a> Resolvable for Call<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (args_resolved, args_total) = self.args.iter().fold((0, 0), |acc, arg| {
+            let (arg_resolved, arg_total) = arg.num_resolved();
+            (acc.0 + arg_resolved, acc.1 + arg_total)
+        });
+        let (function_resolved, function_total) = self.function_id.map_or((0usize, 1usize), |_| (1, 1));
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (args_resolved + type_resolved + function_resolved, args_total + type_total + function_total)
+    }
+}
 
 #[derive(Debug)]
 pub struct Assignment<'a> {
@@ -658,11 +898,21 @@ pub struct Assignment<'a> {
     pub op      : BinaryOperator,
     pub left    : Expression<'a>,
     pub right   : Expression<'a>,
-    pub binding_id: Option<BindingId>,
+    pub type_id : Option<TypeId>,
 }
-impl_bindable!(Assignment);
+
+impl_typeable!(Assignment);
 impl_positioned!(Assignment);
 impl_display!(Assignment, "{} {} {}", left, op, right);
+
+impl<'a> Resolvable for Assignment<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (left_resolved, left_total) = self.left.num_resolved();
+        let (right_resolved, right_total) = self.right.num_resolved();
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (left_resolved + right_resolved + type_resolved, left_total + right_total + type_total)
+    }
+}
 
 impl<'a> Returns for Assignment<'a> {
     fn returns(self: &Self) -> bool {
@@ -675,11 +925,20 @@ pub struct Cast<'a> {
     pub position    : Position,
     pub expr        : Expression<'a>,
     pub ty          : TypeName<'a>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
-impl_bindable!(Cast);
+
+impl_typeable!(Cast);
 impl_positioned!(Cast);
 impl_display!(Cast, "{} as {:?}", expr, ty);
+
+impl<'a> Resolvable for Cast<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (expr_resolved, expr_total) = self.expr.num_resolved();
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (expr_resolved + type_resolved, expr_total + type_total)
+    }
+}
 
 impl<'a> Returns for Cast<'a> {
     fn returns(self: &Self) -> bool {
@@ -693,11 +952,21 @@ pub struct BinaryOp<'a> {
     pub op          : BinaryOperator,
     pub left        : Expression<'a>,
     pub right       : Expression<'a>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
-impl_bindable!(BinaryOp);
+
+impl_typeable!(BinaryOp);
 impl_positioned!(BinaryOp);
 impl_display!(BinaryOp, "{}{}{}", left, op, right);
+
+impl<'a> Resolvable for BinaryOp<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (left_resolved, left_total) = self.left.num_resolved();
+        let (right_resolved, right_total) = self.right.num_resolved();
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (left_resolved + right_resolved + type_resolved, left_total + right_total + type_total)
+    }
+}
 
 impl<'a> Returns for BinaryOp<'a> {
     fn returns(self: &Self) -> bool {
@@ -710,10 +979,19 @@ pub struct UnaryOp<'a> {
     pub position    : Position,
     pub op          : UnaryOperator,
     pub expr        : Expression<'a>,
-    pub binding_id  : Option<BindingId>,
+    pub type_id     : Option<TypeId>,
 }
-impl_bindable!(UnaryOp);
+
+impl_typeable!(UnaryOp);
 impl_positioned!(UnaryOp);
+
+impl<'a> Resolvable for UnaryOp<'a> {
+    fn num_resolved(self: &Self) -> (usize, usize) {
+        let (expr_resolved, expr_total) = self.expr.num_resolved();
+        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
+        (expr_resolved + type_resolved, expr_total + type_total)
+    }
+}
 
 impl<'a> Display for UnaryOp<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

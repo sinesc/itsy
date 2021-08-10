@@ -8,7 +8,7 @@ mod util;
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Bindable, Returns}, resolver::ResolvedProgram};
+use crate::frontend::{ast::{self, Bindable, Typeable, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -92,7 +92,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             S::IfBlock(if_block)        => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
-                    let result_type = self.binding_type(result);
+                    let result_type = self.item_type(result);
                     self.write_discard(result_type);
                 }
                 Ok(())
@@ -102,7 +102,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             S::Block(block)             => {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
-                    let result_type = self.binding_type(result);
+                    let result_type = self.item_type(result);
                     self.write_discard(result_type);
                 }
                 Ok(())
@@ -110,7 +110,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             S::Return(_)                => unreachable!("Return AST nodes should have been rewritten"),
             S::Expression(expression)   => {
                 self.compile_expression(expression)?;
-                let result_type = self.binding_type(expression);
+                let result_type = self.item_type(expression);
                 self.write_discard(result_type);
                 Ok(())
             }
@@ -148,9 +148,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_assignment_to_var(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
-        let binding_id = item.left.binding_id().unwrap();
+        let binding_id = item.left.as_variable().unwrap().binding_id().unwrap();
         let local = self.locals.lookup(binding_id);
-        let ty = self.binding_type(&item.left);
+        let ty = self.item_type(&item.left);
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
@@ -183,7 +183,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_assignment_to_offset(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "offset assignment");
-        let ty = self.binding_type(&item.left);
+        let ty = self.item_type(&item.left);
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.left)?;       // stack: &left
@@ -387,7 +387,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     fn compile_for_loop_array(self: &Self, item: &ast::ForLoop<'ast>, element_local: Local, element_ty: &Type) -> CompileResult {
         comment!(self, "for in array");
-        let array_ty = self.binding_type(&item.expr);
+        let array_ty = self.item_type(&item.expr);
         let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
         let array_constructor = self.get_constructor(array_ty);
 
@@ -517,7 +517,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_literal(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
-        let ty = self.binding_type(item);
+        let ty = self.item_type(item);
         match item.value {
             LiteralValue::Numeric(numeric) => self.write_numeric(numeric, ty),
             LiteralValue::Bool(v) =>  {
@@ -552,7 +552,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes instructions to assemble a prototype.
     fn compile_prototype_instructions(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
-        let ty = self.binding_type(item);
+        let ty = self.item_type(item);
         match &item.value {
             LiteralValue::Array(array_literal) => {
                 for element in &array_literal.elements {
@@ -583,7 +583,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) -> CompileResult {
         use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
 
-        let exp_type = self.binding_type(&item.expr);
+        let exp_type = self.item_type(&item.expr);
 
         match item.op {
             // logical
@@ -630,8 +630,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_binary_op_simple(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
 
         use crate::frontend::ast::BinaryOperator as BO;
-        let ty_result = self.binding_type(item);
-        let ty_left = self.binding_type(&item.left);
+        let ty_result = self.item_type(item);
+        let ty_left = self.item_type(&item.left);
 
         // compile left, right and store references, left and right will be consumed
         self.compile_expression(&item.left)?;
@@ -690,8 +690,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles an offsetting binary operation, i.e.. indexing and member access.
     fn compile_binary_op_offseting(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
-        let result_type = self.binding_type(item);
-        let compare_type = self.binding_type(&item.left);
+        let result_type = self.item_type(item);
+        let compare_type = self.item_type(&item.left);
         self.compile_expression(&item.left)?;
         self.compile_expression(&item.right)?;
         match item.op {
@@ -743,7 +743,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         self.compile_expression(&item.expr)?;
 
-        let from = self.binding_type(&item.expr);
+        let from = self.item_type(&item.expr);
         let to = self.bindings.type_by_id(item.ty.type_id.unwrap());
 
         if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
@@ -789,6 +789,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 }
 
 impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+
+    /// Returns the type of given AST item.
+    fn item_type(self: &Self, item: &impl Typeable) -> &Type {
+        match item.type_id() {
+            None => panic!("Unresolved type encountered"),
+            Some(type_id) => self.bindings.type_by_id(type_id)
+        }
+    }
 
     /// Returns the type of the given binding.
     fn binding_type(self: &Self, item: &impl Bindable) -> &Type {
@@ -914,7 +922,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Stores given literal on the const pool.
     fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> StackAddress {
         use crate::frontend::ast::LiteralValue;
-        let ty = self.binding_type(item);
+        let ty = self.item_type(item);
         let pos = self.writer.const_len();
         match &item.value {
             &LiteralValue::Numeric(int) => {
@@ -1090,7 +1098,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     // TODO: try to remove tmp64 handling
     fn maybe_ref_temporary(self: &Self, op: HeapRefOp, item: &ast::Expression<'ast>) {
-        let ty = self.binding_type(item);
+        let ty = self.item_type(item);
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             match op {

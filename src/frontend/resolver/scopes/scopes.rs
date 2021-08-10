@@ -45,22 +45,23 @@ impl Scopes {
         }
     }
 
-    /// Returns the number of unresolved and total items in the Scopes.
-    pub fn state(self: &Self, additional_unresolved: usize) -> (usize, usize) {
+    /// Returns the number of resolved and total items in the Scopes.
+    pub fn state(self: &Self, additional_resolved: (usize, usize)) -> (usize, usize) {
         (
-            // unresolved counts
-            self.bindings.values().fold(0, |acc, b| acc + if b.type_id.is_some() { 0 } else { 1 })
-            + self.types.values().fold(0, |acc, t| acc + match t {
-                Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 0 } else { 1 },
-                _ => 0,
-            })
-            + self.functions.values().fold(0, |acc, f| acc + if f.is_resolved() { 0 } else { 1 })
-            + additional_unresolved,
-
             // resolved counts
+            self.bindings.values().fold(0, |acc, b| acc + b.type_id.is_some() as usize)
+            + self.types.values().fold(0, |acc, t| acc + match t {
+                Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 1 } else { 0 },
+                _ => 1,
+            })
+            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved() as usize)
+            + additional_resolved.0,
+
+            // total counts
             self.bindings.len()
             + self.types.len()
-            + self.functions.len(),
+            + self.functions.len()
+            + additional_resolved.1,
         )
     }
 

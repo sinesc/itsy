@@ -147,7 +147,7 @@ fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
                 type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
-                binding_id  : None,
+                type_id     : None,
             }));
         }
     } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
@@ -157,7 +157,7 @@ fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
                     position    : position,
                     value       : LiteralValue::Numeric(Numeric::Signed(integer)),
                     type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
-                    binding_id  : None,
+                    type_id     : None,
                 }));
             }
         }
@@ -168,7 +168,7 @@ fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
                     position    : position,
                     value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
                     type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
-                    binding_id  : None,
+                    type_id     : None,
                 }));
             }
         }
@@ -190,7 +190,7 @@ fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
             position    : position,
             value       : LiteralValue::Bool(*m == "true"),
             type_name   : None,
-            binding_id  : None,
+            type_id     : None,
         }
     })(i)
 }
@@ -206,7 +206,7 @@ fn string(i: Input<'_>) -> Output<Literal<'_>> {
                 position    : position,
                 value       : LiteralValue::String(*m),
                 type_name   : None,
-                binding_id  : None,
+                type_id     : None,
             }
         }
     )(i)
@@ -224,7 +224,7 @@ fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
                 elements: m.1,
             }),
             type_name   : None,
-            binding_id  : None,
+            type_id     : None,
         }
     )(i)
 }
@@ -259,7 +259,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal<'_>> {
                 fields: m.2,
             }),
             type_name   : Some(TypeName::from_path(m.0)),
-            binding_id  : None,
+            type_id     : None,
         }
     )(i)
 }
@@ -274,12 +274,12 @@ fn literal(i: Input<'_>) -> Output<Literal<'_>> {
 
 fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
     let var_position = i.position();
-    let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
+    let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None, type_id: None }))(i)?;
     let op_position = init.0.position();
     fold_many0(
         alt((
             map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, e)),
-            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, binding_id: None, index: None })))
+            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, type_id: None, index: None })))
         )),
         init.1,
         |mut acc, (op, val)| {
@@ -294,7 +294,7 @@ fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
                 }
                 _ => {}
             }
-            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: acc, right: val, binding_id: None }))
+            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: acc, right: val, type_id: None }))
         }
     )(init.0)
 }
@@ -318,7 +318,7 @@ fn assignment(i: Input<'_>) -> Output<Assignment<'_>> {
                 op      : m.1,
                 left    : m.0,
                 right   : m.2,
-                binding_id: None,
+                type_id : None,
             }
         }
     ))(i)
@@ -335,12 +335,12 @@ fn call(i: Input<'_>) -> Output<Call<'_>> {
     ws(map(
         tuple((ident, space0, call_argument_list)),
         move |m| Call {
-            position        : position,
-            ident           : m.0,
-            args            : m.2,
-            call_type       : CallType::Function,
-            function_id     : None,
-            binding_id      : None,
+            position    : position,
+            ident       : m.0,
+            args        : m.2,
+            call_type   : CallType::Function,
+            function_id : None,
+            type_id     : None,
         }
     ))(i)
 }
@@ -353,12 +353,12 @@ fn call_static(i: Input<'_>) -> Output<Call<'_>> {
         move |mut m| {
             let ident = Ident { position: position, name: m.0.pop() };
             Call {
-                position        : position,
-                ident           : ident,
-                args            : m.1,
-                call_type       : CallType::Static(m.0),
-                function_id     : None,
-                binding_id      : None,
+                position    : position,
+                ident       : ident,
+                args        : m.1,
+                call_type   : CallType::Static(m.0),
+                function_id : None,
+                type_id     : None,
             }
         }
     )(i)
@@ -439,10 +439,10 @@ fn prefix(i: Input<'_>) -> Output<UnaryOp<'_>> {
     map(
         pair(ws(alt((tag("++"), tag("--")))), ws(assignable)),
         move |m| UnaryOp {
-            position    : position,
-            op          : UnaryOperator::prefix_from_string(*m.0),
-            expr        : m.1,
-            binding_id  : None,
+            position: position,
+            op      : UnaryOperator::prefix_from_string(*m.0),
+            expr    : m.1,
+            type_id : None,
         }
     )(i)
 }
@@ -452,10 +452,10 @@ fn suffix(i: Input<'_>) -> Output<UnaryOp<'_>> {
     map(
         pair(ws(assignable), ws(alt((tag("++"), tag("--"))))),
         move |m| UnaryOp {
-            position    : position,
-            op          : UnaryOperator::suffix_from_string(*m.1),
-            expr        : m.0,
-            binding_id  : None,
+            position: position,
+            op      : UnaryOperator::suffix_from_string(*m.1),
+            expr    : m.0,
+            type_id : None,
         }
     )(i)
 }
@@ -466,10 +466,10 @@ fn unary(i: Input<'_>) -> Output<Expression<'_>> {
         preceded(ws(tag("!")), ws(prec6)),
         move |m| {
             Expression::UnaryOp(Box::new(UnaryOp {
-                position    : position,
-                op          : UnaryOperator::Not,
-                expr        : m,
-                binding_id  : None,
+                position: position,
+                op      : UnaryOperator::Not,
+                expr    : m,
+                type_id : None,
             }))
         }
     )(i)
@@ -486,7 +486,7 @@ fn operand(i: Input<'_>) -> Output<Expression<'_>> {
         map(prefix, |m| Expression::UnaryOp(Box::new(m))),
         map(call, |m| Expression::Call(m)),
         map(call_static, |m| Expression::Call(m)),
-        map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None }))
+        map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None, type_id: None }))
     )))(i)
 }
 
@@ -497,7 +497,7 @@ fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
         alt((
             map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, e)),
             map(preceded(ws(tag(".")), call), |i| (BinaryOperator::Access, Expression::Call(i))),
-            map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, binding_id: None, index: None })))
+            map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, type_id: None, index: None })))
         )),
         init.1,
         move |acc, (op, mut val)| match &mut val {
@@ -507,7 +507,7 @@ fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
                 call.call_type = CallType::Method;
                 val
             },
-            _ => Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+            _ => Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
         }
     )(init.0)
 }
@@ -522,7 +522,7 @@ fn prec5(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(alt((tag("*"), tag("/"), tag("%"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec6),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -532,7 +532,7 @@ fn prec4(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(alt((tag("+"), tag("-"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec5),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -542,7 +542,7 @@ fn prec3(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec4),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -552,7 +552,7 @@ fn prec2(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(alt((tag("!="), tag("=="))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec3),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -562,7 +562,7 @@ fn prec1(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(tag("&&"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec2),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -572,7 +572,7 @@ fn prec0(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         pair(map(tag("||"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec1),
         init.1,
-        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, binding_id: None }))
+        |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
     )(init.0)
 }
 
@@ -582,7 +582,7 @@ fn precn(i: Input<'_>) -> Output<Expression<'_>> {
     fold_many0(
         preceded(tag("as"), path),
         init.1,
-        |acc, val| Expression::Cast(Box::new(Cast { position: position, expr: acc, ty: TypeName::from_path(val), binding_id: None }))
+        |acc, val| Expression::Cast(Box::new(Cast { position: position, expr: acc, ty: TypeName::from_path(val), type_id: None }))
     )(init.0)
 }
 
@@ -759,7 +759,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
                 op          : BinaryOperator::from_string(*m.1),
                 left        : m.0,
                 right       : m.2,
-                binding_id  : None
+                type_id     : None
             }))
         )(i)
     }

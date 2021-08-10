@@ -12,9 +12,10 @@ use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
 
 /// A container holding type id to type mappings
 pub(crate) trait TypeContainer {
+    /// Returns a reference to the type id.
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
+    /// Returns a mutable reference to the type id.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
-
     /// Computes the size of given type.
     fn type_size(self: &Self, ty: &Type) -> StackAddress { // FIXME: remove this and its usages. cannot be correct anymore due to type storage changes
         match ty {
