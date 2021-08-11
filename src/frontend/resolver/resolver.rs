@@ -197,6 +197,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         item.binding_id().map(|binding_id| self.scopes.binding_mutable(binding_id))
     }
 
+    /// Returns Ok if must_resolve flag is not set or Err if must_resolve is set and the item is not resolved.
+    fn binding_resolved_or_err(self: &Self, item: &(impl Bindable+Positioned), expected_result: Option<TypeId>) -> ResolveResult {
+        if self.must_resolve {
+            let binding_type_id = self.binding_type_id(item);
+            if binding_type_id.is_none() {
+                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string())))
+            } else if expected_result.is_some() {
+                self.check_types_match(item, expected_result, binding_type_id)
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
     fn classify_numeric(self: &Self, value: Numeric) -> Result<Option<TypeId>, Error> {
         Ok(if value.is_integer() {
@@ -245,24 +261,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.primitives.get(&ty).cloned().unwrap_or_ice(ICE)
     }
 
-    /// Returns Ok if must_resolve flag is not set or Err if must_resolve is set and the item is not resolved.
-    fn resolved_or_err(self: &Self, item: &(impl Bindable+Positioned), expected_result: Option<TypeId>) -> ResolveResult {
-        if self.must_resolve {
-            let binding_type_id = self.binding_type_id(item);
-            if binding_type_id.is_none() {
-                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string())))
-            } else if expected_result.is_some() {
-                self.check_types_match(item, expected_result, binding_type_id)
-            } else {
-                Ok(())
-            }
-        } else {
-            Ok(())
-        }
-    }
-
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
-    fn definition_resolved_or_err(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolved_or_err(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
         if self.must_resolve {
             if item.is_resolved() {
                 if expected_result.is_some() {
@@ -282,15 +282,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Returns a path string built from current and additional path segments.
-    fn make_path(self: &Self, append: &[ &str ]) -> String {
-        let mut result = self.path.clone();
-        for &part in append {
-            result.push(part.to_string());
-        }
-        result.join("::")
-    }
-
     /// Sets type if for given AST item if it is not set yet, otherwise checks that new type matches existing type.
     fn set_type_id(self: &Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
         if item.type_id().is_some() {
@@ -306,6 +297,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             None => None,
             Some(type_id) => Some(self.type_by_id(type_id))
         }
+    }
+
+    /// Returns a path string built from current and additional path segments.
+    fn make_path(self: &Self, append: &[ &str ]) -> String {
+        let mut result = self.path.clone();
+        for &part in append {
+            result.push(part.to_string());
+        }
+        result.join("::")
     }
 }
 
@@ -364,7 +364,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.type_id.is_some() && expected_result.is_some() {
             self.check_types_match(item, expected_result, item.type_id)?;
         }
-        self.definition_resolved_or_err(item, expected_result)?;
+        self.resolved_or_err(item, expected_result)?;
         Ok(item.type_id)
     }
 
@@ -379,7 +379,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let new_type_id = self.scopes.insert_type(self.scope_id, None, ty);
             item.type_id = Some(new_type_id);
         }
-        self.definition_resolved_or_err(item, None)?;
+        self.resolved_or_err(item, None)?;
         Ok(item.type_id)
     }
 
@@ -405,7 +405,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let ty = Type::Struct(Struct { fields: fields });
                 item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
             }
-            self.definition_resolved_or_err(item, None)
+            self.resolved_or_err(item, None)
         }
     }
 
@@ -500,10 +500,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()))?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type;
         if let Some(expr) = &mut item.expr {
-            self.definition_resolved_or_err(expr, None)?;
+            self.resolved_or_err(expr, None)?;
             self.resolve_expression(expr, ret_type_id)?;
             // check return type matches function result type
-            self.definition_resolved_or_err(expr, ret_type_id)
+            self.resolved_or_err(expr, ret_type_id)
         } else {
             // no return expression, function result type must be void
             self.check_types_match(item, Some(TypeId::void()), ret_type_id)
@@ -567,7 +567,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        self.definition_resolved_or_err(item, expected_result)
+        self.resolved_or_err(item, expected_result)
     }
 
     /// Resolves an occurance of a variable.
@@ -590,7 +590,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.binding_set_type_id(item, type_id)?;
         }
 
-        self.resolved_or_err(item, expected_result)
+        self.binding_resolved_or_err(item, expected_result)
     }
 
     /// Resolves an if block.
@@ -859,10 +859,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // for mutable binding, expression needs to be a primitive or a literal (both copied/constructed) or mutable itself
         if let Some(expr) = &item.expr {
-            self.definition_resolved_or_err(expr, None)?;
+            self.resolved_or_err(expr, None)?;
         }
 
-        self.resolved_or_err(item, None)?;
+        self.binding_resolved_or_err(item, None)?;
         Ok(())
     }
 
@@ -883,8 +883,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             },
         }
-        self.definition_resolved_or_err(&item.expr, None)?;
-        self.definition_resolved_or_err(item, expected_type)
+        self.resolved_or_err(&item.expr, None)?;
+        self.resolved_or_err(item, expected_type)
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
@@ -927,7 +927,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
         }
-        self.definition_resolved_or_err(item, expected_type)
+        self.resolved_or_err(item, expected_type)
     }
 
     /// Resolves an struct literal and creates the required field types.
@@ -946,11 +946,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let struct_ = item.value.as_struct_mut().unwrap_or_ice(ICE)?;
             for (name, field) in &mut struct_.fields {
                 self.resolve_expression(field, struct_def.type_id(name))?;
-                self.definition_resolved_or_err(field, None)?;
+                self.resolved_or_err(field, None)?;
             }
         }
 
-        self.definition_resolved_or_err(item, None)
+        self.resolved_or_err(item, None)
     }
 
     /// Resolves an array literal and creates the required array types.
@@ -1007,7 +1007,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        self.definition_resolved_or_err(item, expected_type_id)
+        self.resolved_or_err(item, expected_type_id)
     }
 }
 
