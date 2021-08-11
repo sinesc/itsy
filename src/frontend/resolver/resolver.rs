@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Bindable, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
-use crate::shared::TypeContainer;
+use crate::shared::{Progress, TypeContainer};
 use crate::shared::bindings::Bindings;
 use crate::shared::infos::{FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
@@ -94,7 +94,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
     }
 
     // repeatedly try to resolve items until no more progress is made
-    let mut now_resolved = (0, 0);
+    let mut now_resolved = Progress::zero();
     let mut prev_resolved;
     let mut infer_literals = false;
     let mut must_resolve = false;
@@ -109,19 +109,15 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
             primitives      : &primitives,
             path            : &mut path,
         };
+
         for mut statement in program.0.iter_mut() {
             resolver.resolve_statement(&mut statement)?; // todo: want a vec of errors here
         }
 
-        let resolved = program.0.iter().fold((0, 0), |acc, statement| {
-            let (statement_resolved, statement_total) = statement.num_resolved();
-            (acc.0 + statement_resolved, acc.1 + statement_total)
-        });
-
         prev_resolved = now_resolved;
-        now_resolved = scopes.state(resolved);
+        now_resolved = scopes.resolved() + program.0.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
 
-        if now_resolved.0 < now_resolved.1 && (now_resolved == prev_resolved) {
+        if !now_resolved.done() && now_resolved == prev_resolved {
             if !infer_literals {
                 // no additional items resolved, set flag to assumen default types for literals and try again
                 infer_literals = true
@@ -131,7 +127,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
             } else if must_resolve {
                 return ice("Unresolved types remaining but no errors were triggered in error run");
             }
-        } else if now_resolved.0 == now_resolved.1 {
+        } else if now_resolved.done() {
             break;
         }
     }
@@ -188,11 +184,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns TypeId for the given binding.
     fn binding_type_id(self: &Self, item: &impl Bindable) -> Option<TypeId> {
         item.binding_id().and_then(|binding_id| self.scopes.binding_type_id(binding_id))
-    }
-
-    /// Returns a reference to the type of the given binding.
-    fn binding_type(self: &mut Self, item: &impl Bindable) -> Option<&Type> {
-        self.binding_type_id(item).map(move |type_id| self.type_by_id(type_id))
     }
 
     /// Sets mutability for given binding.

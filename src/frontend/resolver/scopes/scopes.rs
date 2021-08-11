@@ -2,13 +2,14 @@ mod repository;
 
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
+use crate::shared::Progress;
 use crate::shared::bindings::Bindings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
 use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
 use crate::shared::types::Type;
 
 /// Flat lists of types and bindings and which scope the belong to.
-pub struct Scopes {
+pub(crate) struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
@@ -46,22 +47,20 @@ impl Scopes {
     }
 
     /// Returns the number of resolved and total items in the Scopes.
-    pub fn state(self: &Self, additional_resolved: (usize, usize)) -> (usize, usize) {
-        (
+    pub fn resolved(self: &Self) -> Progress {
+        Progress::new(
             // resolved counts
             self.bindings.values().fold(0, |acc, b| acc + b.type_id.is_some() as usize)
             + self.types.values().fold(0, |acc, t| acc + match t {
                 Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 1 } else { 0 },
                 _ => 1,
             })
-            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved() as usize)
-            + additional_resolved.0,
+            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved() as usize),
 
             // total counts
             self.bindings.len()
             + self.types.len()
-            + self.functions.len()
-            + additional_resolved.1,
+            + self.functions.len(),
         )
     }
 

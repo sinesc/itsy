@@ -7,6 +7,8 @@ pub mod error;
 pub mod infos;
 pub mod bindings;
 
+use std::ops::Add;
+use std::fmt;
 use crate::frontend::ast::Position;
 use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
 
@@ -29,6 +31,40 @@ pub(crate) trait TypeContainer {
             },
             Type::Enum(_)   => unimplemented!("enum size"),
             _               => ty.primitive_size() as StackAddress
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) struct Progress {
+    pub current: usize,
+    pub total: usize,
+}
+
+impl Progress {
+    pub fn new(current: usize, total: usize) -> Self {
+        Self { current, total }
+    }
+    pub fn zero() -> Self {
+        Self { current: 0, total: 0 }
+    }
+    pub fn done(self: &Self) -> bool {
+        self.current == self.total
+    }
+}
+
+impl fmt::Debug for Progress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.current, self.total)
+    }
+}
+
+impl Add for Progress {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self {
+            current: self.current + other.current,
+            total: self.total + other.total,
         }
     }
 }

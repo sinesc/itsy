@@ -4,6 +4,7 @@ use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{StackAddress, ItemCount};
 use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
+use crate::shared::Progress;
 
 /// BindingId handling for bindable AST structures.
 pub(crate) trait Bindable {
@@ -61,28 +62,11 @@ macro_rules! impl_typeable {
 /// Resolvable AST structures.
 pub(crate) trait Resolvable {
     /// Number of resolved and total items
-    fn num_resolved(self: &Self) -> (usize, usize);
+    fn num_resolved(self: &Self) -> Progress;
     /// Whether the structure is fully resolved
     fn is_resolved(self: &Self) -> bool {
-        let num_resolved = self.num_resolved();
-        num_resolved.0 == num_resolved.1
+        self.num_resolved().done()
     }
-}
-
-/// Marker trait for Typeable AST structures that should automatically implement Resolvable
-pub(crate) trait AutoImplementResolvable { }
-
-/// Implement Resolvable for all Typeable AST structures that have the AutoImplementResolvable marker.
-impl<T> Resolvable for T where T: Typeable+AutoImplementResolvable {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        (if self.type_id().is_some() { 1 } else { 0 }, 1)
-    }
-}
-
-macro_rules! impl_resolvable {
-    ($struct_name:ident) => {
-        impl<'a> AutoImplementResolvable for $struct_name<'a> { }
-    };
 }
 
 /// A position in the source code.
@@ -225,7 +209,7 @@ impl<'a> Positioned for Statement<'a> {
 }
 
 impl<'a> Resolvable for Statement<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
+    fn num_resolved(self: &Self) -> Progress {
         impl_matchall!(self, Statement, item, { item.num_resolved() })
     }
 }
@@ -250,11 +234,10 @@ impl_bindable!(Binding);
 impl_positioned!(Binding);
 
 impl<'a> Resolvable for Binding<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (expr_resolved, expr_total) = self.expr.as_ref().map_or((0, 0), |expr| expr.num_resolved());
-        let (ty_resolved, ty_total) = self.ty.as_ref().map_or((0, 0), |ty| ty.num_resolved());
-        let (binding_resolved, binding_total) = self.binding_id.map_or((0, 1), |_| (1, 1));
-        (expr_resolved + ty_resolved + binding_resolved, expr_total + ty_total + binding_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.as_ref().map_or(Progress::zero(), |expr| expr.num_resolved())
+        + self.ty.as_ref().map_or(Progress::zero(), |ty| ty.num_resolved())
+        + self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -270,15 +253,11 @@ pub struct Function<'a> {
 impl_positioned!(Function);
 
 impl<'a> Resolvable for Function<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (args_resolved, args_total) = self.sig.args.iter().fold((0, 0), |acc, arg| {
-            let (arg_resolved, arg_total) = arg.num_resolved();
-            (acc.0 + arg_resolved, acc.1 + arg_total)
-        });
-        let (ret_resolved, ret_total) = self.sig.ret.as_ref().map_or((0, 0), |ret| ret.num_resolved());
-        let (block_resolved, block_total) = self.block.num_resolved();
-        let (function_resolved, function_total) = self.function_id.map_or((0usize, 1usize), |_| (1, 1));
-        (args_resolved + ret_resolved + block_resolved + function_resolved, args_total + ret_total + block_total + function_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.sig.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
+        + self.sig.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
+        + self.block.num_resolved()
+        + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -296,7 +275,12 @@ pub struct TypeName<'a> {
 }
 
 impl_typeable!(TypeName);
-impl_resolvable!(TypeName);
+
+impl<'a> Resolvable for TypeName<'a> {
+    fn num_resolved(self: &Self) -> Progress {
+        self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+}
 
 impl<'a> TypeName<'a> {
     /// Returns a type with the given name and an unresolved type-id.
@@ -351,7 +335,7 @@ impl<'a> Typeable for InlineType<'a> {
 }
 
 impl<'a> Resolvable for InlineType<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
+    fn num_resolved(self: &Self) -> Progress {
         match self {
             Self::TypeName(typename) => typename.num_resolved(),
             Self::Array(array) => array.num_resolved(),
@@ -371,10 +355,9 @@ impl_positioned!(Array);
 impl_typeable!(Array);
 
 impl<'a> Resolvable for Array<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (element_resolved, element_total) = self.element_type.num_resolved();
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (element_resolved + type_resolved, element_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.element_type.num_resolved()
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -397,13 +380,9 @@ impl<'a> Typeable for StructDef<'a> {
 }
 
 impl<'a> Resolvable for StructDef<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (fields_resolved, fields_total) = self.fields.iter().fold((0, 0), |acc, (_, field)| {
-            let (field_resolved, field_total) = field.num_resolved();
-            (acc.0 + field_resolved, acc.1 + field_total)
-        });
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (fields_resolved + type_resolved, fields_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved())
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -418,13 +397,9 @@ pub struct ImplBlock<'a> {
 impl_positioned!(ImplBlock);
 
 impl<'a> Resolvable for ImplBlock<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (functions_resolved, functions_total) = self.functions.iter().fold((0, 0), |acc, function| {
-            let (function_resolved, function_total) = function.num_resolved();
-            (acc.0 + function_resolved, acc.1 + function_total)
-        });
-        let (type_resolved, type_total) = self.ty.num_resolved();
-        (functions_resolved + type_resolved, functions_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved())
+        + self.ty.num_resolved()
     }
 }
 
@@ -440,11 +415,10 @@ pub struct ForLoop<'a> {
 impl_positioned!(ForLoop);
 
 impl<'a> Resolvable for ForLoop<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (iter_resolved, iter_total) = self.iter.num_resolved();
-        let (expr_resolved, expr_total) = self.expr.num_resolved();
-        let (block_resolved, block_total) = self.block.num_resolved();
-        (iter_resolved + expr_resolved + block_resolved, iter_total + expr_total + block_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.iter.num_resolved()
+        + self.expr.num_resolved()
+        + self.block.num_resolved()
     }
 }
 
@@ -460,10 +434,9 @@ impl_positioned!(WhileLoop);
 impl_display!(WhileLoop, "while {} {{ ... }}", expr);
 
 impl<'a> Resolvable for WhileLoop<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (expr_resolved, expr_total) = self.expr.num_resolved();
-        let (block_resolved, block_total) = self.block.num_resolved();
-        (expr_resolved + block_resolved, expr_total + block_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.num_resolved()
+        + self.block.num_resolved()
     }
 }
 
@@ -476,8 +449,8 @@ pub struct Return<'a> {
 impl_positioned!(Return);
 
 impl<'a> Resolvable for Return<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        self.expr.as_ref().map_or((0, 0), |e| e.num_resolved())
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.as_ref().map_or(Progress::zero(), |e| e.num_resolved())
     }
 }
 
@@ -494,11 +467,10 @@ impl_positioned!(IfBlock);
 impl_display!(IfBlock, "if {} {{ ... }}", cond);
 
 impl<'a> Resolvable for IfBlock<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (cond_resolved, cond_total) = self.cond.num_resolved();
-        let (if_block_resolved, if_block_total) = self.if_block.num_resolved();
-        let (else_block_resolved, else_block_total) = self.else_block.as_ref().map_or((0, 0), |e| e.num_resolved());
-        (cond_resolved + if_block_resolved + else_block_resolved, cond_total + if_block_total + else_block_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.cond.num_resolved()
+        + self.if_block.num_resolved()
+        + self.else_block.as_ref().map_or(Progress::zero(), |e| e.num_resolved())
     }
 }
 
@@ -540,14 +512,10 @@ impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
 
 impl<'a> Resolvable for Block<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (statements_resolved, statements_total) = self.statements.iter().fold((0, 0), |acc, statement| {
-            let (statment_resolved, statement_total) = statement.num_resolved();
-            (acc.0 + statment_resolved, acc.1 + statement_total)
-        });
-        let (result_resolved, result_total) = self.result.as_ref().map_or((0, 0), |result| result.num_resolved());
-        let (returns_resolved, returns_total) = self.result.as_ref().map_or((0, 0), |returns| returns.num_resolved());
-        (statements_resolved + result_resolved + returns_resolved, statements_total + result_total + returns_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.statements.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved())
+        + self.result.as_ref().map_or(Progress::zero(), |result| result.num_resolved())
+        + self.result.as_ref().map_or(Progress::zero(), |returns| returns.num_resolved())
     }
 }
 
@@ -653,7 +621,7 @@ impl<'a> Resolvable for Expression<'a> {
     fn is_resolved(self: &Self) -> bool {
         impl_matchall!(self, Expression, item, { item.is_resolved() })
     }
-    fn num_resolved(self: &Self) -> (usize, usize) {
+    fn num_resolved(self: &Self) -> Progress {
         impl_matchall!(self, Expression, item, { item.num_resolved() })
     }
 }
@@ -702,10 +670,9 @@ impl_typeable!(Literal);
 impl_positioned!(Literal);
 
 impl<'a> Resolvable for Literal<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (resolved, total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        let (value_resolved, value_total) = self.value.num_resolved();
-        (resolved + value_resolved, total + value_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.value.num_resolved()
     }
 }
 
@@ -776,11 +743,11 @@ impl<'a> LiteralValue<'a> {
 }
 
 impl<'a> Resolvable for LiteralValue<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
+    fn num_resolved(self: &Self) -> Progress {
         match self {
             Self::Array(array) => array.num_resolved(),
             Self::Struct(struct_) => struct_.num_resolved(),
-            _ => (1, 1),
+            _ => Progress::new(1, 1),
         }
     }
 }
@@ -803,11 +770,8 @@ pub struct ArrayLiteral<'a> {
 }
 
 impl<'a> Resolvable for ArrayLiteral<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        self.elements.iter().fold((0, 0), |acc, element| {
-            let (element_resolved, element_total) = element.num_resolved();
-            (acc.0 + element_resolved, acc.1 + element_total)
-        })
+    fn num_resolved(self: &Self) -> Progress {
+        self.elements.iter().fold(Progress::zero(), |acc, element| acc + element.num_resolved())
     }
 }
 
@@ -817,11 +781,8 @@ pub struct StructLiteral<'a> {
 }
 
 impl<'a> Resolvable for StructLiteral<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        self.fields.iter().fold((0, 0), |acc, (_, field)| {
-            let (field_resolved, field_total) = field.num_resolved();
-            (acc.0 + field_resolved, acc.1 + field_total)
-        })
+    fn num_resolved(self: &Self) -> Progress {
+        self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved())
     }
 }
 
@@ -839,10 +800,9 @@ impl_positioned!(Variable);
 impl_display!(Variable, "{}", ident);
 
 impl<'a> Resolvable for Variable<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        let (binding_resolved, binding_total) = self.binding_id.map_or((0usize, 1usize), |_| (1, 1));
-        (type_resolved + binding_resolved, type_total + binding_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -855,9 +815,14 @@ pub struct Member<'a> {
 }
 
 impl_typeable!(Member);
-impl_resolvable!(Member);
 impl_positioned!(Member);
 impl_display!(Member, "{}", ident);
+
+impl<'a> Resolvable for Member<'a> {
+    fn num_resolved(self: &Self) -> Progress {
+        self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+}
 
 #[derive(Debug)]
 pub enum CallType<'a> {
@@ -881,14 +846,10 @@ impl_positioned!(Call);
 impl_display!(Call, "{}({:?})", ident, args);
 
 impl<'a> Resolvable for Call<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (args_resolved, args_total) = self.args.iter().fold((0, 0), |acc, arg| {
-            let (arg_resolved, arg_total) = arg.num_resolved();
-            (acc.0 + arg_resolved, acc.1 + arg_total)
-        });
-        let (function_resolved, function_total) = self.function_id.map_or((0usize, 1usize), |_| (1, 1));
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (args_resolved + type_resolved + function_resolved, args_total + type_total + function_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
+        + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -906,11 +867,10 @@ impl_positioned!(Assignment);
 impl_display!(Assignment, "{} {} {}", left, op, right);
 
 impl<'a> Resolvable for Assignment<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (left_resolved, left_total) = self.left.num_resolved();
-        let (right_resolved, right_total) = self.right.num_resolved();
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (left_resolved + right_resolved + type_resolved, left_total + right_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.left.num_resolved()
+        + self.right.num_resolved()
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -933,10 +893,9 @@ impl_positioned!(Cast);
 impl_display!(Cast, "{} as {:?}", expr, ty);
 
 impl<'a> Resolvable for Cast<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (expr_resolved, expr_total) = self.expr.num_resolved();
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (expr_resolved + type_resolved, expr_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.num_resolved()
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -960,11 +919,10 @@ impl_positioned!(BinaryOp);
 impl_display!(BinaryOp, "{}{}{}", left, op, right);
 
 impl<'a> Resolvable for BinaryOp<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (left_resolved, left_total) = self.left.num_resolved();
-        let (right_resolved, right_total) = self.right.num_resolved();
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (left_resolved + right_resolved + type_resolved, left_total + right_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.left.num_resolved()
+        + self.right.num_resolved()
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
@@ -986,10 +944,9 @@ impl_typeable!(UnaryOp);
 impl_positioned!(UnaryOp);
 
 impl<'a> Resolvable for UnaryOp<'a> {
-    fn num_resolved(self: &Self) -> (usize, usize) {
-        let (expr_resolved, expr_total) = self.expr.num_resolved();
-        let (type_resolved, type_total) = self.type_id.map_or((0usize, 1usize), |_| (1, 1));
-        (expr_resolved + type_resolved, expr_total + type_total)
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.num_resolved()
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
