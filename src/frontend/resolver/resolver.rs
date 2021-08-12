@@ -778,7 +778,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         .map(|type_id| self.type_by_id_mut(type_id));
 
                     if let Some(Type::Array(array)) = ty {
-                        array.type_id = Some(result_type_id); // todo: check that array.type_id is either None or equals binding_type_id
+                        if array.type_id.is_some() && array.type_id != Some(result_type_id) {
+                            return ice("Resolved array type differs from its current type");
+                        }
+                        array.type_id = Some(result_type_id);
                     }
                 }
                 // if we know the array element type, set the result type to that
@@ -958,7 +961,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         let mut elements_type_id = None;
 
-        // apply expected type if known. if we already have a known type, binding_set_type_id will check that it matches the one we're trying to set
+        // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
             self.set_type_id(item, expected_type_id)?;
         }
