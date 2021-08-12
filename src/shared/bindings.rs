@@ -1,4 +1,4 @@
-use crate::shared::{TypeContainer, types::Type, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, TypeId, BindingId}};
+use crate::shared::{TypeContainer, BindingContainer, types::Type, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, TypeId, BindingId}};
 
 /// Program binding data. // FIXME: naming is bad. this is type information
 pub struct Bindings {
@@ -57,5 +57,17 @@ impl TypeContainer for Bindings {
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
         let index: usize = type_id.into();
         &mut self.type_map[index]
+    }
+}
+
+/// A container holding binding id to BindingInfo mappings
+impl BindingContainer for Bindings {
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
+        let binding_index = Into::<usize>::into(binding_id);
+        &self.binding_map[binding_index]
+    }
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
+        let binding_index = Into::<usize>::into(binding_id);
+        &mut self.binding_map[binding_index]
     }
 }

@@ -274,7 +274,7 @@ fn literal(i: Input<'_>) -> Output<Literal<'_>> {
 
 fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
     let var_position = i.position();
-    let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None, type_id: None }))(i)?;
+    let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
     let op_position = init.0.position();
     fold_many0(
         alt((
@@ -486,7 +486,7 @@ fn operand(i: Input<'_>) -> Output<Expression<'_>> {
         map(prefix, |m| Expression::UnaryOp(Box::new(m))),
         map(call, |m| Expression::Call(m)),
         map(call_static, |m| Expression::Call(m)),
-        map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None, type_id: None }))
+        map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None }))
     )))(i)
 }
 

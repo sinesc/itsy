@@ -8,7 +8,7 @@ mod util;
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Bindable, Typeable, Returns}, resolver::ResolvedProgram};
+use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -148,7 +148,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_assignment_to_var(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
-        let binding_id = item.left.as_variable().unwrap().binding_id().unwrap();
+        let binding_id = item.left.as_variable().unwrap().binding_id.unwrap();
         let local = self.locals.lookup(binding_id);
         let ty = self.item_type(&item.left);
         match item.op {
@@ -232,7 +232,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             FunctionKind::Intrinsic(_intrinsic) => {
                 /* if let CallType::Method(exp) = &item.call_type {
-                    let ty = self.binding_type(&**exp);
+                    let ty = self.item_type(&**exp);
                     self.write_intrinsic_len(ty);
                 } */
             },
@@ -265,7 +265,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
             let local = self.locals.lookup(binding_id);
-            let ty = self.binding_type(item);
+            let ty = self.item_type(item);
             self.write_storex(local, ty);
             self.locals.set_active(binding_id, true);
         }
@@ -283,7 +283,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             }
             local.index
         };
-        self.write_load(load_index as StackOffset, self.binding_type(item));
+        self.write_load(load_index as StackOffset, self.item_type(item));
         Ok(())
     }
 
@@ -431,7 +431,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // activate iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
         let iter_local = self.locals.set_active(binding_id, true);
-        let iter_ty = self.binding_type(&item.iter);
+        let iter_ty = self.item_type(&item.iter);
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
             Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
@@ -453,10 +453,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         comment!(self, "\nfn {}", item.sig.ident.name);
         // create local environment
         let mut frame = Locals::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.bindings.type_by_id(ret.type_id().unwrap()).primitive_size());
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, true));
-            frame.arg_pos += self.binding_type(arg).primitive_size() as StackAddress;
+            frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
         self.create_stack_frame_block(&item.block, &mut frame);
         // store call info required to compile calls to this function
@@ -481,7 +481,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // handle exit
         comment!(self, "fn exiting");
         let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
-            let ty = self.bindings.type_by_id(ret.type_id().unwrap());
+            let ty = self.item_type(ret);
             if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
         });
         if let Some(constructor) = constructor {
@@ -792,15 +792,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> &Type {
-        match item.type_id() {
+        match item.type_id(&self.bindings) {
             None => panic!("Unresolved type encountered"),
             Some(type_id) => self.bindings.type_by_id(type_id)
         }
-    }
-
-    /// Returns the type of the given binding.
-    fn binding_type(self: &Self, item: &impl Bindable) -> &Type {
-        self.bindings.binding_type(item.binding_id().expect("Unresolved binding encountered."))
     }
 
     /// Returns type for given type_id.
@@ -864,13 +859,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
                 frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos, false));
-                frame.var_pos += self.binding_type(binding).primitive_size() as StackAddress;
+                frame.var_pos += self.item_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos, false));
-                frame.var_pos += self.binding_type(&for_loop.iter).primitive_size() as StackAddress;
+                frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);

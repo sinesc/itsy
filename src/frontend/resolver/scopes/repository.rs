@@ -4,7 +4,7 @@ use std::hash::Hash;
 use crate::shared::typed_ids::ScopeId;
 
 /// A datastructure that stores items by name and index.
-pub(super) struct Repository<K, I, V> {
+pub(crate) struct Repository<K, I, V> {
     map     : HashMap<(K, ScopeId), I>,
     data    : Vec<(V, ScopeId)>,
 }

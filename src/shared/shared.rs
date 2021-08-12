@@ -10,13 +10,13 @@ pub mod bindings;
 use std::ops::Add;
 use std::fmt;
 use crate::frontend::ast::Position;
-use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
+use crate::{StackAddress, shared::{typed_ids::{BindingId, TypeId}, types::Type, infos::BindingInfo}};
 
 /// A container holding type id to type mappings
 pub(crate) trait TypeContainer {
-    /// Returns a reference to the type id.
+    /// Returns a reference to the type.
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
-    /// Returns a mutable reference to the type id.
+    /// Returns a mutable reference to the type.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
     /// Computes the size of given type.
     fn type_size(self: &Self, ty: &Type) -> StackAddress { // FIXME: remove this and its usages. cannot be correct anymore due to type storage changes
@@ -33,6 +33,14 @@ pub(crate) trait TypeContainer {
             _               => ty.primitive_size() as StackAddress
         }
     }
+}
+
+/// A container holding binding id to BindingInfo mappings
+pub(crate) trait BindingContainer {
+    /// Returns a reference to the type id.
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo;
+    /// Returns a mutable reference to the type id.
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo;
 }
 
 #[derive(Copy, Clone, PartialEq)]

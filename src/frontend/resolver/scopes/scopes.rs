@@ -13,7 +13,7 @@ pub(crate) struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings        : Repository<String, BindingId, BindingInfo>,
+    pub(crate) bindings        : Repository<String, BindingId, BindingInfo>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<(String, TypeId), FunctionId, FunctionInfo>,
     /// Function scopes (the function containing this scope)
@@ -190,7 +190,7 @@ impl Scopes {
             }
         }
     }
-
+/*
     /// Returns a mutable reference to the type-id of the given binding id.
     pub fn binding_type_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Option<TypeId> {
         &mut self.bindings.value_by_id_mut(binding_id).type_id
@@ -208,6 +208,7 @@ impl Scopes {
     pub fn binding_mutable(self: &Self, binding_id: BindingId) -> bool {
         self.bindings.value_by_id(binding_id).mutable
     }
+*/
 }
 
 /// Type handling
