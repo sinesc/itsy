@@ -472,8 +472,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // return value
             let function_info = self.scopes.function_ref(function_id).clone();
-            if function_info.ret_type.is_some() {
-                *item.type_id_mut(self) = function_info.ret_type;
+
+            if let Some(ret_type_id) = function_info.ret_type {
+                self.set_type_id(item, ret_type_id)?;
             }
 
             if expected_result.is_some() && item.type_id(self).is_some() {
@@ -514,13 +515,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(expected_result) = expected_result {
             self.set_type_id(item, expected_result)?;
         }
-
-        if let Some(type_id) = item.type_id(self) {
-            self.set_type_id(item, type_id)?;
-        } else if let Some(type_id) = item.type_id(self) {
-            self.set_type_id(item, type_id)?;
-        }
-
         self.resolved_or_err(item, expected_result)
     }
 
@@ -702,17 +696,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_expression(&mut item.right, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
                 // left[right] : item
                 self.set_type_id(&mut item.right, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
+                // if we expect the result to be of a particular type, set it now
+                if let Some(expected_result) = expected_result {
+                    self.set_type_id(item, expected_result)?;
+                }
                 // if we know the result type, set the array element type to that
                 if let Some(result_type_id) = item.type_id(self) {
-                    // get mutable reference to type
-                    let ty = item.left.type_id(self)
-                        .map(|type_id| self.type_by_id_mut(type_id));
-
-                    if let Some(Type::Array(array)) = ty {
-                        if array.type_id.is_some() && array.type_id != Some(result_type_id) {
-                            return ice("Resolved array type differs from its current type");
+                    if let Some(Type::Array(array)) = self.item_type(&item.left) {
+                        if array.type_id.is_some() {
+                            self.check_types_match(item, array.type_id, Some(result_type_id))?;
+                        } else {
+                            // TODO: this is pretty ugly, referencing left type again. working around mutable borrow issues when directly borrowing mutably in above if let
+                            let ty = item.left.type_id(self).map(|type_id| self.type_by_id_mut(type_id));
+                            if let Some(Type::Array(array)) = ty {
+                                array.type_id = Some(result_type_id);
+                            }
                         }
-                        array.type_id = Some(result_type_id);
                     }
                 }
                 // if we know the array element type, set the result type to that
@@ -766,16 +765,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        // if we have a binding type, apply it to the expression
+        // if we have a type, apply it to the expression
         let lhs = item.type_id(self);
 
         // resolve right hand side
         if let Some(expr) = &mut item.expr {
             self.resolve_expression(expr, lhs)?;
-        }
-
-        if let (Some(lhs), Some(expr)) = (lhs, &mut item.expr) {
-            self.set_type_id(expr, lhs)?;
         }
 
         // if the expression has a type, apply it back to the binding
@@ -784,11 +779,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.set_type_id(item, expr_type_id)?;
             }
         };
-
-        // for mutable binding, expression needs to be a primitive or a literal (both copied/constructed) or mutable itself
-        if let Some(expr) = &item.expr {
-            self.resolved_or_err(expr, None)?;
-        }
 
         self.resolved_or_err(item, None)?;
         Ok(())
