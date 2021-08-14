@@ -448,6 +448,20 @@ fn branching() {
 }
 
 #[test]
+fn branching_ref_cleanup() {
+    let result = run("
+        if true {
+            let a = \"Hello\";
+            ret_string(a);
+        } else {
+            let b = \"World\";
+            ret_string(b);
+        }
+    ");
+    assert_all(&result, &[ "Hello".to_string() ]);
+}
+
+#[test]
 fn array_literal() {
     let result = run("
         let x = [ 1, 2, 3, 4 ];
