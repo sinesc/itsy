@@ -32,6 +32,7 @@ pub struct Locals { // TODO rename Frame?
 }
 
 impl Locals {
+    const UNKNOWN_BINDING: &'static str = "Unknown local binding";
     pub fn new() -> Self {
         Locals {
             map     : HashMap::new(),
@@ -41,6 +42,16 @@ impl Locals {
             unfixed_exit_jmps: Vec::new(),
         }
     }
+    /// Look up local variable descriptor for the given BindingId.
+    pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
+        *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
+    }
+    /// Marks the the given local variable as initialized and returns its index.
+    pub fn set_active(self: &mut Self, binding_id: BindingId, active: bool) -> Local {
+        let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
+        local.active = active;
+        *local
+    }
 }
 
 /// A stack of Locals mappings.
@@ -48,7 +59,6 @@ pub struct LocalsStack(RefCell<Vec<Locals>>); // TODO rename Frames?
 
 impl LocalsStack {
     const NO_STACK: &'static str = "Attempted to access empty LocalsStack";
-    const UNKNOWN_BINDING: &'static str = "Unknown local binding";
     /// Create new local stack frame descriptor stack.
     pub fn new() -> Self {
         LocalsStack(RefCell::new(Vec::new()))
@@ -77,15 +87,13 @@ impl LocalsStack {
     }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
-        *self.0.borrow().last().expect(Self::NO_STACK).map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
+        self.0.borrow().last().expect(Self::NO_STACK).lookup(binding_id)
     }
     /// Marks the the given local variable as initialized and returns its index.
     pub fn set_active(self: &Self, binding_id: BindingId, active: bool) -> Local {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
-        let local = locals.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
-        local.active = active;
-        *local
+        locals.set_active(binding_id, active)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
     pub fn add_forward_jmp(self: &Self, address: StackAddress) {
