@@ -144,12 +144,12 @@ pub trait StackRelativeOp<T>: StackOffsetOp<T> + StackOp<T> {
         let pos = self.offset_fp(offset);
         self.load(pos)
     }
-    /// Store given value in the stack relative to the stack pointer.
+    /// Store given value in the stack relative to the stack pointer. The offset should be negative.
     fn store_sp(self: &mut Self, offset: StackOffset, value: T) {
         let pos = self.offset_sp(offset);
         self.store(pos, value);
     }
-    /// Load a value from the stack relative to the stack pointer.
+    /// Load a value from the stack relative to the stack pointer. The offset should be negative.
     fn load_sp(self: &Self, offset: StackOffset) -> T {
         let pos = self.offset_sp(offset);
         self.load(pos)

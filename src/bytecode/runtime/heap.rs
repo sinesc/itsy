@@ -16,8 +16,11 @@ pub enum HeapCmp {
 /// Allowed heap reference counting operations.
 #[derive(Copy, Clone, Debug)]
 pub enum HeapRefOp {
+    /// Increase reference counter.
     Inc,
+    /// Decrease reference counter, free on zero.
     Dec,
+    /// Decrease reference counter but do not free on zero.
     Zero,
 }
 
