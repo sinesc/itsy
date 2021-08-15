@@ -23,15 +23,21 @@ use frontend::{parser::parse, resolver::resolve};
 
 // configure pointer sizes
 
+/// Type representing a stack address.
 type StackAddress = usize;
+/// Type representing a stack offset, must be same size as addresses.
 type StackOffset = isize;
+/// Itsy type used to store stack addresses and vector indices. Public only so that tests can access this.
 #[doc(hidden)]
 pub const STACK_ADDRESS_TYPE: shared::types::Type = shared::types::Type::u64; // TODO: assumes usize is 64 bit
 
+/// Type representing a heap address.
 type HeapAddress = usize;
+/// Number of bits of the heap address to allocate for internal offsets. The remaining bits are used to represent the index into the heap vector.
 const HEAP_OFFSET_BITS: usize = 36;
 
-type ItemCount = u16;
+/// Type used to store index of static elements in code, e.g. struct members.
+type ItemIndex = u16;
 
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.

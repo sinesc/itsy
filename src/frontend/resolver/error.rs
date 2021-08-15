@@ -1,6 +1,6 @@
 
 use std::fmt::{self, Display};
-use crate::ItemCount;
+use crate::ItemIndex;
 use crate::frontend::ast::{Position, Positioned};
 use crate::shared::types::Type;
 use crate::shared::numeric::Numeric;
@@ -16,7 +16,7 @@ pub enum ResolveErrorKind {
     IncompatibleNumeric(Type, Numeric),
     UnknownValue(String),
     UnknownMember(String),
-    NumberOfArguments(ItemCount, ItemCount),
+    NumberOfArguments(ItemIndex, ItemIndex),
     MutabilityEscalation,
     AssignToImmutable,
     CannotResolve(String),

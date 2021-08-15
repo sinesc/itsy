@@ -6,7 +6,7 @@ pub mod error;
 mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
-use crate::{StackAddress, StackOffset, ItemCount, STACK_ADDRESS_TYPE};
+use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
@@ -892,12 +892,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match ty {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array as u8);
-                self.writer.store_const(array.len.unwrap() as ItemCount);
+                self.writer.store_const(array.len.unwrap() as ItemIndex);
                 self.store_constructor(self.get_type(array.type_id));
             }
             Type::Struct(structure) => {
                 self.writer.store_const(Constructor::Struct as u8);
-                self.writer.store_const(structure.fields.len() as ItemCount);
+                self.writer.store_const(structure.fields.len() as ItemIndex);
                 for field in &structure.fields {
                     self.store_constructor(self.get_type(field.1));
                 }
@@ -908,7 +908,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::Enum(_) => unimplemented!("enum constructor"),
             _ => {
                 self.writer.store_const(Constructor::Primitive as u8);
-                self.writer.store_const(ty.primitive_size() as ItemCount);
+                self.writer.store_const(ty.primitive_size() as ItemIndex);
             }
         }
         position
@@ -981,7 +981,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Computes struct member offset in bytes.
-    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: ItemCount) -> StackAddress {
+    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: ItemIndex) -> StackAddress {
         let mut offset = 0;
         for index in 0 .. member_index {
             let field_type = self.get_type(struct_.fields[index as usize].1);

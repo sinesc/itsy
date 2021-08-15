@@ -2,7 +2,7 @@
 
 use std::convert::TryInto;
 use std::mem::size_of;
-use crate::{StackAddress, StackOffset, ItemCount};
+use crate::{StackAddress, StackOffset, ItemIndex};
 use crate::bytecode::{HeapRef, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
 
 /// Current state of the vm, checked after each instruction.
@@ -148,8 +148,8 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     /// Reads a constructor argument.
     #[inline(always)]
     fn read_arg(self: &Self, constructor_offset: &mut StackAddress) -> StackAddress {
-        let arg: ItemCount = self.stack.load(*constructor_offset);
-        *constructor_offset += size_of::<ItemCount>() as StackAddress;
+        let arg: ItemIndex = self.stack.load(*constructor_offset);
+        *constructor_offset += size_of::<ItemIndex>() as StackAddress;
         arg as StackAddress
     }
 

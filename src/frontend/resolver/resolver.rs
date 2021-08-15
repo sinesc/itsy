@@ -6,7 +6,7 @@ pub mod error;
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
-use crate::{StackAddress, ItemCount, STACK_ADDRESS_TYPE};
+use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::shared::{Progress, TypeContainer, BindingContainer};
@@ -483,7 +483,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // argument count
             if function_info.arg_type.len() != item.args.len() {
-                return Err(Error::new(item, ErrorKind::NumberOfArguments(function_info.arg_type.len() as ItemCount, item.args.len() as ItemCount)));
+                return Err(Error::new(item, ErrorKind::NumberOfArguments(function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex)));
             }
 
             // arguments
@@ -729,7 +729,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if field.index.is_none() {
                         let index = struct_.fields.iter().position(|f| f.0 == field.ident.name)
                             .unwrap_or_err(Some(field), ErrorKind::UnknownMember(format!("Unknown struct member '{}'", field.ident.name)))?;
-                        field.index = Some(index as ItemCount);
+                        field.index = Some(index as ItemIndex);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap_or_ice(ICE)? as usize].1 {
                         self.set_type_id(item, type_id)?;
