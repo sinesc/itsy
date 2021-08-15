@@ -1,7 +1,7 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use std::mem::size_of;
-use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE};
+use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex};
 use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
@@ -645,7 +645,7 @@ impl_vm!{
 
     /// Calls the given Rust function.
     fn rustcall(&mut self, &mut context, func: RustFn) {
-        T::from_u16(func).exec(self, context);
+        T::from_index(func).exec(self, context);
     }
 
     /// Function call. Saves state and sets programm counter to given addr. Expects

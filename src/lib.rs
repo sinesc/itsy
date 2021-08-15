@@ -21,7 +21,7 @@ pub use interface::*;
 use bytecode::{compiler::compile, runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 use frontend::{parser::parse, resolver::resolve};
 
-// configure pointer sizes
+// configure data sizes
 
 /// Type representing a stack address.
 type StackAddress = usize;
@@ -36,9 +36,12 @@ type HeapAddress = usize;
 /// Number of bits of the heap address to allocate for internal offsets. The remaining bits are used to represent the index into the heap vector.
 const HEAP_OFFSET_BITS: usize = 36;
 
-/// Type used to store index of static elements in code, e.g. struct members.
+/// Type used to index static elements in code, e.g. struct members.
 type ItemIndex = u16;
 
+/// Type used to index RustFns. Public because it is used by the vm_func macro.
+#[doc(hidden)]
+pub type RustFnIndex = u16;
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
@@ -104,7 +107,6 @@ macro_rules! vm_func {
 macro_rules! vm_func {
     (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
-        #[repr(u16)]
         #[derive(Copy, Clone, Debug)]
         $vis enum $type_name {
             $(
@@ -165,23 +167,23 @@ macro_rules! vm_func {
     (@handle_str $other:ident) => { $other };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
-            fn into_u16(self: Self) -> u16 {
-                self as u16
+            fn into_index(self: Self) -> $crate::RustFnIndex {
+                self as $crate::RustFnIndex
             }
-            fn from_u16(index: u16) -> Self {
+            fn from_index(index: $crate::RustFnIndex) -> Self {
                 //un safe { ::std::mem::trans mute(index) }
                 match index {
                     $(
-                        x if x == Self::$name as u16 => Self::$name,
+                        x if x == Self::$name as $crate::RustFnIndex => Self::$name,
                     )+
                     _ => panic!("Invalid VMFunc index {}", index),
                 }
             }
             #[allow(unused_mut)]
-            fn call_info() -> ::std::collections::HashMap<&'static str, (u16, &'static str, Vec<&'static str>)> {
+            fn call_info() -> ::std::collections::HashMap<&'static str, ($crate::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($type_name::$name.into_u16(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
+                    map.insert(stringify!($name), ($type_name::$name.into_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
                 )*
                 map
             }

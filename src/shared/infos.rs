@@ -1,4 +1,5 @@
 use crate::shared::typed_ids::TypeId;
+use crate::RustFnIndex;
 
 /// Binding meta information
 pub struct BindingInfo {
@@ -14,7 +15,7 @@ pub struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    pub fn rust_fn_index(self: &Self) -> Option<u16> {
+    pub fn rust_fn_index(self: &Self) -> Option<RustFnIndex> {
         match self.kind {
             Some(FunctionKind::Rust(index)) => Some(index),
             _ => None,
@@ -29,7 +30,7 @@ impl FunctionInfo {
 pub enum FunctionKind {
     Function,
     Method(TypeId),
-    Rust(u16),
+    Rust(RustFnIndex),
     Intrinsic(Intrinsic),
 }
 

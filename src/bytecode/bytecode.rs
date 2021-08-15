@@ -13,7 +13,7 @@ use std::fmt::{self, Debug};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use writer::{Writer, StoreConst};
-use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS};
+use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
 use crate::bytecode::runtime::vm::VM;
 
 const CALLSIZE: StackOffset = 2 * 4; // previous FP and PC
@@ -25,11 +25,11 @@ const ARG3: StackOffset = -CALLSIZE - 3 * 4;
 /// Use the `vm_func!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMFunc<T>: Clone + Debug + 'static where T: VMFunc<T> {
     #[doc(hidden)]
-    fn from_u16(index: u16) -> Self;
+    fn from_index(index: RustFnIndex) -> Self;
     #[doc(hidden)]
-    fn into_u16(self: Self) -> u16;
+    fn into_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
-    fn call_info() -> HashMap<&'static str, (u16, &'static str, Vec<&'static str>)>;
+    fn call_info() -> HashMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.

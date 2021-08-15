@@ -228,7 +228,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         match function_info.kind.unwrap() {
             FunctionKind::Rust(rust_fn_index) => {
-                self.writer.rustcall(T::from_u16(rust_fn_index));
+                self.writer.rustcall(T::from_index(rust_fn_index));
             },
             FunctionKind::Intrinsic(_intrinsic) => {
                 /* if let CallType::Method(exp) = &item.call_type {

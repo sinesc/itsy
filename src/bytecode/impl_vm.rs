@@ -10,7 +10,7 @@ macro_rules! impl_vm {
     });
 
     // wrappers for readers and writers
-    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, $from, $counter) );
+    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read RustFnIndex, $from, $counter) );
     (read u8, $from:ident, $counter:expr) => ( impl_vm!(do_read u8, $from, $counter) );
     (read u16, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, $from, $counter) );
     (read u32, $from:ident, $counter:expr) => ( impl_vm!(do_read u32, $from, $counter) );
@@ -30,7 +30,7 @@ macro_rules! impl_vm {
         ::std::str::from_utf8(slice).unwrap().to_string()
     });
 
-    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_u16().to_le_bytes()[..]) );
+    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
     (write String, $value:expr, $to:ident) => (
         $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
         $to.write(&$value.as_bytes()[..]);
@@ -40,7 +40,7 @@ macro_rules! impl_vm {
     (map_writer_type RustFn) => ( T );
     (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
-    (map_reader_type RustFn) => ( u16 );
+    (map_reader_type RustFn) => ( RustFnIndex );
     (map_reader_type $ty:tt) => ( $ty );
 
     // main definition block
@@ -208,7 +208,7 @@ macro_rules! impl_vm {
                         // implement special formatting for some opcodes
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", T::from_u16( impl_vm!(read RustFn, self, pc) )));
+                            result.push_str(&format!("{:?} ", T::from_index( impl_vm!(read RustFn, self, pc) )));
                             Some((result, pc))
                         }
                         OpCode::comment => {
