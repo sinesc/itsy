@@ -29,6 +29,33 @@
             //"problemMatcher": "$rustc"
         },
         {
+            "label": "cargo run playground",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--bin",
+                "playground"
+            ],
+            "group": "build",
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
+        },
+        {
+            "label": "cargo run bench (release)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--bin",
+                "bench"
+            ],
+            "group": "build",
+            "problemMatcher": []
+            //"problemMatcher": "$rustc"
+        },
+        {
             "label": "cargo run",
             "type": "shell",
             "command": "cargo",
