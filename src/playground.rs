@@ -49,7 +49,7 @@ vm_func!(MyFns, (), {
 });
 
 fn main() {
-    let source = std::fs::read_to_string("itsy/test.itsy").unwrap();
+    let source = std::fs::read_to_string("itsy/playground.itsy").unwrap();
     let write_logs = std::path::Path::new("./logs/").is_dir();
     match build(&source, write_logs) {
         Ok(program) => {

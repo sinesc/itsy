@@ -33,7 +33,9 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run"
+                "run",
+                "--bin",
+                "${fileBasenameNoExtension}"
             ],
             "group": "build",
             "problemMatcher": []
@@ -45,7 +47,9 @@
             "command": "cargo",
             "args": [
                 "run",
-                "--release"
+                "--release",
+                "--bin",
+                "${fileBasenameNoExtension}"
             ],
             "group": "build",
             "problemMatcher": []

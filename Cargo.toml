@@ -21,3 +21,8 @@ path = "src/lib.rs"
 doc = false
 name = "playground"
 path = "src/playground.rs"
+
+[[bin]]
+doc = false
+name = "bench"
+path = "src/bench.rs"
