@@ -9,8 +9,6 @@ use crate::bytecode::HeapRef;
 pub struct Stack {
     /// Raw stack data.
     data            : Vec<u8>,
-    /// Frames
-    frames          : Vec<(StackAddress, StackAddress)>,
     /// Current frame pointer.
     pub(crate) fp   : StackAddress,
     /// Base frame pointer, pointing to the first byte after constant data.
@@ -22,18 +20,9 @@ impl Stack {
     pub fn new() -> Self {
         Stack {
             data    : Vec::new(),
-            frames  : Vec::new(),
             fp      : 0,
             base_fp : 0,
         }
-    }
-    pub fn push_frame(self: &mut Self, pc: StackAddress) {
-        self.frames.push((self.fp, pc));
-    }
-    pub fn pop_frame(self: &mut Self) -> StackAddress {
-        let (fp, pc) = self.frames.pop().expect("Pop on empty frame-stack");
-        self.fp = fp;
-        pc
     }
     /// Returns the current stack pointer.
     #[cfg_attr(not(debug_assertions), inline(always))]

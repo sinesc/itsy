@@ -16,10 +16,9 @@ use writer::{Writer, StoreConst};
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
 use crate::bytecode::runtime::vm::VM;
 
-const CALLSIZE: StackOffset = 2 * 4; // previous FP and PC
-const ARG1: StackOffset = -CALLSIZE - 1 * 4;
-const ARG2: StackOffset = -CALLSIZE - 2 * 4;
-const ARG3: StackOffset = -CALLSIZE - 3 * 4;
+const ARG1: StackOffset = 0;
+const ARG2: StackOffset = 4;
+const ARG3: StackOffset = 8;
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `vm_func!` macro to generate a type implementing `VMData` and `VMFunc`.

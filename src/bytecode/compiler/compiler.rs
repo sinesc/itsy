@@ -5,7 +5,7 @@ mod locals;
 pub mod error;
 mod util;
 
-use std::{cell::RefCell, cell::Cell, collections::HashMap};
+use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
@@ -217,7 +217,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             comment!(self, "{}()", item.ident.name);
         }
 
-        // put args on stack, ensure temporaries are cleaned up later
+        // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, _index);
             self.compile_expression(arg)?;
@@ -458,15 +458,19 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, true));
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
+        frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
+        let arg_size = frame.arg_pos;
+        let ret_size = frame.ret_size;
         self.create_stack_frame_block(&item.block, &mut frame);
+        let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
         // store call info required to compile calls to this function
         let function_id = item.function_id.unwrap();
         let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
         self.functions.borrow_mut().insert(function_id, call_info);
         self.fix_targets(function_id, call_info);
         // reserve space for local variables on the stack
-        if frame.var_pos > 0 {
-            self.writer.reserve(frame.var_pos as u8);
+        if var_size > 0 {
+            self.writer.reserve(var_size as u8);
         }
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
@@ -491,8 +495,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(constructor) = constructor {
             self.write_cntzero(constructor);
         }
-        self.write_ret();
+
+        match ret_size {
+            0 => self.writer.ret0(arg_size),
+            1 => self.writer.ret8(arg_size),
+            2 => self.writer.ret16(arg_size),
+            4 => self.writer.ret32(arg_size),
+            8 => self.writer.ret64(arg_size),
+            _ => unreachable!(),
+        };
         self.locals.pop();
+
         Ok(())
     }
 
@@ -1623,10 +1636,5 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else {
             panic!("unsupported type")
         }
-    }
-
-    /// Writes a return instruction with the correct arguments for the current stack frame.
-    fn write_ret(self: &Self) {
-        self.writer.ret(self.locals.ret_size());
     }
 }

@@ -648,29 +648,43 @@ impl_vm!{
         T::from_index(func).exec(self, context);
     }
 
-    /// Function call. Saves state and sets programm counter to given addr. Expects
-    /// callee arguments on the stack.
+    /// Function call. Saves state and sets programm counter to given addr.
     fn call(&mut self, addr: StackAddress, arg_size: StackAddress) {
-        self.stack.push_frame(self.pc);
-        self.stack.fp = self.stack.sp() - arg_size; // new frame starts with arguments
-        self.pc = addr;                             // set new program counter
+        // stack: ... | ARGS
+        self.stack.push(self.stack.fp);
+        self.stack.fp = self.stack.sp() - arg_size - (size_of::<StackAddress>() as StackAddress);
+        self.stack.push(self.pc);
+        self.pc = addr;
+        // stack: ARGS | previous FP | previous PC | (local vars and dynamic stack follow here)
     }
 
     /// Function return. Restores state, removes arguments left on stack by caller and
     /// leaves call result on the stack.
-    fn ret(&mut self, ret_size: u8) {
-        let ret_size = ret_size as StackAddress;
-        // move function result to the beginning of this stack frame
-        if ret_size == 4 {
-            let arg: u32 = self.stack.load(self.stack.sp() - 4);
-            self.stack.store(self.stack.fp, arg);
-        } else if ret_size > 0 {
-            self.stack.copy(self.stack.sp() - ret_size, self.stack.fp, ret_size);
-        }
-        // truncate stack down, so that the result is the last item on the stack
-        self.stack.truncate(self.stack.fp + ret_size);
-        // remove stack frame, restore program counter
-        self.pc = self.stack.pop_frame();
+    fn ret0(&mut self, arg_size: StackAddress) {
+        // stack: ARGS | previous FP | previous PC | local vars
+        let prev_fp = self.stack.load_fp(arg_size as StackOffset);
+        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of::<StackAddress>() as StackOffset);
+        self.stack.truncate(self.stack.fp);
+        self.pc = prev_pc;
+        self.stack.fp = prev_fp;
+    }
+
+    /// Function return. Restores state, removes arguments left on stack by caller and
+    /// leaves call result on the stack.
+    fn <
+        ret8<T: Data8>(arg_size: StackAddress),
+        ret16<T: Data16>(arg_size: StackAddress),
+        ret32<T: Data32>(arg_size: StackAddress),
+        ret64<T: Data64>(arg_size: StackAddress),
+    >(&mut self) {
+        // stack: ARGS | previous FP | previous PC | local vars | RESULT
+        let prev_fp = self.stack.load_fp(arg_size as StackOffset);
+        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of::<StackAddress>() as StackOffset);
+        let ret: T = self.stack.top();
+        self.stack.store_fp(0, ret);
+        self.stack.truncate(self.stack.fp + size_of::<T>() as StackAddress);
+        self.pc = prev_pc;
+        self.stack.fp = prev_fp;
     }
 
     /// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
