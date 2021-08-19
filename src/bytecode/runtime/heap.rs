@@ -20,6 +20,8 @@ pub enum HeapRefOp {
     Inc,
     /// Decrease reference counter, free on zero.
     Dec,
+    /// Free if reference counter is 0, otherwise do nothing.
+    FreeTmp,
     /// Decrease reference counter but do not free on zero.
     Zero,
 }
@@ -96,6 +98,11 @@ impl Heap {
                     self.free(index);
                 } else {
                     (*refs) -= 1;
+                }
+            }
+            HeapRefOp::FreeTmp => {
+                if *refs == 0 {
+                    self.free(index);
                 }
             }
             HeapRefOp::Zero => {

@@ -9,8 +9,8 @@ use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp, ARG1, ARG2, ARG3};
-use locals::{Local, Locals, LocalsStack};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
+use locals::{Local, Locals, LocalsStack, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
 
@@ -162,11 +162,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
-                self.write_cntinc2(ty);
                 self.compile_expression(&item.right)?; // stack: left right
-                self.write_cntinc2(ty);
                 match item.op { // stack: result
-                    BO::AddAssign => self.write_add(ty, true),
+                    BO::AddAssign => self.write_add(ty),
                     BO::SubAssign => self.write_sub(ty),
                     BO::MulAssign => self.write_mul(ty),
                     BO::DivAssign => self.write_div(ty),
@@ -194,11 +192,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.write_clone(&Type::HeapRefSize);       // stack: &left &left
                 self.write_heap_fetch(ty);                      // stack: &left left
-                self.write_cntinc2(ty);
                 self.compile_expression(&item.right)?;      // stack: &left left right
-                self.write_cntinc2(ty);
                 match item.op {                                 // stack: &left result
-                    BO::AddAssign => self.write_add(ty, true),
+                    BO::AddAssign => self.write_add(ty),
                     BO::SubAssign => self.write_sub(ty),
                     BO::MulAssign => self.write_mul(ty),
                     BO::DivAssign => self.write_div(ty),
@@ -217,14 +213,23 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             comment!(self, "{}()", item.ident.name);
         }
 
+        let function_info = self.bindings.function(item.function_id.unwrap());
+
         // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, _index);
             self.compile_expression(arg)?;
-            self.maybe_ref_temporary(HeapRefOp::Inc, arg);
-        }
 
-        let function_info = self.bindings.function(item.function_id.unwrap());
+            match function_info.kind.unwrap() {
+                FunctionKind::Method(_) | FunctionKind::Function => {
+                    let ty = self.item_type(arg);
+                    if ty.is_ref() {
+                        self.write_cntinc(self.get_constructor(ty));
+                    }
+                },
+                _ => { }
+            }
+        }
 
         match function_info.kind.unwrap() {
             FunctionKind::Rust(rust_fn_index) => {
@@ -249,10 +254,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
                 self.writer.call(target.addr, target.arg_size);
             },
-        }
-
-        for arg in item.args.iter().rev() {
-            self.maybe_ref_temporary(HeapRefOp::Dec, arg);
         }
 
         Ok(())
@@ -448,14 +449,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given function.
     fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
+
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
         comment!(self, "\nfn {}", item.sig.ident.name);
+
         // create local environment
         let mut frame = Locals::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, true));
+            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, LocalOrigin::Argument, true));
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
         frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
@@ -468,32 +471,43 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
         self.functions.borrow_mut().insert(function_id, call_info);
         self.fix_targets(function_id, call_info);
+
         // reserve space for local variables on the stack
         if var_size > 0 {
             self.writer.reserve(var_size as u8);
         }
+
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
         self.compile_block(&item.block)?;
+        let mut frame = self.locals.pop();
+
         // fix forward-to-exit jmps within the function
         let exit_address = self.writer.position();
-        self.locals.borrow_mut(|frame| {
-            while let Some(jmp_address) = frame.unfixed_exit_jmps.pop() {
-                self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
-            }
-        });
-        // handle exit
-        comment!(self, "fn exiting");
-        let constructor = item.sig.ret.as_ref().map_or(None, |ret| {
-            let ty = self.item_type(ret);
-            if ty.is_ref() { Some(self.get_constructor(ty)) } else { None }
-        });
-        if let Some(constructor) = constructor {
-            self.write_cntinc(constructor);
+        while let Some(jmp_address) = frame.unfixed_exit_jmps.pop() {
+            self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
         }
-        self.write_cntdec_all();
-        if let Some(constructor) = constructor {
-            self.write_cntzero(constructor);
+
+        // handle exit
+        comment!(self, "exiting fn {}", item.sig.ident.name);
+
+        // decrease argument ref-count
+        for arg in item.sig.args.iter() {
+            let ty = self.item_type(arg);
+            if ty.is_ref() {
+                let arg = frame.lookup(arg.binding_id.unwrap());
+                self.write_load(arg.index as StackOffset, ty);
+                self.write_cntdec(self.get_constructor(ty));
+            }
+        }
+
+        // decrease local variable ref-count //FIXME this needs to happen per block
+        for (&binding_id, local) in frame.map.iter().filter(|(_, local)| local.active && local.origin == LocalOrigin::Binding) {
+            let ty = self.bindings.binding_type(binding_id);
+            if ty.is_ref() {
+                self.write_load(local.index as StackOffset, ty);
+                self.write_cntdec(self.get_constructor(ty));
+            }
         }
 
         match ret_size {
@@ -504,7 +518,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             8 => self.writer.ret64(arg_size),
             _ => unreachable!(),
         };
-        self.locals.pop();
 
         Ok(())
     }
@@ -647,15 +660,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let ty_left = self.item_type(&item.left);
 
         // compile left, right and store references, left and right will be consumed
-        self.compile_expression(&item.left)?;
-        self.maybe_ref_temporary(HeapRefOp::Inc, &item.left);
+        self.compile_expression(&item.left)?; // stack: left
         comment!(self, "{}", item.op);
-        self.compile_expression(&item.right)?;
-        self.maybe_ref_temporary(HeapRefOp::Inc, &item.right);
+        self.compile_expression(&item.right)?; // stack: left right
 
-        match item.op {
+        match item.op {                             // stack: result
             // arithmetic/concat
-            BO::Add => self.write_add(ty_result, false),
+            BO::Add => self.write_add(ty_result),
             BO::Sub => self.write_sub(ty_result),
             BO::Mul => self.write_mul(ty_result),
             BO::Div => self.write_div(ty_result),
@@ -670,8 +681,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             _ => unreachable!("Invalid simple-operation {:?} in compile_binary_op", item.op),
         }
 
-        self.maybe_ref_temporary(HeapRefOp::Dec, &item.right);
-        self.maybe_ref_temporary(HeapRefOp::Dec, &item.left);
         Ok(())
     }
 
@@ -871,13 +880,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos, false));
+                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos, LocalOrigin::Binding, false));
                 frame.var_pos += self.item_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos, false));
+                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos, LocalOrigin::Binding, false));
                 frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -1063,32 +1072,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-
-    /// Writes an appropriate variant of the cntinc instruction.
-    fn write_cntinc2(self: &Self, ty: &Type) {
-        if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
-            opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
-        }
-    }
-
-    /// Writes an appropriate variant of the cntdec instruction.
-    fn write_cntdec2(self: &Self, ty: &Type) {
-        if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
-            opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
-        }
-    }
-
-    /// Writes an appropriate variant of the cntzero instruction.
-    fn write_cntzero2(self: &Self, ty: &Type) {
-        if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
-            opcode_unsigned!(self, cntzero_8_nc, cntzero_16_nc, cntzero_sa_nc, constructor);
-        }
-    }
-
-
     /// Writes an appropriate variant of the cntinc instruction.
     fn write_cntinc(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
@@ -1097,45 +1080,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the cntdec instruction.
     fn write_cntdec(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
-    }
-
-    /// Writes an appropriate variant of the cntzero instruction.
-    fn write_cntzero(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntzero_8_nc, cntzero_16_nc, cntzero_sa_nc, constructor);
-    }
-
-    // TODO: try to remove tmp64 handling
-    fn maybe_ref_temporary(self: &Self, op: HeapRefOp, item: &ast::Expression<'ast>) {
-        let ty = self.item_type(item);
-        if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
-            match op {
-                HeapRefOp::Inc => {
-                    self.writer.cntstore_nc();
-                    self.write_cntinc(constructor);
-                }
-                HeapRefOp::Dec => {
-                    self.writer.cntpop();
-                    self.write_cntdec(constructor);
-                }
-                HeapRefOp::Zero => unreachable!("Invalid heap ref op")
-            }
-
-        }
-    }
-
-    /// Writes operations to unref local heap objects.
-    fn write_cntdec_all(self: &Self) {
-        self.locals.borrow_mut(|locals| {
-            for (&binding_id, local) in locals.map.iter().filter(|(_, local)| local.active) {
-                let ty = self.bindings.binding_type(binding_id);
-                if ty.is_ref() {
-                    let constructor = self.get_constructor(ty);
-                    self.write_load(local.index as StackOffset, ty);
-                    self.write_cntdec(constructor);
-                }
-            }
-        });
     }
 
     /// Writes instructions to compute member offset for access on a struct.
@@ -1148,7 +1092,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             assert!(::std::mem::size_of::<StackAddress>() == ::std::mem::size_of::<u32>());
             let const_id = self.writer.store_const(offset);
             self.write_const(const_id, &STACK_ADDRESS_TYPE);
-            self.write_add(&STACK_ADDRESS_TYPE, false)
+            self.write_add(&STACK_ADDRESS_TYPE)
         }
     }
 
@@ -1498,7 +1442,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Write addition instruction.
-    fn write_add(self: &Self, ty: &Type, compound_assign: bool) {
+    fn write_add(self: &Self, ty: &Type) {
         match ty {
             Type::i8 | Type::u8 => self.writer.addi8(),
             Type::i16 | Type::u16 => self.writer.addi16(),
@@ -1506,7 +1450,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::i64 | Type::u64 => self.writer.addi64(),
             Type::f32 => self.writer.addf32(),
             Type::f64 => self.writer.addf64(),
-            Type::String => self.writer.string_concatx(compound_assign as u8),
+            Type::String => self.writer.string_concatx(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }

@@ -149,22 +149,25 @@ macro_rules! vm_func {
     (@handle_param $vm:ident, f32) => { $vm.stack.pop() };
     (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
     (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
-    (@handle_param $vm:ident, String) => { {
-        let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
-        $vm.heap.string(item).to_string()
-    } };
-    (@handle_param $vm:ident, str) => { {
-        let item: $crate::runtime::heap::HeapRef = $vm.stack.pop();
-        $vm.heap.string(item)
-    } };
-    (@handle_param $vm:ident, & $_:tt) => { {
-        compile_error!("Unsupported parameter type");
-    } };
+    (@handle_param $vm:ident, String) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, str) => { $vm.stack.pop() };
+    (@handle_param_type String) => { $crate::runtime::heap::HeapRef };
+    (@handle_param_type str) => { $crate::runtime::heap::HeapRef };
+    (@handle_param_type $other:ident) => { $other };
+
+    (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
+    (@handle_ref_param $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
+    (@handle_ref_param $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
+    (@handle_ref_param_type $other:ident) => { $other };
+
+    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::FreeTmp) };
+    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::FreeTmp) };
+    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
+
     (@handle_param $vm:ident, $_:tt) => { {
-        compile_error!("Unsupported parameter type");
+        compile_error!("Unsupported parameter type")
     } };
-    (@handle_str str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
-    (@handle_str $other:ident) => { $other };
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
             fn into_index(self: Self) -> $crate::RustFnIndex {
@@ -197,14 +200,23 @@ macro_rules! vm_func {
                     $(
                         $type_name::$name => {
                             let $context = context;
-                            // set rust function arguments, insert function body
+                            // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
+                            $(
+                                let $arg_name: vm_func!(@handle_param_type $arg_type) = vm_func!(@handle_param vm, $arg_type);
+                            )*
+                            // Run code.
                             let ret = {
+                                // Shadow HeapRef arguments with actual argument value.
                                 $(
-                                    let $arg_name: vm_func!(@handle_str $arg_type) = vm_func!(@handle_param vm, $arg_type);
+                                    let $arg_name: vm_func!(@handle_ref_param_type $arg_type) = vm_func!(@handle_ref_param vm, $arg_type, $arg_name);
                                 )*
                                 $code
                             };
-                            // set return value, if any
+                            // Handle refcounting.
+                            $(
+                                vm_func!(@handle_ref_param_free vm, $arg_type, $arg_name);
+                            )*
+                            // Set return value, if any.
                             $(
                                 let ret_typed: $ret_type = ret;
                                 vm_func!(@handle_ret vm, $ret_type, ret_typed);

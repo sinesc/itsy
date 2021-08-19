@@ -34,7 +34,6 @@ pub struct VM<T, U> where T: VMFunc<T> {
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
-    pub cnt                 : Stack,
 }
 
 /// Public VM methods.
@@ -51,7 +50,6 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
             state       : VMState::Ready,
             stack       : stack,
             heap        : Heap::new(),
-            cnt         : Stack::new(),
         }
     }
 
@@ -83,7 +81,6 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     pub fn reset(self: &mut Self) {
         self.stack.reset();
         self.heap.reset();
-        self.cnt.reset();
         self.pc = 0;
         self.state = VMState::Ready;
     }

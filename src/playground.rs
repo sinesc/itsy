@@ -66,8 +66,8 @@ fn main() {
                 }
                 let vmstate = vm.step(&mut ());
                 if let Some(instruction) = instruction {
-                    if instruction.starts_with("[") == false {
-                        log("logs/run.ini", true, &format!(";    stack {:?}\n;    cnt   {:?}\n;    heap  {:?}", vm.stack.frame(), vm.cnt.frame(), vm.heap.data()));
+                    if instruction.starts_with("[") == false && instruction.starts_with("\n") == false {
+                        log("logs/run.ini", true, &format!(";    stack {:?}\n;    heap  {:?}", vm.stack.frame(), vm.heap.data()));
                     }
                 }
                 if vmstate != runtime::VMState::Ready {

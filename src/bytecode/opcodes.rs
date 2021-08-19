@@ -621,27 +621,16 @@ impl_vm!{
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec);
     }
-    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0.
+    /// Pops a heap reference off the stack and frees it if it has a reference count of 0.
     fn <
-        cntzero_8_nc(constructor: u8 as StackAddress),
-        cntzero_16_nc(constructor: u16 as StackAddress),
-        cntzero_sa_nc(constructor: StackAddress),
+        cntfreetmp_8(constructor: u8 as StackAddress),
+        cntfreetmp_16(constructor: u16 as StackAddress),
+        cntfreetmp_sa(constructor: StackAddress),
     >(&mut self) {
-        let item: HeapRef = self.stack.top();
-        self.refcount_value(item, constructor, HeapRefOp::Zero);
+        let item: HeapRef = self.stack.pop();
+        self.refcount_value(item, constructor, HeapRefOp::FreeTmp);
     }
 
-    /// Reads the top value off the stack and pushes it onto the tmp stack.
-    fn cntstore_nc(&mut self) {
-        let value: HeapRef = self.stack.top();
-        self.cnt.push(value);
-    }
-
-    /// Pops the top value off the tmp stack and pushes it onto the stack.
-    fn cntpop(&mut self) {
-        let value: HeapRef = self.cnt.pop();
-        self.stack.push(value);
-    }
 
     /// Calls the given Rust function.
     fn rustcall(&mut self, &mut context, func: RustFn) {
@@ -700,6 +689,9 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Eq);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
     /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_cneq(&mut self, num_bytes: StackAddress) {
@@ -707,6 +699,9 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Neq);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
 
     /// Pops 2 heap references to strings, compares the strings for equality and pushes the result.
@@ -715,6 +710,9 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Eq);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
     /// Pops 2 heap references to strings, compares the strings for inequality and pushes the result.
     fn string_cneq(&mut self) {
@@ -722,6 +720,9 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Neq);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
     /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
     fn string_clt(&mut self) {
@@ -729,6 +730,9 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lt);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
     /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
     fn string_clte(&mut self) {
@@ -736,23 +740,24 @@ impl_vm!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
         self.stack.push(equals as Data8);
+
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
     /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
-    fn string_concatx(&mut self, compound_assign: u8) {
-        let src_b: HeapRef = self.stack.pop();
-        let src_b_len = self.heap.size_of(src_b.index());
-        let src_a: HeapRef = self.stack.pop();
-        let src_a_len = self.heap.size_of(src_a.index());
+    fn string_concatx(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let b_len = self.heap.size_of(b.index());
+        let a: HeapRef = self.stack.pop();
+        let a_len = self.heap.size_of(a.index());
 
         let dest_index: StackAddress = self.heap.alloc(Vec::new());
-        self.heap.copy(HeapRef::new(dest_index, 0), src_a, src_a_len);
-        self.heap.copy(HeapRef::new(dest_index, src_a_len), src_b, src_b_len);
+        self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
+        self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
         self.stack.push(HeapRef::new(dest_index, 0));
 
-        if compound_assign != 0 {
-            self.heap.ref_item(src_a.index(), HeapRefOp::Dec);
-            self.heap.ref_item(src_b.index(), HeapRefOp::Dec);
-        }
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.

@@ -2,18 +2,26 @@ use std::{collections::HashMap, cell::RefCell};
 use crate::StackAddress;
 use crate::shared::typed_ids::BindingId;
 
+#[derive(Copy,Clone, PartialEq)]
+pub enum LocalOrigin {
+    Binding,
+    Argument,
+}
+
 /// Describes a single local variable of a stack frame
 #[derive(Copy,Clone)]
 pub struct Local {
     /// The load-index for this variable.
     pub index: StackAddress,
+    /// Whether is is an argument passed into a function or a binding.
+    pub origin: LocalOrigin,
     /// Whether this variable is currently in scope (stack frame does not equal scope!)
     pub active: bool,
 }
 
 impl Local {
-    pub fn new(index: StackAddress, active: bool) -> Self {
-        Local { index, active }
+    pub fn new(index: StackAddress, origin: LocalOrigin, active: bool) -> Self {
+        Local { index, origin, active }
     }
 }
 
@@ -71,20 +79,14 @@ impl LocalsStack {
     pub fn pop(self: &Self) -> Locals {
         self.0.borrow_mut().pop().expect(Self::NO_STACK)
     }
-    /// Borrow the top stack frame descriptor within given function.
-    pub fn borrow_mut(self: &Self, func: impl FnOnce(&mut Locals)) {
-        let mut inner = self.0.borrow_mut();
-        let mut locals = inner.last_mut().expect(Self::NO_STACK);
-        func(&mut locals);
-    }
     // /// Returns the argument size in bytes for the top stack frame descriptor.
     //pub fn arg_size(self: &Self) -> StackAddress {
     //    self.0.borrow().last().expect(Self::NO_STACK).arg_pos
     //}
-    /// Returns the return value size in bytes for the top stack frame descriptor.
-    pub fn ret_size(self: &Self) -> u8 {
-        self.0.borrow().last().expect(Self::NO_STACK).ret_size
-    }
+    // /// Returns the return value size in bytes for the top stack frame descriptor.
+    //pub fn ret_size(self: &Self) -> u8 {
+    //    self.0.borrow().last().expect(Self::NO_STACK).ret_size
+    //}
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         self.0.borrow().last().expect(Self::NO_STACK).lookup(binding_id)
