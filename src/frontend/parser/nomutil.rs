@@ -88,11 +88,11 @@ impl<'a, 'b> Compare<&'b str> for Input<'a> {
 impl<'a, 'b> Compare<Input<'b>> for Input<'a> {
     #[inline(always)]
     fn compare(&self, t: Input<'b>) -> CompareResult {
-        self.data.compare(&t)
+        self.data.compare(t.data)
     }
     #[inline(always)]
     fn compare_no_case(&self, t: Input<'b>) -> CompareResult {
-        self.data.compare_no_case(&t)
+        self.data.compare_no_case(t.data)
     }
 }
 
