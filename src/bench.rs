@@ -19,15 +19,10 @@ vm_func!(BenchFn, Bench, {
     fn rust_fib_r(&mut context, n: i32) -> i32 {
         fib_r(n)
     }
-});
-
-fn fib_r(n: i32) -> i32 {
-    if n < 2 {
-        n
-    } else {
-        fib_r(n - 1) + fib_r(n - 2)
+    fn rust_fib_i(&mut context, n: i32) -> i32 {
+        fib_i(n)
     }
-}
+});
 
 fn main() {
     println!("Ballpark Bench™ - As accurate as football field units");
@@ -48,4 +43,32 @@ fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
     let parsed = parser::parse(source)?;
     let resolved = resolver::resolve::<BenchFn>(parsed, "main")?;
     Ok(compiler::compile(resolved)?)
+}
+fn fib_r(n: i32) -> i32 {
+    if n < 2 {
+        n
+    } else {
+        fib_r(n - 1) + fib_r(n - 2)
+    }
+}
+
+fn fib_i(n: i32) -> i32 {
+
+    let mut i = 0;
+    let mut j = 1;
+    let mut k = 1;
+    let mut t;
+
+    if n == 0 {
+       return 0;
+    }
+
+    while k < n {
+        t = i + j;
+        i = j;
+        j = t;
+        k += 1;
+    }
+
+    return j;
 }
