@@ -1,5 +1,5 @@
-/// The `impl_vm` macro to generate bytecode writers and readers from instruction signatures.
-macro_rules! impl_vm {
+/// The `impl_opcodes` macro to generate bytecode writers and readers from instruction signatures.
+macro_rules! impl_opcodes {
 
     // perform read from slice
     (do_read $ty:tt, $from:ident, $counter:expr) => ( {
@@ -10,21 +10,21 @@ macro_rules! impl_vm {
     });
 
     // wrappers for readers and writers
-    (read RustFn, $from:ident, $counter:expr) => ( impl_vm!(do_read RustFnIndex, $from, $counter) );
-    (read u8, $from:ident, $counter:expr) => ( impl_vm!(do_read u8, $from, $counter) );
-    (read u16, $from:ident, $counter:expr) => ( impl_vm!(do_read u16, $from, $counter) );
-    (read u32, $from:ident, $counter:expr) => ( impl_vm!(do_read u32, $from, $counter) );
-    (read u64, $from:ident, $counter:expr) => ( impl_vm!(do_read u64, $from, $counter) );
-    (read i8,  $from:ident, $counter:expr) => ( impl_vm!(do_read i8, $from, $counter) );
-    (read i16, $from:ident, $counter:expr) => ( impl_vm!(do_read i16, $from, $counter) );
-    (read i32, $from:ident, $counter:expr) => ( impl_vm!(do_read i32, $from, $counter) );
-    (read i64, $from:ident, $counter:expr) => ( impl_vm!(do_read i64, $from, $counter) );
-    (read f32, $from:ident, $counter:expr) => ( impl_vm!(do_read f32, $from, $counter) );
-    (read f64, $from:ident, $counter:expr) => ( impl_vm!(do_read f64, $from, $counter) );
-    (read StackAddress, $from:ident, $counter:expr) => ( impl_vm!(do_read StackAddress, $from, $counter) );
-    (read StackOffset, $from:ident, $counter:expr) => ( impl_vm!(do_read StackOffset, $from, $counter) );
+    (read RustFn, $from:ident, $counter:expr) => ( impl_opcodes!(do_read RustFnIndex, $from, $counter) );
+    (read u8, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u8, $from, $counter) );
+    (read u16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u16, $from, $counter) );
+    (read u32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u32, $from, $counter) );
+    (read u64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u64, $from, $counter) );
+    (read i8,  $from:ident, $counter:expr) => ( impl_opcodes!(do_read i8, $from, $counter) );
+    (read i16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i16, $from, $counter) );
+    (read i32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i32, $from, $counter) );
+    (read i64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i64, $from, $counter) );
+    (read f32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f32, $from, $counter) );
+    (read f64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f64, $from, $counter) );
+    (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
+    (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
-        let len = impl_vm!(do_read StackAddress, $from, $counter);
+        let len = impl_opcodes!(do_read StackAddress, $from, $counter);
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
@@ -61,7 +61,7 @@ macro_rules! impl_vm {
         )+
     ) => {
 
-        /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_vm!` macro.
+        /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
         /// # Naming
         ///
         /// `<op><suffix1>[_<suffix2>[_nc]]`
@@ -124,7 +124,7 @@ macro_rules! impl_vm {
             }
         }
 
-        /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_vm!` macro.
+        /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
         impl<T> crate::bytecode::Writer<T> where T: crate::bytecode::VMFunc<T> {
             $(
                 $( #[ $attr ] )*
@@ -132,11 +132,11 @@ macro_rules! impl_vm {
                 $(
                     $(
                         #[allow(unused_imports)]
-                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_vm!(map_writer_type $variant_type) ),* ) -> StackAddress {
+                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
                             let insert_pos = self.position();
-                            impl_vm!(write u8, OpCode::$variant_name as u8, self);
+                            impl_opcodes!(write u8, OpCode::$variant_name as u8, self);
                             $(
-                                impl_vm!(write $variant_type, $variant_arg, self);
+                                impl_opcodes!(write $variant_type, $variant_arg, self);
                             )*
                             insert_pos as StackAddress
                         }
@@ -145,52 +145,25 @@ macro_rules! impl_vm {
                 // single opcode
                 $(
                     #[allow(unused_imports)]
-                    pub fn $name(self: &Self, $($arg_name: impl_vm!(map_writer_type $arg_type)),* ) -> StackAddress {
+                    pub fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
-                        impl_vm!(write u8, OpCode::$name as u8, self);
-                        $( impl_vm!(write $arg_type, $arg_name, self); )*
+                        impl_opcodes!(write u8, OpCode::$name as u8, self);
+                        $( impl_opcodes!(write $arg_type, $arg_name, self); )*
                         insert_pos as StackAddress
                     }
                 )?
             )+
         }
 
-        /// Bytecode instructions. Implemented on VM by the `impl_vm!` macro.
+        /// Bytecode execution/output/debug.
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
-
-            // Generate methods for executing each bytecode on VM struct.
-            $(
-                $( #[ $attr ] )*
-                $(
-                    #[cfg_attr(not(debug_assertions), inline(always))]
-                    fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_vm!(map_reader_type $arg_type)),* ) {
-                        $code
-                    }
-                )?
-                $(
-                    $(
-                        #[cfg_attr(not(debug_assertions), inline(always))]
-                        fn $variant_name ( $variant_self: &mut Self, $( $variant_arg: impl_vm!(map_reader_type $variant_type) ),* ) {
-                            $(
-                                $( type $generic_name = $generic_type; )+
-                            )?
-                            $(
-                                $(
-                                    let $variant_arg = $variant_arg as $variant_type_as;
-                                )?
-                            )*
-                            $code
-                        }
-                    )+
-                )?
-            )+
 
             /// Returns disassembled opcode at given position along with the next opcode position.
             pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<(OpCode, StackAddress)> {
                 use std::convert::TryInto;
                 let mut pc = position;
                 if pc < self.instructions.len() as StackAddress {
-                    let instruction = impl_vm!(read u8, self, pc);
+                    let instruction = impl_opcodes!(read u8, self, pc);
                     Some((OpCode::from_u8(instruction), pc))
                 } else {
                     None
@@ -208,11 +181,11 @@ macro_rules! impl_vm {
                         // implement special formatting for some opcodes
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", T::from_index( impl_vm!(read RustFn, self, pc) )));
+                            result.push_str(&format!("{:?} ", T::from_index( impl_opcodes!(read RustFn, self, pc) )));
                             Some((result, pc))
                         }
                         OpCode::comment => {
-                            let message = impl_vm!(read String, self, pc);
+                            let message = impl_opcodes!(read String, self, pc);
                             let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
                             Some((result, pc))
                         }
@@ -222,7 +195,7 @@ macro_rules! impl_vm {
                                 OpCode::$name => {
                                     let mut result = format!("{:?} {} ", position, stringify!($name));
                                     $(
-                                        result.push_str(&format!("{:?} ", impl_vm!(read $arg_type, self, pc) ));
+                                        result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, pc) ));
                                     )*
                                     Some((result, pc))
                                 }
@@ -233,7 +206,7 @@ macro_rules! impl_vm {
                                     OpCode::$variant_name => {
                                         let mut result = format!("{:?} {} ", position, stringify!($variant_name));
                                         $(
-                                            result.push_str(&format!("{:?} ", impl_vm!(read $variant_type, self, pc) ));
+                                            result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, pc) ));
                                         )*
                                         Some((result, pc))
                                     }
@@ -251,14 +224,14 @@ macro_rules! impl_vm {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use std::convert::TryInto;
                 loop {
-                    let instruction = impl_vm!(read u8, self, self.pc);
+                    let instruction = impl_opcodes!(read u8, self, self.pc);
                     #[allow(unreachable_patterns)]
                     match OpCode::from_u8(instruction) {
                         $(
                             // handle single opcode
                             $(
                                 OpCode::$name => {
-                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
+                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
                                     $( $ret; )?
@@ -269,7 +242,7 @@ macro_rules! impl_vm {
                                 $(
                                     OpCode::$variant_name => {
                                         $(
-                                            let $variant_arg: $variant_type = impl_vm!(read $variant_type, self, self.pc);
+                                            let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                         )*
                                         self.$variant_name( $( $variant_arg ),* );
                                     }
@@ -285,14 +258,14 @@ macro_rules! impl_vm {
             #[cfg_attr(not(debug_assertions), inline(always))]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 use std::convert::TryInto;
-                let instruction = impl_vm!(read u8, self, self.pc);
+                let instruction = impl_opcodes!(read u8, self, self.pc);
                 #[allow(unreachable_patterns)]
                 match OpCode::from_u8(instruction) {
                     $(
                         // handle single opcode
                         $(
                             OpCode::$name => {
-                                let ( (), $( $arg_name ),* ) = ( (), $( impl_vm!(read $arg_type, self, self.pc) ),* );
+                                let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
                                 $( $ret; )?
@@ -303,7 +276,7 @@ macro_rules! impl_vm {
                             $(
                                 OpCode::$variant_name => {
                                     $(
-                                        let $variant_arg: $variant_type = impl_vm!(read $variant_type, self, self.pc);
+                                        let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                     )*
                                     self.$variant_name( $( $variant_arg ),* );
                                 }
@@ -312,6 +285,37 @@ macro_rules! impl_vm {
                     ),+
                 }
             }
+        }
+
+        /// Bytecode instructions. Implemented on VM by the `impl_opcodes!` macro.
+        impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
+
+            // Generate methods for executing each bytecode on VM struct.
+            $(
+                $( #[ $attr ] )*
+                $(
+                    #[cfg_attr(not(debug_assertions), inline(always))]
+                    fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(map_reader_type $arg_type)),* ) {
+                        $code
+                    }
+                )?
+                $(
+                    $(
+                        #[cfg_attr(not(debug_assertions), inline(always))]
+                        fn $variant_name ( $variant_self: &mut Self, $( $variant_arg: impl_opcodes!(map_reader_type $variant_type) ),* ) {
+                            $(
+                                $( type $generic_name = $generic_type; )+
+                            )?
+                            $(
+                                $(
+                                    let $variant_arg = $variant_arg as $variant_type_as;
+                                )?
+                            )*
+                            $code
+                        }
+                    )+
+                )?
+            )+
         }
     }
 }

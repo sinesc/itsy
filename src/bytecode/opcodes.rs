@@ -9,7 +9,7 @@ type Data16 = u16;
 type Data32 = u32;
 type Data64 = u64;
 
-impl_vm!{
+impl_opcodes!{
 
     /// Does nothing.
     fn noop(&mut self) { }
@@ -590,7 +590,7 @@ impl_vm!{
 
     /// Constructs an instance of a non-primitive type.
     fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
-        let mut constructor = constructor; // impl_vm macro does not allow mut arguments
+        let mut constructor = constructor; // impl_opcodes macro does not allow mut arguments
         let mut prototype = prototype; //if prototype < 0 { self.stack.sp() as i32 + prototype } else { prototype } as u32;
         self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, false);
     }
@@ -598,7 +598,7 @@ impl_vm!{
     /// Constructs an instance of a non-primitive type from a prototype that was dynamically constructed on the stack.
     /// This opcode expects any contained strings to already be constructed on the heap and be stored as references on the stack.
     fn construct_dyn(&mut self, constructor: StackAddress, relative_prototype: StackAddress) {
-        let mut constructor = constructor; // impl_vm macro does not allow mut arguments
+        let mut constructor = constructor; // impl_opcodes macro does not allow mut arguments
         let mut prototype = (self.stack.sp() as i32 - relative_prototype as i32) as StackAddress;
         self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, true);
     }

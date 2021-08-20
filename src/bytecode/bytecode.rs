@@ -2,7 +2,7 @@
 
 pub mod writer;
 #[macro_use]
-pub mod impl_vm;
+pub mod impl_opcodes;
 pub mod opcodes;
 #[path="compiler/compiler.rs"]
 pub mod compiler;
