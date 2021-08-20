@@ -31,11 +31,11 @@ pub enum HeapRefOp {
 pub(crate) struct HeapObject {
     refs: StackAddress,
     data: Vec<u8>,
-    epoch: u8,
+    epoch: usize,
 }
 
 impl HeapObject {
-    fn new(data: Vec<u8>, epoch: u8) -> Self {
+    fn new(data: Vec<u8>, epoch: usize) -> Self {
         Self {
             refs: 0,
             data: data,
@@ -49,7 +49,7 @@ impl HeapObject {
 pub struct Heap {
     objects: Vec<HeapObject>,
     free: Vec<StackAddress>,
-    epoch: u8,
+    epoch: usize,
 }
 
 impl Heap {
@@ -78,11 +78,11 @@ impl Heap {
         self.objects[index as usize].data.extend_from_slice(slice);
         position
     }
-    pub fn new_epoch(self: &mut Self) -> u8 {
+    pub fn new_epoch(self: &mut Self) -> usize {
         self.epoch = self.epoch.wrapping_add(1);
         self.epoch
     }
-    pub fn item_epoch(self: &Self, index: StackAddress) -> u8 {
+    pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
         self.objects[index as usize].epoch
     }
     /// Increase/decrease reference count for given heap object, optionally freeing it at count 0.

@@ -228,7 +228,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
-    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: u8) {
+    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
         match constructor {
             Constructor::Array => {
                 let num_elements = self.read_arg(&mut constructor_offset);
