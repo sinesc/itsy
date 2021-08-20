@@ -1,16 +1,19 @@
 
 pub use crate::shared::error::Error;
 
+#[cfg(feature="compiler")]
 pub mod parser {
     //! Sourcecode parsing.
     pub use crate::frontend::parser::{parse, types::ParsedProgram, error::{ParseError, ParseErrorKind}};
 }
 
+#[cfg(feature="compiler")]
 pub mod ast {
     //! Abstract syntax tree representation.
     pub use crate::frontend::ast::*;
 }
 
+#[cfg(feature="compiler")]
 pub mod resolver {
     //! Type resolution.
     pub use crate::frontend::resolver::{resolve, ResolvedProgram, error::ResolveError, error::ResolveErrorKind};
@@ -26,6 +29,7 @@ pub mod resolver {
     }
 }
 
+#[cfg(feature="compiler")]
 pub mod compiler {
     //! Bytecode generation.
     pub use crate::bytecode::Program;

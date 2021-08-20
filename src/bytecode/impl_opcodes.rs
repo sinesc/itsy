@@ -125,6 +125,7 @@ macro_rules! impl_opcodes {
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
+        #[cfg(feature="compiler")]
         impl<T> crate::bytecode::Writer<T> where T: crate::bytecode::VMFunc<T> {
             $(
                 $( #[ $attr ] )*

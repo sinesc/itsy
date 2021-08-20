@@ -1,15 +1,20 @@
-use crate::shared::{TypeContainer, BindingContainer, types::Type, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, TypeId, BindingId}};
+use crate::shared::{TypeContainer, types::Type, typed_ids::TypeId};
+#[cfg(feature="compiler")]
+use crate::shared::{BindingContainer, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, BindingId}};
 
 /// Program binding data. // FIXME: naming is bad. this is type information
 pub struct Bindings {
     /// Maps binding ids to binding info descriptors.
+    #[cfg(feature="compiler")]
     binding_map : Vec<BindingInfo>,
     /// Maps type ids to types.
     type_map    : Vec<Type>,
     /// Maps function ids to functions.
+    #[cfg(feature="compiler")]
     function_map: Vec<FunctionInfo>,
 }
 
+#[cfg(feature="compiler")]
 impl Bindings {
     pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<FunctionInfo>) -> Self {
         for info in binding_map.iter() {
@@ -61,6 +66,7 @@ impl TypeContainer for Bindings {
 }
 
 /// A container holding binding id to BindingInfo mappings
+#[cfg(feature="compiler")]
 impl BindingContainer for Bindings {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
         let binding_index = Into::<usize>::into(binding_id);

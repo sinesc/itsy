@@ -6,6 +6,7 @@
 //! Look at the [build] or [run] examples to get started.
 
 #[path="frontend/frontend.rs"]
+#[cfg(feature="compiler")]
 mod frontend;
 
 #[macro_use]
@@ -18,7 +19,10 @@ mod interface;
 
 pub use interface::*;
 
-use bytecode::{compiler::compile, runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
+use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
+#[cfg(feature="compiler")]
+use bytecode::compiler::compile;
+#[cfg(feature="compiler")]
 use frontend::{parser::parse, resolver::resolve};
 
 // configure data sizes
@@ -271,6 +275,7 @@ macro_rules! vm_func {
 ///     run(&program, &mut ()).unwrap();
 /// }
 /// ```
+#[cfg(feature="compiler")]
 pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
     let parsed = parse(source)?;
     let resolved = resolve::<F>(parsed, "main")?;

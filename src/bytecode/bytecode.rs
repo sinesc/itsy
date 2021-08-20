@@ -1,10 +1,12 @@
 //! Bytecode generation.
 
+#[cfg(feature="compiler")]
 pub mod writer;
 #[macro_use]
 pub mod impl_opcodes;
 pub mod opcodes;
 #[path="compiler/compiler.rs"]
+#[cfg(feature="compiler")]
 pub mod compiler;
 #[path="runtime/runtime.rs"]
 pub mod runtime;
@@ -12,6 +14,7 @@ pub mod runtime;
 use std::fmt::{self, Debug};
 use std::collections::HashMap;
 use std::marker::PhantomData;
+#[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
 use crate::bytecode::runtime::vm::VM;
@@ -48,6 +51,7 @@ pub struct Program<T> where T: VMFunc<T> {
 }
 
 impl<T> Program<T> where T: VMFunc<T> {
+    #[cfg(feature="compiler")]
     pub(crate) fn new() -> Self {
         Program {
             rust_fn             : PhantomData,
@@ -60,6 +64,7 @@ impl<T> Program<T> where T: VMFunc<T> {
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub(crate) enum ConstEndianness {
     None    = 0,
     Integer = 1,

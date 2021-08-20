@@ -2,6 +2,7 @@
 name = "itsy"
 version = "0.2.0"
 edition = "2018"
+resolver = "2"
 authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 description = "Strongly typed scripting language with a rusty syntax and nice Rust integration."
 documentation = "https://docs.rs/itsy/"
@@ -10,8 +11,15 @@ license = "MIT"
 readme = "README.md"
 keywords = [ "language", "scripting" ]
 
+[features]
+default = [ "compiler" ]
+compiler = [ "nom" ]
+
 [dependencies]
-nom = { version = "7.0.0-alpha3", default-features = false, features = [ "alloc" ] }
+nom = { version = "7.0.0-alpha3", default-features = false, features = [ "alloc" ], optional = true }
+
+[dev-dependencies]
+itsy = { path = ".", features = [ "compiler" ] }
 
 [lib]
 name = "itsy"
@@ -21,8 +29,10 @@ path = "src/lib.rs"
 doc = false
 name = "playground"
 path = "src/playground.rs"
+required-features = [ "compiler" ]
 
 [[bin]]
 doc = false
 name = "bench"
 path = "src/bench.rs"
+required-features = [ "compiler" ]

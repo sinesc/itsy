@@ -4,13 +4,17 @@ pub mod numeric;
 pub mod typed_ids;
 pub mod types;
 pub mod error;
+#[cfg(feature="compiler")]
 pub mod infos;
 pub mod bindings;
 
-use std::ops::Add;
-use std::fmt;
+#[cfg(feature="compiler")]
+use std::{ops::Add, fmt};
+#[cfg(feature="compiler")]
 use crate::frontend::ast::Position;
-use crate::{StackAddress, shared::{typed_ids::{BindingId, TypeId}, types::Type, infos::BindingInfo}};
+use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
+#[cfg(feature="compiler")]
+use crate::shared::{infos::BindingInfo, typed_ids::BindingId};
 
 /// A container holding type id to type mappings
 pub(crate) trait TypeContainer {
@@ -36,6 +40,7 @@ pub(crate) trait TypeContainer {
 }
 
 /// A container holding binding id to BindingInfo mappings
+#[cfg(feature="compiler")]
 pub(crate) trait BindingContainer {
     /// Returns a reference to the type id.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo;
@@ -44,11 +49,13 @@ pub(crate) trait BindingContainer {
 }
 
 #[derive(Copy, Clone, PartialEq)]
+#[cfg(feature="compiler")]
 pub(crate) struct Progress {
     pub current: usize,
     pub total: usize,
 }
 
+#[cfg(feature="compiler")]
 impl Progress {
     pub fn new(current: usize, total: usize) -> Self {
         Self { current, total }
@@ -61,12 +68,14 @@ impl Progress {
     }
 }
 
+#[cfg(feature="compiler")]
 impl fmt::Debug for Progress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.current, self.total)
     }
 }
 
+#[cfg(feature="compiler")]
 impl Add for Progress {
     type Output = Self;
     fn add(self, other: Self) -> Self {
@@ -78,6 +87,7 @@ impl Add for Progress {
 }
 
 /// Compute line/column number from absolute offset in string
+#[cfg(feature="compiler")]
 pub fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
     let mut parsed = &input[0..offset as usize];
     let mut line = 1;
