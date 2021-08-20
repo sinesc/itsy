@@ -35,6 +35,7 @@
             "args": [
                 "run",
                 "--features=\"compiler\"",
+                "--features=\"debugging\"",
                 "--bin",
                 "playground"
             ],

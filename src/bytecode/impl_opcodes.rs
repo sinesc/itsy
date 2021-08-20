@@ -160,6 +160,7 @@ macro_rules! impl_opcodes {
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
 
             /// Returns disassembled opcode at given position along with the next opcode position.
+            #[cfg(feature="debugging")]
             pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<(OpCode, StackAddress)> {
                 use std::convert::TryInto;
                 let mut pc = position;
@@ -174,6 +175,7 @@ macro_rules! impl_opcodes {
             /// Returns disassembled opcode as string at given position along with the next opcode position.
             //#[allow(unused_imports)]
             #[allow(unused_mut)]
+            #[cfg(feature="debugging")]
             pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
                 use std::convert::TryInto;
                 if let Some((opcode, mut pc)) = self.read_instruction(position) {
@@ -257,6 +259,7 @@ macro_rules! impl_opcodes {
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
             #[cfg_attr(not(debug_assertions), inline(always))]
+            #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 use std::convert::TryInto;
                 let instruction = impl_opcodes!(read u8, self, self.pc);

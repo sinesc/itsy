@@ -66,6 +66,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Executes single bytecode instruction.
+    #[cfg(feature="debugging")]
     pub fn step(self: &mut Self, context: &mut U) -> VMState {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             panic!("Attempted to run in non-ready state");
@@ -86,6 +87,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Disassembles the bytecode and returns it as a string.
+    #[cfg(feature="debugging")]
     pub fn format_program(self: &Self) -> String {
         let mut position = 0;
         let mut result = "".to_string();
@@ -98,16 +100,19 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Disassembles the current bytecode instruction and returns it as a string.
+    #[cfg(feature="debugging")]
     pub fn format_instruction(self: &Self) -> Option<String> {
         self.describe_instruction(self.pc).map(|result| result.0)
     }
 
     /// Returns the current stack as a string.
+    #[cfg(feature="debugging")]
     pub fn format_stack(self: &Self) -> String {
         format!("{:?}", self.stack)
     }
 
     /// Returns the current stack-frame as a string.
+    #[cfg(feature="debugging")]
     pub fn format_frame(self: &Self) -> String {
         format!("{:?}", &self.stack.frame())
     }

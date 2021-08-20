@@ -14,6 +14,7 @@ keywords = [ "language", "scripting" ]
 [features]
 default = [ "compiler" ]
 compiler = [ "nom" ]
+debugging = [ ]
 
 [dependencies]
 nom = { version = "7.0.0-alpha3", default-features = false, features = [ "alloc" ], optional = true }
@@ -29,7 +30,7 @@ path = "src/lib.rs"
 doc = false
 name = "playground"
 path = "src/playground.rs"
-required-features = [ "compiler" ]
+required-features = [ "compiler", "debugging" ]
 
 [[bin]]
 doc = false
