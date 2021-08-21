@@ -155,10 +155,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
                 self.write_storex(local, ty);
-                self.locals.set_active(binding_id, true);
+                self.locals.initialize(binding_id);
             },
             _ => {
-                if !local.active {
+                if !local.initialized {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
@@ -262,13 +262,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) -> CompileResult {
         let binding_id = item.binding_id.expect("Unresolved binding encountered");
+        self.locals.activate(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
             let local = self.locals.lookup(binding_id);
             let ty = self.item_type(item);
             self.write_storex(local, ty);
-            self.locals.set_active(binding_id, true);
+            self.locals.initialize(binding_id);
         }
         Ok(())
     }
@@ -279,7 +280,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
-            if !local.active {
+            if !local.initialized {
                 return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
             }
             local.index
@@ -429,9 +430,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles a for - in loop
     fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) -> CompileResult {
         use ast::{Expression, BinaryOperator as Op};
-        // activate iter variable
+        // initialize iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-        let iter_local = self.locals.set_active(binding_id, true);
+        self.locals.push_block();
+        let iter_local = self.locals.initialize(binding_id);
         let iter_ty = self.item_type(&item.iter);
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
@@ -443,7 +445,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => Err(CompileError::new(item, CompileErrorKind::Internal))
         };
-        self.locals.set_active(binding_id, false);
+        self.locals.pop_block();
         result
     }
 
@@ -454,28 +456,29 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let position = self.writer.position();
         comment!(self, "\nfn {}", item.sig.ident.name);
 
-        // create local environment
+        // create arguments in local environment
         let mut frame = Locals::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.map.insert(arg.binding_id.unwrap(), Local::new(frame.arg_pos, LocalOrigin::Argument, true));
+            frame.insert(arg.binding_id.unwrap(), frame.arg_pos, LocalOrigin::Argument);
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
+
+        // create variables in local environment and reserve space on the stack
         frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
         let arg_size = frame.arg_pos;
         let ret_size = frame.ret_size;
         self.create_stack_frame_block(&item.block, &mut frame);
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
+        if var_size > 0 {
+            self.writer.reserve(var_size as u8);
+        }
+
         // store call info required to compile calls to this function
         let function_id = item.function_id.unwrap();
         let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
         self.functions.borrow_mut().insert(function_id, call_info);
         self.fix_targets(function_id, call_info);
-
-        // reserve space for local variables on the stack
-        if var_size > 0 {
-            self.writer.reserve(var_size as u8);
-        }
 
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
@@ -501,15 +504,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             }
         }
 
-        // decrease local variable ref-count //FIXME this needs to happen per block
-        for (&binding_id, local) in frame.map.iter().filter(|(_, local)| local.active && local.origin == LocalOrigin::Binding) {
-            let ty = self.bindings.binding_type(binding_id);
-            if ty.is_ref() {
-                self.write_load(local.index as StackOffset, ty);
-                self.write_cntdec(self.get_constructor(ty));
-            }
-        }
-
         match ret_size {
             0 => self.writer.ret0(arg_size),
             1 => self.writer.ret8(arg_size),
@@ -524,19 +518,43 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given block.
     fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
+        self.locals.push_block();
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
         }
         if let Some(returns) = &item.returns {
             comment!(self, "block returning");
             self.compile_expression(returns)?;
+            self.decref_block_locals();
             let exit_jump = self.writer.jmp(123);
             self.locals.add_forward_jmp(exit_jump);
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
+            self.decref_block_locals();
+        } else {
+            self.decref_block_locals();
         }
+
+        // decrease local variable ref-count
+        self.locals.pop_block();
         Ok(())
+    }
+
+    // FIXME: to handle ret instruction this may need to run recursively
+    fn decref_block_locals(self: &Self) {
+
+        let frame = self.locals.pop();
+        for (&binding_id, local) in frame.map.iter() {
+            if frame.block_index == local.block_index && local.initialized && local.origin == LocalOrigin::Binding {
+                let ty = self.bindings.binding_type(binding_id);
+                if ty.is_ref() {
+                    self.write_load(local.index as StackOffset, ty);
+                    self.write_cntdec(self.get_constructor(ty));
+                }
+            }
+        }
+        self.locals.push(frame);
     }
 
     /// Compiles the given literal
@@ -842,7 +860,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Creates stack frame variables for expressions.
+    /// Creates stack frame variables for expressions. // FIXME move this into AST
     fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut Locals) {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame);
@@ -875,18 +893,18 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Creates stack frame variables for blocks.
+    /// Creates stack frame variables for blocks. // FIXME move this into AST
     fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut Locals) {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                frame.map.insert(binding.binding_id.unwrap(), Local::new(frame.var_pos, LocalOrigin::Binding, false));
+                frame.insert(binding.binding_id.unwrap(), frame.var_pos, LocalOrigin::Binding);
                 frame.var_pos += self.item_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.map.insert(for_loop.iter.binding_id.unwrap(), Local::new(frame.var_pos, LocalOrigin::Binding, false));
+                frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos, LocalOrigin::Binding);
                 frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -1199,7 +1217,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn write_storex(self: &Self, local: Local, ty: &Type) -> StackAddress {
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
-            if local.active {
+            if local.initialized {
                 self.writer.storex_replace(local.index as StackOffset, constructor)
             } else {
                 self.writer.storex_new(local.index as StackOffset, constructor)

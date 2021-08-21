@@ -15,14 +15,10 @@ pub struct Local {
     pub index: StackAddress,
     /// Whether is is an argument passed into a function or a binding.
     pub origin: LocalOrigin,
-    /// Whether this variable is currently in scope (stack frame does not equal scope!)
-    pub active: bool,
-}
-
-impl Local {
-    pub fn new(index: StackAddress, origin: LocalOrigin, active: bool) -> Self {
-        Local { index, origin, active }
-    }
+    /// Whether this variable is initialized.
+    pub initialized: bool,
+    /// Index of the block that defined this variable.
+    pub block_index: usize,
 }
 
 /// Maps bindings and arguments to indices relative to the stack frame.
@@ -37,6 +33,7 @@ pub struct Locals { // TODO rename Frame?
     pub ret_size: u8,
     /// Addresses of forward jumps within the function that need to be replaced with the return location
     pub unfixed_exit_jmps: Vec<StackAddress>,
+    pub block_index: usize,
 }
 
 impl Locals {
@@ -48,16 +45,31 @@ impl Locals {
             var_pos : 0,
             ret_size: 0,
             unfixed_exit_jmps: Vec::new(),
+            block_index: 0,
         }
+    }
+    /// Add new local variable.
+    pub fn insert(self: &mut Self, binding_id: BindingId, index: StackAddress, origin: LocalOrigin) {
+        self.map.insert(binding_id, Local {
+            index       : index,
+            origin      : origin,
+            block_index : 0,
+            initialized : origin == LocalOrigin::Argument,
+        });
     }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
     /// Marks the the given local variable as initialized and returns its index.
-    pub fn set_active(self: &mut Self, binding_id: BindingId, active: bool) -> Local {
+    pub fn initialize(self: &mut Self, binding_id: BindingId) -> Local {
         let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
-        local.active = active;
+        local.initialized = true;
+        *local
+    }
+    pub fn activate(self: &mut Self, binding_id: BindingId) -> Local {
+        let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
+        local.block_index = self.block_index;
         *local
     }
 }
@@ -91,11 +103,32 @@ impl LocalsStack {
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         self.0.borrow().last().expect(Self::NO_STACK).lookup(binding_id)
     }
-    /// Marks the the given local variable as initialized and returns its index.
-    pub fn set_active(self: &Self, binding_id: BindingId, active: bool) -> Local {
+    pub fn push_block(self: &Self) {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.set_active(binding_id, active)
+        locals.block_index += 1;
+    }
+    pub fn pop_block(self: &Self) {
+        let mut inner = self.0.borrow_mut();
+        let locals = inner.last_mut().expect(Self::NO_STACK);
+        for (_, local) in locals.map.iter_mut() {
+            if locals.block_index == local.block_index {
+                local.initialized = false;
+            }
+        }
+        locals.block_index -= 1;
+    }
+    /// Marks the the given local variable as initialized and returns its index.
+    pub fn initialize(self: &Self, binding_id: BindingId) -> Local {
+        let mut inner = self.0.borrow_mut();
+        let locals = inner.last_mut().expect(Self::NO_STACK);
+        locals.initialize(binding_id)
+    }
+    /// Marks the the given local variable as activated (binding created) and returns its index.
+    pub fn activate(self: &Self, binding_id: BindingId) -> Local {
+        let mut inner = self.0.borrow_mut();
+        let locals = inner.last_mut().expect(Self::NO_STACK);
+        locals.activate(binding_id)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
     pub fn add_forward_jmp(self: &Self, address: StackAddress) {
