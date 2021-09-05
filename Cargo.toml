@@ -17,7 +17,7 @@ compiler = [ "nom" ]
 debugging = [ ]
 
 [dependencies]
-nom = { version = "7.0.0-alpha3", default-features = false, features = [ "alloc" ], optional = true }
+nom = { version = "7.0.0", default-features = false, features = [ "alloc" ], optional = true }
 
 [dev-dependencies]
 itsy = { path = ".", features = [ "compiler" ] }
