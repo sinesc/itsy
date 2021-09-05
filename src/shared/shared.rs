@@ -6,6 +6,7 @@ pub mod types;
 pub mod error;
 #[cfg(feature="compiler")]
 pub mod infos;
+#[cfg(feature="compiler")]
 pub mod bindings;
 
 #[cfg(feature="compiler")]

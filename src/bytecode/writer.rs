@@ -8,7 +8,7 @@ use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor};
 ///
 /// Provides methods to write bytecode instructions to the program as well as constants to the const pool (via the implemented [`StoreConst`](trait.StoreConst.html) trait).
 #[derive(Debug)]
-pub struct Writer<T> where T: VMFunc<T> {
+pub struct Writer<T> {
     pub(crate) program: RefCell<Program<T>>,
     position: Cell<StackAddress>,
 }

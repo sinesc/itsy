@@ -1,20 +1,16 @@
-use crate::shared::{TypeContainer, types::Type, typed_ids::TypeId};
-#[cfg(feature="compiler")]
-use crate::shared::{BindingContainer, infos::{BindingInfo, FunctionInfo}, typed_ids::{FunctionId, BindingId}};
+use crate::shared::types::Type;
+use crate::shared::{infos::{BindingInfo, FunctionInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
 
 /// Program binding data. // FIXME: naming is bad. this is type information
 pub struct Bindings {
     /// Maps binding ids to binding info descriptors.
-    #[cfg(feature="compiler")]
-    binding_map : Vec<BindingInfo>,
+    pub(crate) binding_map : Vec<BindingInfo>,
     /// Maps type ids to types.
-    type_map    : Vec<Type>,
+    pub(crate) type_map    : Vec<Type>,
     /// Maps function ids to functions.
-    #[cfg(feature="compiler")]
-    function_map: Vec<FunctionInfo>,
+    pub(crate) function_map: Vec<FunctionInfo>,
 }
 
-#[cfg(feature="compiler")]
 impl Bindings {
     pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<FunctionInfo>) -> Self {
         for info in binding_map.iter() {
@@ -29,51 +25,16 @@ impl Bindings {
             function_map,
         }
     }
-    /// Returns the TypeId of the given binding.
-    pub fn binding_type_id(self: &Self, binding_id: BindingId) -> TypeId {
-        let binding_index = Into::<usize>::into(binding_id);
-        self.binding_map[binding_index].type_id.unwrap()
-    }
-    /// Returns the type of the given binding.
-    pub fn binding_type(self: &Self, binding_id: BindingId) -> &Type {
-        let type_id = self.binding_type_id(binding_id);
-        &self.type_map[Into::<usize>::into(type_id)]
-    }
-    /*/// Returns the mutability of the given binding.
-    pub fn binding_mutable(self: &Self, binding_id: BindingId) -> bool {
-        let binding_index = Into::<usize>::into(binding_id);
-        self.binding_map[binding_index].mutable
-    }*/
-    pub fn types(self: &Self) -> &[Type] {
-        &self.type_map
-    }
+    /// Returns function information for given function id.
     pub fn function(self: &Self, function_id: FunctionId) -> &FunctionInfo {
         &self.function_map[Into::<usize>::into(function_id)]
     }
-}
-
-/// Support TypeContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
-/// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
-impl TypeContainer for Bindings {
-    fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
-        let index: usize = type_id.into();
-        &self.type_map[index]
+    /// Returns binding information for given binding id.
+    pub fn binding(self: &Self, binding_id: BindingId) -> &BindingInfo {
+        &self.binding_map[Into::<usize>::into(binding_id)]
     }
-    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
-        let index: usize = type_id.into();
-        &mut self.type_map[index]
-    }
-}
-
-/// A container holding binding id to BindingInfo mappings
-#[cfg(feature="compiler")]
-impl BindingContainer for Bindings {
-    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
-        let binding_index = Into::<usize>::into(binding_id);
-        &self.binding_map[binding_index]
-    }
-    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
-        let binding_index = Into::<usize>::into(binding_id);
-        &mut self.binding_map[binding_index]
+    /// Returns type information for given type id.
+    pub fn ty(self: &Self, type_id: TypeId) -> &Type {
+        &self.type_map[Into::<usize>::into(type_id)]
     }
 }

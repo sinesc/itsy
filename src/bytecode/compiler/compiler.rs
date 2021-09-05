@@ -7,7 +7,7 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{TypeContainer, bindings::Bindings, infos::FunctionKind, numeric::Numeric, types::{Type, Struct}, typed_ids::{FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, bindings::Bindings, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack, LocalOrigin};
@@ -16,7 +16,7 @@ use util::CallInfo;
 
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler<'ty, T> where T: VMFunc<T> {
+pub struct Compiler<'ty, T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
     /// Type and mutability data.
@@ -49,7 +49,7 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
     };
 
     // serialize constructors onto const pool
-    for ty in compiler.bindings.types().iter() {
+    for ty in compiler.bindings.type_map.iter() {
         if !ty.is_primitive() {
             let position = compiler.store_constructor(ty);
             compiler.constructors.insert(ty, position);
@@ -547,7 +547,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let frame = self.locals.pop();
         for (&binding_id, local) in frame.map.iter() {
             if frame.block_index == local.block_index && local.initialized && local.origin == LocalOrigin::Binding {
-                let ty = self.bindings.binding_type(binding_id);
+                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
+                let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
                     self.write_load(local.index as StackOffset, ty);
                     self.write_cntdec(self.get_constructor(ty));
@@ -581,7 +582,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
                         self.writing_protype_instructions.set(true);
                         self.compile_prototype_instructions(item)?;
-                        self.writer.construct_dyn(constructor, self.bindings.type_size(ty)); //FIXME need to take size of references to strings into account
+                        self.writer.construct_dyn(constructor, self.type_size(ty)); //FIXME need to take size of references to strings into account
                         self.writing_protype_instructions.set(false);
                     }
                 } else {
@@ -784,7 +785,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         self.compile_expression(&item.expr)?;
 
         let from = self.item_type(&item.expr);
-        let to = self.bindings.type_by_id(item.ty.type_id.unwrap());
+        let to = self.type_by_id(item.ty.type_id.unwrap());
 
         if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
             self.write_zclamp(from);
@@ -832,15 +833,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> &Type {
-        match item.type_id(&self.bindings) {
+        match item.type_id(self) {
             None => panic!("Unresolved type encountered"),
-            Some(type_id) => self.bindings.type_by_id(type_id)
+            Some(type_id) => self.type_by_id(type_id)
         }
     }
 
     /// Returns type for given type_id.
     fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
-        self.bindings.type_by_id(type_id.expect("Unresolved binding encountered."))
+        self.type_by_id(type_id.expect("Unresolved binding encountered."))
     }
 
     /// Returns constructor index for given type.
@@ -1533,7 +1534,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_ceq();
         } else {
-            self.writer.heap_ceq(self.bindings.type_size(ty)); //FIXME: check this
+            self.writer.heap_ceq(self.type_size(ty)); //FIXME: check this
         }
     }
 
@@ -1550,7 +1551,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cneq();
         } else {
-            self.writer.heap_cneq(self.bindings.type_size(ty)); //FIXME: check this
+            self.writer.heap_cneq(self.type_size(ty)); //FIXME: check this
         }
     }
 
@@ -1598,5 +1599,31 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else {
             panic!("unsupported type")
         }
+    }
+}
+
+/// Support TypeContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
+/// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
+impl<'ty, T> TypeContainer for Compiler<'ty, T> {
+    fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
+        let index: usize = type_id.into();
+        &self.bindings.type_map[index]
+    }
+    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
+        let index: usize = type_id.into();
+        &mut self.bindings.type_map[index]
+    }
+}
+
+/// A container holding binding id to BindingInfo mappings
+#[cfg(feature="compiler")]
+impl<'ty, T> BindingContainer for Compiler<'ty, T> {
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
+        let binding_index = Into::<usize>::into(binding_id);
+        &self.bindings.binding_map[binding_index]
+    }
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
+        let binding_index = Into::<usize>::into(binding_id);
+        &mut self.bindings.binding_map[binding_index]
     }
 }

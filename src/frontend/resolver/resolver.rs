@@ -929,8 +929,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 }
 
-// TODO: move this onto scopes, or alternatively move the implementation for Bindings to Compiler instead? might run into mutability issues
-
 /// Support TypeContainer for Scopes so that methods that need to follow type_ids can be implemented once and be used in both
 /// the Resolver where types are stored in Scopes and the Compiler where types are a stored in a Vec.
 impl<'ctx> TypeContainer for Resolver<'ctx> {

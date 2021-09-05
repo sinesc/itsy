@@ -43,7 +43,7 @@ pub trait VMData<T: VMFunc<T>, U> {
 
 /// An Itsy bytecode program. Programs can be created using the bytecode [`Writer`](struct.Writer.html).
 #[derive(Clone, Debug)]
-pub struct Program<T> where T: VMFunc<T> {
+pub struct Program<T> {
     rust_fn: PhantomData<T>,
     pub(crate) instructions     : Vec<u8>,
     pub(crate) consts           : Vec<u8>,
