@@ -7,8 +7,8 @@ mod util;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, bindings::Bindings, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Typeable, Returns}, resolver::ResolvedProgram};
+use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::frontend::{ast::{self, Typeable, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
 use locals::{Local, Locals, LocalsStack, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -20,7 +20,7 @@ pub struct Compiler<'ty, T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
     /// Type and mutability data.
-    bindings: Bindings,
+    bindings: IdMappings,
     /// Maps from binding id to load-argument for each frame.
     locals: LocalsStack,
     /// Non-primitive type constructors.
@@ -36,7 +36,7 @@ pub struct Compiler<'ty, T> {
 /// Compiles a resolved program into bytecode.
 pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
-    let ResolvedProgram { ast: statements, bindings, entry_fn, .. } = program;
+    let ResolvedProgram { ast: statements, id_mappings: bindings, entry_fn, .. } = program;
 
     let mut compiler = Compiler {
         writer      : Writer::new(),

@@ -1,12 +1,13 @@
 use crate::shared::typed_ids::TypeId;
 use crate::RustFnIndex;
 
-/// Binding meta information
+/// Binding meta information.
 pub struct BindingInfo {
     pub mutable: bool,
     pub type_id: Option<TypeId>,
 }
 
+/// Function mata information.
 #[derive(Clone)]
 pub struct FunctionInfo {
     pub kind    : Option<FunctionKind>,
@@ -26,6 +27,7 @@ impl FunctionInfo {
     }
 }
 
+/// The kind of a function described by a FunctionInfo.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FunctionKind {
     Function,

@@ -3,7 +3,7 @@ mod repository;
 use std::{collections::HashMap, convert::Into};
 use self::repository::Repository;
 use crate::shared::Progress;
-use crate::shared::bindings::Bindings;
+use crate::frontend::resolver::resolved::IdMappings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
 use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
 use crate::shared::types::Type;
@@ -22,13 +22,13 @@ pub(crate) struct Scopes {
     parent_map          : Vec<ScopeId>, // ScopeId => ScopeId
 }
 
-impl Into<Bindings> for Scopes {
+impl Into<IdMappings> for Scopes {
     /// convert scopes into type vector
-    fn into(self: Self) -> Bindings {
+    fn into(self: Self) -> IdMappings {
         let binding_map = self.bindings.into();
         let type_map = self.types.into();
         let function_map = self.functions.into();
-        Bindings::new(binding_map, type_map, function_map)
+        IdMappings::new(binding_map, type_map, function_map)
     }
 }
 

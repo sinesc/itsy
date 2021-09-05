@@ -16,15 +16,19 @@ pub mod ast {
 #[cfg(feature="compiler")]
 pub mod resolver {
     //! Type resolution.
-    pub use crate::frontend::resolver::{resolve, ResolvedProgram, error::ResolveError, error::ResolveErrorKind};
+    pub use crate::frontend::resolver::{resolve, resolved::ResolvedProgram, error::ResolveError, error::ResolveErrorKind};
     pub mod resolved {
         //! Resolved information to be used by the bytecode generator.
-        pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
-        pub use crate::shared::bindings::Bindings;
-        pub mod types {
+        pub use crate::frontend::resolver::resolved::{ResolvedProgram, IdMappings};
+        pub mod ids {
+            //! Typed ids used to refer to specific program elements.
+            pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
+        }
+        pub mod meta {
             //! Resolved program type information.
             pub use crate::shared::types::{Type, Struct, Enum, Array};
             pub use crate::shared::numeric::Numeric;
+            pub use crate::shared::infos::{FunctionInfo, BindingInfo, FunctionKind};
         }
     }
 }

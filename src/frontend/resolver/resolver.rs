@@ -3,34 +3,22 @@
 #[path="scopes/scopes.rs"]
 mod scopes;
 pub mod error;
+pub mod resolved;
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
+use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, TypeContainer, BindingContainer};
-use crate::shared::bindings::Bindings;
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
-use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
+use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
 use crate::frontend::parser::types::ParsedProgram;
-
-/// Parsed program AST with all types, bindings and other language structures resolved.
-pub struct ResolvedProgram<'ast, T> where T: VMFunc<T> {
-    /// Programs are generic over their Rust API
-    ty: PhantomData<T>,
-    /// Program AST with resolved `BindingId`s.
-    pub ast: ParsedProgram<'ast>,
-    /// Type and mutability data for each binding.
-    pub bindings: Bindings,
-    /// `FunctionId` of the entry/main function.
-    pub entry_fn: FunctionId,
-}
-
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
@@ -138,7 +126,7 @@ pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result
         ty              : PhantomData,
         ast             : program,
         entry_fn        : entry_fn,
-        bindings        : scopes.into(),
+        id_mappings     : scopes.into(),
     })
 }
 
