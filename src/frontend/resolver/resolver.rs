@@ -945,9 +945,9 @@ impl<'ctx> TypeContainer for Resolver<'ctx> {
 /// A container holding binding id to BindingInfo mappings
 impl<'ctx> BindingContainer for Resolver<'ctx> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
-        self.scopes.bindings.value_by_id(binding_id)
+        self.scopes.binding_ref(binding_id)
     }
     fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
-        self.scopes.bindings.value_by_id_mut(binding_id)
+        self.scopes.binding_mut(binding_id)
     }
 }
