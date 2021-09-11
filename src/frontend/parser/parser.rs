@@ -375,8 +375,8 @@ fn block(i: Input<'_>) -> Output<Block<'_>> {
             ws(char('}'))
         ),
         move |mut m| {
-            // move last block item into result if it could be an expression and no result was matched
-            if m.1.is_none() && m.0.last().map_or(false, |l| l.maybe_expression()) {
+            // move last block item into result if it is an expression and no result was matched
+            if m.1.is_none() && m.0.last().map_or(false, |l| l.is_expression()) {
                 m.1 = m.0.pop().map(|s| s.into_expression().unwrap());
             }
             Block {

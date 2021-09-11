@@ -141,9 +141,10 @@ pub enum Statement<'a> {
 
 impl<'a> Statement<'a> {
     /// Returns whether the statement could also be an expression. Notably, an expression could not be since Statement::Expression is ; terminated
-    pub fn maybe_expression(self: &Self) -> bool {
+    pub fn is_expression(self: &Self) -> bool {
         match self {
-            Statement::IfBlock(_) | Statement::Block(_) => true,
+            Statement::IfBlock(if_block) => if_block.if_block.result.is_some(),
+            Statement::Block(block) => block.result.is_some(),
             _ => false,
         }
     }
