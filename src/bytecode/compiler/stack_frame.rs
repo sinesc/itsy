@@ -2,27 +2,23 @@ use std::{collections::HashMap, cell::RefCell};
 use crate::StackAddress;
 use crate::shared::typed_ids::BindingId;
 
-#[derive(Copy,Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum LocalOrigin {
     Binding,
     Argument,
 }
 
 /// Describes a single local variable of a stack frame
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct Local {
     /// The load-index for this variable.
     pub index: StackAddress,
     /// Whether is is an argument passed into a function or a binding.
     pub origin: LocalOrigin,
-    // /// Whether this variable is initialized.
-    //pub initialized: bool,
-    /// Index of the block that defined this variable.
-    pub block_index: usize,
 }
 
 /// Maps bindings and arguments to indices relative to the stack frame.
-pub struct Locals { // TODO rename Frame?
+pub struct StackFrame {
     /// Maps a binding ID to a variable or argument position on the stack.
     pub map     : HashMap<BindingId, Local>,
     /// Index of the NEXT argument to be inserted.
@@ -31,66 +27,46 @@ pub struct Locals { // TODO rename Frame?
     pub var_pos : StackAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
-    /// Addresses of forward jumps within the function that need to be replaced with the return location
+    /// Addresses of forward jumps within the function that need to be replaced with the return location.
     pub unfixed_exit_jmps: Vec<StackAddress>,
-    pub block_index: usize,
 }
 
-impl Locals {
+impl StackFrame {
     const UNKNOWN_BINDING: &'static str = "Unknown local binding";
     pub fn new() -> Self {
-        Locals {
+        StackFrame {
             map     : HashMap::new(),
             arg_pos : 0,
             var_pos : 0,
             ret_size: 0,
             unfixed_exit_jmps: Vec::new(),
-            block_index: 0,
         }
     }
     /// Add new local variable.
     pub fn insert(self: &mut Self, binding_id: BindingId, index: StackAddress, origin: LocalOrigin) {
-        self.map.insert(binding_id, Local {
-            index       : index,
-            origin      : origin,
-            block_index : 0,
-            //initialized : origin == LocalOrigin::Argument,
-        });
+        self.map.insert(binding_id, Local { index, origin });
     }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
-    /*
-    /// Marks the the given local variable as initialized and returns its index.
-    pub fn initialize(self: &mut Self, binding_id: BindingId) -> Local {
-        let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
-        local.initialized = true;
-        *local
-    }
-    */
-    pub fn activate(self: &mut Self, binding_id: BindingId) -> Local {
-        let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
-        local.block_index = self.block_index;
-        *local
-    }
 }
 
 /// A stack of Locals mappings.
-pub struct LocalsStack(RefCell<Vec<Locals>>); // TODO rename Frames?
+pub struct StackFrames(RefCell<Vec<StackFrame>>);
 
-impl LocalsStack {
+impl StackFrames {
     const NO_STACK: &'static str = "Attempted to access empty LocalsStack";
     /// Create new local stack frame descriptor stack.
     pub fn new() -> Self {
-        LocalsStack(RefCell::new(Vec::new()))
+        StackFrames(RefCell::new(Vec::new()))
     }
     /// Push stack frame descriptor.
-    pub fn push(self: &Self, frame: Locals) {
+    pub fn push(self: &Self, frame: StackFrame) {
         self.0.borrow_mut().push(frame);
     }
     /// Pop stack frame descriptor and return it.
-    pub fn pop(self: &Self) -> Locals {
+    pub fn pop(self: &Self) -> StackFrame {
         self.0.borrow_mut().pop().expect(Self::NO_STACK)
     }
     // /// Returns the argument size in bytes for the top stack frame descriptor.
@@ -104,35 +80,6 @@ impl LocalsStack {
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         self.0.borrow().last().expect(Self::NO_STACK).lookup(binding_id)
-    }
-    pub fn push_block(self: &Self) {
-        let mut inner = self.0.borrow_mut();
-        let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.block_index += 1;
-    }
-    pub fn pop_block(self: &Self) {
-        let mut inner = self.0.borrow_mut();
-        let locals = inner.last_mut().expect(Self::NO_STACK);
-        /*for (_, local) in locals.map.iter_mut() {
-            if locals.block_index == local.block_index {
-                local.initialized = false;
-            }
-        }*/
-        locals.block_index -= 1;
-    }
-    /*
-    /// Marks the the given local variable as initialized and returns its index.
-    pub fn initialize(self: &Self, binding_id: BindingId) -> Local {
-        let mut inner = self.0.borrow_mut();
-        let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.initialize(binding_id)
-    }
-    */
-    /// Marks the the given local variable as activated (binding created) and returns its index.
-    pub fn activate(self: &Self, binding_id: BindingId) -> Local {
-        let mut inner = self.0.borrow_mut();
-        let locals = inner.last_mut().expect(Self::NO_STACK);
-        locals.activate(binding_id)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
     pub fn add_forward_jmp(self: &Self, address: StackAddress) {

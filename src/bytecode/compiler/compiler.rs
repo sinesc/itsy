@@ -1,6 +1,6 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
-mod locals;
+mod stack_frame;
 #[macro_use] mod macros;
 pub mod error;
 mod util;
@@ -11,10 +11,10 @@ use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
-use locals::{Local, Locals, LocalsStack, LocalOrigin};
+use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-use init_state::{InitState, BranchingKind, BranchingPath};
+use init_state::{BindingState, BranchingKind, BranchingPath};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<'ty, T> {
@@ -23,7 +23,7 @@ pub struct Compiler<'ty, T> {
     /// Type and mutability data.
     bindings: IdMappings,
     /// Maps from binding id to load-argument for each frame.
-    locals: LocalsStack,
+    locals: StackFrames,
     /// Non-primitive type constructors.
     constructors: HashMap<&'ty Type, StackAddress>,
     // Maps functions to their call index.
@@ -33,7 +33,7 @@ pub struct Compiler<'ty, T> {
     /// Set to true while compiling expressions within a Struct/Array constructor. Prevents writing additional constructors for nested structures. TODO: Crappy solution.
     writing_protype_instructions: Cell<bool>,
     /// Tracks variable initialization state.
-    init_state: RefCell<InitState>,
+    init_state: RefCell<BindingState>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -44,12 +44,12 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
     let mut compiler = Compiler {
         writer      : Writer::new(),
         bindings    : bindings,
-        locals      : LocalsStack::new(),
+        locals      : StackFrames::new(),
         functions   : RefCell::new(HashMap::new()),
         unfixed_function_calls: RefCell::new(HashMap::new()),
         constructors: HashMap::new(),
         writing_protype_instructions: Cell::new(false),
-        init_state  : RefCell::new(InitState::new()),
+        init_state  : RefCell::new(BindingState::new()),
     };
 
     // serialize constructors onto const pool
@@ -159,11 +159,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
                 self.write_storex(local, ty, binding_id);
-                //self.locals.initialize(binding_id);
-                self.init_state.borrow_mut().init(binding_id);
+                self.init_state.borrow_mut().initialize(binding_id);
             },
             _ => {
-                if !self.init_state.borrow().is_init(binding_id) {
+                if !self.init_state.borrow().initialized(binding_id) {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
@@ -267,15 +266,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &Self, item: &ast::Binding<'ast>) -> CompileResult {
         let binding_id = item.binding_id.expect("Unresolved binding encountered");
-        self.locals.activate(binding_id);
+        self.init_state.borrow_mut().activate(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             self.compile_expression(expr)?;
             let local = self.locals.lookup(binding_id);
             let ty = self.item_type(item);
             self.write_storex(local, ty, binding_id);
-            //self.locals.initialize(binding_id);
-            self.init_state.borrow_mut().init(binding_id);
+            self.init_state.borrow_mut().initialize(binding_id);
         }
         Ok(())
     }
@@ -286,7 +284,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
-            if !self.init_state.borrow().is_init(binding_id) {
+            if !self.init_state.borrow().initialized(binding_id) {
                 return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
             }
             local.index
@@ -443,10 +441,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         use ast::{Expression, BinaryOperator as Op};
         // initialize iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-        self.locals.push_block();
         self.init_state.borrow_mut().push(BranchingKind::Single);
         let iter_local = self.locals.lookup(binding_id);
-        self.init_state.borrow_mut().init(binding_id);
+        self.init_state.borrow_mut().initialize(binding_id);
         let iter_ty = self.item_type(&item.iter);
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
@@ -459,7 +456,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             _ => Err(CompileError::new(item, CompileErrorKind::Internal))
         };
         self.init_state.borrow_mut().pop();
-        self.locals.pop_block();
         result
     }
 
@@ -472,11 +468,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         // create arguments in local environment
         self.init_state.borrow_mut().push(BranchingKind::Single);
-        let mut frame = Locals::new();
+        let mut frame = StackFrame::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.insert(arg.binding_id.unwrap(), frame.arg_pos, LocalOrigin::Argument);
-            self.init_state.borrow_mut().init(arg.binding_id.unwrap());
+            self.init_state.borrow_mut().initialize(arg.binding_id.unwrap());
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
 
@@ -535,7 +531,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given block.
     fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
-        self.locals.push_block();
         self.init_state.borrow_mut().push(BranchingKind::Single);
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
@@ -556,16 +551,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         // decrease local variable ref-count
         self.init_state.borrow_mut().pop();
-        self.locals.pop_block();
         Ok(())
     }
 
     // FIXME: to handle ret instruction this may need to run recursively
     fn decref_block_locals(self: &Self) {
-
         let frame = self.locals.pop();
         for (&binding_id, local) in frame.map.iter() {
-            if frame.block_index == local.block_index && self.init_state.borrow().is_init(binding_id) && local.origin == LocalOrigin::Binding {
+            if self.init_state.borrow().activated(binding_id) && self.init_state.borrow().initialized(binding_id) && local.origin == LocalOrigin::Binding {
                 let type_id = self.binding_by_id(binding_id).type_id.unwrap();
                 let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
@@ -881,7 +874,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Creates stack frame variables for expressions. // FIXME move this into AST
-    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut Locals) {
+    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut StackFrame) {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame);
         } else if let ast::Expression::Call(call) = expression {
@@ -914,7 +907,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Creates stack frame variables for blocks. // FIXME move this into AST
-    fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut Locals) {
+    fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut StackFrame) {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
@@ -1237,7 +1230,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn write_storex(self: &Self, local: Local, ty: &Type, binding_id: BindingId) -> StackAddress {
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
-            if self.init_state.borrow().is_init(binding_id) {
+            if self.init_state.borrow().initialized(binding_id) {
                 self.writer.storex_replace(local.index as StackOffset, constructor)
             } else {
                 self.writer.storex_new(local.index as StackOffset, constructor)
