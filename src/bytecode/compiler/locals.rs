@@ -15,8 +15,8 @@ pub struct Local {
     pub index: StackAddress,
     /// Whether is is an argument passed into a function or a binding.
     pub origin: LocalOrigin,
-    /// Whether this variable is initialized.
-    pub initialized: bool,
+    // /// Whether this variable is initialized.
+    //pub initialized: bool,
     /// Index of the block that defined this variable.
     pub block_index: usize,
 }
@@ -54,19 +54,21 @@ impl Locals {
             index       : index,
             origin      : origin,
             block_index : 0,
-            initialized : origin == LocalOrigin::Argument,
+            //initialized : origin == LocalOrigin::Argument,
         });
     }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
         *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
+    /*
     /// Marks the the given local variable as initialized and returns its index.
     pub fn initialize(self: &mut Self, binding_id: BindingId) -> Local {
         let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
         local.initialized = true;
         *local
     }
+    */
     pub fn activate(self: &mut Self, binding_id: BindingId) -> Local {
         let local = self.map.get_mut(&binding_id).expect(Self::UNKNOWN_BINDING);
         local.block_index = self.block_index;
@@ -111,19 +113,21 @@ impl LocalsStack {
     pub fn pop_block(self: &Self) {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
-        for (_, local) in locals.map.iter_mut() {
+        /*for (_, local) in locals.map.iter_mut() {
             if locals.block_index == local.block_index {
                 local.initialized = false;
             }
-        }
+        }*/
         locals.block_index -= 1;
     }
+    /*
     /// Marks the the given local variable as initialized and returns its index.
     pub fn initialize(self: &Self, binding_id: BindingId) -> Local {
         let mut inner = self.0.borrow_mut();
         let locals = inner.last_mut().expect(Self::NO_STACK);
         locals.initialize(binding_id)
     }
+    */
     /// Marks the the given local variable as activated (binding created) and returns its index.
     pub fn activate(self: &Self, binding_id: BindingId) -> Local {
         let mut inner = self.0.borrow_mut();

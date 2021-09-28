@@ -4,6 +4,7 @@ mod locals;
 #[macro_use] mod macros;
 pub mod error;
 mod util;
+mod init_state;
 
 use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
@@ -13,7 +14,7 @@ use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, AR
 use locals::{Local, Locals, LocalsStack, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-
+use init_state::{InitState, BranchingKind, BranchingPath};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub struct Compiler<'ty, T> {
@@ -31,6 +32,8 @@ pub struct Compiler<'ty, T> {
     unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<StackAddress>>>,
     /// Set to true while compiling expressions within a Struct/Array constructor. Prevents writing additional constructors for nested structures. TODO: Crappy solution.
     writing_protype_instructions: Cell<bool>,
+    /// Tracks variable initialization state.
+    init_state: RefCell<InitState>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -46,6 +49,7 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
         unfixed_function_calls: RefCell::new(HashMap::new()),
         constructors: HashMap::new(),
         writing_protype_instructions: Cell::new(false),
+        init_state  : RefCell::new(InitState::new()),
     };
 
     // serialize constructors onto const pool
@@ -154,11 +158,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                self.write_storex(local, ty);
-                self.locals.initialize(binding_id);
+                self.write_storex(local, ty, binding_id);
+                //self.locals.initialize(binding_id);
+                self.init_state.borrow_mut().init(binding_id);
             },
             _ => {
-                if !local.initialized {
+                if !self.init_state.borrow().is_init(binding_id) {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
@@ -171,7 +176,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_storex(local, ty); // stack --
+                self.write_storex(local, ty, binding_id); // stack --
             },
         };
         Ok(())
@@ -268,8 +273,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             self.compile_expression(expr)?;
             let local = self.locals.lookup(binding_id);
             let ty = self.item_type(item);
-            self.write_storex(local, ty);
-            self.locals.initialize(binding_id);
+            self.write_storex(local, ty, binding_id);
+            //self.locals.initialize(binding_id);
+            self.init_state.borrow_mut().init(binding_id);
         }
         Ok(())
     }
@@ -280,7 +286,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
-            if !local.initialized {
+            if !self.init_state.borrow().is_init(binding_id) {
                 return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
             }
             local.index
@@ -293,7 +299,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) -> CompileResult {
         comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
+        self.init_state.borrow_mut().push(BranchingKind::Double);
         let result = self.compile_block(&item.if_block);
+        self.init_state.borrow_mut().pop();
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
         result
@@ -303,6 +311,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) -> CompileResult {
 
         let else_jump = self.writer.j0(123);
+        self.init_state.borrow_mut().push(BranchingKind::Double);
         let result = self.compile_block(if_block);
         let exit_jump = if !if_block.returns() {
             Some(self.writer.jmp(123))
@@ -311,7 +320,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         };
 
         let else_target = self.writer.position();
+        self.init_state.borrow_mut().set_path(BranchingPath::B);
         self.compile_block(else_block)?;
+        self.init_state.borrow_mut().pop();
 
         let exit_target = self.writer.position();
 
@@ -433,7 +444,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // initialize iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
         self.locals.push_block();
-        let iter_local = self.locals.initialize(binding_id);
+        self.init_state.borrow_mut().push(BranchingKind::Single);
+        let iter_local = self.locals.lookup(binding_id);
+        self.init_state.borrow_mut().init(binding_id);
         let iter_ty = self.item_type(&item.iter);
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
@@ -445,6 +458,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => Err(CompileError::new(item, CompileErrorKind::Internal))
         };
+        self.init_state.borrow_mut().pop();
         self.locals.pop_block();
         result
     }
@@ -457,10 +471,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         comment!(self, "\nfn {}", item.sig.ident.name);
 
         // create arguments in local environment
+        self.init_state.borrow_mut().push(BranchingKind::Single);
         let mut frame = Locals::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.insert(arg.binding_id.unwrap(), frame.arg_pos, LocalOrigin::Argument);
+            self.init_state.borrow_mut().init(arg.binding_id.unwrap());
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
 
@@ -483,6 +499,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
         self.compile_block(&item.block)?;
+        self.init_state.borrow_mut().pop();
         let mut frame = self.locals.pop();
 
         // fix forward-to-exit jmps within the function
@@ -519,6 +536,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles the given block.
     fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
         self.locals.push_block();
+        self.init_state.borrow_mut().push(BranchingKind::Single);
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
         }
@@ -537,6 +555,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
 
         // decrease local variable ref-count
+        self.init_state.borrow_mut().pop();
         self.locals.pop_block();
         Ok(())
     }
@@ -546,7 +565,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         let frame = self.locals.pop();
         for (&binding_id, local) in frame.map.iter() {
-            if frame.block_index == local.block_index && local.initialized && local.origin == LocalOrigin::Binding {
+            if frame.block_index == local.block_index && self.init_state.borrow().is_init(binding_id) && local.origin == LocalOrigin::Binding {
                 let type_id = self.binding_by_id(binding_id).type_id.unwrap();
                 let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
@@ -1215,10 +1234,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
-    fn write_storex(self: &Self, local: Local, ty: &Type) -> StackAddress {
+    fn write_storex(self: &Self, local: Local, ty: &Type, binding_id: BindingId) -> StackAddress {
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
-            if local.initialized {
+            if self.init_state.borrow().is_init(binding_id) {
                 self.writer.storex_replace(local.index as StackOffset, constructor)
             } else {
                 self.writer.storex_new(local.index as StackOffset, constructor)
