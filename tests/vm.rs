@@ -1347,6 +1347,19 @@ fn string_compound_heap_concat() {
 }
 
 #[test]
+fn string_loop_concat() {
+    let result = run("
+        let test = \"Hello World\";
+        for i in 0..=5 {
+            test = test + (i as String);
+        }
+        ret_string(test);
+        ret_str(test);
+    ");
+    assert_all(&result, &[ "Hello World012345".to_string(), "Hello World012345".to_string() ]);
+}
+
+#[test]
 fn dead_code_result() {
     let result = run("
         fn result() -> u32 {

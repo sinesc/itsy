@@ -199,17 +199,26 @@ fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
 
 fn string(i: Input<'_>) -> Output<Literal<'_>> {
     let position = i.position();
-    map(
-        delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"n\\")), char('"')),
-        move |m: Input<'_>| {
+    alt((
+        // empty string (TODO this should be possible without a second mapping)
+        map(tag("\"\""), move |m: Input<'_>| {
+            Literal {
+                position    : position,
+                value       : LiteralValue::String(&m[0..0]),
+                type_name   : None,
+                type_id     : None,
+            }
+        }),
+        // non-empty string
+        map(delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"n\\")), char('"')), move |m: Input<'_>| {
             Literal {
                 position    : position,
                 value       : LiteralValue::String(*m),
                 type_name   : None,
                 type_id     : None,
             }
-        }
-    )(i)
+        })
+    ))(i)
 }
 
 // literal array ([ 1, 2, 3 ])
