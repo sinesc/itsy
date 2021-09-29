@@ -1123,7 +1123,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the const instruction.
     fn write_const(self: &Self, index: StackAddress, ty: &Type) {
         match ty.primitive_size() {
-            1 => opcode_unsigned!(self, const8_8, const8_16, const8_sa, index),
             2 => opcode_unsigned!(self, const16_8, const16_16, const16_sa, index),
             4 => opcode_unsigned!(self, const32_8, const32_16, const32_sa, index),
             8 => opcode_unsigned!(self, const64_8, const64_16, const64_sa, index),

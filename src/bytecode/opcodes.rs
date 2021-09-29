@@ -86,9 +86,6 @@ impl_opcodes!{
 
     /// Loads data from constpool at given offset and pushes it onto the stack.
     fn <
-        const8_8<T: Data8>(offset: u8 as StackAddress),
-        const8_16<T: Data8>(offset: u16 as StackAddress),
-        const8_sa<T: Data8>(offset: StackAddress),
         const16_8<T: Data16>(offset: u8 as StackAddress),
         const16_16<T: Data16>(offset: u16 as StackAddress),
         const16_sa<T: Data16>(offset: StackAddress),
