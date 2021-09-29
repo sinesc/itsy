@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "presentation": {
         "reveal": "always",
-        "panel": "new"
+        "panel": "shared"
     },
     "tasks": [
         {
@@ -14,7 +14,6 @@
             ],
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo build (release)",
@@ -26,7 +25,6 @@
             ],
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run playground",
@@ -39,9 +37,13 @@
                 "--bin",
                 "playground"
             ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run bench (release)",
@@ -54,9 +56,13 @@
                 "--bin",
                 "bench"
             ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run",
@@ -68,9 +74,13 @@
                 "--bin",
                 "${fileBasenameNoExtension}"
             ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         {
             "label": "cargo run (release)",
@@ -83,9 +93,13 @@
                 "--bin",
                 "${fileBasenameNoExtension}"
             ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
             "group": "build",
             "problemMatcher": []
-            //"problemMatcher": "$rustc"
         },
         /*{
             "label": "cargo run example",
