@@ -233,6 +233,17 @@ impl_opcodes!{
         self.stack.push(item);
     }
 
+    /// Offsets the heap address at the top of the stack by given value.
+    fn <
+        offsetx_8(offset: i8 as StackOffset),
+        offsetx_16(offset: i16 as StackOffset),
+        offsetx_sa(offset: StackOffset),
+    >(&mut self) {
+        let mut item: HeapRef = self.stack.pop();
+        item.add_offset(offset);
+        self.stack.push(item);
+    }
+
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
     fn <
         zclampf32<T: f32>(),
@@ -647,8 +658,7 @@ impl_opcodes!{
         // stack: ARGS | previous FP | previous PC | (local vars and dynamic stack follow here)
     }
 
-    /// Function return. Restores state, removes arguments left on stack by caller and
-    /// leaves call result on the stack.
+    /// Function return. Restores state, removes arguments left on stack by caller.
     fn ret0(&mut self, arg_size: StackAddress) {
         // stack: ARGS | previous FP | previous PC | local vars
         let prev_fp = self.stack.load_fp(arg_size as StackOffset);
@@ -859,7 +869,7 @@ impl_opcodes!{
         self.stack.push(data);
     }
 
-    /// Read an element index (at top) and heap reference (just below) and push the heap value at element index onto the stack.
+    /// Read an element index (at top) and heap reference (just below) and push the heap value at element index from the end of the heap object onto the stack.
     fn <
         heap_tail_element8_nc<T: Data8>(),
         heap_tail_element16_nc<T: Data16>(),

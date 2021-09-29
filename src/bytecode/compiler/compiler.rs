@@ -1115,15 +1115,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
-        if offset == 0 {
-            // nothing to do
-        } else if offset == 1 {
-            self.write_inc(&STACK_ADDRESS_TYPE);
-        } else {
-            assert!(::std::mem::size_of::<StackAddress>() == ::std::mem::size_of::<u32>());
-            let const_id = self.writer.store_const(offset);
-            self.write_const(const_id, &STACK_ADDRESS_TYPE);
-            self.write_add(&STACK_ADDRESS_TYPE)
+        if offset > 0 {
+            opcode_signed!(self, offsetx_8, offsetx_16, offsetx_sa, offset as StackOffset);
         }
     }
 
@@ -1202,7 +1195,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
+    /// Writes instructions to fetch an element from the end of the array whose reference is at the top of the stack.
     fn write_heap_tail_element_nc(self: &Self, ty: &Type) {
         match ty.primitive_size() {
             1 => { self.writer.heap_tail_element8_nc(); },
@@ -1336,7 +1329,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes zclamp instruction.
+    /// Writes clamp to zero instruction.
     fn write_zclamp(self: &Self, ty: &Type) {
         match ty {
             Type::f32 => self.writer.zclampf32(),
@@ -1347,17 +1340,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::i64 => self.writer.zclampi64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
-    }
-
-    /// Write increment instruction.
-    fn write_inc(self: &Self, ty: &Type) -> StackAddress {
-        match ty {
-            Type::i64 | Type::u64 => self.writer.deci64(-1),
-            Type::i32 | Type::u32 => self.writer.deci32(-1),
-            Type::i16 | Type::u16 => self.writer.deci16(-1),
-            Type::i8 | Type::u8 => self.writer.deci8(-1),
-            _ => unreachable!("Unsupported operation for type {:?}", ty),
-        }
     }
 
     /// Write decrement instruction.
