@@ -18,7 +18,7 @@ use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
-use crate::frontend::parser::types::ParsedProgram;
+use crate::frontend::parser::types::ParsedSource;
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
@@ -38,7 +38,7 @@ struct Resolver<'ctx> {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'ast, T>(mut program: ParsedProgram<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
+pub fn resolve<'ast, T>(mut program: ParsedSource<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -258,6 +258,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Block(block)             => self.resolve_block(block, None),
             S::Return(ret)              => self.resolve_return(ret),
             S::Expression(expression)   => self.resolve_expression(expression, None),
+            S::Module(_)                => { Ok(()) /* nothing to do here */ },
         }
     }
 

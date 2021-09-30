@@ -1,11 +1,68 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::ops::Deref;
-use crate::frontend::{ast::{Statement, Position}, parser::error::{ParseErrorKind}};
+use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
 
-/// Parsed program AST.
+/// Parsed source-file AST.
 #[derive(Debug)]
-pub struct ParsedProgram<'a> (pub Vec<Statement<'a>>);
+pub struct ParsedSource<'a> (pub(crate) Vec<Statement<'a>>);
+
+impl<'a> ParsedSource<'a> {
+    /// Returns an iterator over modules referenced by the source.
+    pub fn modules(self: &'a Self) -> ModuleIterator<'a> {
+        ModuleIterator {
+            source: self,
+            index: 0,
+        }
+    }
+    /// Returns an iterator over all statements in the source.
+    pub fn iter(self: &'a Self) -> SourceIterator<'a> {
+        SourceIterator {
+            source: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct SourceIterator<'a> {
+    source: &'a ParsedSource<'a>,
+    index: usize,
+}
+
+impl<'a> Iterator for SourceIterator<'a> {
+    type Item = &'a Statement<'a>;
+    fn next(self: &mut Self) -> Option<&'a Statement<'a>> {
+        while self.index < self.source.0.len() {
+            let index = self.index;
+            self.index += 1;
+            return Some(&self.source.0[index]);
+        }
+        return None;
+    }
+}
+
+pub struct ModuleIterator<'a> {
+    source: &'a ParsedSource<'a>,
+    index: usize,
+}
+
+impl<'a> Iterator for ModuleIterator<'a> {
+    type Item = &'a Module<'a>;
+    fn next(self: &mut Self) -> Option<&'a Module<'a>> {
+        loop {
+            if self.index < self.source.0.len() {
+                let index = self.index;
+                self.index += 1;
+                match &self.source.0[index] {
+                    Statement::Module(m) => return Some(&m),
+                    _ => { },
+                }
+            } else {
+                return None;
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super)struct ParserState {

@@ -75,7 +75,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module)
     };
     ($self:ident, $enum_name:ident, $val_name:ident, $code:tt $(, $variant_name:ident)+) => {
         match $self {
@@ -137,6 +137,7 @@ pub enum Statement<'a> {
     Block(Block<'a>),
     Return(Return<'a>),
     Expression(Expression<'a>),
+    Module(Module<'a>),
 }
 
 impl<'a> Statement<'a> {
@@ -187,6 +188,27 @@ impl<'a> Resolvable for Statement<'a> {
 impl<'a> Debug for Statement<'a> {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Statement, item, { write!(f, "{:#?}", item) })
+    }
+}
+
+#[derive(Debug)]
+pub struct Module<'a> {
+    pub position    : Position,
+    pub ident       : Ident<'a>,
+}
+
+impl_positioned!(Module);
+
+impl<'a> Module<'a> {
+    /// Returns the module name as a string
+    pub fn name(self: &Self) -> &str {
+        &self.ident.name
+    }
+}
+
+impl<'a> Resolvable for Module<'a> {
+    fn num_resolved(self: &Self) -> Progress {
+        Progress::new(1, 1)
     }
 }
 

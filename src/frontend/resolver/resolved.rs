@@ -2,14 +2,14 @@
 use std::marker::PhantomData;
 use crate::shared::types::Type;
 use crate::shared::{infos::{BindingInfo, FunctionInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
-use crate::frontend::parser::types::ParsedProgram;
+use crate::frontend::parser::types::ParsedSource;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
 pub struct ResolvedProgram<'ast, T> {
     /// Programs are generic over their Rust API
     pub(crate) ty: PhantomData<T>,
     /// Program AST with resolved `BindingId`s.
-    pub ast: ParsedProgram<'ast>,
+    pub ast: ParsedSource<'ast>,
     /// Maps typed ids to program meta data.
     pub id_mappings: IdMappings,
     /// `FunctionId` of the entry/main function.

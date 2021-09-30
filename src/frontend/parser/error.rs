@@ -15,6 +15,7 @@ pub enum ParseErrorKind {
     IllegalStructDef,
     IllegalIfBlock,
     IllegalLetStatement,
+    IllegalModuleDef,
 }
 
 /// An error reported by the parser (e.g. syntax error).

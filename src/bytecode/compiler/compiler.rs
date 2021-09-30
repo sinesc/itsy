@@ -84,16 +84,18 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compile_statement(self: &Self, item: &ast::Statement<'ast>) -> CompileResult {
         use self::ast::Statement as S;
         match item {
-            S::Function(function)       => self.compile_function(function),
-            S::StructDef(_)             => Ok(()),
+            S::StructDef(_) => Ok(()),
+            S::Module(_) => Ok(()),
+            S::Return(_) => unreachable!("Return AST nodes should have been rewritten"),
+            S::Function(function) => self.compile_function(function),
             S::ImplBlock(impl_block) => {
                 for function in &impl_block.functions {
                     self.compile_function(function)?;
                 }
                 Ok(())
             }
-            S::Binding(binding)         => self.compile_binding(binding),
-            S::IfBlock(if_block)        => {
+            S::Binding(binding) => self.compile_binding(binding),
+            S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
                     let result_type = self.item_type(result);
@@ -101,9 +103,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 Ok(())
             }
-            S::ForLoop(for_loop)        => self.compile_for_loop(for_loop),
-            S::WhileLoop(while_loop)    => self.compile_while_loop(while_loop),
-            S::Block(block)             => {
+            S::ForLoop(for_loop) => self.compile_for_loop(for_loop),
+            S::WhileLoop(while_loop) => self.compile_while_loop(while_loop),
+            S::Block(block) => {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
                     let result_type = self.item_type(result);
@@ -111,8 +113,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 Ok(())
             }
-            S::Return(_)                => unreachable!("Return AST nodes should have been rewritten"),
-            S::Expression(expression)   => {
+            S::Expression(expression) => {
                 self.compile_expression(expression)?;
                 let result_type = self.item_type(expression);
                 self.write_discard(result_type);

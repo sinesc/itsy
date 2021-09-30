@@ -16,7 +16,7 @@ use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
 use crate::shared::numeric::Numeric;
 use crate::frontend::ast::*;
-use types::{Input, Output, Error, ParserState, ParsedProgram};
+use types::{Input, Output, Error, ParserState, ParsedSource};
 use error::{ParseError, ParseErrorKind};
 use nomutil::*;
 
@@ -667,6 +667,23 @@ fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
     ))(i)
 }
 
+// module
+
+fn module(i: Input<'_>) -> Output<Module<'_>> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_state(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
+            terminated(ident, char(';'))
+        ),
+        move |ident| Module {
+            position: position,
+            ident   : ident,
+        }
+    ))(i)
+
+}
+
 // impl block
 
 fn impl_block(i: Input<'_>) -> Output<ImplBlock<'_>> {
@@ -843,8 +860,9 @@ fn statement(i: Input<'_>) -> Output<Statement<'_>> {
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
-        map(terminated(expression, char(';')), |m| Statement::Expression(m)),
         map(block, |m| Statement::Block(m)),
+        map(module, |m| Statement::Module(m)),
+        map(terminated(expression, char(';')), |m| Statement::Expression(m)),
     )))(i)
 }
 
@@ -855,12 +873,12 @@ fn root(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
 }
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(src: &str) -> Result<ParsedProgram<'_>, ParseError> {
+pub fn parse(src: &str) -> Result<ParsedSource<'_>, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
     let input = Input::new(src);
     let result = root(input.clone());
     match result {
         Ok(result) => {
-            Ok(ParsedProgram(result.1))
+            Ok(ParsedSource(result.1))
         },
         Err(err) => {
             match err {
