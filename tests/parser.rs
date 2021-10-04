@@ -3,41 +3,41 @@ use util::*;
 
 #[test]
 fn line_comment() {
-    parse("// test\n").unwrap();
+    parse_module("// test\n").unwrap();
 }
 
 #[test]
 fn unterminated_line_comment() {
-    parse("// test").unwrap();
+    parse_module("// test").unwrap();
 }
 
 #[test]
 fn unterminated_empty_line_comment() {
-    parse("//").unwrap();
+    parse_module("//").unwrap();
 }
 
 #[test]
 fn block_comment() {
-    parse("/* test */").unwrap();
+    parse_module("/* test */").unwrap();
 }
 
 #[test]
 fn multi_line_block_comment() {
-    parse("/*
+    parse_module("/*
     test
     */").unwrap();
 }
 
 #[test]
 fn multi_line_block_comment_followed() {
-    parse("/*
+    parse_module("/*
     test
     */ //").unwrap();
 }
 
 #[test]
 fn comments_in_expression() {
-    parse("
+    parse_module("
         fn test() {
             x + /* ml */ y // sl
         }
@@ -46,7 +46,7 @@ fn comments_in_expression() {
 
 #[test]
 fn comments_in_statement() {
-    parse("
+    parse_module("
         fn /* test */ test() {
         }
     ").unwrap();
@@ -54,7 +54,7 @@ fn comments_in_statement() {
 
 #[test]
 fn comments_without_whitespace() {
-    parse("
+    parse_module("
         fn/*ml*/test(){//sl
         }
     ").unwrap();

@@ -16,7 +16,7 @@ use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
 use crate::shared::numeric::Numeric;
 use crate::frontend::ast::*;
-use types::{Input, Output, Error, ParserState, ParsedSource};
+use types::{Input, Output, Error, ParserState, ParsedModule, ParsedProgram};
 use error::{ParseError, ParseErrorKind};
 use nomutil::*;
 
@@ -873,12 +873,12 @@ fn root(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
 }
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse(src: &str) -> Result<ParsedSource<'_>, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
+pub fn parse_module(src: &str) -> Result<ParsedModule<'_>, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
     let input = Input::new(src);
     let result = root(input.clone());
     match result {
         Ok(result) => {
-            Ok(ParsedSource(result.1))
+            Ok(ParsedModule(result.1))
         },
         Err(err) => {
             match err {
@@ -895,4 +895,32 @@ pub fn parse(src: &str) -> Result<ParsedSource<'_>, ParseError> {  // also retur
             }
         }
     }
+}
+
+pub fn parse<'a>(filename: &str, mut loader: impl FnMut(&str) -> &'a str) -> Result<ParsedProgram<'a>, ParseError> {
+    let mut program = ParsedProgram(HashMap::new());
+    parse_recurse(filename, None, &mut program, &mut loader)?;
+    Ok(program)
+}
+
+fn parse_recurse<'a>(file_name: &str, module_name: Option<&str>, program: &mut ParsedProgram<'a>, loader: &mut impl FnMut(&str) -> &'a str) -> Result<(), ParseError> {
+
+    let mut basepath = std::path::Path::new(file_name).parent().expect("Invalid filename").to_path_buf();
+
+    if let Some(module_name) = module_name {
+        basepath.push(module_name);
+    }
+
+    let module = parse_module(loader(file_name))?;
+
+    for submodule_ast in module.modules() {
+        let mut submodule_filename = basepath.clone();
+        let submodule_name = submodule_ast.name();
+        submodule_filename.push(submodule_name);
+        submodule_filename.set_extension("itsy");
+        parse_recurse(submodule_filename.to_str().unwrap(), Some(submodule_name), program, loader)?;
+    }
+
+    program.add_module(module_name.unwrap_or("main"), module);
+    Ok(())
 }

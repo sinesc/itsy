@@ -1,13 +1,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::ops::Deref;
+use std::collections::HashMap;
 use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
 
 /// Parsed source-file AST.
 #[derive(Debug)]
-pub struct ParsedSource<'a> (pub(crate) Vec<Statement<'a>>);
+pub struct ParsedModule<'a> (pub(crate) Vec<Statement<'a>>);
 
-impl<'a> ParsedSource<'a> {
+impl<'a> ParsedModule<'a> {
     /// Returns an iterator over modules referenced by the source.
     pub fn modules(self: &'a Self) -> ModuleIterator<'a> {
         ModuleIterator {
@@ -25,7 +26,7 @@ impl<'a> ParsedSource<'a> {
 }
 
 pub struct SourceIterator<'a> {
-    source: &'a ParsedSource<'a>,
+    source: &'a ParsedModule<'a>,
     index: usize,
 }
 
@@ -42,7 +43,7 @@ impl<'a> Iterator for SourceIterator<'a> {
 }
 
 pub struct ModuleIterator<'a> {
-    source: &'a ParsedSource<'a>,
+    source: &'a ParsedModule<'a>,
     index: usize,
 }
 
@@ -64,6 +65,15 @@ impl<'a> Iterator for ModuleIterator<'a> {
     }
 }
 
+pub struct ParsedProgram<'a> (pub(crate) HashMap<String, ParsedModule<'a>>);
+
+impl<'a> ParsedProgram<'a> {
+    pub fn add_module(self: &mut Self, name: &str, module: ParsedModule<'a>) {
+        self.0.insert(name.to_string(), module);
+    }
+}
+
+/// Interal parser state, tracked via RC through the Input type.
 #[derive(Clone, Copy, Debug)]
 pub(super)struct ParserState {
     pub in_function: bool,

@@ -40,7 +40,7 @@ fn main() {
     }
 }
 fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
-    let parsed = parser::parse(source)?;
+    let parsed = parser::parse_module(source)?;
     let resolved = resolver::resolve::<BenchFn>(parsed, "main")?;
     Ok(compiler::compile(resolved)?)
 }

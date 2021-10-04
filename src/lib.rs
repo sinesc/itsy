@@ -23,7 +23,7 @@ use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 #[cfg(feature="compiler")]
 use bytecode::compiler::compile;
 #[cfg(feature="compiler")]
-use frontend::{parser::parse, resolver::resolve};
+use frontend::{parser::parse_module, resolver::resolve};
 
 // configure data sizes
 
@@ -277,7 +277,7 @@ macro_rules! vm_func {
 /// ```
 #[cfg(feature="compiler")]
 pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
-    let parsed = parse(source)?;
+    let parsed = parse_module(source)?;
     let resolved = resolve::<F>(parsed, "main")?;
     Ok(compile(resolved)?)
 }

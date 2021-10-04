@@ -4,7 +4,7 @@ pub use crate::shared::error::Error;
 #[cfg(feature="compiler")]
 pub mod parser {
     //! Sourcecode parsing.
-    pub use crate::frontend::parser::{parse, types::{ParsedSource, ModuleIterator, SourceIterator}, error::{ParseError, ParseErrorKind}};
+    pub use crate::frontend::parser::{parse, parse_module, types::{ParsedModule, ModuleIterator, SourceIterator}, error::{ParseError, ParseErrorKind}};
 }
 
 #[cfg(feature="compiler")]

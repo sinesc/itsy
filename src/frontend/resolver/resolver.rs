@@ -18,7 +18,7 @@ use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
-use crate::frontend::parser::types::ParsedSource;
+use crate::frontend::parser::types::ParsedModule;
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
@@ -38,7 +38,7 @@ struct Resolver<'ctx> {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'ast, T>(mut program: ParsedSource<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
+pub fn resolve<'ast, T>(mut program: ParsedModule<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
