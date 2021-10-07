@@ -37,7 +37,7 @@ pub struct Compiler<'ty, T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
+pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
     let ResolvedProgram { ast: statements, id_mappings: bindings, entry_fn, .. } = program;
 
@@ -81,7 +81,7 @@ pub fn compile<'ast, T>(program: ResolvedProgram<'ast, T>) -> Result<Program<T>,
 impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
-    fn compile_statement(self: &Self, item: &ast::Statement<'ast>) -> CompileResult {
+    fn compile_statement(self: &Self, item: &ast::Statement) -> CompileResult {
         use self::ast::Statement as S;
         match item {
             S::StructDef(_) => Ok(()),
@@ -123,7 +123,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given expression.
-    fn compile_expression(self: &Self, item: &ast::Expression<'ast>) -> CompileResult {
+    fn compile_expression(self: &Self, item: &ast::Expression) -> CompileResult {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
@@ -140,7 +140,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the assignment operation.
-    fn compile_assignment(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+    fn compile_assignment(self: &Self, item: &ast::Assignment) -> CompileResult {
         comment!(self, "{}", item);
         match item.left {
             ast::Expression::Variable(_) => self.compile_assignment_to_var(item),
@@ -150,7 +150,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles an assignment to a variable.
-    fn compile_assignment_to_var(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+    fn compile_assignment_to_var(self: &Self, item: &ast::Assignment) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
         let binding_id = item.left.as_variable().unwrap().binding_id.unwrap();
@@ -183,7 +183,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles an assignment to an index- or access-write operation.
-    fn compile_assignment_to_offset(self: &Self, item: &ast::Assignment<'ast>) -> CompileResult {
+    fn compile_assignment_to_offset(self: &Self, item: &ast::Assignment) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "offset assignment");
         let ty = self.item_type(&item.left);
@@ -213,7 +213,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given call.
-    fn compile_call(self: &Self, item: &ast::Call<'ast>) -> CompileResult {
+    fn compile_call(self: &Self, item: &ast::Call) -> CompileResult {
         if item.args.len() == 0 {
             comment!(self, "{}()", item.ident.name);
         }
@@ -265,7 +265,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &Self, item: &ast::Binding<'ast>) -> CompileResult {
+    fn compile_binding(self: &Self, item: &ast::Binding) -> CompileResult {
         let binding_id = item.binding_id.expect("Unresolved binding encountered");
         self.init_state.borrow_mut().activate(binding_id);
         if let Some(expr) = &item.expr {
@@ -280,7 +280,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given variable.
-    fn compile_variable(self: &Self, item: &ast::Variable<'ast>) -> CompileResult {
+    fn compile_variable(self: &Self, item: &ast::Variable) -> CompileResult {
         comment!(self, "variable {}", item);
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
@@ -295,7 +295,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles an if block without else part.
-    fn compile_if_only_block(self: &Self, item: &ast::IfBlock<'ast>) -> CompileResult {
+    fn compile_if_only_block(self: &Self, item: &ast::IfBlock) -> CompileResult {
         comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
         self.init_state.borrow_mut().push(BranchingKind::Double);
@@ -307,7 +307,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles an if+else block.
-    fn compile_if_else_block(self: &Self, if_block: &ast::Block<'ast>, else_block: &ast::Block<'ast>) -> CompileResult {
+    fn compile_if_else_block(self: &Self, if_block: &ast::Block, else_block: &ast::Block) -> CompileResult {
 
         let else_jump = self.writer.j0(123);
         self.init_state.borrow_mut().push(BranchingKind::Double);
@@ -335,7 +335,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given if block.
-    fn compile_if_block(self: &Self, item: &ast::IfBlock<'ast>) -> CompileResult {
+    fn compile_if_block(self: &Self, item: &ast::IfBlock) -> CompileResult {
 
         // compile condition and jump placeholder
         self.compile_expression(&item.cond)?;
@@ -348,7 +348,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a while loop.
-    fn compile_while_loop(self: &Self, item: &ast::WhileLoop<'ast>) -> CompileResult {
+    fn compile_while_loop(self: &Self, item: &ast::WhileLoop) -> CompileResult {
         comment!(self, "{}", item);
         let start_target = self.writer.position();
         self.compile_expression(&item.expr)?;
@@ -360,7 +360,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_range(self: &Self, item: &ast::ForLoop<'ast>, iter_local: Local, iter_ty: &Type) -> CompileResult {
+    fn compile_for_loop_range(self: &Self, item: &ast::ForLoop, iter_local: Local, iter_ty: &Type) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
@@ -397,7 +397,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_array(self: &Self, item: &ast::ForLoop<'ast>, element_local: Local, element_ty: &Type) -> CompileResult {
+    fn compile_for_loop_array(self: &Self, item: &ast::ForLoop, element_local: Local, element_ty: &Type) -> CompileResult {
         comment!(self, "for in array");
         let array_ty = self.item_type(&item.expr);
         let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
@@ -438,7 +438,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a for - in loop
-    fn compile_for_loop(self: &Self, item: &ast::ForLoop<'ast>) -> CompileResult {
+    fn compile_for_loop(self: &Self, item: &ast::ForLoop) -> CompileResult {
         use ast::{Expression, BinaryOperator as Op};
         // initialize iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
@@ -461,7 +461,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given function.
-    fn compile_function(self: &Self, item: &ast::Function<'ast>) -> CompileResult {
+    fn compile_function(self: &Self, item: &ast::Function) -> CompileResult {
 
         // register function bytecode index, check if any bytecode needs fixing
         let position = self.writer.position();
@@ -531,7 +531,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given block.
-    fn compile_block(self: &Self, item: &ast::Block<'ast>) -> CompileResult {
+    fn compile_block(self: &Self, item: &ast::Block) -> CompileResult {
         self.init_state.borrow_mut().push(BranchingKind::Single);
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
@@ -572,7 +572,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given literal
-    fn compile_literal(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
+    fn compile_literal(self: &Self, item: &ast::Literal) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
         let ty = self.item_type(item);
@@ -608,7 +608,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to assemble a prototype.
-    fn compile_prototype_instructions(self: &Self, item: &ast::Literal<'ast>) -> CompileResult {
+    fn compile_prototype_instructions(self: &Self, item: &ast::Literal) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
         match &item.value {
@@ -638,7 +638,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given unary operation.
-    fn compile_unary_op(self: &Self, item: &ast::UnaryOp<'ast>) -> CompileResult {
+    fn compile_unary_op(self: &Self, item: &ast::UnaryOp) -> CompileResult {
         use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
 
         let exp_type = self.item_type(&item.expr);
@@ -685,7 +685,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a simple, non-shortcutting binary operation.
-    fn compile_binary_op_simple(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+    fn compile_binary_op_simple(self: &Self, item: &ast::BinaryOp) -> CompileResult {
 
         use crate::frontend::ast::BinaryOperator as BO;
         let ty_result = self.item_type(item);
@@ -717,7 +717,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a short-circuiting binary operation (and/or)
-    fn compile_binary_op_shortcircuiting(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+    fn compile_binary_op_shortcircuiting(self: &Self, item: &ast::BinaryOp) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         match item.op {
             BO::And => {
@@ -742,7 +742,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles an offsetting binary operation, i.e.. indexing and member access.
-    fn compile_binary_op_offseting(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+    fn compile_binary_op_offseting(self: &Self, item: &ast::BinaryOp) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         let result_type = self.item_type(item);
         let compare_type = self.item_type(&item.left);
@@ -780,7 +780,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles the given binary operation.
-    fn compile_binary_op(self: &Self, item: &ast::BinaryOp<'ast>) -> CompileResult {
+    fn compile_binary_op(self: &Self, item: &ast::BinaryOp) -> CompileResult {
         if item.op.is_simple() {
             self.compile_binary_op_simple(item)
         } else if item.op.is_shortcircuit() {
@@ -793,7 +793,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_cast(self: &Self, item: &ast::Cast<'ast>) -> CompileResult {
+    fn compile_cast(self: &Self, item: &ast::Cast) -> CompileResult {
 
         self.compile_expression(&item.expr)?;
 
@@ -875,7 +875,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Creates stack frame variables for expressions. // FIXME move this into AST
-    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression<'ast>, frame: &mut StackFrame) {
+    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression, frame: &mut StackFrame) {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame);
         } else if let ast::Expression::Call(call) = expression {
@@ -908,7 +908,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Creates stack frame variables for blocks. // FIXME move this into AST
-    fn create_stack_frame_block(self: &Self, item: &ast::Block<'ast>, frame: &mut StackFrame) {
+    fn create_stack_frame_block(self: &Self, item: &ast::Block, frame: &mut StackFrame) {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
@@ -969,7 +969,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Stores given literal on the const pool.
-    fn store_literal_prototype(self: &Self, item: &ast::Literal<'ast>) -> StackAddress {
+    fn store_literal_prototype(self: &Self, item: &ast::Literal) -> StackAddress {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
         let pos = self.writer.const_len();
@@ -983,8 +983,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
-            &LiteralValue::String(string_literal) => {
-                self.writer.store_const(string_literal);
+            LiteralValue::String(string_literal) => {
+                self.writer.store_const(string_literal.as_str());
             },
             LiteralValue::Array(array_literal) => {
                 for element in &array_literal.elements {

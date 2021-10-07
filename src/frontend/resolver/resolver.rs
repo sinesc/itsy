@@ -38,7 +38,7 @@ struct Resolver<'ctx> {
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<'ast, T>(mut program: ParsedModule<'ast>, entry: &str) -> Result<ResolvedProgram<'ast, T>, Error> where T: VMFunc<T> {
+pub fn resolve<T>(mut program: ParsedModule, entry: &str) -> Result<ResolvedProgram<T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -232,10 +232,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns a path string built from current and additional path segments.
-    fn make_path(self: &Self, append: &[ &str ]) -> String {
+    fn make_path<T: AsRef<str>>(self: &Self, append: &[ T ]) -> String {
         let mut result = self.path.clone();
-        for &part in append {
-            result.push(part.to_string());
+        for part in append {
+            result.push(part.as_ref().to_string());
         }
         result.join("::")
     }
@@ -245,7 +245,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves types and bindings used in a statement.
-    fn resolve_statement(self: &mut Self, item: &mut ast::Statement<'ast>) -> ResolveResult  {
+    fn resolve_statement(self: &mut Self, item: &mut ast::Statement) -> ResolveResult  {
         use self::ast::Statement as S;
         match item {
             S::Function(function)       => self.resolve_function(function, None),
@@ -263,7 +263,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves types and bindings used in an expression.
-    fn resolve_expression(self: &mut Self, item: &mut ast::Expression<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_expression(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
         use self::ast::Expression as E;
         match item { // todo: these all need to check expected_result since the caller might depend on an error result on type mismatch
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
@@ -280,7 +280,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     // Resolves an inline type definition.
-    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType<'ast>) -> Result<Option<TypeId>, Error> {
+    fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType) -> Result<Option<TypeId>, Error> {
         match item {
             ast::InlineType::TypeName(type_name) => self.resolve_type(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
             ast::InlineType::Array(array) => self.resolve_array(array),
@@ -288,7 +288,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a type (name) to a type_id.
-    fn resolve_type(self: &mut Self, item: &mut ast::TypeName<'ast>, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
+    fn resolve_type(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
         if item.type_id.is_none() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&item.path.name)) {
                 item.type_id = Some(new_type_id);
@@ -302,7 +302,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array definition
-    fn resolve_array(self: &mut Self, item: &mut ast::Array<'ast>) -> Result<Option<TypeId>, Error> {
+    fn resolve_array(self: &mut Self, item: &mut ast::Array) -> Result<Option<TypeId>, Error> {
         let inner_type_id = self.resolve_inline_type(&mut item.element_type)?;
         if item.type_id.is_none() { //FIXME needs to update inner type if it is none
             let ty = Type::Array(Array {
@@ -317,7 +317,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef<'ast>) -> ResolveResult {
+    fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
         if item.is_resolved() {
             Ok(())
         } else {
@@ -336,14 +336,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 ty.as_struct_mut().unwrap().fields = fields;
             } else {
                 let ty = Type::Struct(Struct { fields: fields });
-                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(item.ident.name), ty));
+                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(&item.ident.name), ty));
             }
             self.resolved_or_err(item, None)
         }
     }
 
     /// Resolves a struct definition.
-    fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock<'ast>) -> ResolveResult {
+    fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock) -> ResolveResult {
         if item.ty.type_id(self).is_none() {
             self.resolve_inline_type(&mut item.ty)?;
         }
@@ -363,7 +363,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a function signature.
-    fn resolve_signature(self: &mut Self, item: &mut ast::Signature<'ast>) -> ResolveResult {
+    fn resolve_signature(self: &mut Self, item: &mut ast::Signature) -> ResolveResult {
         // resolve arguments
         for arg in item.args.iter_mut() {
             self.resolve_binding(arg)?; // checks resolved_or_err
@@ -376,7 +376,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function<'ast>, struct_scope: Option<(ScopeId, TypeId)>) -> ResolveResult {
+    fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<(ScopeId, TypeId)>) -> ResolveResult {
 
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
@@ -389,14 +389,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // function/method switch
             let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
                 let type_name = self.scopes.lookup_type_name(scope.1).unwrap();
-                let path = self.make_path(&[ type_name, item.sig.ident.name ]);
+                let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
                     (scope.0, FunctionKind::Function, path)
                 } else {
                     (scope.0, FunctionKind::Method(scope.1), path)
                 }
             } else {
-                let path = self.make_path(&[ item.sig.ident.name ]);
+                let path = self.make_path(&[ &item.sig.ident.name ]);
                 (parent_scope_id, FunctionKind::Function, path)
             };
             let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
@@ -416,7 +416,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a return statement.
-    fn resolve_return(self: &mut Self, item: &mut ast::Return<'ast>) -> ResolveResult {
+    fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()))?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type;
         if let Some(expr) = &mut item.expr {
@@ -431,7 +431,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an occurance of a function call.
-    fn resolve_call(self: &mut Self, item: &mut ast::Call<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_call(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
 
         // locate function definition
         if item.function_id.is_none() {
@@ -441,13 +441,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.resolve_expression(arg, None)?;
                     let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
                     let type_name = self.scopes.lookup_type_name(type_id).unwrap_or_ice("Unnamed type")?;
-                    (self.make_path(&[ type_name, item.ident.name ]), type_id)
+                    (self.make_path(&[ type_name, &item.ident.name ]), type_id)
                 },
                 CallType::Function => {
-                    (self.make_path(&[ item.ident.name ]), TypeId::void())
+                    (self.make_path(&[ &item.ident.name ]), TypeId::void())
                 },
                 CallType::Static(path) => {
-                    (self.make_path(&[ &path.name.join("::"), item.ident.name ]), TypeId::void())
+                    (self.make_path(&[ &path.name.join("::"), &item.ident.name ]), TypeId::void())
                 },
             };
             item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
@@ -492,10 +492,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an occurance of a variable.
-    fn resolve_variable(self: &mut Self, item: &mut ast::Variable<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_variable(self: &mut Self, item: &mut ast::Variable, expected_result: Option<TypeId>) -> ResolveResult {
         // resolve binding
         if item.binding_id.is_none() {
-            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, item.ident.name);
+            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, &item.ident.name);
             if item.binding_id.is_none() {
                 return Err(Error::new(item, ErrorKind::UnknownValue(item.ident.name.to_string())));
             }
@@ -508,7 +508,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an if block.
-    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // resolve condition and block
         self.resolve_expression(&mut item.cond, Some(self.primitive_type_id(Type::bool)?))?;
@@ -530,7 +530,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a for loop.
-    fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop<'ast>) -> ResolveResult {
+    fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop) -> ResolveResult {
         use ast::{Expression, BinaryOperator as Op};
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
@@ -558,7 +558,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a while loop.
-    fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop<'ast>) -> ResolveResult {
+    fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None)?;
         self.resolve_block(&mut item.block, None)?;
@@ -567,7 +567,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a block.
-    fn resolve_block(self: &mut Self, item: &mut ast::Block<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_block(self: &mut Self, item: &mut ast::Block, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
         // check for unconditional returns, code below those is unreachable, remove
@@ -619,7 +619,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment<'ast>) -> ResolveResult {
+    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment) -> ResolveResult {
         let right_type_id = item.right.type_id(self);
         self.resolve_expression(&mut item.left, right_type_id)?;
         let left_type_id = item.left.type_id(self);
@@ -629,7 +629,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_cast(self: &mut Self, item: &mut ast::Cast<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_cast(self: &mut Self, item: &mut ast::Cast, expected_result: Option<TypeId>) -> ResolveResult {
         self.resolve_type(&mut item.ty/*, 0*/, expected_result)?; // FIXME hardcoded ref arg
         self.resolve_expression(&mut item.expr, None)?;
         if let Some(type_id) = item.ty.type_id {
@@ -648,7 +648,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a binary operation.
-    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp<'ast>, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
         use crate::frontend::ast::BinaryOperator as O;
 
         match item.op {
@@ -735,15 +735,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a binding created by let, for or a signature.
-    fn resolve_binding(self: &mut Self, item: &mut ast::Binding<'ast>) -> ResolveResult {
+    fn resolve_binding(self: &mut Self, item: &mut ast::Binding) -> ResolveResult {
 
         // create binding id if we don't have one yet
         if item.binding_id.is_none() {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
-            if self.scopes.binding_id(self.scope_id, item.ident.name).is_some() {
+            if self.scopes.binding_id(self.scope_id, &item.ident.name).is_some() {
                 unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
             }
-            let binding_id = self.scopes.insert_binding(self.scope_id, Some(item.ident.name), item.mutable, None);
+            let binding_id = self.scopes.insert_binding(self.scope_id, Some(&item.ident.name), item.mutable, None);
             item.binding_id = Some(binding_id);
         }
 
@@ -774,7 +774,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a unary operation.
-    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp<'ast>, expected_type: Option<TypeId>) -> ResolveResult {
+    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp, expected_type: Option<TypeId>) -> ResolveResult {
         use crate::frontend::ast::UnaryOperator as UO;
         self.resolve_expression(&mut item.expr, expected_type)?;
         match item.op {
@@ -795,7 +795,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
-    fn resolve_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type: Option<TypeId>) -> ResolveResult {
+    fn resolve_literal(self: &mut Self, item: &mut ast::Literal, expected_type: Option<TypeId>) -> ResolveResult {
         use self::ast::LiteralValue as LV;
 
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
@@ -838,7 +838,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an struct literal and creates the required field types.
-    fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal<'ast>) -> ResolveResult {
+    fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal) -> ResolveResult {
 
         // resolve type from name
 
@@ -861,7 +861,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array literal and creates the required array types.
-    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal<'ast>, expected_type_id: Option<TypeId>) -> ResolveResult {
+    fn resolve_array_literal(self: &mut Self, item: &mut ast::Literal, expected_type_id: Option<TypeId>) -> ResolveResult {
 
         let mut elements_type_id = None;
 

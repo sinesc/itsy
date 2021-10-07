@@ -17,7 +17,7 @@ pub(crate) trait Typeable {
 /// Implements the Typeable trait for given structure.
 macro_rules! impl_typeable {
     ($struct_name:ident) => {
-        impl<'a> Typeable for $struct_name<'a> {
+        impl Typeable for $struct_name {
             fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
                 self.type_id
             }
@@ -50,7 +50,7 @@ pub(crate) trait Positioned {
 /// Implements the Position trait for given structure.
 macro_rules! impl_positioned {
     ($struct_name:ident) => {
-        impl<'a> Positioned for $struct_name<'a> {
+        impl Positioned for $struct_name {
             fn position(self: &Self) -> Position {
                 self.position
             }
@@ -61,7 +61,7 @@ macro_rules! impl_positioned {
 /// Implements the Display trait for given structure.
 macro_rules! impl_display {
     ($struct_name:ident, $format:literal $(, $field:ident)*) => {
-        impl<'a> Display for $struct_name<'a> {
+        impl Display for $struct_name {
             fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, $format $(, self.$field)*)
             }
@@ -93,12 +93,12 @@ pub(crate) trait Returns {
 }
 
 #[derive(Debug)]
-pub struct Ident<'a> {
+pub struct Ident {
     pub position: Position,
-    pub name: &'a str,
+    pub name: String,
 }
 
-impl<'a> Display for Ident<'a> {
+impl Display for Ident {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -107,18 +107,18 @@ impl<'a> Display for Ident<'a> {
 impl_positioned!(Ident);
 
 #[derive(Debug)]
-pub struct Path<'a> {
+pub struct Path {
     pub position: Position,
-    pub name: Vec<&'a str>,
+    pub name: Vec<String>,
 }
 
-impl<'a> Path<'a> {
-    pub fn pop(self: &mut Self) -> &'a str {
+impl Path {
+    pub fn pop(self: &mut Self) -> String {
         self.name.pop().unwrap()
     }
 }
 
-impl<'a> Display for Path<'a> {
+impl Display for Path {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name.join("::"))
     }
@@ -126,21 +126,21 @@ impl<'a> Display for Path<'a> {
 
 impl_positioned!(Path);
 
-pub enum Statement<'a> {
-    Binding(Binding<'a>),
-    Function(Function<'a>),
-    StructDef(StructDef<'a>),
-    ImplBlock(ImplBlock<'a>),
-    ForLoop(ForLoop<'a>),
-    WhileLoop(WhileLoop<'a>),
-    IfBlock(IfBlock<'a>),
-    Block(Block<'a>),
-    Return(Return<'a>),
-    Expression(Expression<'a>),
-    Module(Module<'a>),
+pub enum Statement {
+    Binding(Binding),
+    Function(Function),
+    StructDef(StructDef),
+    ImplBlock(ImplBlock),
+    ForLoop(ForLoop),
+    WhileLoop(WhileLoop),
+    IfBlock(IfBlock),
+    Block(Block),
+    Return(Return),
+    Expression(Expression),
+    Module(Module),
 }
 
-impl<'a> Statement<'a> {
+impl Statement {
     /// Returns whether the statement could also be an expression. Notably, an expression could not be since Statement::Expression is ; terminated
     pub fn is_expression(self: &Self) -> bool {
         match self {
@@ -150,7 +150,7 @@ impl<'a> Statement<'a> {
         }
     }
     /// Converts the statement into an expression or panics if the conversion would be invalid.
-    pub fn into_expression(self: Self) -> Option<Expression<'a>> {
+    pub fn into_expression(self: Self) -> Option<Expression> {
         match self {
             Statement::IfBlock(if_block)        => Some(Expression::IfBlock(Box::new(if_block))),
             Statement::Block(block)             => Some(Expression::Block(Box::new(block))),
@@ -161,7 +161,7 @@ impl<'a> Statement<'a> {
     }
 }
 
-impl<'a> Returns for Statement<'a> {
+impl Returns for Statement {
     fn returns(self: &Self) -> bool {
         match self {
             Statement::Return(_)    => true,
@@ -173,58 +173,58 @@ impl<'a> Returns for Statement<'a> {
     }
 }
 
-impl<'a> Positioned for Statement<'a> {
+impl Positioned for Statement {
     fn position(self: &Self) -> Position {
         impl_matchall!(self, Statement, item, { item.position() })
     }
 }
 
-impl<'a> Resolvable for Statement<'a> {
+impl Resolvable for Statement {
     fn num_resolved(self: &Self) -> Progress {
         impl_matchall!(self, Statement, item, { item.num_resolved() })
     }
 }
 
-impl<'a> Debug for Statement<'a> {
+impl Debug for Statement {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Statement, item, { write!(f, "{:#?}", item) })
     }
 }
 
 #[derive(Debug)]
-pub struct Module<'a> {
+pub struct Module {
     pub position    : Position,
-    pub ident       : Ident<'a>,
+    pub ident       : Ident,
 }
 
 impl_positioned!(Module);
 
-impl<'a> Module<'a> {
+impl Module {
     /// Returns the module name as a string
     pub fn name(self: &Self) -> &str {
         &self.ident.name
     }
 }
 
-impl<'a> Resolvable for Module<'a> {
+impl Resolvable for Module {
     fn num_resolved(self: &Self) -> Progress {
         Progress::new(1, 1)
     }
 }
 
 #[derive(Debug)]
-pub struct Binding<'a> {
+pub struct Binding {
     pub position    : Position,
-    pub ident       : Ident<'a>,
+    pub ident       : Ident,
     pub mutable     : bool,
-    pub expr        : Option<Expression<'a>>,
-    pub ty          : Option<InlineType<'a>>,
+    pub expr        : Option<Expression>,
+    pub ty          : Option<InlineType>,
     pub binding_id  : Option<BindingId>,
 }
 
 impl_positioned!(Binding);
 
-impl<'a> Typeable for Binding<'a> {
+impl Typeable for Binding {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match self.binding_id {
             Some(binding_id) => bindings.binding_by_id(binding_id).type_id,
@@ -239,7 +239,7 @@ impl<'a> Typeable for Binding<'a> {
     }
 }
 
-impl<'a> Resolvable for Binding<'a> {
+impl Resolvable for Binding {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.as_ref().map_or(Progress::zero(), |expr| expr.num_resolved())
         + self.ty.as_ref().map_or(Progress::zero(), |ty| ty.num_resolved())
@@ -248,17 +248,17 @@ impl<'a> Resolvable for Binding<'a> {
 }
 
 #[derive(Debug)]
-pub struct Function<'a> {
+pub struct Function {
     pub position    : Position,
-    pub sig         : Signature<'a>,
-    pub block       : Block<'a>,
+    pub sig         : Signature,
+    pub block       : Block,
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
 }
 
 impl_positioned!(Function);
 
-impl<'a> Resolvable for Function<'a> {
+impl Resolvable for Function {
     fn num_resolved(self: &Self) -> Progress {
         self.sig.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
         + self.sig.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
@@ -268,70 +268,70 @@ impl<'a> Resolvable for Function<'a> {
 }
 
 #[derive(Debug)]
-pub struct Signature<'a> {
-    pub ident   : Ident<'a>,
-    pub args    : Vec<Binding<'a>>,
-    pub ret     : Option<InlineType<'a>>,
+pub struct Signature {
+    pub ident   : Ident,
+    pub args    : Vec<Binding>,
+    pub ret     : Option<InlineType>,
 }
 
-impl<'a> Signature<'a> {
-    pub(crate) fn ret_resolved<'ast>(self: &Self, bindings: &impl BindingContainer) -> bool {
+impl Signature {
+    pub(crate) fn ret_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
         self.ret.as_ref().map_or(true, |ret| ret.type_id(bindings).is_some())
     }
-    pub(crate) fn ret_type_id<'ast>(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    pub(crate) fn ret_type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id(bindings))
     }
-    pub(crate) fn args_resolved<'ast>(self: &Self, bindings: &impl BindingContainer) -> bool {
+    pub(crate) fn args_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
         !self.args.iter().any(|arg| arg.ty.as_ref().map_or(true, |type_name| type_name.type_id(bindings).is_none()))
     }
-    pub(crate) fn arg_type_ids<'ast>(self: &Self, bindings: &impl BindingContainer) -> Vec<Option<TypeId>> {
+    pub(crate) fn arg_type_ids(self: &Self, bindings: &impl BindingContainer) -> Vec<Option<TypeId>> {
         self.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id(bindings))).collect()
     }
 }
 
 #[derive(Debug)]
-pub struct TypeName<'a> {
-    pub path    : Path<'a>,
+pub struct TypeName {
+    pub path    : Path,
     pub type_id : Option<TypeId>,
 }
 
 impl_typeable!(TypeName);
 
-impl<'a> Resolvable for TypeName<'a> {
+impl Resolvable for TypeName {
     fn num_resolved(self: &Self) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
-impl<'a> TypeName<'a> {
+impl TypeName {
     /// Returns a type with the given name and an unresolved type-id.
-    pub fn from_path(path: Path<'a>) -> Self {
+    pub fn from_path(path: Path) -> Self {
         TypeName {
             path    : path,
             type_id : None,
         }
     }
-    pub fn from_str(name: &'a str, position: Position) -> Self {
+    pub fn from_str(name: &str, position: Position) -> Self {
         TypeName {
-            path    : Path { name: vec! [ name ], position: position },
+            path    : Path { name: vec! [ name.to_string() ], position: position },
             type_id : None,
         }
     }
 }
 
-impl<'a> Positioned for TypeName<'a> {
+impl Positioned for TypeName {
     fn position(self: &Self) -> Position {
         self.path.position
     }
 }
 
 #[derive(Debug)]
-pub enum InlineType<'a> {
-    TypeName(TypeName<'a>),
-    Array(Box<Array<'a>>),
+pub enum InlineType {
+    TypeName(TypeName),
+    Array(Box<Array>),
 }
 
-impl<'a> Typeable for InlineType<'a> {
+impl Typeable for InlineType {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match &self {
             InlineType::Array(array) => array.type_id(bindings),
@@ -346,7 +346,7 @@ impl<'a> Typeable for InlineType<'a> {
     }
 }
 
-impl<'a> Resolvable for InlineType<'a> {
+impl Resolvable for InlineType {
     fn num_resolved(self: &Self) -> Progress {
         match self {
             Self::TypeName(typename) => typename.num_resolved(),
@@ -356,9 +356,9 @@ impl<'a> Resolvable for InlineType<'a> {
 }
 
 #[derive(Debug)]
-pub struct Array<'a> {
+pub struct Array {
     pub position    : Position,
-    pub element_type: InlineType<'a>,
+    pub element_type: InlineType,
     pub len         : StackAddress,
     pub type_id     : Option<TypeId>,
 }
@@ -366,7 +366,7 @@ pub struct Array<'a> {
 impl_positioned!(Array);
 impl_typeable!(Array);
 
-impl<'a> Resolvable for Array<'a> {
+impl Resolvable for Array {
     fn num_resolved(self: &Self) -> Progress {
         self.element_type.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -374,15 +374,15 @@ impl<'a> Resolvable for Array<'a> {
 }
 
 #[derive(Debug)]
-pub struct StructDef<'a> {
+pub struct StructDef {
     pub position: Position,
-    pub ident   : Ident<'a>,
-    pub fields  : Vec<(&'a str, InlineType<'a>)>,
+    pub ident   : Ident,
+    pub fields  : Vec<(String, InlineType)>,
     pub type_id : Option<TypeId>,
 }
 impl_positioned!(StructDef);
 
-impl<'a> Typeable for StructDef<'a> {
+impl Typeable for StructDef {
     fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
         self.type_id
     }
@@ -391,7 +391,7 @@ impl<'a> Typeable for StructDef<'a> {
     }
 }
 
-impl<'a> Resolvable for StructDef<'a> {
+impl Resolvable for StructDef {
     fn num_resolved(self: &Self) -> Progress {
         self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved())
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -399,16 +399,16 @@ impl<'a> Resolvable for StructDef<'a> {
 }
 
 #[derive(Debug)]
-pub struct ImplBlock<'a> {
+pub struct ImplBlock {
     pub position    : Position,
-    pub functions   : Vec<Function<'a>>,
+    pub functions   : Vec<Function>,
     pub scope_id    : Option<ScopeId>,
-    pub ty          : InlineType<'a>,
+    pub ty          : InlineType,
 }
 
 impl_positioned!(ImplBlock);
 
-impl<'a> Resolvable for ImplBlock<'a> {
+impl Resolvable for ImplBlock {
     fn num_resolved(self: &Self) -> Progress {
         self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved())
         + self.ty.num_resolved()
@@ -416,17 +416,17 @@ impl<'a> Resolvable for ImplBlock<'a> {
 }
 
 #[derive(Debug)]
-pub struct ForLoop<'a> {
+pub struct ForLoop {
     pub position: Position,
-    pub iter    : Binding<'a>,
-    pub expr    : Expression<'a>,
-    pub block   : Block<'a>,
+    pub iter    : Binding,
+    pub expr    : Expression,
+    pub block   : Block,
     pub scope_id: Option<ScopeId>,
 }
 
 impl_positioned!(ForLoop);
 
-impl<'a> Resolvable for ForLoop<'a> {
+impl Resolvable for ForLoop {
     fn num_resolved(self: &Self) -> Progress {
         self.iter.num_resolved()
         + self.expr.num_resolved()
@@ -435,17 +435,17 @@ impl<'a> Resolvable for ForLoop<'a> {
 }
 
 #[derive(Debug)]
-pub struct WhileLoop<'a> {
+pub struct WhileLoop {
     pub position: Position,
-    pub expr    : Expression<'a>,
-    pub block   : Block<'a>,
+    pub expr    : Expression,
+    pub block   : Block,
     pub scope_id: Option<ScopeId>,
 }
 
 impl_positioned!(WhileLoop);
 impl_display!(WhileLoop, "while {} {{ ... }}", expr);
 
-impl<'a> Resolvable for WhileLoop<'a> {
+impl Resolvable for WhileLoop {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.num_resolved()
         + self.block.num_resolved()
@@ -453,32 +453,32 @@ impl<'a> Resolvable for WhileLoop<'a> {
 }
 
 #[derive(Debug)]
-pub struct Return<'a> {
+pub struct Return {
     pub position        : Position,
-    pub expr            : Option<Expression<'a>>,
+    pub expr            : Option<Expression>,
 }
 
 impl_positioned!(Return);
 
-impl<'a> Resolvable for Return<'a> {
+impl Resolvable for Return {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.as_ref().map_or(Progress::zero(), |e| e.num_resolved())
     }
 }
 
 #[derive(Debug)]
-pub struct IfBlock<'a> {
+pub struct IfBlock {
     pub position    : Position,
-    pub cond        : Expression<'a>,
-    pub if_block    : Block<'a>,
-    pub else_block  : Option<Block<'a>>,
+    pub cond        : Expression,
+    pub if_block    : Block,
+    pub else_block  : Option<Block>,
     pub scope_id    : Option<ScopeId>,
 }
 
 impl_positioned!(IfBlock);
 impl_display!(IfBlock, "if {} {{ ... }}", cond);
 
-impl<'a> Resolvable for IfBlock<'a> {
+impl Resolvable for IfBlock {
     fn num_resolved(self: &Self) -> Progress {
         self.cond.num_resolved()
         + self.if_block.num_resolved()
@@ -486,7 +486,7 @@ impl<'a> Resolvable for IfBlock<'a> {
     }
 }
 
-impl<'a> Returns for IfBlock<'a> {
+impl Returns for IfBlock {
     fn returns(self: &Self) -> bool {
         if self.cond.returns() {
             true
@@ -498,7 +498,7 @@ impl<'a> Returns for IfBlock<'a> {
     }
 }
 
-impl<'a> Typeable for IfBlock<'a> {
+impl Typeable for IfBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.if_block.result.as_ref().map_or(None, |e| e.type_id(bindings))
     }
@@ -512,18 +512,18 @@ impl<'a> Typeable for IfBlock<'a> {
 }
 
 #[derive(Debug)]
-pub struct Block<'a> {
+pub struct Block {
     pub position    : Position,
-    pub statements  : Vec<Statement<'a>>,
-    pub result      : Option<Expression<'a>>,
-    pub returns     : Option<Expression<'a>>,
+    pub statements  : Vec<Statement>,
+    pub result      : Option<Expression>,
+    pub returns     : Option<Expression>,
     pub scope_id    : Option<ScopeId>,
 }
 
 impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
 
-impl<'a> Resolvable for Block<'a> {
+impl Resolvable for Block {
     fn num_resolved(self: &Self) -> Progress {
         self.statements.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved())
         + self.result.as_ref().map_or(Progress::zero(), |result| result.num_resolved())
@@ -531,7 +531,7 @@ impl<'a> Resolvable for Block<'a> {
     }
 }
 
-impl<'a> Typeable for Block<'a> {
+impl Typeable for Block {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.result.as_ref().map_or(None, |e| e.type_id(bindings))
     }
@@ -544,26 +544,26 @@ impl<'a> Typeable for Block<'a> {
     }
 }
 
-impl<'a> Returns for Block<'a> {
+impl Returns for Block {
     fn returns(self: &Self) -> bool {
         self.returns.is_some() || self.result.as_ref().map_or(false, |result| result.returns()) || self.statements.iter().any(|statement| statement.returns())
     }
 }
 
-pub enum Expression<'a> {
-    Literal(Literal<'a>),
-    Variable(Variable<'a>),
-    Call(Call<'a>),
-    Member(Member<'a>), //FIXME this shouldn't be here. either implement an Operand enum for BinaryOp that contains it or change to MemberAccess and store left+right (more in line with Cast)
-    Assignment(Box<Assignment<'a>>),
-    BinaryOp(Box<BinaryOp<'a>>),
-    UnaryOp(Box<UnaryOp<'a>>),
-    Cast(Box<Cast<'a>>),
-    Block(Box<Block<'a>>),
-    IfBlock(Box<IfBlock<'a>>),
+pub enum Expression {
+    Literal(Literal),
+    Variable(Variable),
+    Call(Call),
+    Member(Member), //FIXME this shouldn't be here. either implement an Operand enum for BinaryOp that contains it or change to MemberAccess and store left+right (more in line with Cast)
+    Assignment(Box<Assignment>),
+    BinaryOp(Box<BinaryOp>),
+    UnaryOp(Box<UnaryOp>),
+    Cast(Box<Cast>),
+    Block(Box<Block>),
+    IfBlock(Box<IfBlock>),
 }
 
-impl<'a> Expression<'a> {
+impl Expression {
     pub fn is_literal(self: &Self) -> bool {
         match self {
             Self::Literal(_) => true,
@@ -588,31 +588,31 @@ impl<'a> Expression<'a> {
             _ => false,
         }
     }
-    pub fn as_variable(self: &Self) -> Option<&Variable<'a>> {
+    pub fn as_variable(self: &Self) -> Option<&Variable> {
         match self {
             Self::Variable(variable) => Some(variable),
             _ => None,
         }
     }
-    pub fn as_literal(self: &Self) -> Option<&Literal<'a>> {
+    pub fn as_literal(self: &Self) -> Option<&Literal> {
         match self {
             Expression::Literal(literal) => Some(literal),
             _ => None,
         }
     }
-    pub fn as_binary_op(self: &Self) -> Option<&BinaryOp<'a>> {
+    pub fn as_binary_op(self: &Self) -> Option<&BinaryOp> {
         match self {
             Expression::BinaryOp(binary_op) => Some(binary_op),
             _ => None,
         }
     }
-    pub fn as_member(self: &Self) -> Option<&Member<'a>> {
+    pub fn as_member(self: &Self) -> Option<&Member> {
         match self {
             Expression::Member(member) => Some(member),
             _ => None,
         }
     }
-    pub fn as_member_mut(self: &mut Self) -> Option<&mut Member<'a>> {
+    pub fn as_member_mut(self: &mut Self) -> Option<&mut Member> {
         match self {
             Expression::Member(member) => Some(member),
             _ => None,
@@ -620,7 +620,7 @@ impl<'a> Expression<'a> {
     }
 }
 
-impl<'a> Typeable for Expression<'a> {
+impl Typeable for Expression {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         impl_matchall!(self, Expression, item, { item.type_id(bindings) })
     }
@@ -629,7 +629,7 @@ impl<'a> Typeable for Expression<'a> {
     }
 }
 
-impl<'a> Resolvable for Expression<'a> {
+impl Resolvable for Expression {
     fn is_resolved(self: &Self) -> bool {
         impl_matchall!(self, Expression, item, { item.is_resolved() })
     }
@@ -638,7 +638,7 @@ impl<'a> Resolvable for Expression<'a> {
     }
 }
 
-impl<'a> Returns for Expression<'a> {
+impl Returns for Expression {
     fn returns(self: &Self) -> bool {
         match self {
             Expression::Assignment(v)   => v.returns(),
@@ -652,43 +652,43 @@ impl<'a> Returns for Expression<'a> {
     }
 }
 
-impl<'a> Positioned for Expression<'a> {
+impl Positioned for Expression {
     fn position(self: &Self) -> Position {
         impl_matchall!(self, Expression, item, { item.position() })
     }
 }
 
-impl<'a> Debug for Expression<'a> {
+impl Debug for Expression {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Expression, item, { write!(f, "{:#?}", item) })
     }
 }
 
-impl<'a> Display for Expression<'a> {
+impl Display for Expression {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Expression, item, { write!(f, "{}", item) })
     }
 }
 
 #[derive(Debug)]
-pub struct Literal<'a> {
+pub struct Literal {
     pub position    : Position,
-    pub value       : LiteralValue<'a>,
-    pub type_name   : Option<TypeName<'a>>, // used in e.g. 1i8, 3.1415f32
+    pub value       : LiteralValue,
+    pub type_name   : Option<TypeName>, // used in e.g. 1i8, 3.1415f32
     pub type_id     : Option<TypeId>,
 }
 
 impl_typeable!(Literal);
 impl_positioned!(Literal);
 
-impl<'a> Resolvable for Literal<'a> {
+impl Resolvable for Literal {
     fn num_resolved(self: &Self) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
         + self.value.num_resolved()
     }
 }
 
-impl<'a> Display for Literal<'a> {
+impl Display for Literal {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.value {
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
@@ -700,15 +700,15 @@ impl<'a> Display for Literal<'a> {
     }
 }
 
-pub enum LiteralValue<'a> {
+pub enum LiteralValue {
     Bool(bool),
     Numeric(Numeric),
-    String(&'a str),
-    Array(ArrayLiteral<'a>),
-    Struct(StructLiteral<'a>),
+    String(String),
+    Array(ArrayLiteral),
+    Struct(StructLiteral),
 }
 
-impl<'a> LiteralValue<'a> {
+impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
         match self {
             LiteralValue::Array(v) => !v.elements.iter().any(|e| !e.is_literal()),
@@ -716,7 +716,7 @@ impl<'a> LiteralValue<'a> {
             _ => true,
         }
     }
-    pub fn as_string(self: &Self) -> Option<&'a str> {
+    pub fn as_string(self: &Self) -> Option<&str> {
         match self {
             LiteralValue::String(v) => Some(v),
             _ => None,
@@ -740,13 +740,13 @@ impl<'a> LiteralValue<'a> {
             _ => None,
         }
     }
-    pub fn as_array_mut(self: &mut Self) -> Option<&mut ArrayLiteral<'a>> {
+    pub fn as_array_mut(self: &mut Self) -> Option<&mut ArrayLiteral> {
         match self {
             LiteralValue::Array(v) => Some(v),
             _ => None,
         }
     }
-    pub fn as_struct_mut(self: &mut Self) -> Option<&mut StructLiteral<'a>> {
+    pub fn as_struct_mut(self: &mut Self) -> Option<&mut StructLiteral> {
         match self {
             LiteralValue::Struct(v) => Some(v),
             _ => None,
@@ -754,7 +754,7 @@ impl<'a> LiteralValue<'a> {
     }
 }
 
-impl<'a> Resolvable for LiteralValue<'a> {
+impl Resolvable for LiteralValue {
     fn num_resolved(self: &Self) -> Progress {
         match self {
             Self::Array(array) => array.num_resolved(),
@@ -764,7 +764,7 @@ impl<'a> Resolvable for LiteralValue<'a> {
     }
 }
 
-impl<'a> Debug for LiteralValue<'a> {
+impl Debug for LiteralValue {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
@@ -777,38 +777,38 @@ impl<'a> Debug for LiteralValue<'a> {
 }
 
 #[derive(Debug)]
-pub struct ArrayLiteral<'a> {
-    pub elements: Vec<Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
+pub struct ArrayLiteral {
+    pub elements: Vec<Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
-impl<'a> Resolvable for ArrayLiteral<'a> {
+impl Resolvable for ArrayLiteral {
     fn num_resolved(self: &Self) -> Progress {
         self.elements.iter().fold(Progress::zero(), |acc, element| acc + element.num_resolved())
     }
 }
 
 #[derive(Debug)]
-pub struct StructLiteral<'a> {
-    pub fields: HashMap<&'a str, Expression<'a>>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
+pub struct StructLiteral {
+    pub fields: HashMap<String, Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
-impl<'a> Resolvable for StructLiteral<'a> {
+impl Resolvable for StructLiteral {
     fn num_resolved(self: &Self) -> Progress {
         self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved())
     }
 }
 
 #[derive(Debug)]
-pub struct Variable<'a> {
+pub struct Variable {
     pub position    : Position,
-    pub ident       : Ident<'a>,
+    pub ident       : Ident,
     pub binding_id  : Option<BindingId>,
 }
 
 impl_positioned!(Variable);
 impl_display!(Variable, "{}", ident);
 
-impl<'a> Typeable for Variable<'a> {
+impl Typeable for Variable {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match self.binding_id {
             Some(binding_id) => bindings.binding_by_id(binding_id).type_id,
@@ -823,16 +823,16 @@ impl<'a> Typeable for Variable<'a> {
     }
 }
 
-impl<'a> Resolvable for Variable<'a> {
+impl Resolvable for Variable {
     fn num_resolved(self: &Self) -> Progress {
         self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
 #[derive(Debug)]
-pub struct Member<'a> {
+pub struct Member {
     pub position    : Position,
-    pub ident       : Ident<'a>,
+    pub ident       : Ident,
     pub type_id     : Option<TypeId>,
     pub index       : Option<ItemIndex>,
 }
@@ -841,25 +841,25 @@ impl_typeable!(Member);
 impl_positioned!(Member);
 impl_display!(Member, "{}", ident);
 
-impl<'a> Resolvable for Member<'a> {
+impl Resolvable for Member {
     fn num_resolved(self: &Self) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
 #[derive(Debug)]
-pub enum CallType<'a> {
+pub enum CallType {
     Function,
     Method,
-    Static(Path<'a>),
+    Static(Path),
 }
 
 #[derive(Debug)]
-pub struct Call<'a> {
+pub struct Call {
     pub position        : Position,
-    pub ident           : Ident<'a>,
-    pub args            : Vec<Expression<'a>>,
-    pub call_type       : CallType<'a>,
+    pub ident           : Ident,
+    pub args            : Vec<Expression>,
+    pub call_type       : CallType,
     pub function_id     : Option<FunctionId>,
     pub type_id         : Option<TypeId>,
 }
@@ -868,7 +868,7 @@ impl_typeable!(Call);
 impl_positioned!(Call);
 impl_display!(Call, "{}({:?})", ident, args);
 
-impl<'a> Resolvable for Call<'a> {
+impl Resolvable for Call {
     fn num_resolved(self: &Self) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -877,11 +877,11 @@ impl<'a> Resolvable for Call<'a> {
 }
 
 #[derive(Debug)]
-pub struct Assignment<'a> {
+pub struct Assignment {
     pub position: Position,
     pub op      : BinaryOperator,
-    pub left    : Expression<'a>,
-    pub right   : Expression<'a>,
+    pub left    : Expression,
+    pub right   : Expression,
     pub type_id : Option<TypeId>,
 }
 
@@ -889,7 +889,7 @@ impl_typeable!(Assignment);
 impl_positioned!(Assignment);
 impl_display!(Assignment, "{} {} {}", left, op, right);
 
-impl<'a> Resolvable for Assignment<'a> {
+impl Resolvable for Assignment {
     fn num_resolved(self: &Self) -> Progress {
         self.left.num_resolved()
         + self.right.num_resolved()
@@ -897,17 +897,17 @@ impl<'a> Resolvable for Assignment<'a> {
     }
 }
 
-impl<'a> Returns for Assignment<'a> {
+impl Returns for Assignment {
     fn returns(self: &Self) -> bool {
         self.left.returns() || self.right.returns()
     }
 }
 
 #[derive(Debug)]
-pub struct Cast<'a> {
+pub struct Cast {
     pub position    : Position,
-    pub expr        : Expression<'a>,
-    pub ty          : TypeName<'a>,
+    pub expr        : Expression,
+    pub ty          : TypeName,
     pub type_id     : Option<TypeId>,
 }
 
@@ -915,25 +915,25 @@ impl_typeable!(Cast);
 impl_positioned!(Cast);
 impl_display!(Cast, "{} as {:?}", expr, ty);
 
-impl<'a> Resolvable for Cast<'a> {
+impl Resolvable for Cast {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
-impl<'a> Returns for Cast<'a> {
+impl Returns for Cast {
     fn returns(self: &Self) -> bool {
         self.expr.returns()
     }
 }
 
 #[derive(Debug)]
-pub struct BinaryOp<'a> {
+pub struct BinaryOp {
     pub position    : Position,
     pub op          : BinaryOperator,
-    pub left        : Expression<'a>,
-    pub right       : Expression<'a>,
+    pub left        : Expression,
+    pub right       : Expression,
     pub type_id     : Option<TypeId>,
 }
 
@@ -941,7 +941,7 @@ impl_typeable!(BinaryOp);
 impl_positioned!(BinaryOp);
 impl_display!(BinaryOp, "{}{}{}", left, op, right);
 
-impl<'a> Resolvable for BinaryOp<'a> {
+impl Resolvable for BinaryOp {
     fn num_resolved(self: &Self) -> Progress {
         self.left.num_resolved()
         + self.right.num_resolved()
@@ -949,31 +949,31 @@ impl<'a> Resolvable for BinaryOp<'a> {
     }
 }
 
-impl<'a> Returns for BinaryOp<'a> {
+impl Returns for BinaryOp {
     fn returns(self: &Self) -> bool {
         self.left.returns() || self.right.returns()
     }
 }
 
 #[derive(Debug)]
-pub struct UnaryOp<'a> {
+pub struct UnaryOp {
     pub position    : Position,
     pub op          : UnaryOperator,
-    pub expr        : Expression<'a>,
+    pub expr        : Expression,
     pub type_id     : Option<TypeId>,
 }
 
 impl_typeable!(UnaryOp);
 impl_positioned!(UnaryOp);
 
-impl<'a> Resolvable for UnaryOp<'a> {
+impl Resolvable for UnaryOp {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 
-impl<'a> Display for UnaryOp<'a> {
+impl Display for UnaryOp {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.op {
             UnaryOperator::DecAfter | UnaryOperator::DecBefore => write!(f, "{}{}", self.expr, self.op),
@@ -982,7 +982,7 @@ impl<'a> Display for UnaryOp<'a> {
     }
 }
 
-impl<'a> Returns for UnaryOp<'a> {
+impl Returns for UnaryOp {
     fn returns(self: &Self) -> bool {
         self.expr.returns()
     }

@@ -65,7 +65,7 @@ fn ident(i: Input<'_>) -> Output<Ident> {
     map(
         label,
         move |l| Ident {
-            name: l,
+            name: l.to_string(),
             position: position,
         }
     )(i)
@@ -75,12 +75,12 @@ fn ident(i: Input<'_>) -> Output<Ident> {
 
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(ws(tag("::")), ws(label)), move |m| Path { position: position, name: m.into_iter().collect() })(i)
+    map(separated_list1(ws(tag("::")), ws(label)), move |m| Path { position: position, name: m.into_iter().map(|s| s.to_string()).collect() })(i)
 }
 
 // literal numerical (-3.14f32)
 
-fn numerical(i: Input<'_>) -> Output<Literal<'_>> {
+fn numerical(i: Input<'_>) -> Output<Literal> {
 
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
@@ -183,7 +183,7 @@ fn static_size(i: Input<'_>) -> Output<StackAddress> {
 
 // literal boolean (true)
 
-fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
+fn boolean(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(alt((tag("true"), tag("false"))), move |m: Input<'_>| {
         Literal {
@@ -197,14 +197,14 @@ fn boolean(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal string ("hello world")
 
-fn string(i: Input<'_>) -> Output<Literal<'_>> {
+fn string(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     alt((
         // empty string (TODO this should be possible without a second mapping)
-        map(tag("\"\""), move |m: Input<'_>| {
+        map(tag("\"\""), move |_: Input<'_>| {
             Literal {
                 position    : position,
-                value       : LiteralValue::String(&m[0..0]),
+                value       : LiteralValue::String("".to_string()),
                 type_name   : None,
                 type_id     : None,
             }
@@ -213,7 +213,7 @@ fn string(i: Input<'_>) -> Output<Literal<'_>> {
         map(delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"n\\")), char('"')), move |m: Input<'_>| {
             Literal {
                 position    : position,
-                value       : LiteralValue::String(*m),
+                value       : LiteralValue::String(m.to_string()),
                 type_name   : None,
                 type_id     : None,
             }
@@ -223,7 +223,7 @@ fn string(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal array ([ 1, 2, 3 ])
 
-fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
+fn array_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(
         tuple((ws(char('[')), separated_list0(ws(char(',')), expression), opt(ws(char(','))), ws(char(']')))),
@@ -240,16 +240,16 @@ fn array_literal(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal struct (MyStruct { a: 1 })
 
-fn struct_literal(i: Input<'_>) -> Output<Literal<'_>> {
+fn struct_literal(i: Input<'_>) -> Output<Literal> {
 
-    fn field(i: Input<'_>) -> Output<(&str, Expression<'_>)> {
+    fn field(i: Input<'_>) -> Output<(String, Expression)> {
         map(
             tuple((ws(label), ws(char(':')), expression)),
-            |tuple| (tuple.0, tuple.2)
+            |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
 
-    fn fields(i: Input<'_>) -> Output<HashMap<&str, Expression<'_>>> {
+    fn fields(i: Input<'_>) -> Output<HashMap<String, Expression>> {
         map(
             separated_list0(char(','), field),
             |list| {
@@ -275,13 +275,13 @@ fn struct_literal(i: Input<'_>) -> Output<Literal<'_>> {
 
 // literal
 
-fn literal(i: Input<'_>) -> Output<Literal<'_>> {
+fn literal(i: Input<'_>) -> Output<Literal> {
     ws(alt((boolean, string, array_literal, struct_literal, numerical)))(i)
 }
 
 // assignment
 
-fn assignable(i: Input<'_>) -> Output<Expression<'_>> {
+fn assignable(i: Input<'_>) -> Output<Expression> {
     let var_position = i.position();
     let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
     let op_position = init.0.position();
@@ -317,7 +317,7 @@ fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
     ))(i)
 }
 
-fn assignment(i: Input<'_>) -> Output<Assignment<'_>> {
+fn assignment(i: Input<'_>) -> Output<Assignment> {
     let position = i.position();
     ws(map(
         tuple((assignable, assignment_operator, expression)),
@@ -335,11 +335,11 @@ fn assignment(i: Input<'_>) -> Output<Assignment<'_>> {
 
 // call
 
-fn call_argument_list(i: Input<'_>) -> Output<Vec<Expression<'_>>> {
+fn call_argument_list(i: Input<'_>) -> Output<Vec<Expression>> {
     delimited(ws(char('(')), separated_list0(ws(char(',')), expression), ws(char(')')))(i)
 }
 
-fn call(i: Input<'_>) -> Output<Call<'_>> {
+fn call(i: Input<'_>) -> Output<Call> {
     let position = i.position();
     ws(map(
         tuple((ident, space0, call_argument_list)),
@@ -355,7 +355,7 @@ fn call(i: Input<'_>) -> Output<Call<'_>> {
 }
 
 
-fn call_static(i: Input<'_>) -> Output<Call<'_>> {
+fn call_static(i: Input<'_>) -> Output<Call> {
     let position = i.position();
     map(
         tuple((path, call_argument_list)),
@@ -375,7 +375,7 @@ fn call_static(i: Input<'_>) -> Output<Call<'_>> {
 
 // block
 
-fn block(i: Input<'_>) -> Output<Block<'_>> {
+fn block(i: Input<'_>) -> Output<Block> {
     let position = i.position();
     ws(map(
         delimited(
@@ -401,9 +401,9 @@ fn block(i: Input<'_>) -> Output<Block<'_>> {
 
 // if
 
-fn if_block(i: Input<'_>) -> Output<IfBlock<'_>> {
+fn if_block(i: Input<'_>) -> Output<IfBlock> {
 
-    fn else_block(i: Input<'_>) -> Output<Block<'_>> {
+    fn else_block(i: Input<'_>) -> Output<Block> {
         let position = i.position();
         ws(preceded(
             tag("else"),
@@ -439,11 +439,11 @@ fn if_block(i: Input<'_>) -> Output<IfBlock<'_>> {
 
 // expression
 
-fn parens(i: Input<'_>) -> Output<Expression<'_>> {
+fn parens(i: Input<'_>) -> Output<Expression> {
     ws(delimited(char('('), expression, char(')')))(i)
 }
 
-fn prefix(i: Input<'_>) -> Output<UnaryOp<'_>> {
+fn prefix(i: Input<'_>) -> Output<UnaryOp> {
     let position = i.position();
     map(
         pair(ws(alt((tag("++"), tag("--")))), ws(assignable)),
@@ -456,7 +456,7 @@ fn prefix(i: Input<'_>) -> Output<UnaryOp<'_>> {
     )(i)
 }
 
-fn suffix(i: Input<'_>) -> Output<UnaryOp<'_>> {
+fn suffix(i: Input<'_>) -> Output<UnaryOp> {
     let position = i.position();
     map(
         pair(ws(assignable), ws(alt((tag("++"), tag("--"))))),
@@ -469,7 +469,7 @@ fn suffix(i: Input<'_>) -> Output<UnaryOp<'_>> {
     )(i)
 }
 
-fn unary(i: Input<'_>) -> Output<Expression<'_>> {
+fn unary(i: Input<'_>) -> Output<Expression> {
     let position = i.position();
     map(
         preceded(ws(tag("!")), ws(prec6)),
@@ -484,7 +484,7 @@ fn unary(i: Input<'_>) -> Output<Expression<'_>> {
     )(i)
 }
 
-fn operand(i: Input<'_>) -> Output<Expression<'_>> {
+fn operand(i: Input<'_>) -> Output<Expression> {
     let position = i.position();
     ws(alt((
         map(literal, |m| Expression::Literal(m)),
@@ -499,7 +499,7 @@ fn operand(i: Input<'_>) -> Output<Expression<'_>> {
     )))(i)
 }
 
-fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec7(i: Input<'_>) -> Output<Expression> {
     let init = operand(i.clone())?;
     let position = i.position();
     fold_many0(
@@ -521,11 +521,11 @@ fn prec7(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec6(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec6(i: Input<'_>) -> Output<Expression> {
     alt((prec7, unary))(i)
 }
 
-fn prec5(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec5(i: Input<'_>) -> Output<Expression> {
     let init = prec6(i)?;
     let position = init.0.position();
     fold_many0(
@@ -535,7 +535,7 @@ fn prec5(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec4(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec4(i: Input<'_>) -> Output<Expression> {
     let init = prec5(i)?;
     let position = init.0.position();
     fold_many0(
@@ -545,7 +545,7 @@ fn prec4(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec3(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec3(i: Input<'_>) -> Output<Expression> {
     let init = prec4(i)?;
     let position = init.0.position();
     fold_many0(
@@ -555,7 +555,7 @@ fn prec3(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec2(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec2(i: Input<'_>) -> Output<Expression> {
     let init = prec3(i)?;
     let position = init.0.position();
     fold_many0(
@@ -565,7 +565,7 @@ fn prec2(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec1(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec1(i: Input<'_>) -> Output<Expression> {
     let init = prec2(i)?;
     let position = init.0.position();
     fold_many0(
@@ -575,7 +575,7 @@ fn prec1(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn prec0(i: Input<'_>) -> Output<Expression<'_>> {
+fn prec0(i: Input<'_>) -> Output<Expression> {
     let init = prec1(i)?;
     let position = init.0.position();
     fold_many0(
@@ -585,7 +585,7 @@ fn prec0(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn precn(i: Input<'_>) -> Output<Expression<'_>> {
+fn precn(i: Input<'_>) -> Output<Expression> {
     let init = prec0(i)?;
     let position = init.0.position();
     fold_many0(
@@ -595,7 +595,7 @@ fn precn(i: Input<'_>) -> Output<Expression<'_>> {
     )(init.0)
 }
 
-fn expression(i: Input<'_>) -> Output<Expression<'_>> {
+fn expression(i: Input<'_>) -> Output<Expression> {
     ws(alt((
         map(assignment, |m| Expression::Assignment(Box::new(m))),
         precn
@@ -604,7 +604,7 @@ fn expression(i: Input<'_>) -> Output<Expression<'_>> {
 
 // let
 
-fn binding(i: Input<'_>) -> Output<Binding<'_>> {
+fn binding(i: Input<'_>) -> Output<Binding> {
     let position = i.position();
     ws(map(
         preceded(
@@ -624,7 +624,7 @@ fn binding(i: Input<'_>) -> Output<Binding<'_>> {
 
 // inline type
 
-fn inline_type(i: Input<'_>) -> Output<InlineType<'_>> {
+fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ws(alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
         map(array, |a| InlineType::Array(Box::new(a)))
@@ -633,16 +633,16 @@ fn inline_type(i: Input<'_>) -> Output<InlineType<'_>> {
 
 // struct definition
 
-fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
+fn struct_def(i: Input<'_>) -> Output<StructDef> {
 
-    fn field(i: Input<'_>) -> Output<(&str, InlineType<'_>)> {
+    fn field(i: Input<'_>) -> Output<(String, InlineType)> {
         map(
             tuple((ws(label), ws(char(':')), ws(inline_type))),
-            |tuple| (tuple.0, tuple.2)
+            |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
 
-    fn fields(i: Input<'_>) -> Output<Vec<(&str, InlineType<'_>)>> {
+    fn fields(i: Input<'_>) -> Output<Vec<(String, InlineType)>> {
         map(
             separated_list1(ws(char(',')), field),
             |list| {
@@ -669,7 +669,7 @@ fn struct_def(i: Input<'_>) -> Output<StructDef<'_>> {
 
 // module
 
-fn module(i: Input<'_>) -> Output<Module<'_>> {
+fn module(i: Input<'_>) -> Output<Module> {
     let position = i.position();
     ws(map(
         preceded(
@@ -686,7 +686,7 @@ fn module(i: Input<'_>) -> Output<Module<'_>> {
 
 // impl block
 
-fn impl_block(i: Input<'_>) -> Output<ImplBlock<'_>> {
+fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
     ws(map(
         preceded(
@@ -704,7 +704,7 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock<'_>> {
 
 // array definition
 
-fn array(i: Input<'_>) -> Output<Array<'_>> {
+fn array(i: Input<'_>) -> Output<Array> {
     let position = i.position();
     ws(map(
         delimited(ws(char('[')), tuple((ws(inline_type), ws(char(';')), ws(static_size))), ws(char(']'))),
@@ -719,9 +719,9 @@ fn array(i: Input<'_>) -> Output<Array<'_>> {
 
 // function definition
 
-fn function(i: Input<'_>) -> Output<Function<'_>> {
+fn function(i: Input<'_>) -> Output<Function> {
 
-    fn signature_argument(i: Input<'_>) -> Output<Binding<'_>> {
+    fn signature_argument(i: Input<'_>) -> Output<Binding> {
         let position = i.position();
         ws(map(
             tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
@@ -736,7 +736,7 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
         ))(i)
     }
 
-    fn signature_argument_list(i: Input<'_>) -> Output<Vec<Binding<'_>>> {
+    fn signature_argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
         delimited(ws(char('(')), separated_list0(ws(char(',')), ws(signature_argument)), ws(char(')')))(i)
     }
 
@@ -744,7 +744,7 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
         preceded(ws(tag("->")), inline_type)(i)
     }
 
-    fn signature(i: Input<'_>) -> Output<Signature<'_>> {
+    fn signature(i: Input<'_>) -> Output<Signature> {
         ws(map(
             preceded(
                 check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None }),
@@ -774,9 +774,9 @@ fn function(i: Input<'_>) -> Output<Function<'_>> {
 
 // for
 
-fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
+fn for_loop(i: Input<'_>) -> Output<ForLoop> {
 
-    fn loop_range(i: Input<'_>) -> Output<Expression<'_>> {
+    fn loop_range(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         map(
             tuple((ws(expression), ws(alt((tag("..="), tag("..")))), ws(expression))),
@@ -816,7 +816,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop<'_>> {
 
 // while loop
 
-fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
+fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let position = i.position();
     ws(map(
         preceded(
@@ -834,7 +834,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop<'_>> {
 
 // return
 
-fn return_statement(i: Input<'_>) -> Output<Return<'_>> {
+fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
     map(
         preceded(
@@ -850,7 +850,7 @@ fn return_statement(i: Input<'_>) -> Output<Return<'_>> {
 
 // statement
 
-fn statement(i: Input<'_>) -> Output<Statement<'_>> {
+fn statement(i: Input<'_>) -> Output<Statement> {
     ws(alt((
         map(binding,|m| Statement::Binding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
@@ -868,12 +868,12 @@ fn statement(i: Input<'_>) -> Output<Statement<'_>> {
 
 // root
 
-fn root(i: Input<'_>) -> Output<Vec<Statement<'_>>> {
+fn root(i: Input<'_>) -> Output<Vec<Statement>> {
     all_consuming(ws(many0(statement)))(i)
 }
 
 /// Parses an Itsy source file into a program AST structure.
-pub fn parse_module(src: &str) -> Result<ParsedModule<'_>, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
+pub fn parse_module(src: &str) -> Result<ParsedModule, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
     let input = Input::new(src);
     let result = root(input.clone());
     match result {
@@ -897,13 +897,14 @@ pub fn parse_module(src: &str) -> Result<ParsedModule<'_>, ParseError> {  // als
     }
 }
 
-pub fn parse<'a>(filename: &str, mut loader: impl FnMut(&str) -> &'a str) -> Result<ParsedProgram<'a>, ParseError> {
+/// Parses a Itsy source files into a program AST structure. Loader receives a file name and should return the file contents.
+pub fn parse(filename: &str, mut loader: impl FnMut(&str) -> String) -> Result<ParsedProgram, ParseError> {
     let mut program = ParsedProgram(HashMap::new());
     parse_recurse(filename, None, &mut program, &mut loader)?;
     Ok(program)
 }
 
-fn parse_recurse<'a>(file_name: &str, module_name: Option<&str>, program: &mut ParsedProgram<'a>, loader: &mut impl FnMut(&str) -> &'a str) -> Result<(), ParseError> {
+fn parse_recurse(file_name: &str, module_name: Option<&str>, program: &mut ParsedProgram, loader: &mut impl FnMut(&str) -> String) -> Result<(), ParseError> {
 
     let mut basepath = std::path::Path::new(file_name).parent().expect("Invalid filename").to_path_buf();
 
@@ -911,7 +912,7 @@ fn parse_recurse<'a>(file_name: &str, module_name: Option<&str>, program: &mut P
         basepath.push(module_name);
     }
 
-    let module = parse_module(loader(file_name))?;
+    let module = parse_module(&loader(file_name))?;
 
     for submodule_ast in module.modules() {
         let mut submodule_filename = basepath.clone();

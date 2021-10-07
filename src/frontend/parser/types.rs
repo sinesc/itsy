@@ -6,18 +6,18 @@ use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseE
 
 /// Parsed source-file AST.
 #[derive(Debug)]
-pub struct ParsedModule<'a> (pub(crate) Vec<Statement<'a>>);
+pub struct ParsedModule (pub(crate) Vec<Statement>);
 
-impl<'a> ParsedModule<'a> {
+impl ParsedModule {
     /// Returns an iterator over modules referenced by the source.
-    pub fn modules(self: &'a Self) -> ModuleIterator<'a> {
+    pub fn modules<'a>(self: &'a Self) -> ModuleIterator<'a> {
         ModuleIterator {
             source: self,
             index: 0,
         }
     }
     /// Returns an iterator over all statements in the source.
-    pub fn iter(self: &'a Self) -> SourceIterator<'a> {
+    pub fn iter<'a>(self: &'a Self) -> SourceIterator<'a> {
         SourceIterator {
             source: self,
             index: 0,
@@ -26,13 +26,13 @@ impl<'a> ParsedModule<'a> {
 }
 
 pub struct SourceIterator<'a> {
-    source: &'a ParsedModule<'a>,
+    source: &'a ParsedModule,
     index: usize,
 }
 
 impl<'a> Iterator for SourceIterator<'a> {
-    type Item = &'a Statement<'a>;
-    fn next(self: &mut Self) -> Option<&'a Statement<'a>> {
+    type Item = &'a Statement;
+    fn next(self: &mut Self) -> Option<&'a Statement> {
         while self.index < self.source.0.len() {
             let index = self.index;
             self.index += 1;
@@ -43,13 +43,13 @@ impl<'a> Iterator for SourceIterator<'a> {
 }
 
 pub struct ModuleIterator<'a> {
-    source: &'a ParsedModule<'a>,
+    source: &'a ParsedModule,
     index: usize,
 }
 
 impl<'a> Iterator for ModuleIterator<'a> {
-    type Item = &'a Module<'a>;
-    fn next(self: &mut Self) -> Option<&'a Module<'a>> {
+    type Item = &'a Module;
+    fn next(self: &mut Self) -> Option<&'a Module> {
         loop {
             if self.index < self.source.0.len() {
                 let index = self.index;
@@ -65,10 +65,10 @@ impl<'a> Iterator for ModuleIterator<'a> {
     }
 }
 
-pub struct ParsedProgram<'a> (pub(crate) HashMap<String, ParsedModule<'a>>);
+pub struct ParsedProgram (pub(crate) HashMap<String, ParsedModule>);
 
-impl<'a> ParsedProgram<'a> {
-    pub fn add_module(self: &mut Self, name: &str, module: ParsedModule<'a>) {
+impl ParsedProgram {
+    pub fn add_module(self: &mut Self, name: &str, module: ParsedModule) {
         self.0.insert(name.to_string(), module);
     }
 }
