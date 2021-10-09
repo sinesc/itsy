@@ -9,8 +9,6 @@ pub mod infos;
 
 #[cfg(feature="compiler")]
 use std::{ops::Add, fmt};
-#[cfg(feature="compiler")]
-use crate::frontend::ast::Position;
 use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
 #[cfg(feature="compiler")]
 use crate::shared::{infos::BindingInfo, typed_ids::BindingId};
@@ -83,27 +81,6 @@ impl Add for Progress {
             total: self.total + other.total,
         }
     }
-}
-
-/// Compute line/column number from absolute offset in string
-#[cfg(feature="compiler")]
-pub fn compute_loc(input: &str, offset: Position) -> (Position, Position) {
-    let mut parsed = &input[0..offset as usize];
-    let mut line = 1;
-    while { // can't use let parsed.lines() here as a line-break at the end is ignored
-        let mut break_char = '\0';
-        if let Some(nl) = parsed.find(|c| if c == '\n' || c == '\r' { break_char = c; true } else { false }) {
-            parsed = &parsed[nl+1..];
-            if break_char == '\r' && parsed.starts_with('\n') { // skip \n after \r on windows
-                parsed = &parsed[1..];
-            }
-            line += 1;
-            true
-        } else {
-            false
-        }
-    } {}
-    (line as Position, parsed.len() as Position + 1)
 }
 
 /// References two elements of a slice mutably

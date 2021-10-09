@@ -1,6 +1,5 @@
 use std::fmt::{self, Display};
 use crate::frontend::ast::Position;
-use crate::shared::compute_loc;
 
 /// Represents the various possible parser error-kinds.
 #[derive(Copy, Clone, Debug)]
@@ -21,17 +20,21 @@ pub enum ParseErrorKind {
 /// An error reported by the parser (e.g. syntax error).
 #[derive(Copy, Clone, Debug)]
 pub struct ParseError {
-    pub kind: ParseErrorKind,
-    position: Position, // this is the position from the end of the input
+    kind: ParseErrorKind,
+    position: Position,
 }
 
 impl ParseError {
-    pub(crate) fn new(kind: ParseErrorKind, offset: Position) -> ParseError {
-        Self { kind: kind, position: offset }
+    pub(crate) fn new(kind: ParseErrorKind, position: Position) -> ParseError {
+        Self { kind, position }
     }
-    /// Computes and returns the source code location of this error.
-    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
-        compute_loc(input, input.len() as Position - self.position)
+    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        self.position.loc(input)
+    }
+    /// The kind of the error.
+    pub fn kind(self: &Self) -> &ParseErrorKind {
+        &self.kind
     }
 }
 

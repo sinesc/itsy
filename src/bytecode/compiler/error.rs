@@ -1,9 +1,8 @@
 use std::fmt::{self, Display};
-use crate::shared::compute_loc;
 use crate::frontend::ast::{Positioned, Position};
 
 /// Represents the various possible compiler error-kinds.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum CompileErrorKind {
     Uninitialized,
     Internal,
@@ -12,18 +11,21 @@ pub enum CompileErrorKind {
 /// An error reported by the compiler.
 #[derive(Clone, Debug)]
 pub struct CompileError {
-    pub kind: CompileErrorKind,
-    position: Position, // this is the position from the end of the input
+    kind: CompileErrorKind,
+    position: Position,
 }
 
 impl CompileError {
     pub(super) fn new(item: &impl Positioned, kind: CompileErrorKind) -> CompileError {
-        Self { kind: kind, position: item.position() }
+        Self { kind, position: item.position() }
     }
-    /// Computes and returns the source code location of this error. Since the AST only stores byte
-    /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
-        compute_loc(input, input.len() as Position - self.position)
+    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        self.position.loc(input)
+    }
+    /// The kind of the error.
+    pub fn kind(self: &Self) -> &CompileErrorKind {
+        &self.kind
     }
 }
 

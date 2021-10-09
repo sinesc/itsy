@@ -4,7 +4,6 @@ use crate::ItemIndex;
 use crate::frontend::ast::{Position, Positioned};
 use crate::shared::types::Type;
 use crate::shared::numeric::Numeric;
-use crate::shared::compute_loc;
 
 pub const ICE: &'static str = "Internal compiler error";
 
@@ -27,18 +26,21 @@ pub enum ResolveErrorKind {
 /// An error reported by the resolver (e.g. unknown/mismatching types).
 #[derive(Clone, Debug)]
 pub struct ResolveError {
-    pub kind: ResolveErrorKind,
-    pub(crate) position: Position, // this is the position from the end of the input
+    kind: ResolveErrorKind,
+    pub(crate) position: Position,
 }
 
 impl ResolveError {
     pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind) -> ResolveError {
-        Self { kind: kind, position: item.position() }
+        Self { kind, position: item.position() }
     }
-    /// Computes and returns the source code location of this error. Since the AST only stores byte
-    /// offsets, the original source is required to recover line and column information.
-    pub fn loc(self: &Self, input: &str) -> (Position, Position) {
-        compute_loc(input, input.len() as Position - self.position)
+    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        self.position.loc(input)
+    }
+    /// The kind of the error.
+    pub fn kind(self: &Self) -> &ResolveErrorKind {
+        &self.kind
     }
 }
 
@@ -73,7 +75,7 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         } else {
             Err(ResolveError {
                 kind: kind,
-                position: item.map_or(0, |i| i.position())
+                position: item.map_or(Position(0), |i| i.position())
             })
         }
     }
@@ -86,7 +88,7 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         } else {
             Err(ResolveError {
                 kind: kind,
-                position: item.map_or(0, |i| i.position())
+                position: item.map_or(Position(0), |i| i.position())
             })
         }
     }
@@ -99,6 +101,6 @@ impl<T> SomeOrResolveError<T> for Option<T> {
 pub(crate) fn ice<T>(message: &str) -> Result<T, ResolveError> {
     Err(ResolveError {
         kind: ResolveErrorKind::Internal(message.to_string()),
-        position: 0
+        position: Position(0)
     })
 }

@@ -146,7 +146,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
             return Ok((remaining, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
-                type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
+                type_name   : type_name.map(|ty| TypeName::from_str(ty, position)), // TODO: this is the position of the number, not just the type suffix
                 type_id     : None,
             }));
         }
@@ -156,7 +156,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
                 return Ok((remaining, Literal {
                     position    : position,
                     value       : LiteralValue::Numeric(Numeric::Signed(integer)),
-                    type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
+                    type_name   : type_name.map(|ty| TypeName::from_str(ty, position)), // TODO: this is the position of the number, not just the type suffix
                     type_id     : None,
                 }));
             }
@@ -167,7 +167,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
                 return Ok((remaining, Literal {
                     position    : position,
                     value       : LiteralValue::Numeric(Numeric::Unsigned(integer)),
-                    type_name   : type_name.map(|ty| TypeName::from_str(ty, 0)),
+                    type_name   : type_name.map(|ty| TypeName::from_str(ty, position)), // TODO: this is the position of the number, not just the type suffix
                     type_id     : None,
                 }));
             }
@@ -890,7 +890,7 @@ pub fn parse_module(src: &str) -> Result<ParsedModule, ParseError> {  // also re
                 nom::Err::Error(_) => {
                     // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
                     let error = input.max_parsed();
-                    Err(ParseError::new(ParseErrorKind::SyntaxError, error.1 as Position))
+                    Err(ParseError::new(ParseErrorKind::SyntaxError, Position(error.1)))
                 }
             }
         }

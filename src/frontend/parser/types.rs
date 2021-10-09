@@ -104,7 +104,7 @@ impl<'a> Input<'a> {
         }
     }
     pub fn position(self: &Self) -> Position {
-        self.data.len() as Position
+        Position(self.data.len())
     }
     pub fn max_parsed(self: &Self) -> (Option<ParseErrorKind>, usize) {
         self.max_parsed.get()

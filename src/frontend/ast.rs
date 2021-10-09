@@ -39,7 +39,35 @@ pub(crate) trait Resolvable {
 }
 
 /// A position in the source code.
-pub(crate) type Position = u32;
+#[derive(Copy, Clone, Debug)]
+pub struct Position(pub(crate) usize);
+
+impl Position {
+    /// Create a new position. The source is required since a position is internally an absolute offset from the end of a string.
+    pub fn new(input: &str, offset: usize) -> Self {
+        Self(input.len() - offset)
+    }
+    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    pub fn loc(self: &Self, input: &str) -> (u32, u32) {
+        let offset = input.len() - self.0;
+        let mut parsed = &input[0..offset];
+        let mut line = 1;
+        while { // can't use let parsed.lines() here as a line-break at the end is ignored
+            let mut break_char = '\0';
+            if let Some(nl) = parsed.find(|c| if c == '\n' || c == '\r' { break_char = c; true } else { false }) {
+                parsed = &parsed[nl+1..];
+                if break_char == '\r' && parsed.starts_with('\n') { // skip \n after \r on windows
+                    parsed = &parsed[1..];
+                }
+                line += 1;
+                true
+            } else {
+                false
+            }
+        } {}
+        (line, parsed.len() as u32 + 1)
+    }
+}
 
 /// Source code position handling for AST structures associated with a position.
 pub(crate) trait Positioned {
