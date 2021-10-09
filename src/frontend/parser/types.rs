@@ -10,58 +10,17 @@ pub struct ParsedModule (pub(crate) Vec<Statement>);
 
 impl ParsedModule {
     /// Returns an iterator over modules referenced by the source.
-    pub fn modules<'a>(self: &'a Self) -> ModuleIterator<'a> {
-        ModuleIterator {
-            source: self,
-            index: 0,
-        }
+    pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&Module> {
+        self.0
+            .iter()
+            .filter_map(|s| match s {
+                Statement::Module(m) => Some(m),
+                _ => None,
+            })
     }
     /// Returns an iterator over all statements in the source.
-    pub fn iter<'a>(self: &'a Self) -> SourceIterator<'a> {
-        SourceIterator {
-            source: self,
-            index: 0,
-        }
-    }
-}
-
-pub struct SourceIterator<'a> {
-    source: &'a ParsedModule,
-    index: usize,
-}
-
-impl<'a> Iterator for SourceIterator<'a> {
-    type Item = &'a Statement;
-    fn next(self: &mut Self) -> Option<&'a Statement> {
-        while self.index < self.source.0.len() {
-            let index = self.index;
-            self.index += 1;
-            return Some(&self.source.0[index]);
-        }
-        return None;
-    }
-}
-
-pub struct ModuleIterator<'a> {
-    source: &'a ParsedModule,
-    index: usize,
-}
-
-impl<'a> Iterator for ModuleIterator<'a> {
-    type Item = &'a Module;
-    fn next(self: &mut Self) -> Option<&'a Module> {
-        loop {
-            if self.index < self.source.0.len() {
-                let index = self.index;
-                self.index += 1;
-                match &self.source.0[index] {
-                    Statement::Module(m) => return Some(&m),
-                    _ => { },
-                }
-            } else {
-                return None;
-            }
-        }
+    pub fn iter<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {
+        self.0.iter()
     }
 }
 
