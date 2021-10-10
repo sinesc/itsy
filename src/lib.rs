@@ -249,7 +249,8 @@ macro_rules! vm_func {
 }
 
 /// Parses, resolves and compiles given Itsy source code. The name of the
-/// entry function must be `main`. For more control, see either [build] or
+/// entry function must be `main`. This utility-function does not support
+/// external Itsy modules. For more control, see either [build] or
 /// [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM] to execute the given program.
 ///
@@ -292,6 +293,11 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F
     Ok(compile(resolved)?)
 }
 
+/// Parses, resolves and compiles given Itsy source file. The name of the
+/// entry function must be `main`. Modules are loaded from disk relative to the
+/// given source file. For more control, see [parser::parse], [resolver::resolve] and [compiler::compile].
+/// Use [run] or [VM] to execute the given program.
+#[cfg(feature="compiler")]
 pub fn build<F, P: AsRef<std::path::Path>>(source_file: P) -> Result<Program<F>, Error> where F: VMFunc<F> {
     use std::collections::HashMap;
     let source_file = source_file.as_ref();

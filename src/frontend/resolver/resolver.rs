@@ -39,8 +39,32 @@ struct Resolver<'ctx> {
 }
 
 /// Resolves types within the given program AST structure.
+///
+/// The following example parses a string into a module, constructs a program with it and resolves the program.
+/// If the program were to be compiled and run, execution would start at the "main" function.
+/// ```
+/// use itsy::{vm_func, parser, resolver};
+///
+/// vm_func!(MyFns, (), {
+///     /// a rust function that prints given string
+///     fn print(&mut context, value: &str) {
+///         println!("print: {}", value);
+///     }
+/// });
+///
+/// fn main() {
+///     let parsed = parser::parse_module("
+///         /// an itsy function that calls a rust function
+///         fn main() {
+///             print(\"Hello from Itsy!\");
+///         }
+///     ", "").unwrap();
+///     let mut program = parser::ParsedProgram::new();
+///     program.add_module(parsed);
+///     let resolved = resolver::resolve::<MyFns>(program, "main").unwrap();
+/// }
 #[allow(invalid_type_param_default)]
-pub fn resolve<T>(mut program: ParsedProgram, entry: &str) -> Result<ResolvedProgram<T>, Error> where T: VMFunc<T> {
+pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<ResolvedProgram<T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -127,7 +151,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry: &str) -> Result<ResolvedPro
         }
     }
 
-    let entry_fn = scopes.lookup_function_id(root_scope_id, (entry, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry)))?;
+    let entry_fn = scopes.lookup_function_id(root_scope_id, (entry_function, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry_function)))?;
 
     Ok(ResolvedProgram {
         ty              : PhantomData,

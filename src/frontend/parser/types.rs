@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::ops::Deref;
 use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
 
-/// Parsed source-file AST.
+/// Parsed sourcecode of a single Itsy module.
 #[derive(Debug)]
 pub struct ParsedModule {
     pub(crate) path: String,
@@ -11,7 +11,7 @@ pub struct ParsedModule {
 }
 
 impl ParsedModule {
-    /// Returns an iterator over modules referenced by the source.
+    /// Returns an iterator over all submodules of the module.
     pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&Module> {
         self.ast
             .iter()
@@ -26,6 +26,7 @@ impl ParsedModule {
     }
 }
 
+/// Parsed sourcecode of an Itsy program.
 pub struct ParsedProgram (pub(crate) Vec<ParsedModule>);
 
 impl ParsedProgram {

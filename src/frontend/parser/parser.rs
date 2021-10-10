@@ -872,7 +872,7 @@ fn root(i: Input<'_>) -> Output<Vec<Statement>> {
     all_consuming(ws(many0(statement)))(i)
 }
 
-/// Parses a Itsy source code into a program AST structure.
+/// Parses Itsy source code into a program AST structure.
 pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
     let input = Input::new(src);
     let result = root(input.clone());
@@ -897,7 +897,22 @@ pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseE
     }
 }
 
-/// Parses Itsy source files into a program AST structure. The loader receives the fully qualified module name and is expected to return the parsed module.
+/// Parses Itsy source files into a program AST structure. The loader receives the fully qualified module name and is
+/// expected to return the parsed module.
+///
+/// The following example parses a module with its dependencies.
+/// ```
+/// use itsy::parser;
+/// use std::fs;
+///
+/// fn main() {
+///     let source_file = "itsy/playground/playground.itsy";
+///     let parsed = parser::parse(|module_path| {
+///         let filename = parser::module_filename(source_file, module_path);
+///         let file = fs::read_to_string(filename).unwrap();
+///         parser::parse_module(&file, module_path)
+///     }).unwrap();
+/// }
 pub fn parse(mut loader: impl FnMut(&str) -> Result<ParsedModule, ParseError>) -> Result<ParsedProgram, ParseError> {
     let mut program = ParsedProgram::new();
     parse_recurse("", &mut program, &mut loader)?;
