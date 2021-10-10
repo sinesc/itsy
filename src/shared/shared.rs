@@ -101,6 +101,7 @@ pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
 }
 
 /// Splits a path string into its constituent parts.
+#[cfg(feature="compiler")]
 pub fn path_to_parts<T: AsRef<str>>(path: T) -> Vec<String> {
     let path = path.as_ref();
     match path {
@@ -110,6 +111,7 @@ pub fn path_to_parts<T: AsRef<str>>(path: T) -> Vec<String> {
 }
 
 /// Joins parts of a path into a string.
+#[cfg(feature="compiler")]
 pub fn parts_to_path<T: AsRef<str>>(parts: &[T]) -> String {
     let parts = parts.iter().map(|p| p.as_ref()).collect::<Vec<_>>(); // todo: lame to have to collect first
     parts.join("::")
