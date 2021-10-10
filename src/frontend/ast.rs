@@ -2,9 +2,7 @@
 
 use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{ItemIndex, StackAddress, shared::BindingContainer};
-use crate::shared::typed_ids::{BindingId, FunctionId, ScopeId, TypeId};
-use crate::shared::numeric::Numeric;
-use crate::shared::Progress;
+use crate::shared::{typed_ids::{BindingId, FunctionId, ScopeId, TypeId}, numeric::Numeric, Progress, parts_to_path};
 
 /// TypeId handling for typeable AST structures.
 pub(crate) trait Typeable {
@@ -148,7 +146,7 @@ impl Path {
 
 impl Display for Path {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name.join("::"))
+        write!(f, "{}", parts_to_path(&self.name))
     }
 }
 

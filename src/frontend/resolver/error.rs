@@ -27,12 +27,13 @@ pub enum ResolveErrorKind {
 #[derive(Clone, Debug)]
 pub struct ResolveError {
     kind: ResolveErrorKind,
-    pub(crate) position: Position,
+    position: Position,
+    module_path: String,
 }
 
 impl ResolveError {
-    pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind) -> ResolveError {
-        Self { kind, position: item.position() }
+    pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
+        Self { kind, position: item.position(), module_path: module_path.to_string() }
     }
     /// Compute 1-based line/column number from Position (absolute offset from end) in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
@@ -41,6 +42,10 @@ impl ResolveError {
     /// The kind of the error.
     pub fn kind(self: &Self) -> &ResolveErrorKind {
         &self.kind
+    }
+    /// Path to the module where the error occured.
+    pub fn module_path(self: &Self) -> &str {
+        &self.module_path
     }
 }
 
@@ -75,7 +80,8 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         } else {
             Err(ResolveError {
                 kind: kind,
-                position: item.map_or(Position(0), |i| i.position())
+                position: item.map_or(Position(0), |i| i.position()),
+                module_path: "fixme".to_string(),
             })
         }
     }
@@ -88,7 +94,8 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         } else {
             Err(ResolveError {
                 kind: kind,
-                position: item.map_or(Position(0), |i| i.position())
+                position: item.map_or(Position(0), |i| i.position()),
+                module_path: "fixme".to_string(),
             })
         }
     }
@@ -101,6 +108,7 @@ impl<T> SomeOrResolveError<T> for Option<T> {
 pub(crate) fn ice<T>(message: &str) -> Result<T, ResolveError> {
     Err(ResolveError {
         kind: ResolveErrorKind::Internal(message.to_string()),
-        position: Position(0)
+        position: Position(0),
+        module_path: "".to_string(),
     })
 }

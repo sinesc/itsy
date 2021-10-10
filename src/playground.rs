@@ -93,8 +93,10 @@ fn log(filename: &str, append: bool, data: &str) {
 }
 
 fn build(source: &str, write_logs: bool) -> Result<compiler::Program<MyFns>, Error> {
-    let parsed = parser::parse_module(source)?;
-    let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
+    let parsed = parser::parse_module(source, "")?;
+    let mut program = parser::ParsedProgram::new();
+    program.add_module(parsed);
+    let resolved = resolver::resolve::<MyFns>(program, "main")?;
     if write_logs {
         log("logs/ast.c", false, &format!("{:?}", resolved.ast));
     }

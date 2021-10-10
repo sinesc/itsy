@@ -61,7 +61,7 @@ pub type RustFnIndex = u16;
 /// The following example defines a few Rust function and calls them from itsy code.
 ///
 /// ```
-/// use itsy::{vm_func, build, runtime::VM};
+/// use itsy::{vm_func, build_str, runtime::VM};
 ///
 /// struct MyContext {
 ///     // ...
@@ -81,7 +81,7 @@ pub type RustFnIndex = u16;
 /// fn main() {
 ///     let mut context = MyContext { /* ... */ };
 ///
-///     let program = build::<MyFns>("
+///     let program = build_str::<MyFns>("
 ///         fn main() {
 ///             print(intense_computation(4, 5));
 ///         }
@@ -249,13 +249,13 @@ macro_rules! vm_func {
 }
 
 /// Parses, resolves and compiles given Itsy source code. The name of the
-/// entry function must be `main`. For more control, see [parser::parse],
-/// [resolver::resolve] and [compiler::compile].
+/// entry function must be `main`. For more control, see either [build] or
+/// [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM] to execute the given program.
 ///
 /// The following example builds and runs a program:
 /// ```
-/// use itsy::{vm_func, build, run};
+/// use itsy::{vm_func, build_str, run};
 ///
 /// vm_func!(MyFns, (), {
 ///     /// a rust function that prints given string
@@ -265,7 +265,7 @@ macro_rules! vm_func {
 /// });
 ///
 /// fn main() {
-///     let program = build::<MyFns>("
+///     let program = build_str::<MyFns>("
 ///         /// an itsy function that calls a rust function
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
@@ -276,8 +276,33 @@ macro_rules! vm_func {
 /// }
 /// ```
 #[cfg(feature="compiler")]
-pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
-    let parsed = parse_module(source)?;
+pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
+    use crate::frontend::parser::{types::ParsedProgram, error::ParseError, error::ParseErrorKind};
+    let parsed = parse_module(source, "")?;
+    if let Some(module) = parsed.modules().next() {
+        return Err(Error::ParseError(ParseError::new(
+            ParseErrorKind::DisabledFeature("build_str() does not support module loading. Please use either build() or parser::parse() and provide a module loader"),
+            module.position,
+            "",
+        )));
+    }
+    let mut program = ParsedProgram::new();
+    program.add_module(parsed);
+    let resolved = resolve::<F>(program, "main")?;
+    Ok(compile(resolved)?)
+}
+
+pub fn build<F, P: AsRef<std::path::Path>>(source_file: P) -> Result<Program<F>, Error> where F: VMFunc<F> {
+    use std::collections::HashMap;
+    let source_file = source_file.as_ref();
+    let mut files: HashMap<String, String> = HashMap::new();
+    let parsed = parser::parse(|module_path| {
+        let filename = parser::module_filename(source_file, module_path);
+        let file = std::fs::read_to_string(filename).unwrap();
+        let module = parser::parse_module(&file, module_path);
+        files.insert(module_path.to_string(), file);
+        module
+    })?;
     let resolved = resolve::<F>(parsed, "main")?;
     Ok(compile(resolved)?)
 }
@@ -287,7 +312,7 @@ pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
 ///
 /// The following example builds and runs a program:
 /// ```
-/// use itsy::{vm_func, build, run};
+/// use itsy::{vm_func, build_str, run};
 ///
 /// vm_func!(MyFns, (), {
 ///     /// a rust function that prints given string
@@ -297,7 +322,7 @@ pub fn build<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F> {
 /// });
 ///
 /// fn main() {
-///     let program = build::<MyFns>("
+///     let program = build_str::<MyFns>("
 ///         /// an itsy function that calls a rust function
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");

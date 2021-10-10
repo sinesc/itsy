@@ -17,7 +17,7 @@ use util::CallInfo;
 use init_state::{BindingState, BranchingKind, BranchingPath};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-pub struct Compiler<'ty, T> {
+struct Compiler<'ty, T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
     /// Type and mutability data.
@@ -34,12 +34,14 @@ pub struct Compiler<'ty, T> {
     writing_protype_instructions: Cell<bool>,
     /// Tracks variable initialization state.
     init_state: RefCell<BindingState>,
+    /// Module base path. For error reporting only
+    module_path: String,
 }
 
 /// Compiles a resolved program into bytecode.
 pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
-    let ResolvedProgram { ast: statements, id_mappings: bindings, entry_fn, .. } = program;
+    let ResolvedProgram { ast: modules, id_mappings: bindings, entry_fn, .. } = program;
 
     let mut compiler = Compiler {
         writer      : Writer::new(),
@@ -50,6 +52,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         constructors: HashMap::new(),
         writing_protype_instructions: Cell::new(false),
         init_state  : RefCell::new(BindingState::new()),
+        module_path : "".to_string(),
     };
 
     // serialize constructors onto const pool
@@ -65,8 +68,11 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     compiler.writer.exit();
 
     // compile program
-    for statement in statements.0.iter() {
-        compiler.compile_statement(statement)?;
+    for module in modules {
+        compiler.module_path = module.path.clone();
+        for statement in module.iter() {
+            compiler.compile_statement(statement)?;
+        }
     }
 
     // overwrite placeholder with actual entry position
@@ -164,7 +170,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => {
                 if !self.init_state.borrow().initialized(binding_id) {
-                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
+                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized, &self.module_path));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
@@ -286,7 +292,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
             if !self.init_state.borrow().initialized(binding_id) {
-                return Err(CompileError::new(item, CompileErrorKind::Uninitialized));
+                return Err(CompileError::new(item, CompileErrorKind::Uninitialized, &self.module_path));
             }
             local.index
         };
@@ -454,7 +460,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
                 self.compile_for_loop_array(item, iter_local, iter_ty)
             },
-            _ => Err(CompileError::new(item, CompileErrorKind::Internal))
+            _ => Err(CompileError::new(item, CompileErrorKind::Internal, &self.module_path))
         };
         self.init_state.borrow_mut().pop();
         result

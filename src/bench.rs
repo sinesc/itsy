@@ -40,8 +40,10 @@ fn main() {
     }
 }
 fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
-    let parsed = parser::parse_module(source)?;
-    let resolved = resolver::resolve::<BenchFn>(parsed, "main")?;
+    let parsed = parser::parse_module(source, "")?;
+    let mut program = parser::ParsedProgram::new();
+    program.add_module(parsed);
+    let resolved = resolver::resolve::<BenchFn>(program, "main")?;
     Ok(compiler::compile(resolved)?)
 }
 fn fib_r(n: i32) -> i32 {

@@ -1,4 +1,4 @@
-pub use itsy::{build, run as itsy_run, parser::parse_module};
+pub use itsy::{build_str, run as itsy_run, parser::parse_module};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
@@ -78,7 +78,7 @@ vm_func!(TestFns, Context, {
 pub fn run(code: &str) -> Context {
     let tmp;
     let input = if code.find("fn main()").is_some() { code } else { tmp = format!("fn main() {{ {} }}", code); &tmp };
-    let program = match build::<TestFns>(input) {
+    let program = match build_str::<TestFns>(input) {
         Ok(program) => program,
         Err(err) => {
             let loc =  err.loc(&input);

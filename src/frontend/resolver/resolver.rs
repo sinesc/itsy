@@ -8,17 +8,17 @@ pub mod resolved;
 use std::marker::PhantomData;
 use std::collections::HashMap;
 use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
+use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
-use crate::shared::{Progress, TypeContainer, BindingContainer};
+use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path, path_to_parts};
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
-use crate::frontend::parser::types::ParsedModule;
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
@@ -32,13 +32,15 @@ struct Resolver<'ctx> {
     must_resolve    : bool,
     /// Primitive to type id mapping.
     primitives      : &'ctx HashMap<&'ctx Type, TypeId>,
-    /// Current fully qualified path
+    /// Module base path. For error reporting only
+    module_path     : &'ctx str,
+    /// Current fully qualified path.
     path            : &'ctx mut Vec<String>,
 }
 
 /// Resolves types within the given program AST structure.
 #[allow(invalid_type_param_default)]
-pub fn resolve<T>(mut program: ParsedModule, entry: &str) -> Result<ResolvedProgram<T>, Error> where T: VMFunc<T> {
+pub fn resolve<T>(mut program: ParsedProgram, entry: &str) -> Result<ResolvedProgram<T>, Error> where T: VMFunc<T> {
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
@@ -96,14 +98,19 @@ pub fn resolve<T>(mut program: ParsedModule, entry: &str) -> Result<ResolvedProg
             must_resolve    : must_resolve,
             primitives      : &primitives,
             path            : &mut path,
+            module_path     : "",
         };
 
-        for mut statement in program.0.iter_mut() {
-            resolver.resolve_statement(&mut statement)?; // todo: want a vec of errors here
+        for module in &mut program.0 {
+            resolver.module_path = &module.path;
+            *resolver.path = path_to_parts(&module.path);
+            for mut statement in module.ast.iter_mut() {
+                resolver.resolve_statement(&mut statement)?; // todo: want a vec of errors here
+            }
         }
 
         prev_resolved = now_resolved;
-        now_resolved = scopes.resolved() + program.0.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
+        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.iter()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
 
         if !now_resolved.done() && now_resolved == prev_resolved {
             if !infer_literals {
@@ -124,7 +131,7 @@ pub fn resolve<T>(mut program: ParsedModule, entry: &str) -> Result<ResolvedProg
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
-        ast             : program,
+        ast             : program.0,
         entry_fn        : entry_fn,
         id_mappings     : scopes.into(),
     })
@@ -182,7 +189,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn check_types_match(self: &Self, item: &impl Positioned, type_id_a: Option<TypeId>, type_id_b: Option<TypeId>) -> ResolveResult  {
         if !self.types_match(type_id_a, type_id_b)? {
             let error_kind = ErrorKind::TypeMismatch(self.type_by_id(type_id_a.unwrap_or_ice(ICE)?).clone(), self.type_by_id(type_id_b.unwrap_or_ice(ICE)?).clone());
-            Err(Error::new(item, error_kind))
+            Err(Error::new(item, error_kind, self.module_path))
         } else {
             Ok(())
         }
@@ -203,7 +210,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     Ok(())
                 }
             } else {
-                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string())))
+                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string()), self.module_path))
             }
         } else {
             if item.type_id(self).is_some() && expected_result.is_some() {
@@ -237,7 +244,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for part in append {
             result.push(part.as_ref().to_string());
         }
-        result.join("::")
+        parts_to_path(&result)
     }
 }
 
@@ -409,7 +416,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.scope_id = parent_scope_id;
         if self.must_resolve && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
-            Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name))))
+            Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
         } else {
             Ok(())
         }
@@ -447,12 +454,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     (self.make_path(&[ &item.ident.name ]), TypeId::void())
                 },
                 CallType::Static(path) => {
-                    (self.make_path(&[ &path.name.join("::"), &item.ident.name ]), TypeId::void())
+                    (self.make_path(&[ &parts_to_path(&path.name), &item.ident.name ]), TypeId::void())
                 },
             };
             item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
             if item.function_id.is_none() && self.must_resolve {
-                return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", &path))));
+                return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", &path)), self.module_path));
             }
         }
 
@@ -472,7 +479,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // argument count
             if function_info.arg_type.len() != item.args.len() {
-                return Err(Error::new(item, ErrorKind::NumberOfArguments(function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex)));
+                return Err(Error::new(item, ErrorKind::NumberOfArguments(function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
             }
 
             // arguments
@@ -497,7 +504,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.binding_id.is_none() {
             item.binding_id = self.scopes.lookup_binding_id(self.scope_id, &item.ident.name);
             if item.binding_id.is_none() {
-                return Err(Error::new(item, ErrorKind::UnknownValue(item.ident.name.to_string())));
+                return Err(Error::new(item, ErrorKind::UnknownValue(item.ident.name.to_string()), self.module_path));
             }
         }
         // set expected type, if any
@@ -549,7 +556,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(&mut item.iter, elements_type_id)?;
                 }
             },
-            _ => return Err(Error::new(&item.iter, ErrorKind::InvalidOperation("Unsupported for in operand".to_string()))),
+            _ => return Err(Error::new(&item.iter, ErrorKind::InvalidOperation("Unsupported for in operand".to_string()), self.module_path)),
         };
         // handle block
         self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
@@ -636,12 +643,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *item.type_id_mut(self) = Some(type_id);
             let ty = self.type_by_id(type_id);
             if !ty.is_primitive() && !ty.is_string() {
-                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone())));
+                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone()), self.module_path));
             }
         }
         if let Some(ty) = self.item_type(&item.expr) {
             if !ty.is_primitive() && !ty.is_string() {
-                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone())));
+                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone()), self.module_path));
             }
         }
         Ok(())
@@ -823,7 +830,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
             let ty = self.type_by_id(expected_type);
             if !ty.is_compatible_numeric(numeric) {
-                return Err(Error::new(item, ErrorKind::IncompatibleNumeric(ty.clone(), numeric)));
+                return Err(Error::new(item, ErrorKind::IncompatibleNumeric(ty.clone(), numeric), self.module_path));
             }
             self.set_type_id(item, expected_type)?;
         } else if self.infer_literals {

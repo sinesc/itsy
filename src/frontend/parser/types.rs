@@ -1,17 +1,19 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::ops::Deref;
-use std::collections::HashMap;
 use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
 
 /// Parsed source-file AST.
 #[derive(Debug)]
-pub struct ParsedModule (pub(crate) Vec<Statement>);
+pub struct ParsedModule {
+    pub(crate) path: String,
+    pub(crate) ast: Vec<Statement>,
+}
 
 impl ParsedModule {
     /// Returns an iterator over modules referenced by the source.
     pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&Module> {
-        self.0
+        self.ast
             .iter()
             .filter_map(|s| match s {
                 Statement::Module(m) => Some(m),
@@ -20,15 +22,24 @@ impl ParsedModule {
     }
     /// Returns an iterator over all statements in the source.
     pub fn iter<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {
-        self.0.iter()
+        self.ast.iter()
     }
 }
 
-pub struct ParsedProgram (pub(crate) HashMap<String, ParsedModule>);
+pub struct ParsedProgram (pub(crate) Vec<ParsedModule>);
 
 impl ParsedProgram {
-    pub fn add_module(self: &mut Self, name: &str, module: ParsedModule) {
-        self.0.insert(name.to_string(), module);
+    /// Returns an empty ParsedProgram instance.
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+    /// Adds a module to the instance.
+    pub fn add_module(self: &mut Self, module: ParsedModule) {
+        self.0.push(module);
+    }
+    /// Returns an iterator over all modules and their paths in the program.
+    pub fn modules(self: &Self) -> impl Iterator<Item=&ParsedModule> {
+        self.0.iter()
     }
 }
 

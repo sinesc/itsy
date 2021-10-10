@@ -9,7 +9,7 @@ pub struct ResolvedProgram<T> {
     /// Programs are generic over their Rust API
     pub(crate) ty: PhantomData<T>,
     /// Program AST with resolved `BindingId`s.
-    pub ast: ParsedModule,
+    pub ast: Vec<ParsedModule>,
     /// Maps typed ids to program meta data.
     pub id_mappings: IdMappings,
     /// `FunctionId` of the entry/main function.
