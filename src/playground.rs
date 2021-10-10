@@ -1,7 +1,7 @@
 use itsy::*;
 
 /*
-    This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/test.itsy
+    This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/playground/playground.itsy
     To enable logging, create a "logs" directoy parallel to the "src" directory. To disable logging again, simply delete the directory.
     Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
 */
@@ -49,7 +49,7 @@ vm_func!(MyFns, (), {
 });
 
 fn main() {
-    let source = std::fs::read_to_string("itsy/playground.itsy").unwrap();
+    let source = std::fs::read_to_string("itsy/playground/playground.itsy").unwrap();
     let write_logs = std::path::Path::new("./logs/").is_dir();
     match build(&source, write_logs) {
         Ok(program) => {

@@ -25,7 +25,7 @@ vm_func!(BenchFn, Bench, {
 });
 
 fn main() {
-    println!("Ballpark Bench™ - As accurate as football field units");
+    println!("Ballpark Bench™ - Measuring in approximate baseball fields");
     let source = std::fs::read_to_string("itsy/bench/main.itsy").unwrap();
     let mut context = Bench { time: None };
     match build(&source) {
@@ -55,22 +55,18 @@ fn fib_r(n: i32) -> i32 {
 }
 
 fn fib_i(n: i32) -> i32 {
-
     let mut i = 0;
     let mut j = 1;
     let mut k = 1;
     let mut t;
-
     if n == 0 {
        return 0;
     }
-
     while k < n {
         t = i + j;
         i = j;
         j = t;
         k += 1;
     }
-
     return j;
 }
