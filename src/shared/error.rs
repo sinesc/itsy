@@ -18,15 +18,22 @@ pub enum Error {
 
 #[cfg(feature="compiler")]
 impl Error {
+    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
         match self {
-            #[cfg(feature="compiler")]
             Self::ParseError(e) => e.loc(input),
-            #[cfg(feature="compiler")]
             Self::ResolveError(e) => e.loc(input),
-            #[cfg(feature="compiler")]
             Self::CompileError(e) => e.loc(input),
             Self::RuntimeError => (0, 0),
+        }
+    }
+    /// Path to the module where the error occured.
+    pub fn module_path(self: &Self) -> &str {
+        match self {
+            Self::ParseError(e) => e.module_path(),
+            Self::ResolveError(e) => e.module_path(),
+            Self::CompileError(e) => e.module_path(),
+            Self::RuntimeError => "",
         }
     }
 }

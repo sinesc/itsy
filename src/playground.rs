@@ -1,4 +1,5 @@
 use itsy::*;
+use std::{path::PathBuf, collections::HashMap};
 
 /*
     This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/playground/playground.itsy
@@ -49,9 +50,9 @@ vm_func!(MyFns, (), {
 });
 
 fn main() {
-    let source = std::fs::read_to_string("itsy/playground/playground.itsy").unwrap();
+    let mut files: HashMap<String, (PathBuf, String)> = HashMap::new();
     let write_logs = std::path::Path::new("./logs/").is_dir();
-    match build(&source, write_logs) {
+    match build("itsy/playground/playground.itsy", &mut files, write_logs) {
         Ok(program) => {
             let mut vm = runtime::VM::new(&program);
             if write_logs {
@@ -76,8 +77,9 @@ fn main() {
             }
         }
         Err(err) => {
-            let loc =  err.loc(&source);
-            println!("{} in line {}, column {}.", err, loc.0, loc.1);
+            let module_path = err.module_path();
+            let loc =  err.loc(&files[module_path].1);
+            println!("{} in line {}, column {} in file {}.", err, loc.0, loc.1, files[module_path].0.to_str().unwrap());
         }
     }
 }
@@ -92,11 +94,16 @@ fn log(filename: &str, append: bool, data: &str) {
     }
 }
 
-fn build(source: &str, write_logs: bool) -> Result<compiler::Program<MyFns>, Error> {
-    let parsed = parser::parse_module(source, "")?;
-    let mut program = parser::ParsedProgram::new();
-    program.add_module(parsed);
-    let resolved = resolver::resolve::<MyFns>(program, "main")?;
+fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<compiler::Program<MyFns>, Error> {
+    let source_file = source_file.as_ref();
+    let parsed = parser::parse(|module_path| {
+        let filename = parser::module_filename(source_file, module_path);
+        let file = std::fs::read_to_string(&filename).unwrap();
+        let module = parser::parse_module(&file, module_path);
+        files.insert(module_path.to_string(), (filename, file));
+        module
+    })?;
+    let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
     if write_logs {
         log("logs/ast.c", false, &format!("{:?}", resolved.ast));
     }

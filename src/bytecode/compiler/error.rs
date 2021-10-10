@@ -28,6 +28,10 @@ impl CompileError {
     pub fn kind(self: &Self) -> &CompileErrorKind {
         &self.kind
     }
+    /// Path to the module where the error occured.
+    pub fn module_path(self: &Self) -> &str {
+        &self.module_path
+    }
 }
 
 impl Display for CompileError {
