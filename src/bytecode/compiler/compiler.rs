@@ -92,6 +92,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match item {
             S::StructDef(_) => Ok(()),
             S::Module(_) => Ok(()),
+            S::Use(_) => Ok(()),
             S::Return(_) => unreachable!("Return AST nodes should have been rewritten"),
             S::Function(function) => self.compile_function(function),
             S::ImplBlock(impl_block) => {

@@ -319,6 +319,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Return(ret)              => self.resolve_return(ret),
             S::Expression(expression)   => self.resolve_expression(expression, None),
             S::Module(_)                => { Ok(()) /* nothing to do here */ },
+            S::Use(_)                => { Ok(()) /* nothing to do here */ },
         }
     }
 

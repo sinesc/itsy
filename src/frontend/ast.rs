@@ -101,7 +101,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module, Use)
     };
     ($self:ident, $enum_name:ident, $val_name:ident, $code:tt $(, $variant_name:ident)+) => {
         match $self {
@@ -164,6 +164,7 @@ pub enum Statement {
     Return(Return),
     Expression(Expression),
     Module(Module),
+    Use(Use),
 }
 
 impl Statement {
@@ -235,6 +236,20 @@ impl Module {
 impl Resolvable for Module {
     fn num_resolved(self: &Self) -> Progress {
         Progress::new(1, 1)
+    }
+}
+
+#[derive(Debug)]
+pub struct Use {
+    pub position    : Position,
+    pub mapping     : HashMap<String, String>,
+}
+
+impl_positioned!(Use);
+
+impl Resolvable for Use {
+    fn num_resolved(self: &Self) -> Progress {
+        Progress::new(0, 1) // TODO
     }
 }
 

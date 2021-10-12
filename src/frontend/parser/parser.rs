@@ -14,7 +14,7 @@ use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::StackAddress;
-use crate::shared::{numeric::Numeric, path_to_parts};
+use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedModule, ParsedProgram};
 use error::{ParseError, ParseErrorKind};
@@ -75,7 +75,7 @@ fn ident(i: Input<'_>) -> Output<Ident> {
 
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(ws(tag("::")), ws(label)), move |m| Path { position: position, name: m.into_iter().map(|s| s.to_string()).collect() })(i)
+    map(separated_list1(ws(tag("::")), label), move |m| Path { position: position, name: m.into_iter().map(|s| s.to_string()).collect() })(i)
 }
 
 // literal numerical (-3.14f32)
@@ -589,7 +589,7 @@ fn precn(i: Input<'_>) -> Output<Expression> {
     let init = prec0(i)?;
     let position = init.0.position();
     fold_many0(
-        preceded(tag("as"), path),
+        preceded(sepr(tag("as")), path),
         init.1,
         |acc, val| Expression::Cast(Box::new(Cast { position: position, expr: acc, ty: TypeName::from_path(val), type_id: None }))
     )(init.0)
@@ -681,7 +681,46 @@ fn module(i: Input<'_>) -> Output<Module> {
             ident   : ident,
         }
     ))(i)
+}
 
+// use
+
+fn use_item(i: Input<'_>) -> Output<Vec<(String, String)>> {
+    ws(alt((
+        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
+            let mut flattened = Vec::new();
+            let parent = parts_to_path(&path.name);
+            for elements in list  {
+                for (path, ident) in elements {
+                    flattened.push((parent.clone() + "::" + &path, ident));
+                }
+            }
+            flattened
+        }),
+        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
+            vec![(parts_to_path(&path.name), ident.name)]
+        }),
+        map(path, |path| {
+            vec![(parts_to_path(&path.name), path.name.last().unwrap().clone())]
+        }),
+    )))(i)
+}
+
+fn use_declaration(i: Input<'_>) -> Output<Use> {
+    let position = i.position();
+    ws(map(
+        delimited(
+            check_state(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
+            use_item,
+            char(';')
+        ),
+        move |items| {
+            Use {
+                position,
+                mapping: items.into_iter().collect(),
+            }
+        }
+    ))(i)
 }
 
 // impl block
@@ -861,6 +900,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
         map(block, |m| Statement::Block(m)),
+        map(use_declaration, |m| Statement::Use(m)),
         map(module, |m| Statement::Module(m)),
         map(terminated(expression, char(';')), |m| Statement::Expression(m)),
     )))(i)
