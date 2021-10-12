@@ -12,7 +12,7 @@ use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
-use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path, path_to_parts};
+use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
@@ -20,22 +20,48 @@ use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
 
+#[derive(Copy, Clone, Debug)]
+struct Stage(u8);
+
+impl Stage {
+    /// Construct stage.
+    fn new() -> Self {
+        Stage(0)
+    }
+    /// Proceed to next stage.
+    fn next(self: &mut Self) {
+        self.0 += 1;
+    }
+    /// Resets back to first stage.
+    fn reset(self: &mut Self) {
+        self.0 = 0;
+    }
+    /// Assume paths to be absolute.
+    fn absolute_paths(self: &Self) -> bool {
+        self.0 == 1
+    }
+    /// Assume unresolved numeric literals to be their default types.
+    fn infer_literals(self: &Self) -> bool {
+        self.0 == 2
+    }
+    /// Previous stages failed, next resolution failure must trigger a resolution error.
+    fn must_resolve(self: &Self) -> bool {
+        self.0 >= 3
+    }
+}
+
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
     /// Scope id this state operates in.
     scope_id        : ScopeId,
     /// Repository of all scopes.
     scopes          : &'ctx mut scopes::Scopes,
-    /// Set to true once resolution failed proceed, causes unresolved numeric literals to be assumed as their default types.
-    infer_literals  : bool,
-    /// Set to true once resolution failed to proceed again after numeric literal types have been defaulted, causes next resolution failure to trigger a resolution error.
-    must_resolve    : bool,
+    /// Resolution stage.
+    stage           : Stage,
     /// Primitive to type id mapping.
     primitives      : &'ctx HashMap<&'ctx Type, TypeId>,
-    /// Module base path. For error reporting only
+    /// Current module base path.
     module_path     : &'ctx str,
-    /// Current fully qualified path.
-    path            : &'ctx mut Vec<String>,
 }
 
 /// Resolves types within the given program AST structure.
@@ -110,41 +136,36 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
     // repeatedly try to resolve items until no more progress is made
     let mut now_resolved = Progress::zero();
     let mut prev_resolved;
-    let mut infer_literals = false;
-    let mut must_resolve = false;
-    let mut path = Vec::new();
+    let mut stage = Stage::new();
 
     loop {
         let mut resolver = Resolver {
             scope_id        : root_scope_id,
             scopes          : &mut scopes,
-            infer_literals  : infer_literals,
-            must_resolve    : must_resolve,
+            stage,
             primitives      : &primitives,
-            path            : &mut path,
             module_path     : "",
         };
 
         for module in &mut program.0 {
             resolver.module_path = &module.path;
-            *resolver.path = path_to_parts(&module.path);
             for mut statement in module.ast.iter_mut() {
-                resolver.resolve_statement(&mut statement)?; // todo: want a vec of errors here
+                resolver.resolve_statement(&mut statement)?;
             }
         }
 
         prev_resolved = now_resolved;
         now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.iter()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
 
-        if !now_resolved.done() && now_resolved == prev_resolved {
-            if !infer_literals {
-                // no additional items resolved, set flag to assumen default types for literals and try again
-                infer_literals = true
-            } else if !must_resolve {
-                // no additional items resolved after literals were inferred to default types, set flag that next run must either resolve or error immediately.
-                must_resolve = true;
-            } else if must_resolve {
-                return ice("Unresolved types remaining but no errors were triggered in error run");
+        if !now_resolved.done() {
+            if now_resolved == prev_resolved {
+                if !stage.must_resolve() {
+                    stage.next();
+                } else {
+                    return ice("Unresolved types remaining but no errors were triggered in error run");
+                }
+            } else {
+                stage.reset();
             }
         } else if now_resolved.done() {
             break;
@@ -226,7 +247,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
     fn resolved_or_err(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
-        if self.must_resolve {
+        if self.stage.must_resolve() {
             if item.is_resolved() {
                 if expected_result.is_some() {
                     self.check_types_match(item, expected_result, item.type_id(self))
@@ -262,13 +283,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Returns a path string built from current and additional path segments.
-    fn make_path<T: AsRef<str>>(self: &Self, append: &[ T ]) -> String {
-        let mut result = self.path.clone();
-        for part in append {
-            result.push(part.as_ref().to_string());
+    /// Returns an absolute or relative path string (depending on stage) built from current module and additional path segments.
+    fn make_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
+        if self.module_path == "" || !self.stage.absolute_paths() {
+            parts_to_path(&parts)
+        } else {
+            self.module_path.to_string() + "::" + &parts_to_path(&parts)
         }
-        parts_to_path(&result)
+    }
+    /// Returns absolute path string built from current module path and additional path segments.
+    fn abs_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
+        if self.module_path == "" {
+            parts_to_path(&parts)
+        } else {
+            self.module_path.to_string() + "::" + &parts_to_path(&parts)
+        }
     }
 }
 
@@ -367,7 +396,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 ty.as_struct_mut().unwrap().fields = fields;
             } else {
                 let ty = Type::Struct(Struct { fields: fields });
-                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(&item.ident.name), ty));
+                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(&self.abs_path(&[ &item.ident.name ])), ty));
             }
             self.resolved_or_err(item, None)
         }
@@ -420,14 +449,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // function/method switch
             let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
                 let type_name = self.scopes.lookup_type_name(scope.1).unwrap();
-                let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
+                let path = self.abs_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
                     (scope.0, FunctionKind::Function, path)
                 } else {
                     (scope.0, FunctionKind::Method(scope.1), path)
                 }
             } else {
-                let path = self.make_path(&[ &item.sig.ident.name ]);
+                let path = self.abs_path(&[ &item.sig.ident.name ]);
                 (parent_scope_id, FunctionKind::Function, path)
             };
             let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
@@ -439,7 +468,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_block(&mut item.block, ret_type)?;
         }
         self.scope_id = parent_scope_id;
-        if self.must_resolve && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
+        if self.stage.must_resolve() && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
             Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
         } else {
             Ok(())
@@ -482,7 +511,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 },
             };
             item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
-            if item.function_id.is_none() && self.must_resolve {
+            if item.function_id.is_none() && self.stage.must_resolve() {
                 return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", &path)), self.module_path));
             }
         }
@@ -857,7 +886,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 return Err(Error::new(item, ErrorKind::IncompatibleNumeric(ty.clone(), numeric), self.module_path));
             }
             self.set_type_id(item, expected_type)?;
-        } else if self.infer_literals {
+        } else if self.stage.infer_literals() {
             // numerics, once normal resolution has failed
             if let LV::Numeric(value) = item.value {
                 if let Some(type_id) = self.classify_numeric(value)? {
