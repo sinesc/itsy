@@ -654,15 +654,16 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
     let position = i.position();
 
     ws(map(
-        preceded(
-            check_state(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None }),
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
             tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
         ),
-        move |tuple| StructDef {
+        move |pair| StructDef {
             position: position,
-            ident   : tuple.0,
-            fields  : tuple.2,
+            ident   : pair.1.0,
+            fields  : pair.1.2,
             type_id : None,
+            vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
     ))(i)
 }
@@ -683,25 +684,25 @@ fn module(i: Input<'_>) -> Output<Module> {
     ))(i)
 }
 
-// use
+// use (TODO: capture paths as AST so that we can report exact error positions)
 
-fn use_item(i: Input<'_>) -> Output<Vec<(String, String)>> {
+fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
     ws(alt((
         map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
             let mut flattened = Vec::new();
             let parent = parts_to_path(&path.name);
             for elements in list  {
-                for (path, ident) in elements {
-                    flattened.push((parent.clone() + "::" + &path, ident));
+                for (ident, (path, _)) in elements {
+                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
                 }
             }
             flattened
         }),
         map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
-            vec![(parts_to_path(&path.name), ident.name)]
+            vec![(ident.name, (parts_to_path(&path.name), false))]
         }),
         map(path, |path| {
-            vec![(parts_to_path(&path.name), path.name.last().unwrap().clone())]
+            vec![(path.name.last().unwrap().clone(), (parts_to_path(&path.name), false))]
         }),
     )))(i)
 }
@@ -785,14 +786,15 @@ fn function(i: Input<'_>) -> Output<Function> {
 
     fn signature(i: Input<'_>) -> Output<Signature> {
         ws(map(
-            preceded(
-                check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None }),
+            pair(
+                terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
                 tuple((ident, ws(signature_argument_list), opt(ws(signature_return_part))))
             ),
             |sig| Signature {
-                ident   : sig.0,
-                args    : sig.1,
-                ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
+                ident   : sig.1.0,
+                args    : sig.1.1,
+                ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
+                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
             },
         ))(i)
     }
@@ -918,7 +920,7 @@ pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseE
     let result = root(input.clone());
     match result {
         Ok(result) => {
-            Ok(ParsedModule { path: module_path.to_string(), ast: result.1 })
+            Ok(ParsedModule { path: module_path.to_string(), ast: result.1, scope_id: None })
         },
         Err(err) => {
             match err {

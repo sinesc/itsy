@@ -118,6 +118,13 @@ pub(crate) trait Returns {
     fn returns(self: &Self) -> bool;
 }
 
+/// Visibility of types and functions.
+#[derive(Debug, PartialEq)]
+pub enum Visibility {
+    Private,
+    Public,
+}
+
 #[derive(Debug)]
 pub struct Ident {
     pub position: Position,
@@ -242,14 +249,14 @@ impl Resolvable for Module {
 #[derive(Debug)]
 pub struct Use {
     pub position    : Position,
-    pub mapping     : HashMap<String, String>,
+    pub mapping     : HashMap<String, (String, bool)>,
 }
 
 impl_positioned!(Use);
 
 impl Resolvable for Use {
     fn num_resolved(self: &Self) -> Progress {
-        Progress::new(0, 1) // TODO
+        Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())
     }
 }
 
@@ -313,6 +320,7 @@ pub struct Signature {
     pub ident   : Ident,
     pub args    : Vec<Binding>,
     pub ret     : Option<InlineType>,
+    pub vis     : Visibility,
 }
 
 impl Signature {
@@ -420,6 +428,7 @@ pub struct StructDef {
     pub ident   : Ident,
     pub fields  : Vec<(String, InlineType)>,
     pub type_id : Option<TypeId>,
+    pub vis     : Visibility,
 }
 impl_positioned!(StructDef);
 

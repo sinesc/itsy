@@ -122,6 +122,11 @@ impl Scopes {
         self.functions.insert(scope_id, Some((name.into(), type_id)), FunctionInfo { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
     }
 
+    /// Aliases an existing function into the given scope, returning a function id.
+    pub fn alias_function(self: &mut Self, scope_id: ScopeId, name: &str, function_id: FunctionId) -> FunctionId {
+        self.functions.alias(scope_id, (name.into(), TypeId::void()), function_id)
+    }
+
     /// Returns the id of the named function originating in exactly this scope.
     pub fn function_id(self: &Self, scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> {
         self.functions.id_by_name(scope_id, (name.0.to_string(), name.1))
@@ -191,6 +196,11 @@ impl Scopes {
         self.types.insert(scope_id, name.map(|n| n.into()), ty)
     }
 
+    /// Aliases an existing type into the given scope, returning a type id.
+    pub fn alias_type(self: &mut Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> TypeId {
+        self.types.alias(scope_id, name.into(), type_id)
+    }
+
     /// Returns the id of the named type originating in exactly this scope.
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
         self.types.id_by_name(scope_id, name.to_string())
@@ -207,11 +217,6 @@ impl Scopes {
                 return None;
             }
         }
-    }
-
-    /// Aliases an existing type into the given scope, returning a type id.
-    pub fn alias_type(self: &mut Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> TypeId {
-        self.types.alias(scope_id, name.into(), type_id)
     }
 
     /// Returns the name of the given type id.

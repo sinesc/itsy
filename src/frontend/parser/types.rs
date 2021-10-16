@@ -2,12 +2,14 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::ops::Deref;
 use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
+use crate::shared::typed_ids::ScopeId;
 
 /// Parsed sourcecode of a single Itsy module.
 #[derive(Debug)]
 pub struct ParsedModule {
     pub(crate) path: String,
     pub(crate) ast: Vec<Statement>,
+    pub(crate) scope_id: Option<ScopeId>,
 }
 
 impl ParsedModule {
@@ -19,6 +21,16 @@ impl ParsedModule {
                 Statement::Module(m) => Some(m),
                 _ => None,
             })
+    }
+    /// Returns an iterator over all use mappings in the module.
+    pub fn using<'a>(self: &'a Self) -> impl Iterator<Item=(&String, &String)> {
+        self.ast
+            .iter()
+            .filter_map(|s| match s {
+                Statement::Use(u) => Some(u.mapping.iter().map(|(k, v)| (k, &v.0))),
+                _ => None,
+            })
+            .flatten()
     }
     /// Returns an iterator over all statements in the source.
     pub fn iter<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {

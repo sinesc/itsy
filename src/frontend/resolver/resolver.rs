@@ -6,12 +6,14 @@ pub mod error;
 pub mod resolved;
 
 use std::marker::PhantomData;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use crate::ast::Visibility;
 use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
+use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Type};
@@ -52,14 +54,16 @@ impl Stage {
 
 /// Temporary internal state during program type/binding resolution.
 struct Resolver<'ctx> {
+    /// Resolution stage.
+    stage           : Stage,
     /// Scope id this state operates in.
     scope_id        : ScopeId,
     /// Repository of all scopes.
     scopes          : &'ctx mut scopes::Scopes,
-    /// Resolution stage.
-    stage           : Stage,
     /// Primitive to type id mapping.
     primitives      : &'ctx HashMap<&'ctx Type, TypeId>,
+    /// Paths of known modules in the program.
+    module_paths    : &'ctx HashSet<String>,
     /// Current module base path.
     module_path     : &'ctx str,
 }
@@ -132,6 +136,14 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
         scopes.insert_function(root_scope_id, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(*index)));
     }
 
+    // create scopes for each module
+    for module in &mut program.0 {
+        module.scope_id = Some(scopes.create_scope(root_scope_id));
+    }
+
+    // assemble set of module paths to check use declarations against
+    let module_paths = program.modules().map(|m| m.path.clone()).collect::<HashSet<_>>();
+
     // repeatedly try to resolve items until no more progress is made
     let mut now_resolved = Progress::zero();
     let mut prev_resolved;
@@ -139,15 +151,17 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
 
     loop {
         let mut resolver = Resolver {
+            stage,
             scope_id        : root_scope_id,
             scopes          : &mut scopes,
-            stage,
             primitives      : &primitives,
+            module_paths    : &module_paths,
             module_path     : "",
         };
 
         for module in &mut program.0 {
             resolver.module_path = &module.path;
+            resolver.scope_id = module.scope_id.unwrap();
             for mut statement in module.ast.iter_mut() {
                 resolver.resolve_statement(&mut statement)?;
             }
@@ -171,7 +185,9 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
         }
     }
 
-    let entry_fn = scopes.lookup_function_id(root_scope_id, (entry_function, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry_function)))?;
+    // find entry module (empty path) and main function within
+    let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
+    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry_function)))?;
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
@@ -319,8 +335,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Return(ret)              => self.resolve_return(ret),
             S::Expression(expression)   => self.resolve_expression(expression, None),
             S::Module(_)                => { Ok(()) /* nothing to do here */ },
-            S::Use(_)                => { Ok(()) /* nothing to do here */ },
+            S::Use(use_declaration)                => self.resolve_use_declaration(use_declaration),
         }
+    }
+
+    /// Resolves use declarations.
+    fn resolve_use_declaration(self: &mut Self, item: &mut ast::Use) -> ResolveResult  {
+        for (_, (path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
+            if self.module_paths.contains(path)
+                || self.scopes.lookup_type_id(self.scope_id, path).is_some()
+                || self.scopes.lookup_function_id(self.scope_id, (path, TypeId::void())).is_some() {
+                *resolved = true;
+            }
+        }
+        Ok(())
     }
 
     /// Resolves types and bindings used in an expression.
@@ -397,7 +425,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 ty.as_struct_mut().unwrap().fields = fields;
             } else {
                 let ty = Type::Struct(Struct { fields: fields });
-                item.type_id = Some(self.scopes.insert_type(self.scope_id, Some(&self.abs_path(&[ &item.ident.name ])), ty));
+                let qualified = self.abs_path(&[ &item.ident.name ]);
+                let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), ty);
+                item.type_id = Some(type_id);
+                if item.vis == Visibility::Public {
+                    self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+                }
             }
             self.resolved_or_err(item, None)
         }
@@ -461,6 +494,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 (parent_scope_id, FunctionKind::Function, path)
             };
             let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
+            if item.sig.vis == Visibility::Public {
+                self.scopes.alias_function(Scopes::root_id(), &qualified, function_id);
+            }
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
