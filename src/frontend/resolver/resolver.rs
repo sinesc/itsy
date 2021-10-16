@@ -115,8 +115,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
     scopes.insert_function(root_scope_id, "len", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FunctionKind::Intrinsic(Intrinsic::ArrayLen)));
 
     // insert rust functions into root scope
-    for (name, info) in T::call_info().iter() {
-        let (index, ret_type_name, arg_type_names) = info;
+    for (&name, (index, ret_type_name, arg_type_names)) in T::call_info().iter() {
         let ret_type = if *ret_type_name == "" {
             Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
         } else {
@@ -130,7 +129,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
-        scopes.insert_function(root_scope_id, *name, ret_type, arg_type_id?, Some(FunctionKind::Rust(*index)));
+        scopes.insert_function(root_scope_id, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(*index)));
     }
 
     // repeatedly try to resolve items until no more progress is made
@@ -291,6 +290,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.module_path.to_string() + "::" + &parts_to_path(&parts)
         }
     }
+
     /// Returns absolute path string built from current module path and additional path segments.
     fn abs_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
         if self.module_path == "" {
@@ -449,7 +449,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids(self);
             // function/method switch
             let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
-                let type_name = self.scopes.lookup_type_name(scope.1).unwrap();
+                let type_name = self.scopes.type_name(scope.1).unwrap();
                 let path = self.abs_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
                     (scope.0, FunctionKind::Function, path)
@@ -501,7 +501,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
                     self.resolve_expression(arg, None)?;
                     let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
-                    let type_name = self.scopes.lookup_type_name(type_id).unwrap_or_ice("Unnamed type")?;
+                    let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;
                     (self.make_path(&[ type_name, &item.ident.name ]), type_id)
                 },
                 CallType::Function => {

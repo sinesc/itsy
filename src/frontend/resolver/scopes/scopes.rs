@@ -11,15 +11,15 @@ use crate::shared::types::Type;
 /// Flat lists of types and bindings and which scope the belong to.
 pub(crate) struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
-    types               : Repository<String, TypeId, Type>,
+    types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings : Repository<String, BindingId, BindingInfo>,
+    bindings        : Repository<String, BindingId, BindingInfo>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions           : Repository<(String, TypeId), FunctionId, FunctionInfo>,
+    functions       : Repository<(String, TypeId), FunctionId, FunctionInfo>,
     /// Function scopes (the function containing this scope)
-    scopefunction       : HashMap<ScopeId, Option<FunctionId>>,
+    scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
-    parent_map          : Vec<ScopeId>, // ScopeId => ScopeId
+    parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
 }
 
 impl Into<IdMappings> for Scopes {
@@ -42,7 +42,7 @@ impl Scopes {
             bindings        : Repository::new(),
             functions       : Repository::new(),
             scopefunction   : HashMap::new(),
-            parent_map      : vec![ root_id ],
+            parent_map      : vec![ root_id ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
     }
 
@@ -69,26 +69,17 @@ impl Scopes {
         (0).into()
     }
 
+    /// Returns the parent scope id of the given scope id.
+    pub fn parent_id(self: &Self, scope_id: ScopeId) -> Option<ScopeId> {
+        let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
+        if parent_scope_id == scope_id { None } else { Some(parent_scope_id) }
+    }
+
     /// Creates a new scope within the parent and returns its id.
     pub fn create_scope(self: &mut Self, parent: ScopeId) -> ScopeId {
         let index = self.parent_map.len();
         self.parent_map.push(parent);
         index.into()
-    }
-
-    #[allow(dead_code)]
-    pub fn dump_parents(self: &Self, start_scope_id: ScopeId) { // TODO: remove
-        print!("self({:?})", start_scope_id);
-        let mut scope_id = start_scope_id;
-        loop {
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id == scope_id {
-                break;
-            }
-            print!(" <- {:?}", parent_scope_id);
-            scope_id = parent_scope_id;
-        }
-        println!("");
     }
 }
 
@@ -106,16 +97,14 @@ impl Scopes {
     }
 
     /// Finds the id of the closest function containing this scope.
-    pub fn lookup_scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
-        if let Some(function_id) = self.scopefunction_id(scope_id) {
-            Some(function_id)
-        } else {
-            // TODO: non recursive solution, ran into multiple mut borrow issues using a while loop
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_scopefunction_id(parent_scope_id)
+    pub fn lookup_scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
+        loop {
+            if let Some(function_id) = self.scopefunction_id(scope_id) {
+                return Some(function_id);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
             } else {
-                None
+                return None;
             }
         }
     }
@@ -138,16 +127,15 @@ impl Scopes {
         self.functions.id_by_name(scope_id, (name.0.to_string(), name.1))
     }
 
-    /// Finds the id of the named function within the scope or its parent scopes. // todo: generalize lookup functions, then integrate into resolver
-    pub fn lookup_function_id(self: &Self, scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> {
-        if let Some(index) = self.function_id(scope_id, name) {
-            Some(index)
-        } else {
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_function_id(parent_scope_id, name)
+    /// Finds the id of the named function within the scope or its parent scopes.
+    pub fn lookup_function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> {
+        loop {
+            if let Some(index) = self.function_id(scope_id, name) {
+                return Some(index);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
             } else {
-                None
+                return None;
             }
         }
     }
@@ -172,15 +160,14 @@ impl Scopes {
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn lookup_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        if let Some(index) = self.binding_id(scope_id, name) {
-            Some(index)
-        } else {
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_binding_id(parent_scope_id, name)
+    pub fn lookup_binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> {
+        loop {
+            if let Some(index) = self.binding_id(scope_id, name) {
+                return Some(index);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
             } else {
-                None
+                return None;
             }
         }
     }
@@ -210,15 +197,14 @@ impl Scopes {
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
-    pub fn lookup_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        if let Some(index) = self.type_id(scope_id, name) {
-            Some(index)
-        } else {
-            let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
-            if parent_scope_id != scope_id {
-                self.lookup_type_id(parent_scope_id, name)
+    pub fn lookup_type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
+        loop {
+            if let Some(index) = self.type_id(scope_id, name) {
+                return Some(index);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
             } else {
-                None
+                return None;
             }
         }
     }
@@ -228,9 +214,9 @@ impl Scopes {
         self.types.alias(scope_id, name.into(), type_id)
     }
 
-    /// Returns the id of the named type originating in exactly this scope.
-    pub fn lookup_type_name(self: &Self, type_id: TypeId) -> Option<&String> { //FIXME: not actually recursive
-        self.types.name_by_id(type_id, "Self".to_string()) // todo ugly
+    /// Returns the name of the given type id.
+    pub fn type_name(self: &Self, type_id: TypeId) -> Option<&String> {
+        self.types.name_by_id(type_id, "Self".to_string())
     }
 
     /// Returns a mutable reference to the type of the given type id.
