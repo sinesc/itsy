@@ -18,7 +18,10 @@ pub enum ResolveErrorKind {
     NumberOfArguments(ItemIndex, ItemIndex),
     MutabilityEscalation,
     AssignToImmutable,
-    CannotResolve(String),
+    CannotResolveBinding(String),
+    CannotResolveFunction(String),
+    CannotResolveType(String),
+    CannotResolveUseDeclaration(String),
     InvalidOperation(String),
     Internal(String),
 }
@@ -67,40 +70,40 @@ pub type ResolveResult = Result<(), ResolveError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
 pub(crate) trait SomeOrResolveError<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<T, ResolveError>;
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<T, ResolveError>;
     fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError>;
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<Option<T>, ResolveError>;
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<Option<T>, ResolveError>;
     fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError>;
 }
 
 impl<T> SomeOrResolveError<T> for Option<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<T, ResolveError> {
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<T, ResolveError> {
         if let Some(result) = self {
             Ok(result)
         } else {
             Err(ResolveError {
                 kind: kind,
                 position: item.map_or(Position(0), |i| i.position()),
-                module_path: "fixme".to_string(),
+                module_path: module_path.to_string(),
             })
         }
     }
     fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError> {
-        self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()))
+        self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> Result<Option<T>, ResolveError> {
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<Option<T>, ResolveError> {
         if self.is_some() {
             Ok(self)
         } else {
             Err(ResolveError {
                 kind: kind,
                 position: item.map_or(Position(0), |i| i.position()),
-                module_path: "fixme".to_string(),
+                module_path: module_path.to_string(),
             })
         }
     }
     fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError> {
-        self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()))
+        self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
 }
 

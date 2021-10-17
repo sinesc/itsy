@@ -187,7 +187,8 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
 
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
-    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::void())).unwrap_or_err(None, ErrorKind::CannotResolve(format!("Cannot resolve entry function '{}'", entry_function)))?;
+    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::void()))
+        .unwrap_or_err(None, ErrorKind::CannotResolveFunction(entry_function.to_string()), "")?;
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
@@ -270,7 +271,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     Ok(())
                 }
             } else {
-                Err(Error::new(item, ErrorKind::CannotResolve("Cannot resolve binding".to_string()), self.module_path))
+                Err(Error::new(item, ErrorKind::CannotResolveBinding("Cannot resolve binding".to_string()), self.module_path))
             }
         } else {
             if item.type_id(self).is_some() && expected_result.is_some() {
@@ -506,7 +507,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.scope_id = parent_scope_id;
         if self.stage.must_resolve() && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
-            Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
+            Err(Error::new(item, ErrorKind::CannotResolveBinding(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
         } else {
             Ok(())
         }
@@ -514,7 +515,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
-        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()))?;
+        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()), self.module_path)?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type;
         if let Some(expr) = &mut item.expr {
             self.resolved_or_err(expr, None)?;
@@ -549,7 +550,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             };
             item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
             if item.function_id.is_none() && self.stage.must_resolve() {
-                return Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve function '{}'", &path)), self.module_path));
+                return Err(Error::new(item, ErrorKind::CannotResolveFunction(path), self.module_path));
             }
         }
 
@@ -695,7 +696,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_expression(result, expected_result)?;
         }
         if let Some(ref mut returns) = item.returns {
-            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(returns), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()))?;
+            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(returns), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()), self.module_path)?;
             let ret_type_id = self.scopes.function_ref(function_id).ret_type;
             self.resolve_expression(returns, ret_type_id)?;
         }
@@ -810,11 +811,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_expression(&mut item.right, None)?;
                 // left.right : item
                 if let Some(ty) = self.item_type(&item.left) {
-                    let struct_ = ty.as_struct().unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Member access on a non-struct".to_string()))?;
+                    let struct_ = ty.as_struct().unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Member access on a non-struct".to_string()), self.module_path)?;
                     let field = item.right.as_member_mut().unwrap_or_ice("Member access using a non-field")?;
                     if field.index.is_none() {
                         let index = struct_.fields.iter().position(|f| f.0 == field.ident.name)
-                            .unwrap_or_err(Some(field), ErrorKind::UnknownMember(format!("Unknown struct member '{}'", field.ident.name)))?;
+                            .unwrap_or_err(Some(field), ErrorKind::UnknownMember(format!("Unknown struct member '{}'", field.ident.name)), self.module_path)?;
                         field.index = Some(index as ItemIndex);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap_or_ice(ICE)? as usize].1 {
@@ -946,7 +947,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         if let Some(type_id) = type_id {
             self.set_type_id(item, type_id)?;
-            let struct_def = self.type_by_id(type_id).as_struct().unwrap_or_err(Some(item), ErrorKind::Internal("Tried to resolve a struct but got different type".to_string()))?.clone();
+            let struct_def = self.type_by_id(type_id).as_struct().unwrap_or_err(Some(item), ErrorKind::Internal("Tried to resolve a struct but got different type".to_string()), self.module_path)?.clone();
             let struct_ = item.value.as_struct_mut().unwrap_or_ice(ICE)?;
             for (name, field) in &mut struct_.fields {
                 self.resolve_expression(field, struct_def.type_id(name))?;
