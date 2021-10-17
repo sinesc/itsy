@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+#[cfg(feature="compiler")]
 use std::path::{Path, PathBuf};
 #[cfg(feature="compiler")]
 use crate::frontend::{parser::error::ParseError, resolver::error::ResolveError};
@@ -116,6 +117,7 @@ impl BuildError {
     }
 }
 
+#[cfg(feature="compiler")]
 impl Display for BuildError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.loc();

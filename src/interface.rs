@@ -1,5 +1,7 @@
 
-pub use crate::shared::error::{Error, BuildError};
+pub use crate::shared::error::Error;
+#[cfg(feature="compiler")]
+pub use crate::shared::error::BuildError;
 
 #[cfg(feature="compiler")]
 pub mod parser {
