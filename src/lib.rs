@@ -19,6 +19,7 @@ mod interface;
 
 pub use interface::*;
 
+use std::collections::HashMap;
 use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 #[cfg(feature="compiler")]
 use bytecode::compiler::compile;
@@ -298,15 +299,24 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F
 /// given source file. For more control, see [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM] to execute the given program.
 #[cfg(feature="compiler")]
-pub fn build<F, P: AsRef<std::path::Path>>(source_file: P) -> Result<Program<F>, Error> where F: VMFunc<F> {
-    use std::collections::HashMap;
+pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: VMFunc<F>, P: AsRef<std::path::Path> {
     let source_file = source_file.as_ref();
-    let mut files: HashMap<String, String> = HashMap::new();
+    let mut files: HashMap<String, (std::path::PathBuf, String)> = HashMap::new();
+    match build_inner(source_file, &mut files) {
+        Ok(program) => Ok(program),
+        Err(error) => {
+            let (filename, source) = files.remove(error.module_path()).unwrap();
+            Err(BuildError { error, filename, source })
+        }
+    }
+}
+
+fn build_inner<F>(source_file: &std::path::Path, files: &mut HashMap<String, (std::path::PathBuf, String)>) -> Result<Program<F>, Error> where F: VMFunc<F> {
     let parsed = parser::parse(|module_path| {
         let filename = parser::module_filename(source_file, module_path);
-        let file = std::fs::read_to_string(filename).unwrap();
+        let file = std::fs::read_to_string(&filename).unwrap();
         let module = parser::parse_module(&file, module_path);
-        files.insert(module_path.to_string(), file);
+        files.insert(module_path.to_string(), (filename, file));
         module
     })?;
     let resolved = resolve::<F>(parsed, "main")?;
