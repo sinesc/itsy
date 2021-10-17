@@ -342,14 +342,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves use declarations.
     fn resolve_use_declaration(self: &mut Self, item: &mut ast::Use) -> ResolveResult  {
-        for (_, (path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
-            if self.module_paths.contains(path)
-                || self.scopes.lookup_type_id(self.scope_id, path).is_some()
-                || self.scopes.lookup_function_id(self.scope_id, (path, TypeId::void())).is_some() {
+        let mut unresolved = None;
+        for (name, (path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
+            if self.module_paths.contains(path) {
                 *resolved = true;
+                return Err(Error::new(item, ErrorKind::Unsupported("importing entire module not yet implemented".to_string()), self.module_path));
+            } else if let Some(type_id) = self.scopes.lookup_type_id(self.scope_id, path) {
+                self.scopes.alias_type(self.scope_id, name, type_id); // TODO should probably be prefixed with module name
+                *resolved = true;
+            } else if let Some(function_id) = self.scopes.lookup_function_id(self.scope_id, (path, TypeId::void())) {
+                self.scopes.alias_function(self.scope_id, name, function_id); // TODO should probably be prefixed with module name
+                *resolved = true;
+            } else if unresolved == None {
+                unresolved = Some(path.clone());
             }
         }
-        Ok(())
+        if !self.stage.must_resolve() || unresolved.is_none() {
+            Ok(())
+        } else {
+            Err(Error::new(item, ErrorKind::CannotResolveUseDeclaration(unresolved.unwrap()), self.module_path))
+        }
     }
 
     /// Resolves types and bindings used in an expression.

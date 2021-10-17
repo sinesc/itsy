@@ -24,6 +24,7 @@ pub enum ResolveErrorKind {
     CannotResolveUseDeclaration(String),
     InvalidOperation(String),
     Internal(String),
+    Unsupported(String),
 }
 
 /// An error reported by the resolver (e.g. unknown/mismatching types).
