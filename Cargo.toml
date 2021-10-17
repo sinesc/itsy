@@ -1,6 +1,6 @@
 [package]
 name = "itsy"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2018"
 resolver = "2"
 authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
