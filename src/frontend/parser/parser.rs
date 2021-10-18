@@ -729,10 +729,47 @@ fn array(i: Input<'_>) -> Output<Array> {
     ))(i)
 }
 
+// trait definition
+
+fn trait_def(i: Input<'_>) -> Output<TraitDef> {
+    enum FunctionOrSignature {
+        Function(Function),
+        Signature(Signature),
+    }
+    fn function_or_signature(i: Input<'_>) -> Output<FunctionOrSignature> { // TODO: would probably be more efficient to make function block optional (and handle missing block outside of trait with error)
+        alt((
+            map(terminated(function_signature, ws(char(';'))), |s| FunctionOrSignature::Signature(s)),
+            map(function, |f| FunctionOrSignature::Function(f)),
+        ))(i)
+    }
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_state(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None }),
+            tuple((inline_type, ws(char('{')), many0(function_or_signature), ws(char('}'))))
+        ),
+        move |mut tuple| {
+            let mut required = Vec::new();
+            let mut provided = Vec::new();
+            tuple.2.drain(..).for_each(|item| match item {
+                FunctionOrSignature::Function(f) => provided.push(f),
+                FunctionOrSignature::Signature(s) => required.push(s),
+            });
+            TraitDef {
+                position,
+                provided,
+                required,
+                scope_id    : None,
+                ty          : tuple.0,
+            }
+        }
+    ))(i)
+}
+
 // function definition
 
-fn function(i: Input<'_>) -> Output<Function> {
-    fn signature_argument(i: Input<'_>) -> Output<Binding> {
+fn function_signature(i: Input<'_>) -> Output<Signature> {
+    fn argument(i: Input<'_>) -> Output<Binding> {
         let position = i.position();
         ws(map(
             tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
@@ -746,29 +783,30 @@ fn function(i: Input<'_>) -> Output<Function> {
             }
         ))(i)
     }
-    fn signature_argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
-        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(signature_argument)), ws(char(')')))(i)
+    fn argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
+        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(argument)), ws(char(')')))(i)
     }
-    fn signature_return_part(i: Input<'_>) -> Output<InlineType> {
+    fn return_part(i: Input<'_>) -> Output<InlineType> {
         preceded(ws(tag("->")), inline_type)(i)
     }
-    fn signature(i: Input<'_>) -> Output<Signature> {
-        ws(map(
-            pair(
-                terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
-                tuple((ident, ws(signature_argument_list), opt(ws(signature_return_part))))
-            ),
-            |sig| Signature {
-                ident   : sig.1.0,
-                args    : sig.1.1,
-                ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
-                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
-            },
-        ))(i)
-    }
+    ws(map(
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
+            tuple((ident, ws(argument_list), opt(ws(return_part))))
+        ),
+        |sig| Signature {
+            ident   : sig.1.0,
+            args    : sig.1.1,
+            ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
+            vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
+        },
+    ))(i)
+}
+
+fn function(i: Input<'_>) -> Output<Function> {
     let position = i.position();
     ws(map(
-        tuple((signature, with_state(&|state: &mut ParserState| state.in_function = true, block))),
+        tuple((function_signature, with_state(&|state: &mut ParserState| state.in_function = true, block))),
         move |func| Function {
             position    : position,
             sig         : func.0,
@@ -861,6 +899,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(function, |m| Statement::Function(m)),
         map(struct_def, |m| Statement::StructDef(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
+        map(trait_def, |m| Statement::TraitDef(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),

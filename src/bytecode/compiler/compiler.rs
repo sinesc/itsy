@@ -101,6 +101,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 Ok(())
             }
+            S::TraitDef(_) => unimplemented!(),
             S::Binding(binding) => self.compile_binding(binding),
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;

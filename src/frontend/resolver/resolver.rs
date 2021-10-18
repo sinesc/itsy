@@ -328,6 +328,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Function(function)       => self.resolve_function(function, None),
             S::StructDef(structure)     => self.resolve_struct_def(structure),
             S::ImplBlock(impl_block)     => self.resolve_impl_block(impl_block),
+            S::TraitDef(_trait_def)     => unimplemented!(),
             S::Binding(binding)         => self.resolve_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
