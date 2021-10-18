@@ -125,6 +125,7 @@ pub enum Visibility {
     Public,
 }
 
+/// An identifier for an item, e.g. `item`.
 #[derive(Debug)]
 pub struct Ident {
     pub position: Position,
@@ -139,6 +140,7 @@ impl Display for Ident {
 
 impl_positioned!(Ident);
 
+/// A path to an item, e.g. `path::to::item`.
 #[derive(Debug)]
 pub struct Path {
     pub position: Position,
@@ -159,6 +161,7 @@ impl Display for Path {
 
 impl_positioned!(Path);
 
+/// An itsy statement.
 pub enum Statement {
     Binding(Binding),
     Function(Function),
@@ -225,6 +228,7 @@ impl Debug for Statement {
     }
 }
 
+/// A module declaration, e.g. `mod mymodule;`.
 #[derive(Debug)]
 pub struct Module {
     pub position    : Position,
@@ -246,6 +250,7 @@ impl Resolvable for Module {
     }
 }
 
+/// A use declaration, e.g. `use frontend::{ast::Use, parser::{parse, parse_module}};`.
 #[derive(Debug)]
 pub struct Use {
     pub position    : Position,
@@ -260,6 +265,7 @@ impl Resolvable for Use {
     }
 }
 
+/// A let binding, e.g. `let a = 1;`.
 #[derive(Debug)]
 pub struct Binding {
     pub position    : Position,
@@ -295,6 +301,7 @@ impl Resolvable for Binding {
     }
 }
 
+/// A function definition, e.g. `fn myfunc(a: u8, b: String) -> u16 { ... }`.
 #[derive(Debug)]
 pub struct Function {
     pub position    : Position,
@@ -315,6 +322,7 @@ impl Resolvable for Function {
     }
 }
 
+/// The type signatures of function parameters and returns.
 #[derive(Debug)]
 pub struct Signature {
     pub ident   : Ident,
@@ -338,6 +346,7 @@ impl Signature {
     }
 }
 
+/// A type name (a type-id attached to a Path).
 #[derive(Debug)]
 pub struct TypeName {
     pub path    : Path,
@@ -374,6 +383,7 @@ impl Positioned for TypeName {
     }
 }
 
+/// An inlineable type (e.g. `MyStruct` or `[ MyInt; 16 ]`).
 #[derive(Debug)]
 pub enum InlineType {
     TypeName(TypeName),
@@ -404,6 +414,7 @@ impl Resolvable for InlineType {
     }
 }
 
+/// An array definition, e.g. `[ MyInt; 16 ]`.
 #[derive(Debug)]
 pub struct Array {
     pub position    : Position,
@@ -422,6 +433,7 @@ impl Resolvable for Array {
     }
 }
 
+/// An struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
 #[derive(Debug)]
 pub struct StructDef {
     pub position: Position,
@@ -448,6 +460,7 @@ impl Resolvable for StructDef {
     }
 }
 
+/// An `impl` block for a struct, e.g. `impl MyStruct { fn new() { ... } -> Self }`.
 #[derive(Debug)]
 pub struct ImplBlock {
     pub position    : Position,
@@ -465,6 +478,7 @@ impl Resolvable for ImplBlock {
     }
 }
 
+/// A for-in loop, e.g. `for i in 0..10 { ... }`.
 #[derive(Debug)]
 pub struct ForLoop {
     pub position: Position,
@@ -484,6 +498,7 @@ impl Resolvable for ForLoop {
     }
 }
 
+/// A while loop, e.g. `while a < 10 { a += 1; }`.
 #[derive(Debug)]
 pub struct WhileLoop {
     pub position: Position,
@@ -502,6 +517,7 @@ impl Resolvable for WhileLoop {
     }
 }
 
+/// A return statement, e.g. `return false;`.
 #[derive(Debug)]
 pub struct Return {
     pub position        : Position,
@@ -516,6 +532,7 @@ impl Resolvable for Return {
     }
 }
 
+/// An if block, e.g. `if a { ... } else { ... }`.
 #[derive(Debug)]
 pub struct IfBlock {
     pub position    : Position,
@@ -561,6 +578,7 @@ impl Typeable for IfBlock {
     }
 }
 
+/// A regular block.
 #[derive(Debug)]
 pub struct Block {
     pub position    : Position,
@@ -600,6 +618,7 @@ impl Returns for Block {
     }
 }
 
+/// An itsy expression.
 pub enum Expression {
     Literal(Literal),
     Variable(Variable),
@@ -720,6 +739,7 @@ impl Display for Expression {
     }
 }
 
+/// A literal.
 #[derive(Debug)]
 pub struct Literal {
     pub position    : Position,
@@ -750,6 +770,7 @@ impl Display for Literal {
     }
 }
 
+/// Value-storage for literals.
 pub enum LiteralValue {
     Bool(bool),
     Numeric(Numeric),
@@ -826,6 +847,7 @@ impl Debug for LiteralValue {
     }
 }
 
+/// An inline array literal, e.g. `[ 2, 3, 5, 7 ]`.
 #[derive(Debug)]
 pub struct ArrayLiteral {
     pub elements: Vec<Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
@@ -837,6 +859,7 @@ impl Resolvable for ArrayLiteral {
     }
 }
 
+/// An inline struct literal, e.g. `MyStruct { a: 10, b: "Hello" }`.
 #[derive(Debug)]
 pub struct StructLiteral {
     pub fields: HashMap<String, Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
@@ -848,6 +871,7 @@ impl Resolvable for StructLiteral {
     }
 }
 
+/// A variable.
 #[derive(Debug)]
 pub struct Variable {
     pub position    : Position,
@@ -879,6 +903,7 @@ impl Resolvable for Variable {
     }
 }
 
+/// A member identifier for a struct field.
 #[derive(Debug)]
 pub struct Member {
     pub position    : Position,
@@ -897,6 +922,7 @@ impl Resolvable for Member {
     }
 }
 
+/// The particular type of a function call.
 #[derive(Debug)]
 pub enum CallType {
     Function,
@@ -904,6 +930,7 @@ pub enum CallType {
     Static(Path),
 }
 
+/// A function or method call.
 #[derive(Debug)]
 pub struct Call {
     pub position        : Position,
@@ -926,6 +953,7 @@ impl Resolvable for Call {
     }
 }
 
+/// A variable assignment within an expression, e.g. `x = 10`.
 #[derive(Debug)]
 pub struct Assignment {
     pub position: Position,
@@ -953,6 +981,7 @@ impl Returns for Assignment {
     }
 }
 
+/// An explicit `as` type-cast.
 #[derive(Debug)]
 pub struct Cast {
     pub position    : Position,
@@ -978,6 +1007,7 @@ impl Returns for Cast {
     }
 }
 
+/// A binary operation within an expression.
 #[derive(Debug)]
 pub struct BinaryOp {
     pub position    : Position,
@@ -1005,6 +1035,7 @@ impl Returns for BinaryOp {
     }
 }
 
+/// A unary operation within an expression.
 #[derive(Debug)]
 pub struct UnaryOp {
     pub position    : Position,
@@ -1038,6 +1069,7 @@ impl Returns for UnaryOp {
     }
 }
 
+/// A unary operator used in unary expressions.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOperator {
     // boolean
@@ -1075,6 +1107,7 @@ impl Display for UnaryOperator {
     }
 }
 
+/// A binary operator used in binary expressions.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum BinaryOperator {
     // arithmetic
