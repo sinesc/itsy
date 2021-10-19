@@ -703,13 +703,14 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     ws(map(
         preceded(
             check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            tuple((inline_type, ws(char('{')), many0(function), ws(char('}'))))
+            pair(inline_type, delimited(ws(char('{')), many0(function), ws(char('}'))))
         ),
         move |tuple| ImplBlock {
             position    : position,
-            functions   : tuple.2,
+            functions   : tuple.1,
             scope_id    : None,
             ty          : tuple.0,
+            trt         : None,
         }
     ))(i)
 }
@@ -762,6 +763,28 @@ fn trait_def(i: Input<'_>) -> Output<TraitDef> {
                 scope_id    : None,
                 ty          : tuple.0,
             }
+        }
+    ))(i)
+}
+
+// trait implementation
+
+fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            pair(
+                pair(terminated(path, sepl(tag("for"))), sepl(inline_type)),
+                delimited(ws(char('{')), many0(function), ws(char('}')))
+            )
+        ),
+        move |tuple| ImplBlock {
+            position    : position,
+            functions   : tuple.1,
+            scope_id    : None,
+            ty          : tuple.0.1,
+            trt         : Some(TypeName::from_path(tuple.0.0)),
         }
     ))(i)
 }
@@ -898,6 +921,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(if_block, |m| Statement::IfBlock(m)),
         map(function, |m| Statement::Function(m)),
         map(struct_def, |m| Statement::StructDef(m)),
+        map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
         map(for_loop, |m| Statement::ForLoop(m)),

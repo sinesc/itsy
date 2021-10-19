@@ -474,6 +474,7 @@ pub struct ImplBlock {
     pub functions   : Vec<Function>,
     pub scope_id    : Option<ScopeId>,
     pub ty          : InlineType,
+    pub trt         : Option<TypeName>,
 }
 
 impl_positioned!(ImplBlock);
@@ -482,6 +483,7 @@ impl Resolvable for ImplBlock {
     fn num_resolved(self: &Self) -> Progress {
         self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved())
         + self.ty.num_resolved()
+        + self.trt.as_ref().map_or(Progress::new(0, 0), |trt| trt.num_resolved())
     }
 }
 
