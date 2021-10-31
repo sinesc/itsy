@@ -168,10 +168,10 @@ impl Type {
             _ => false
         }
     }
-    /// Whether the type is an array.
-    pub const fn is_array(self: &Self) -> bool {
+    /// Whether the type is a string.
+    pub const fn is_string(self: &Self) -> bool {
         match self {
-            Type::Array(_) => true,
+            Type::String => true,
             _ => false
         }
     }
@@ -189,13 +189,6 @@ impl Type {
             _ => None
         }
     }
-    /// Whether the type is a struct.
-    pub const fn is_struct(self: &Self) -> bool {
-        match self {
-            Type::Struct(_) => true,
-            _ => false
-        }
-    }
     /// Returns the type as a struct.
     pub const fn as_struct(self: &Self) -> Option<&Struct> {
         match self {
@@ -208,13 +201,6 @@ impl Type {
         match self {
             Type::Struct(struct_) => Some(struct_),
             _ => None
-        }
-    }
-    /// Whether the type is a string.
-    pub const fn is_string(self: &Self) -> bool {
-        match self {
-            Type::String => true,
-            _ => false
         }
     }
 }

@@ -50,7 +50,7 @@ impl ParsedProgram {
     pub fn add_module(self: &mut Self, module: ParsedModule) {
         self.0.push(module);
     }
-    /// Returns an iterator over all modules and their paths in the program.
+    /// Returns an iterator over all modules in the program.
     pub fn modules(self: &Self) -> impl Iterator<Item=&ParsedModule> {
         self.0.iter()
     }
