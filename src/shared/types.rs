@@ -54,7 +54,6 @@ pub enum Type {
     Array(Array),
     Enum(Enum),
     Struct(Struct),
-    HeapRefSize,
 }
 
 impl Debug for Type {
@@ -76,7 +75,6 @@ impl Debug for Type {
             Type::Array(v) => write!(f, "{:?}", v),
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
-            Type::HeapRefSize => write!(f, "HeapRefSize"),
         }
     }
 }
@@ -90,7 +88,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::HeapRefSize => ::std::mem::size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) => ::std::mem::size_of::<HeapAddress>() as u8,
         }
     }
     /// Whether the given numeric is compatible with this type.
@@ -131,10 +129,7 @@ impl Type {
     }
     /// Whether the type is a primitive.
     pub const fn is_primitive(self: &Self) -> bool {
-        match self {
-            Type::HeapRefSize => false,
-            _ => !self.is_ref(),
-        }
+        !self.is_ref()
     }
     /// Whether the type is void.
     pub const fn is_void(self: &Self) -> bool {

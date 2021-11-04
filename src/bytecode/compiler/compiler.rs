@@ -203,7 +203,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => {
                 self.compile_expression(&item.left)?;       // stack: &left
-                self.write_clone(&Type::HeapRefSize);       // stack: &left &left
+                self.write_clone_ref();                     // stack: &left &left
                 self.write_heap_fetch(ty);                      // stack: &left left
                 self.compile_expression(&item.right)?;      // stack: &left left right
                 match item.op {                                 // stack: &left result
@@ -1292,6 +1292,17 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             8 => self.writer.clone64(),
             //16 => self.writer.clone128(offset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
+    fn write_clone_ref(self: &Self) -> StackAddress {
+        match ::std::mem::size_of::<crate::HeapAddress>() {
+            1 => self.writer.clone8(),
+            2 => self.writer.clone16(),
+            4 => self.writer.clone32(),
+            8 => self.writer.clone64(),
+            //16 => self.writer.clone128(offset),
+            size @ _ => unreachable!("Unsupported size {} for heap address", size),
         }
     }
 
