@@ -231,25 +231,23 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns whether the given type_ids refer to matching or fully compatible types.
-    fn types_match(self: &Self, type_id_a: Option<TypeId>, type_id_b: Option<TypeId>) -> Result<bool, Error> {
-        Ok(if type_id_a == type_id_b {
+    fn types_match(self: &Self, type_id_a: TypeId, type_id_b: TypeId) -> bool {
+        if type_id_a == type_id_b {
             true
         } else {
-            let type_a = self.type_by_id(type_id_a.unwrap_or_ice(ICE)?);
-            let type_b = self.type_by_id(type_id_b.unwrap_or_ice(ICE)?);
-            match (type_a, type_b) {
+            match (self.type_by_id(type_id_a), self.type_by_id(type_id_b)) {
                 (&Type::Array(Array { len: a_len, type_id: Some(a_type_id) }), &Type::Array(Array { len: b_len, type_id: Some(b_type_id) })) => {
-                    a_len == b_len && self.types_match(Some(a_type_id), Some(b_type_id))?
+                    a_len == b_len && self.types_match(a_type_id, b_type_id)
                 }
                 _ => false,
             }
-        })
+        }
     }
 
     /// Returns Ok if the given type_ids refer to matching or fully compatible types. Otherwise a TypeMismatch error.
-    fn check_types_match(self: &Self, item: &impl Positioned, type_id_a: Option<TypeId>, type_id_b: Option<TypeId>) -> ResolveResult  {
-        if !self.types_match(type_id_a, type_id_b)? {
-            let error_kind = ErrorKind::TypeMismatch(self.type_by_id(type_id_a.unwrap_or_ice(ICE)?).clone(), self.type_by_id(type_id_b.unwrap_or_ice(ICE)?).clone());
+    fn check_types_match(self: &Self, item: &impl Positioned, type_id_a: TypeId, type_id_b: TypeId) -> ResolveResult  {
+        if !self.types_match(type_id_a, type_id_b) {
+            let error_kind = ErrorKind::TypeMismatch(self.type_by_id(type_id_a).clone(), self.type_by_id(type_id_b).clone());
             Err(Error::new(item, error_kind, self.module_path))
         } else {
             Ok(())
@@ -265,27 +263,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolved_or_err(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
         if self.stage.must_resolve() {
             if item.is_resolved() {
-                if expected_result.is_some() {
-                    self.check_types_match(item, expected_result, item.type_id(self))
-                } else {
-                    Ok(())
+                match expected_result {
+                    Some(expected_result) => self.check_types_match(item, expected_result, item.type_id(self).unwrap()),
+                    None => Ok(())
                 }
             } else {
                 Err(Error::new(item, ErrorKind::CannotResolveBinding("Cannot resolve binding".to_string()), self.module_path))
             }
         } else {
-            if item.type_id(self).is_some() && expected_result.is_some() {
-                self.check_types_match(item, expected_result, item.type_id(self))
-            } else {
-                Ok(())
+            match (item.type_id(self), expected_result) {
+                (Some(item_type_id), Some(expected_result)) => self.check_types_match(item, expected_result, item_type_id),
+                _ => Ok(())
             }
         }
     }
 
     /// Sets type if for given AST item if it is not set yet, otherwise checks that new type matches existing type.
     fn set_type_id(self: &mut Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
-        if item.type_id(self).is_some() {
-            self.check_types_match(item, item.type_id(self), Some(new_type_id))?;
+        if let Some(item_type_id) = item.type_id(self) {
+            self.check_types_match(item, item_type_id, new_type_id)?;
         }
         *item.type_id_mut(self) = Some(new_type_id);
         Ok(())
@@ -397,8 +393,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 item.type_id = Some(new_type_id);
             }
         }
-        if item.type_id.is_some() && expected_result.is_some() {
-            self.check_types_match(item, expected_result, item.type_id)?;
+        if let (Some(item_type_id), Some(expected_result)) = (item.type_id, expected_result) {
+            self.check_types_match(item, expected_result, item_type_id)?;
         }
         self.resolved_or_err(item, expected_result)?;
         Ok(item.type_id)
@@ -537,7 +533,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolved_or_err(expr, ret_type_id)
         } else {
             // no return expression, function result type must be void
-            self.check_types_match(item, Some(TypeId::void()), ret_type_id)
+            self.check_types_match(item, TypeId::void(), ret_type_id.unwrap()) // TODO check this unwrap
         }
     }
 
@@ -577,8 +573,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.set_type_id(item, ret_type_id)?;
             }
 
-            if expected_result.is_some() && item.type_id(self).is_some() {
-                self.check_types_match(item, expected_result, item.type_id(self))?;
+            if let (Some(item_type_id), Some(expected_result)) = (item.type_id(self), expected_result) {
+                self.check_types_match(item, expected_result, item_type_id)?;
             }
 
             // argument count
@@ -587,14 +583,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
 
             // arguments
-            for (index, &expected_type) in function_info.arg_type.iter().enumerate() {
-                self.resolve_expression(&mut item.args[index], expected_type)?;
-                let actual_type = item.args[index].type_id(self);
-                // infer arguments // FIXME: probably don't want to infer parameter types from arguments
-                if actual_type.is_none() && expected_type.is_some() {
-                    *item.args[index].type_id_mut(self) = expected_type;
-                } else if actual_type.is_some() {
-                    self.check_types_match(&item.args[index], expected_type, actual_type)?;
+            for (index, &expected_type_id) in function_info.arg_type.iter().enumerate() {
+                self.resolve_expression(&mut item.args[index], expected_type_id)?;
+                let actual_type_id = item.args[index].type_id(self);
+                // infer arguments
+                if actual_type_id.is_none() && expected_type_id.is_some() {
+                    *item.args[index].type_id_mut(self) = expected_type_id;
+                } else if let (Some(actual_type_id), Some(expected_type_id)) = (actual_type_id, expected_type_id) {
+                    self.check_types_match(&item.args[index], expected_type_id, actual_type_id)?;
                 }
             }
         }
@@ -627,14 +623,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // optionally resolve else block
         if let Some(else_block) = &mut item.else_block {
             self.resolve_block(else_block, expected_result)?;
-            let if_type_id = item.if_block.type_id(self);
-            let else_type_id = else_block.type_id(self);
-            if if_type_id.is_some() && else_type_id.is_some() {
+            if let (Some(if_type_id), Some(else_type_id)) = (item.if_block.type_id(self), else_block.type_id(self)) {
                 self.check_types_match(item, if_type_id, else_type_id)?;
             }
         } else if let Some(if_type_id) = item.if_block.type_id(self) {
             // if block with a non-void result but no else block
-            self.check_types_match(item, Some(if_type_id), Some(TypeId::void()))?; // Todo: meh, using check_types_match to generate an error when we already know there is an error.
+            self.check_types_match(item, if_type_id, TypeId::void())?; // Todo: meh, using check_types_match to generate an error when we already know there is an error.
         }
         self.scope_id = parent_scope_id;
         Ok(())
@@ -715,12 +709,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         // check result type matches expected type unless block is returned from before ever resulting
-        if item.returns.is_none() && expected_result.is_some() {
+        if let (Some(expected_result), None) = (expected_result, &item.returns) {
             if item.result.is_none() { // no result = void
-                self.check_types_match(item, expected_result, Some(self.primitive_type_id(Type::void)?))?;
+                self.check_types_match(item, expected_result, self.primitive_type_id(Type::void)?)?;
             } else if let Some(result_expression) = &item.result {
-                let result_type_id = result_expression.type_id(self);
-                if result_type_id.is_some() {
+                if let Some(result_type_id) = result_expression.type_id(self) {
                     self.check_types_match(item, expected_result, result_type_id)?;
                 }
             }
@@ -803,8 +796,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // if we know the result type, set the array element type to that
                 if let Some(result_type_id) = item.type_id(self) {
                     if let Some(Type::Array(array)) = self.item_type(&item.left) {
-                        if array.type_id.is_some() {
-                            self.check_types_match(item, array.type_id, Some(result_type_id))?;
+                        if let Some(array_type_id) = array.type_id {
+                            self.check_types_match(item, array_type_id, result_type_id)?;
                         } else {
                             // TODO: this is pretty ugly, referencing left type again. working around mutable borrow issues when directly borrowing mutably in above if let
                             let ty = item.left.type_id(self).map(|type_id| self.type_by_id_mut(type_id));
@@ -890,8 +883,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.expr, expected_type)?;
         match item.op {
             UO::Not => {
-                if expected_type.is_some() {
-                    self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::bool)?))?;
+                if let Some(expected_type_id) = expected_type {
+                    self.check_types_match(item, expected_type_id, self.primitive_type_id(Type::bool)?)?;
                 }
                 self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
             },
@@ -910,13 +903,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use self::ast::LiteralValue as LV;
 
         if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
-            if expected_type.is_some() {
-                self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::bool)?))?;
+            if let Some(expected_type_id) = expected_type {
+                self.check_types_match(item, expected_type_id, self.primitive_type_id(Type::bool)?)?;
             }
             self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
         } else if let LV::String(_) = item.value {
-            if expected_type.is_some() {
-                self.check_types_match(item, expected_type, Some(self.primitive_type_id(Type::String)?))?;
+            if let Some(expected_type_id) = expected_type {
+                self.check_types_match(item, expected_type_id, self.primitive_type_id(Type::String)?)?;
             }
             self.set_type_id(item, self.primitive_type_id(Type::String)?)?;
         } else if let LV::Array(_) = item.value {
@@ -927,8 +920,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name, expected_type)? {
                 self.set_type_id(item, explicit_type_id)?;
-                if expected_type.is_some() {
-                    self.check_types_match(item, expected_type, Some(explicit_type_id))?;
+                if let Some(expected_type_id) = expected_type {
+                    self.check_types_match(item, expected_type_id, explicit_type_id)?;
                 }
             }
         } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
@@ -1015,13 +1008,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);
-        } else if elements_type_id.is_some() {
+        } else if let Some(elements_type_id) = elements_type_id {
             let array_type_id = item.type_id(self).unwrap_or_ice(ICE)?;
             let array_ty = self.scopes.type_mut(array_type_id).as_array_mut().unwrap_or_ice(ICE)?;
             if let Some(current_element_type_id) = array_ty.type_id {
-                self.check_types_match(item, Some(current_element_type_id), elements_type_id)?;
+                self.check_types_match(item, current_element_type_id, elements_type_id)?;
             } else {
-                array_ty.type_id = elements_type_id;
+                array_ty.type_id = Some(elements_type_id);
             }
         }
 
