@@ -6,7 +6,7 @@ use std::convert::Into;
 /// Macro to implement typesafe ids.
 macro_rules! impl_typed_id {
     ($name:ident, $string:expr) => {
-        #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
+        #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[doc = $string]
         pub struct $name(NonZeroUsize);
         impl $name {

@@ -733,36 +733,19 @@ fn array(i: Input<'_>) -> Output<Array> {
 // trait definition
 
 fn trait_def(i: Input<'_>) -> Output<TraitDef> {
-    enum FunctionOrSignature {
-        Function(Function),
-        Signature(Signature),
-    }
-    fn function_or_signature(i: Input<'_>) -> Output<FunctionOrSignature> { // TODO: would probably be more efficient to make function block optional (and handle missing block outside of trait with error)
-        alt((
-            map(terminated(function_signature, ws(char(';'))), |s| FunctionOrSignature::Signature(s)),
-            map(function, |f| FunctionOrSignature::Function(f)),
-        ))(i)
-    }
     let position = i.position();
     ws(map(
-        preceded(
-            check_state(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None }),
-            tuple((inline_type, ws(char('{')), many0(function_or_signature), ws(char('}'))))
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
+            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
         ),
-        move |mut tuple| {
-            let mut required = Vec::new();
-            let mut provided = Vec::new();
-            tuple.2.drain(..).for_each(|item| match item {
-                FunctionOrSignature::Function(f) => provided.push(f),
-                FunctionOrSignature::Signature(s) => required.push(s),
-            });
-            TraitDef {
-                position,
-                provided,
-                required,
-                scope_id    : None,
-                ty          : tuple.0,
-            }
+        move |pair| TraitDef {
+            position,
+            functions   : pair.1.2,
+            scope_id    : None,
+            ident       : pair.1.0,
+            type_id     : None,
+            vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
     ))(i)
 }
@@ -829,7 +812,10 @@ fn function_signature(i: Input<'_>) -> Output<Signature> {
 fn function(i: Input<'_>) -> Output<Function> {
     let position = i.position();
     ws(map(
-        tuple((function_signature, with_state(&|state: &mut ParserState| state.in_function = true, block))),
+        tuple((function_signature, with_state(&|state: &mut ParserState| state.in_function = true, alt((
+            map(block, |b| Some(b)),
+            map(ws(char(';')), |_| None)
+        ))))),
         move |func| Function {
             position    : position,
             sig         : func.0,

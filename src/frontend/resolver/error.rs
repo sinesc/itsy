@@ -23,6 +23,7 @@ pub enum ResolveErrorKind {
     CannotResolveType(String),
     CannotResolveUseDeclaration(String),
     InvalidOperation(String),
+    NotATraitMethod(String),
     Internal(String),
     Unsupported(String),
 }

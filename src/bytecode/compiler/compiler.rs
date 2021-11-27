@@ -489,7 +489,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
         let arg_size = frame.arg_pos;
         let ret_size = frame.ret_size;
-        self.create_stack_frame_block(&item.block, &mut frame);
+        self.create_stack_frame_block(item.block.as_ref().unwrap(), &mut frame);
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
         if var_size > 0 {
             self.writer.reserve(var_size as u8);
@@ -503,7 +503,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
-        self.compile_block(&item.block)?;
+        self.compile_block(item.block.as_ref().unwrap())?;
         self.init_state.borrow_mut().pop();
         let mut frame = self.locals.pop();
 

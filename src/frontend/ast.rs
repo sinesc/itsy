@@ -307,7 +307,7 @@ impl Resolvable for Binding {
 pub struct Function {
     pub position    : Position,
     pub sig         : Signature,
-    pub block       : Block,
+    pub block       : Option<Block>,
     pub function_id : Option<FunctionId>,
     pub scope_id    : Option<ScopeId>,
 }
@@ -317,7 +317,7 @@ impl_positioned!(Function);
 impl Resolvable for Function {
     fn num_resolved(self: &Self) -> Progress {
         self.sig.num_resolved()
-        + self.block.num_resolved()
+        + self.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved())
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
@@ -490,20 +490,21 @@ impl Resolvable for ImplBlock {
 /// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } }`.
 #[derive(Debug)]
 pub struct TraitDef {
-    pub position    : Position,
-    pub provided    : Vec<Function>,
-    pub required    : Vec<Signature>,
-    pub scope_id    : Option<ScopeId>,
-    pub ty          : InlineType,
+    pub position: Position,
+    pub functions: Vec<Function>,
+    pub scope_id: Option<ScopeId>,
+    pub ident   : Ident,
+    pub type_id : Option<TypeId>,
+    pub vis     : Visibility,
 }
 
 impl_positioned!(TraitDef);
+impl_typeable!(TraitDef);
 
 impl Resolvable for TraitDef {
     fn num_resolved(self: &Self) -> Progress {
-        self.provided.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved())
-        + self.required.iter().fold(Progress::zero(), |acc, signature| acc + signature.num_resolved())
-        + self.ty.num_resolved()
+        self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved())
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
 

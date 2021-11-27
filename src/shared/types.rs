@@ -1,15 +1,14 @@
-use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
+use crate::prelude::{Map, Hash, Hasher};
 use crate::{StackAddress, HeapAddress};
-use crate::shared::typed_ids::TypeId;
+use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Enum {
     //repr: u8,
-    pub keys: HashMap<usize, u64>
+    pub keys: Map<usize, u64>
 }
 
 impl Hash for Enum {
@@ -25,6 +24,7 @@ impl Hash for Enum {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Struct {
     pub fields: Vec<(String, Option<TypeId>)>,
+    pub impl_traits: Map<TypeId, ImplTrait>,
 }
 
 impl Struct {
@@ -41,6 +41,25 @@ pub struct Array {
     pub type_id: Option<TypeId>,
 }
 
+/// Information about a trait-implementation for a type.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ImplTrait {
+    pub functions: Map<String, Option<FunctionId>>, // TODO: don't like String here, maybe index trait functions?
+}
+
+impl ImplTrait {
+    pub fn new() -> Self {
+        Self { functions: Map::new() }
+    }
+}
+
+/// Information about a trait definition in a resolved program.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Trait {
+    pub provided: Map<String, Option<FunctionId>>, // TODO: don't like String here, maybe index trait functions?
+    pub required: Map<String, Option<FunctionId>>,
+}
+
 /// Information about a data type in a resolved program.
 #[allow(non_camel_case_types)]
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -54,6 +73,7 @@ pub enum Type {
     Array(Array),
     Enum(Enum),
     Struct(Struct),
+    Trait(Trait),
 }
 
 impl Debug for Type {
@@ -75,6 +95,7 @@ impl Debug for Type {
             Type::Array(v) => write!(f, "{:?}", v),
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
+            Type::Trait(_) => write!(f, "<Trait>"),
         }
     }
 }
@@ -88,7 +109,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) => ::std::mem::size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => ::std::mem::size_of::<HeapAddress>() as u8,
         }
     }
     /// Whether the given numeric is compatible with this type.
@@ -116,7 +137,7 @@ impl Type {
     /// Whether the type is a reference type.
     pub const fn is_ref(self: &Self) -> bool {
         match self {
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) => true,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) => true,
             _ => false,
         }
     }
@@ -195,6 +216,23 @@ impl Type {
     pub fn as_struct_mut(self: &mut Self) -> Option<&mut Struct> {
         match self {
             Type::Struct(struct_) => Some(struct_),
+            _ => None
+        }
+    }
+    /// Returns the type as a trait.
+    pub const fn as_trait(self: &Self) -> Option<&Trait> {
+        match self {
+            Type::Trait(trait_def) => Some(trait_def),
+            _ => None
+        }
+    }
+    pub const fn is_trait(self: &Self) -> bool {
+        self.as_trait().is_some()
+    }
+    /// Returns the type as a mutable trait.
+    pub fn as_trait_mut(self: &mut Self) -> Option<&mut Trait> {
+        match self {
+            Type::Trait(trait_def) => Some(trait_def),
             _ => None
         }
     }
