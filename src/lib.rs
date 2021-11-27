@@ -16,6 +16,7 @@ mod bytecode;
 #[path="shared/shared.rs"]
 mod shared;
 mod interface;
+mod prelude;
 
 pub use interface::*;
 
