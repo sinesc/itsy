@@ -196,7 +196,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
-        ast             : program.0,
+        modules         : program.0,
         entry_fn        : entry_fn,
         id_mappings     : scopes.into(),
     })

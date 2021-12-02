@@ -105,7 +105,7 @@ fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, 
     })?;
     let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
     if write_logs {
-        log("logs/ast.c", false, &format!("{:?}", resolved.ast));
+        log("logs/ast.c", false, &format!("{:?}", resolved.modules));
     }
     Ok(compiler::compile(resolved)?)
 }

@@ -21,7 +21,7 @@ struct Compiler<'ty, T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
     /// Type and mutability data.
-    bindings: IdMappings,
+    id_mappings: IdMappings,
     /// Maps from binding id to load-argument for each frame.
     locals: StackFrames,
     /// Non-primitive type constructors.
@@ -41,11 +41,11 @@ struct Compiler<'ty, T> {
 /// Compiles a resolved program into bytecode.
 pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
-    let ResolvedProgram { ast: modules, id_mappings: bindings, entry_fn, .. } = program;
+    let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;
 
     let mut compiler = Compiler {
         writer      : Writer::new(),
-        bindings    : bindings,
+        id_mappings : id_mappings,
         locals      : StackFrames::new(),
         functions   : RefCell::new(HashMap::new()),
         unfixed_function_calls: RefCell::new(HashMap::new()),
@@ -56,7 +56,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     };
 
     // serialize constructors onto const pool
-    for ty in compiler.bindings.type_map.iter() {
+    for ty in compiler.id_mappings.type_map.iter() {
         if !ty.is_primitive() {
             let position = compiler.store_constructor(ty);
             compiler.constructors.insert(ty, position);
@@ -226,7 +226,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             comment!(self, "{}()", item.ident.name);
         }
 
-        let function_info = self.bindings.function(item.function_id.unwrap());
+        let function_info = self.id_mappings.function(item.function_id.unwrap());
 
         // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
@@ -1620,11 +1620,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 impl<'ty, T> TypeContainer for Compiler<'ty, T> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         let index: usize = type_id.into();
-        &self.bindings.type_map[index]
+        &self.id_mappings.type_map[index]
     }
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
         let index: usize = type_id.into();
-        &mut self.bindings.type_map[index]
+        &mut self.id_mappings.type_map[index]
     }
 }
 
@@ -1633,10 +1633,10 @@ impl<'ty, T> TypeContainer for Compiler<'ty, T> {
 impl<'ty, T> BindingContainer for Compiler<'ty, T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
         let binding_index = Into::<usize>::into(binding_id);
-        &self.bindings.binding_map[binding_index]
+        &self.id_mappings.binding_map[binding_index]
     }
     fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
         let binding_index = Into::<usize>::into(binding_id);
-        &mut self.bindings.binding_map[binding_index]
+        &mut self.id_mappings.binding_map[binding_index]
     }
 }

@@ -6,10 +6,10 @@ use crate::frontend::parser::types::ParsedModule;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
 pub struct ResolvedProgram<T> {
-    /// Programs are generic over their Rust API
+    /// Programs are generic over their Rust API.
     pub(crate) ty: PhantomData<T>,
-    /// Program AST with resolved `BindingId`s.
-    pub ast: Vec<ParsedModule>,
+    /// AST of all program modules.
+    pub modules: Vec<ParsedModule>,
     /// Maps typed ids to program meta data.
     pub id_mappings: IdMappings,
     /// `FunctionId` of the entry/main function.
