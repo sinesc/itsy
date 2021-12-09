@@ -101,7 +101,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 }
                 Ok(())
             }
-            S::TraitDef(_) => unimplemented!(),
+            S::TraitDef(trait_def) => {
+                for function in &trait_def.functions {
+                    if function.block.is_some() {
+                        self.compile_function(function)?;
+                    }
+                }
+                Ok(())
+            },
             S::Binding(binding) => self.compile_binding(binding),
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
@@ -254,7 +261,26 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     self.write_intrinsic_len(ty);
                 } */
             },
-            FunctionKind::Method(_) | FunctionKind::Function => {
+            FunctionKind::Method(object_type_id) => {
+
+                if let Some(trt) = self.type_by_id(object_type_id).as_trait() {
+                    panic!("vcall here {:?}", trt);
+                }
+
+                let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
+                let call_position = self.writer.position();
+
+                let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
+                    target
+                } else {
+                    self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                    CallInfo::PLACEHOLDER
+                };
+
+                self.writer.call(target.addr, target.arg_size);
+            },
+            FunctionKind::Function => {
+
                 let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
                 let call_position = self.writer.position();
 

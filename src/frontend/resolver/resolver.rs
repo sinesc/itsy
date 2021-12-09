@@ -476,7 +476,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(trait_type_id) = trait_type_id {
                     // and the trait is resolved (then this is ugly)
                     if let Some(trait_type_id) = trait_type_id {
-                        let trt = self.scopes.type_ref(trait_type_id).as_trait().unwrap();
+                        let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
                         let function_id = function.function_id;
                         let function_name = function.sig.ident.name.clone();
                         if !trt.provided.contains_key(&function_name) && !trt.required.contains_key(&function_name) {
@@ -572,6 +572,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let path = self.abs_path(&[ &item.sig.ident.name ]);
                 (parent_scope_id, FunctionKind::Function, path)
             };
+
             let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
             if item.sig.vis == Visibility::Public {
                 self.scopes.alias_function(Scopes::root_id(), &qualified, function_id);
@@ -613,22 +614,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // locate function definition
         if item.function_id.is_none() {
-            let (path, type_id) = match &item.call_type {
+            let path;
+            match &item.call_type {
                 CallType::Method => {
                     let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
                     self.resolve_expression(arg, None)?;
                     let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
+                    // try method on type
                     let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;
-                    (self.make_path(&[ type_name, &item.ident.name ]), type_id)
+                    path = self.make_path(&[ type_name, &item.ident.name ]);
+                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
+                    // try trait default implementations
+                    if item.function_id.is_none() {
+                        let function_id = self.scopes.trait_function_id(self.scope_id, &item.ident.name, type_id);
+                        if function_id.is_some() {
+                            item.function_id = function_id;
+                        }
+                    }
                 },
                 CallType::Function => {
-                    (self.make_path(&[ &item.ident.name ]), TypeId::void())
+                    path = self.make_path(&[ &item.ident.name ]);
+                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                 },
-                CallType::Static(path) => {
-                    (self.make_path(&[ &parts_to_path(&path.name), &item.ident.name ]), TypeId::void())
+                CallType::Static(static_path) => {
+                    path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
+                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                 },
-            };
-            item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
+            }
             if item.function_id.is_none() && self.stage.must_resolve() {
                 return Err(Error::new(item, ErrorKind::CannotResolveFunction(path), self.module_path));
             }
@@ -680,7 +692,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // set expected type, if any
         if let Some(expected_result) = expected_result {
-            if self.stage.infer_as_trait() || !self.type_by_id(expected_result).is_trait() {
+            if self.stage.infer_as_trait() || !self.type_by_id(expected_result).as_trait().is_some() {
                 self.set_type_id(item, expected_result)?;
             }
         }

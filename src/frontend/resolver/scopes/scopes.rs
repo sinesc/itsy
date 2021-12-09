@@ -6,7 +6,7 @@ use crate::shared::Progress;
 use crate::frontend::resolver::resolved::IdMappings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
 use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
-use crate::shared::types::Type;
+use crate::shared::types::{Type, ImplTrait};
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub(crate) struct Scopes {
@@ -143,6 +143,21 @@ impl Scopes {
                 return None;
             }
         }
+    }
+
+    /// Returns the id of the named function implemented by a trait for the given type_id.
+    pub fn trait_function_id(self: &Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> Option<FunctionId> {
+        // todo: think about scoping
+        let ty = self.types.value_by_id(type_id);
+        if let Some(trait_type_ids) = ty.impl_trait_ids() {
+            for &trait_type_id in trait_type_ids {
+                let trt = self.types.value_by_id(trait_type_id).as_trait().expect("Implemented type expected to be a trait, got something else");
+                if let Some(&function_id) = trt.provided.get(name) {
+                    return function_id;
+                }
+            }
+        }
+        None
     }
 
     /// Returns a reference to the signature of the given function id.

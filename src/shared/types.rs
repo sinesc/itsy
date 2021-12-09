@@ -226,14 +226,25 @@ impl Type {
             _ => None
         }
     }
-    pub const fn is_trait(self: &Self) -> bool {
-        self.as_trait().is_some()
-    }
     /// Returns the type as a mutable trait.
     pub fn as_trait_mut(self: &mut Self) -> Option<&mut Trait> {
         match self {
             Type::Trait(trait_def) => Some(trait_def),
             _ => None
+        }
+    }
+    /// Returns an iterator over the type_ids of traits implemented by this type, if any.
+    pub fn impl_trait_ids(self: &Self) -> Option<impl Iterator<Item=&TypeId>> {
+        match self {
+            Type::Struct(struct_) => Some(struct_.impl_traits.keys()),
+            _ => None,
+        }
+    }
+    /// Returns an iterator over the traits implemented by this type, if any.
+    pub fn impl_traits(self: &Self) -> Option<impl Iterator<Item=(&TypeId, &ImplTrait)>> {
+        match self {
+            Type::Struct(struct_) => Some(struct_.impl_traits.iter()),
+            _ => None,
         }
     }
 }
