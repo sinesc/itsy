@@ -104,6 +104,8 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         }
     }
 
+    let constructor_map_size = trait_implementor_indices.len() * size_of::<StackAddress>();
+
     let mut compiler = Compiler {
         writer      : Writer::new(),
         id_mappings : id_mappings,
@@ -117,14 +119,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
         trait_function_indices: trait_function_indices,
         trait_implementor_indices: trait_implementor_indices,
-        trait_vtable_base : 0,
+        trait_vtable_base : constructor_map_size,
         trait_function_implementors : trait_function_implementors,
     };
 
     // reserve vtable space in const pool
 
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
-    compiler.trait_vtable_base = compiler.writer.reserve_const_data(vtable_size as StackAddress);
+    compiler.writer.reserve_const_data((constructor_map_size + vtable_size) as StackAddress);
 
     // serialize constructors onto const pool
 
@@ -132,6 +134,9 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         if !ty.is_primitive() && !ty.as_trait().is_some() {
             let position = compiler.store_constructor(type_id);
             compiler.constructors.insert(ty, position);
+            if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
+                compiler.writer.set_const_data((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
+            }
         }
     }
 
@@ -332,8 +337,12 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             match function_info.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
                     let ty = self.item_type(arg);
-                    if ty.is_ref() && !ty.as_trait().is_some() /* TODO: cannot exclude trait, need to get constructor dynamically */ {
-                        self.write_cntinc(self.get_constructor(ty));
+                    if ty.is_ref() {
+                        if ty.as_trait().is_some() {
+                            self.writer.vcntinc_nc();
+                        } else {
+                            self.write_cntinc(self.get_constructor(ty));
+                        }
                     }
                 },
                 _ => { }
@@ -356,7 +365,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
                 // handle virtual/static calls
 
-                if self.type_by_id(object_type_id).as_trait().is_some() /* TODO: cannot exclude trait, need to get constructor dynamically */ {
+                if self.type_by_id(object_type_id).as_trait().is_some() {
 
                     let function_offset = self.vtable_function_offset(function_id);
                     let function_arg_size = self.id_mappings.function_arg_size(function_id);
@@ -641,10 +650,14 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // decrease argument ref-count
         for arg in item.sig.args.iter() {
             let ty = self.item_type(arg);
-            if ty.is_ref() && !ty.as_trait().is_some() {
+            if ty.is_ref() {
                 let arg = frame.lookup(arg.binding_id.unwrap());
                 self.write_load(arg.index as StackOffset, ty);
-                self.write_cntdec(self.get_constructor(ty));
+                if ty.as_trait().is_some() {
+                    self.writer.vcntdec();
+                } else {
+                    self.write_cntdec(self.get_constructor(ty));
+                }
             }
         }
 

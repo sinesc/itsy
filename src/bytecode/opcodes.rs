@@ -620,6 +620,15 @@ impl_opcodes!{
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, HeapRefOp::Inc);
     }
+
+    /// Increase reference count for the top heap reference on the stack. Does not pop the object off the stack. Uses dynamic type information to select the constructor.
+    fn vcntinc_nc(&mut self) {
+        let item: HeapRef = self.stack.top();
+        let implementor_index = self.heap.implementor_index(item.index()) as usize;
+        let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
+        self.cntinc_sa_nc(address);
+    }
+
     /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0.
     fn <
         cntdec_8(constructor: u8 as StackAddress),
@@ -629,6 +638,15 @@ impl_opcodes!{
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::Dec);
     }
+
+    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0. Uses dynamic type information to select the constructor.
+    fn vcntdec(&mut self) {
+        let item: HeapRef = self.stack.top();
+        let implementor_index = self.heap.implementor_index(item.index()) as usize;
+        let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
+        self.cntdec_sa(address);
+    }
+
     /// Pops a heap reference off the stack and frees it if it has a reference count of 0.
     fn <
         cntfreetmp_8(constructor: u8 as StackAddress),

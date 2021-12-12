@@ -7,31 +7,31 @@ struct StructB {
 }
 
 pub trait TestTrait {
-    fn required(self: Self) -> u8;
-    fn provided(self: Self) -> u8 {
+    fn required(self: Self, value: u8) -> u8;
+    fn provided(self: Self, value: u8) -> u8 {
         prints("TestTrait::provided");
         //self.required() // TODO: requires dynamic constructor resolution (for refcounting)
-        1
+        value
     }
 }
 
 impl TestTrait for StructA {
-    fn required(self: Self) -> u8 {
+    fn required(self: Self, value: u8) -> u8 {
         prints("StructA::required");
-        self.a
+        self.a + value
     }
 }
 
 impl TestTrait for StructB {
-    fn required(self: Self) -> u8 {
+    fn required(self: Self, value: u8) -> u8 {
         prints("StructB::required");
         self.b as u8
     }
 }
 
 fn doStuff(stuff: TestTrait) {
-    printu8(stuff.provided());
-    printu8(stuff.required());
+    printu8(stuff.provided(3));
+    printu8(stuff.required(9));
 }
 
 fn main() {
@@ -39,6 +39,6 @@ fn main() {
     let b = StructB { b: 9876543210 };
     doStuff(a);
     doStuff(b);
-    //a.provided(); // TODO: this should not vcall, leaves element on heap
-    a.required();
+    printu8(a.provided(7));
+    printu8(a.required(3));
 }
