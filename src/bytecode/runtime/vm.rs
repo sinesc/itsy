@@ -185,7 +185,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                 *prototype_offset += num_bytes;
             }
             Constructor::Array => {
-                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
+                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
                 self.write_ref(target, heap_ref);
                 let num_elements = self.read_arg(constructor_offset);
                 let original_constructor_offset = *constructor_offset;
@@ -196,9 +196,10 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                 }
             }
             Constructor::Struct => {
-                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0);
-                self.write_ref(target, heap_ref);
                 let num_fields = self.read_arg(constructor_offset);
+                let implementor_index = self.read_arg(constructor_offset) as ItemIndex;
+                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
+                self.write_ref(target, heap_ref);
                 for _ in 0..num_fields {
                     self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
@@ -209,7 +210,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                     self.write_proto(target, *prototype_offset, num_bytes);
                     *prototype_offset += num_bytes;
                 } else {
-                    let heap_ref = HeapRef::new(self.heap.alloc(Vec::new()), 0);
+                    let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0);
                     self.write_ref(target, heap_ref);
                     let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
                     *prototype_offset += ::std::mem::size_of_val(&num_bytes) as StackAddress;
@@ -251,6 +252,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
             }
             Constructor::Struct => {
                 let num_fields = self.read_arg(&mut constructor_offset);
+                let _implementor_index = self.read_arg(constructor_offset);
                 for _ in 0..num_fields {
                     let field_constructor = self.read_op(&mut constructor_offset);
                     if field_constructor != Constructor::Primitive {

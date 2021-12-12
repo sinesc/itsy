@@ -3,3 +3,5 @@ pub use std::collections::BTreeSet as Set;
 pub use std::collections::HashMap as UnorderedMap;
 pub use std::collections::HashSet as UnorderedSet;
 pub use std::hash::{Hash, Hasher};
+pub use std::mem::size_of;
+pub use std::cmp::min;

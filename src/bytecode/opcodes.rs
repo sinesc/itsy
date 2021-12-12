@@ -1,7 +1,7 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use std::mem::size_of;
-use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex};
+use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, ItemIndex};
 use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
@@ -263,7 +263,7 @@ impl_opcodes!{
     >(&mut self) {
         let value: T = self.stack.pop();
         let string = format!("{}", value);
-        let index: StackAddress = self.heap.alloc(string.into_bytes());
+        let index: StackAddress = self.heap.alloc(string.into_bytes(), ItemIndex::MAX);
         self.stack.push(HeapRef::new(index, 0));
     }
 
@@ -655,6 +655,14 @@ impl_opcodes!{
         // stack: ARGS | previous FP | previous PC | (local vars and dynamic stack follow here)
     }
 
+    /// Virtual function call. Resolves concrete call address from vtable and invokes call().
+    fn vcall(&mut self, function_base_address: StackAddress, arg_size: StackAddress) {
+        let item: HeapRef = self.stack.load_sp(-(arg_size as StackOffset));
+        let implementor_index = self.heap.implementor_index(item.index());
+        let address: StackAddress = self.stack.load(function_base_address + (implementor_index as usize) * size_of::<StackAddress>());
+        self.call(address, arg_size);
+    }
+
     /// Function return. Restores state, removes arguments left on stack by caller.
     fn ret0(&mut self, arg_size: StackAddress) {
         // stack: ARGS | previous FP | previous PC | local vars
@@ -758,7 +766,7 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let a_len = self.heap.size_of(a.index());
 
-        let dest_index: StackAddress = self.heap.alloc(Vec::new());
+        let dest_index: StackAddress = self.heap.alloc(Vec::new(), ItemIndex::MAX);
         self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
         self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
         self.stack.push(HeapRef::new(dest_index, 0));

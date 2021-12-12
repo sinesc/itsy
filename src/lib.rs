@@ -42,7 +42,8 @@ type HeapAddress = usize;
 const HEAP_OFFSET_BITS: usize = 36;
 
 /// Type used to index static elements in code, e.g. struct members.
-type ItemIndex = u16;
+#[doc(hidden)]
+pub type ItemIndex = u16;
 
 /// Type used to index RustFns. Public because it is used by the vm_func macro.
 #[doc(hidden)]
@@ -136,7 +137,7 @@ macro_rules! vm_func {
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret $vm:ident, String, $value:ident) => { {
         let raw_bytes = &$value.as_bytes();
-        let index = $vm.heap.alloc(raw_bytes.to_vec());
+        let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
         $vm.stack.push($crate::runtime::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, $_:tt, $value:ident) => {

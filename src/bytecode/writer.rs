@@ -1,5 +1,6 @@
 //! Bytecode buffer and writer.
 
+use crate::prelude::*;
 use std::cell::{Cell, RefCell, RefMut};
 use crate::StackAddress;
 use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor};
@@ -61,10 +62,26 @@ impl<T> Writer<T> where T: VMFunc<T> {
         } else {
             // overwrite
             let position = self.position();
-            let end = ::std::cmp::min(position + buf_len, self.len());
+            let end = min(position + buf_len, self.len());
             self.program().instructions.splice(position as usize .. end as usize, buf.iter().cloned());
         }
         self.position.set(self.position.get() + buf_len);
+    }
+    /// Reserves space for a data-block on the const pool and returns its base address.
+    pub fn reserve_const_data(self: &Self, size: StackAddress) -> StackAddress {
+        let position = self.program().consts.len() as StackAddress;
+        self.program().const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        let pool_size = self.program().consts.len();
+        self.program().consts.resize(pool_size + size, 0);
+        position
+    }
+    /// Writes to a data-block on the const pool.
+    pub fn set_const_data(self: &Self, position: StackAddress, value: StackAddress) {
+        let mut program = self.program();
+        let position = position as usize;
+        for (index, &byte) in value.to_le_bytes().iter().enumerate() {
+            program.consts[position + index] = byte;
+        }
     }
 }
 
@@ -73,10 +90,11 @@ impl<T> Writer<T> where T: VMFunc<T> {
 macro_rules! impl_store_const {
     (@write $as_type:ident, $self:ident, $value:ident, $endianess:path) => {
         let position = $self.program().consts.len() as StackAddress;
-        let size = std::mem::size_of::<$as_type>() as StackAddress;
+        let size = size_of::<$as_type>() as StackAddress;
         let endianness = $endianess;
-        $self.program().const_descriptors.push(ConstDescriptor { position, size, endianness });
-        $self.program().consts.extend_from_slice(&$value.to_le_bytes());
+        let mut program = $self.program();
+        program.const_descriptors.push(ConstDescriptor { position, size, endianness });
+        program.consts.extend_from_slice(&$value.to_le_bytes());
     };
     ($type:tt, $endianess:path) => {
         impl<P> StoreConst<$type> for Writer<P> where P: VMFunc<P> {
@@ -116,8 +134,9 @@ impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
         self.store_const(size);
         // string data
         let position = self.program().consts.len() as StackAddress;
-        self.program().const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
-        self.program().consts.extend_from_slice(raw_bytes);
+        let mut program = self.program();
+        program.const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        program.consts.extend_from_slice(raw_bytes);
         position
     }
 }

@@ -1,5 +1,5 @@
 use std::{convert::TryInto, collections::HashMap, mem::{size_of, replace}};
-use crate::{StackAddress, StackOffset};
+use crate::{StackAddress, StackOffset, ItemIndex};
 use crate::bytecode::{HeapRef, HeapSlice};
 use crate::shared::index_twice;
 
@@ -29,17 +29,23 @@ pub enum HeapRefOp {
 /// A reference counted heap object.
 #[derive(Debug)]
 pub(crate) struct HeapObject {
-    refs: StackAddress,
-    data: Vec<u8>,
-    epoch: usize,
+    /// Data stored in the heap object.
+    data                : Vec<u8>,
+    /// For trait implementing types, the type index to use for dynamic dispatch.
+    implementor_index   : ItemIndex,
+    /// Number of references to the heap object.
+    refs                : StackAddress,
+    /// Reference epoch. Epochs are used to prevent refcount updates from getting stuck in reference cycles.
+    epoch               : usize,
 }
 
 impl HeapObject {
-    fn new(data: Vec<u8>, epoch: usize) -> Self {
+    fn new(data: Vec<u8>, implementor_index: ItemIndex, epoch: usize) -> Self {
         Self {
+            data,
+            implementor_index,
             refs: 0,
-            data: data,
-            epoch: epoch
+            epoch
         }
     }
 }
@@ -62,13 +68,13 @@ impl Heap {
         }
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
-    pub fn alloc(self: &mut Self, data: Vec<u8>) -> StackAddress {
+    pub fn alloc(self: &mut Self, data: Vec<u8>, implementor_index: ItemIndex) -> StackAddress {
         if let Some(index) = self.free.pop() {
-            self.objects[index as usize] = HeapObject::new(data, self.epoch);
+            self.objects[index as usize] = HeapObject::new(data, implementor_index, self.epoch);
             index
         } else {
             let index = self.objects.len();
-            self.objects.push(HeapObject::new(data, self.epoch));
+            self.objects.push(HeapObject::new(data, implementor_index, self.epoch));
             index as StackAddress
         }
     }
@@ -121,7 +127,7 @@ impl Heap {
     pub fn remove(self: &mut Self, index: StackAddress) -> Vec<u8> {
         #[cfg(debug_assertions)]
         self.assert_exists(index);
-        let object = replace(&mut self.objects[index as usize], HeapObject::new(Vec::new(), self.epoch));
+        let object = replace(&mut self.objects[index as usize], HeapObject::new(Vec::new(), 0, self.epoch));
         self.free.push(index);
         object.data
     }
@@ -129,7 +135,7 @@ impl Heap {
     pub fn purge(self: &mut Self) {
         // todo: truncate if len=0 or items are consecutive
         for v in self.free.iter() {
-            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), self.epoch));
+            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), 0, self.epoch));
         }
     }
     /// Number of active heap elements.
@@ -151,6 +157,10 @@ impl Heap {
     /// Returns the size in bytes of the given heap object.
     pub fn size_of(self: &Self, index: StackAddress) -> StackAddress {
         self.objects[index as usize].data.len() as StackAddress
+    }
+    /// Returns the size in bytes of the given heap object.
+    pub fn implementor_index(self: &Self, index: StackAddress) -> ItemIndex {
+        self.objects[index as usize].implementor_index
     }
     /// Returns a vector of unfreed heap objects.
     pub fn data(self: &Self) -> HashMap<StackAddress, (StackAddress, &Vec<u8>)> {

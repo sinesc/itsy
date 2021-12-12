@@ -1,6 +1,8 @@
 
 use std::marker::PhantomData;
-use crate::shared::types::Type;
+use crate::prelude::*;
+use crate::StackAddress;
+use crate::shared::types::{Type, Trait, ImplTrait};
 use crate::shared::{infos::{BindingInfo, FunctionInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
 use crate::frontend::parser::types::ParsedModule;
 
@@ -40,6 +42,32 @@ impl IdMappings {
             function_map,
         }
     }
+    /// Returns an iterator over the function mapping.
+    pub fn functions(self: &Self) -> impl Iterator<Item=(FunctionId, &FunctionInfo)> {
+        self.function_map.iter().enumerate().map(|(index, info)| (FunctionId::from(index), info))
+    }
+    /// Returns an iterator over the type mapping.
+    pub fn types(self: &Self) -> impl Iterator<Item=(TypeId, &Type)> {
+        self.type_map.iter().enumerate().map(|(index, info)| (TypeId::from(index), info))
+    }
+    /// Returns an iterator over the type mapping returning only traits.
+    pub fn traits(self: &Self) -> impl Iterator<Item=(TypeId, &Trait)> {
+        self.type_map.iter()
+            .enumerate()
+            .filter_map(|(type_id, ty)| ty.as_trait().map(|trt| (TypeId::from(type_id), trt)))
+    }
+    /// Returns an iterator over the type mapping returning only traits implementors.
+    pub fn implementors(self: &Self) -> impl Iterator<Item=(TypeId, &Map<TypeId, ImplTrait>)> {
+        // TODO: currently only structs support traits. this will have to be extended to at least String and enums once those exist.
+        self.type_map.iter()
+            .enumerate()
+            .filter_map(|(type_id, ty)| ty.as_struct().map(|struct_| (TypeId::from(type_id), struct_)))
+            .filter_map(|i| if i.1.impl_traits.len() > 0 { Some((i.0, &i.1.impl_traits)) } else { None })
+    }
+    /// Returns an iterator over the type mapping.
+    pub fn bindings(self: &Self) -> impl Iterator<Item=(BindingId, &BindingInfo)> {
+        self.binding_map.iter().enumerate().map(|(index, info)| (BindingId::from(index), info))
+    }
     /// Returns function information for given function id.
     pub fn function(self: &Self, function_id: FunctionId) -> &FunctionInfo {
         &self.function_map[Into::<usize>::into(function_id)]
@@ -51,5 +79,21 @@ impl IdMappings {
     /// Returns type information for given type id.
     pub fn ty(self: &Self, type_id: TypeId) -> &Type {
         &self.type_map[Into::<usize>::into(type_id)]
+    }
+    /// Computes the total primitive size of the function parameters.
+    pub fn function_arg_size(self: &Self, function_id: FunctionId) -> StackAddress {
+        let info = self.function(function_id);
+        let mut arg_size = 0;
+        for arg in &info.arg_type {
+            let arg_type_id = arg.expect("Function arg is not resolved");
+            arg_size += self.ty(arg_type_id).primitive_size() as StackAddress;
+        }
+        arg_size
+    }
+    /// Returns the primitive size of the function return type.
+    pub fn function_ret_size(self: &Self, function_id: FunctionId) -> StackAddress {
+        let info = self.function(function_id);
+        let ret_type_id = info.ret_type.expect("Function result is not resolved");
+        self.ty(ret_type_id).primitive_size() as StackAddress
     }
 }

@@ -84,7 +84,7 @@ pub(crate) struct ConstDescriptor {
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
     Array       = 175,  // Array(num_elements, element constructor): copies an array
-    Struct      = 176,  // Struct(num_fields, field constructor, field constructor, ...): copies a struct
+    Struct      = 176,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
     String      = 177,  // String: copies a string
 }
 

@@ -6,7 +6,8 @@ pub mod error;
 mod util;
 mod init_state;
 
-use std::{cell::RefCell, cell::Cell, collections::HashMap, mem::size_of};
+use crate::prelude::*;
+use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
@@ -36,12 +37,72 @@ struct Compiler<'ty, T> {
     init_state: RefCell<BindingState>,
     /// Module base path. For error reporting only
     module_path: String,
+
+    trait_function_indices: HashMap<FunctionId, ItemIndex>,
+    trait_implementor_indices: HashMap<TypeId, ItemIndex>,
+    trait_vtable_base: StackAddress,
+
+    trait_function_implementors: HashMap<FunctionId, FunctionId>,
 }
 
 /// Compiles a resolved program into bytecode.
 pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
 
     let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;
+
+    // find all trait functions
+
+    let trait_functions: Vec<(TypeId, &String, FunctionId)> = id_mappings.traits()
+        .flat_map(|(type_id, trt)| {
+            trt.provided.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap()))
+            .chain(trt.required.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap())))
+        })
+        .collect();
+
+    let mut trait_function_indices = UnorderedMap::new();
+
+    for (index, &(_, _, function_id)) in trait_functions.iter().enumerate() {
+        trait_function_indices.insert(function_id, index as ItemIndex);
+    }
+
+    // find all trait implementors
+
+    let trait_impls: Vec<_> = id_mappings.implementors().collect();
+    let mut trait_implementor_indices = UnorderedMap::new();
+
+    for (index, &(type_id, _)) in trait_impls.iter().enumerate() {
+        trait_implementor_indices.insert(type_id, index as ItemIndex);
+    }
+
+    // create map from (trait_type_id, implementor_type_id, function_name) => function_id
+
+    let mut trait_implementation_mapping = Vec::new();
+
+    let mut trait_function_implementors = HashMap::new();
+
+    for (function_index, &(trait_type_id, function_name, trait_function_id)) in trait_functions.iter().enumerate() {
+        for (implementor_index, &(_implementor_type_id, implementor_traits)) in trait_impls.iter().enumerate() {
+
+            // map trait implementor function ids to trait function ids
+
+            if let Some(impl_trait) = implementor_traits.get(&trait_type_id) {
+                if let Some(&implementor_function_id) = impl_trait.functions.get(function_name) {
+                    trait_function_implementors.insert(implementor_function_id.expect("Unresolved implementor function"), trait_function_id);
+                }
+            }
+
+            // pick function implemented on concrete type or default to trait-provided function (if any)
+            // we also create an entry if the trait+function is not implemented for this type so that lookup position can be computed as table_start + function_index * num_trait_implementors + trait_implementor_index
+            // with the first three components being statically known and can be passed precomputed to vcall. the implementor index is stored on the heap object the function is being called on.
+
+            let selected_function_id = match implementor_traits.get(&trait_type_id) {
+                Some(impl_trait) => *impl_trait.functions.get(function_name).unwrap_or(&Some(trait_function_id)),
+                None => None,
+            };
+
+            trait_implementation_mapping.push((function_index, implementor_index, selected_function_id));
+        }
+    }
 
     let mut compiler = Compiler {
         writer      : Writer::new(),
@@ -53,12 +114,23 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         writing_protype_instructions: Cell::new(false),
         init_state  : RefCell::new(BindingState::new()),
         module_path : "".to_string(),
+
+        trait_function_indices: trait_function_indices,
+        trait_implementor_indices: trait_implementor_indices,
+        trait_vtable_base : 0,
+        trait_function_implementors : trait_function_implementors,
     };
 
+    // reserve vtable space in const pool
+
+    let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
+    compiler.trait_vtable_base = compiler.writer.reserve_const_data(vtable_size as StackAddress);
+
     // serialize constructors onto const pool
-    for ty in compiler.id_mappings.type_map.iter() {
-        if !ty.is_primitive() {
-            let position = compiler.store_constructor(ty);
+
+    for (type_id, ty) in compiler.id_mappings.types() {
+        if !ty.is_primitive() && !ty.as_trait().is_some() {
+            let position = compiler.store_constructor(type_id);
             compiler.constructors.insert(ty, position);
         }
     }
@@ -75,6 +147,16 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         }
     }
 
+    // write actual function offsets to vtable
+
+    for (_function_index, implementor_index, selected_function_id) in trait_implementation_mapping {
+        if let Some(selected_function_id) = selected_function_id {
+            let selected_function_offset = compiler.functions.borrow().get(&selected_function_id).expect("Missing function callinfo").addr;
+            let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
+            compiler.writer.set_const_data(vtable_function_offset + implementor_index * size_of::<StackAddress>(), selected_function_offset);
+        }
+    }
+
     // overwrite placeholder with actual entry position
     let &entry_call = compiler.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
@@ -85,6 +167,13 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
 /// Methods for compiling individual code structures.
 impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+
+    /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
+    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
+        let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
+        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
+        (self.trait_vtable_base + (function_index as usize) * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
+    }
 
     /// Compiles the given statement.
     fn compile_statement(self: &Self, item: &ast::Statement) -> CompileResult {
@@ -243,7 +332,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             match function_info.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
                     let ty = self.item_type(arg);
-                    if ty.is_ref() {
+                    if ty.is_ref() && !ty.as_trait().is_some() /* TODO: cannot exclude trait, need to get constructor dynamically */ {
                         self.write_cntinc(self.get_constructor(ty));
                     }
                 },
@@ -263,21 +352,28 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             FunctionKind::Method(object_type_id) => {
 
-                if let Some(trt) = self.type_by_id(object_type_id).as_trait() {
-                    panic!("vcall here {:?}", trt);
-                }
-
                 let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
-                let call_position = self.writer.position();
 
-                let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
-                    target
+                // handle virtual/static calls
+
+                if self.type_by_id(object_type_id).as_trait().is_some() /* TODO: cannot exclude trait, need to get constructor dynamically */ {
+
+                    let function_offset = self.vtable_function_offset(function_id);
+                    let function_arg_size = self.id_mappings.function_arg_size(function_id);
+                    self.writer.vcall(function_offset, function_arg_size);
+
                 } else {
-                    self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
-                    CallInfo::PLACEHOLDER
-                };
 
-                self.writer.call(target.addr, target.arg_size);
+                    let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
+                        target
+                    } else {
+                        let call_position = self.writer.position();
+                        self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                        CallInfo::PLACEHOLDER
+                    };
+
+                    self.writer.call(target.addr, target.arg_size);
+                }
             },
             FunctionKind::Function => {
 
@@ -545,7 +641,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         // decrease argument ref-count
         for arg in item.sig.args.iter() {
             let ty = self.item_type(arg);
-            if ty.is_ref() {
+            if ty.is_ref() && !ty.as_trait().is_some() {
                 let arg = frame.lookup(arg.binding_id.unwrap());
                 self.write_load(arg.index as StackOffset, ty);
                 self.write_cntdec(self.get_constructor(ty));
@@ -974,27 +1070,29 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes a constructor for non-primitive types.
-    fn store_constructor(self: &Self, ty: &Type) -> StackAddress {
+    fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
         let position = self.writer.const_len();
         //let prototype_size = 0; // TODO track size here?
-        match ty {
+        match self.type_by_id(type_id) {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array as u8);
                 self.writer.store_const(array.len.unwrap() as ItemIndex);
-                self.store_constructor(self.get_type(array.type_id));
+                self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {
                 self.writer.store_const(Constructor::Struct as u8);
                 self.writer.store_const(structure.fields.len() as ItemIndex);
+                self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                 for field in &structure.fields {
-                    self.store_constructor(self.get_type(field.1));
+                    self.store_constructor(field.1.expect("Unresolved struct field type"));
                 }
             }
             Type::String => {
                 self.writer.store_const(Constructor::String as u8);
             }
             Type::Enum(_) => unimplemented!("enum constructor"),
-            _ => {
+            Type::Trait(_) => unimplemented!("trait constructor"),
+            ty @ _ => {
                 self.writer.store_const(Constructor::Primitive as u8);
                 self.writer.store_const(ty.primitive_size() as ItemIndex);
             }

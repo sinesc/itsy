@@ -1,7 +1,44 @@
+struct StructA {
+    a: u8,
+}
 
+struct StructB {
+    b: u64,
+}
+
+pub trait TestTrait {
+    fn required(self: Self) -> u8;
+    fn provided(self: Self) -> u8 {
+        prints("TestTrait::provided");
+        //self.required() // TODO: requires dynamic constructor resolution (for refcounting)
+        1
+    }
+}
+
+impl TestTrait for StructA {
+    fn required(self: Self) -> u8 {
+        prints("StructA::required");
+        self.a
+    }
+}
+
+impl TestTrait for StructB {
+    fn required(self: Self) -> u8 {
+        prints("StructB::required");
+        self.b as u8
+    }
+}
+
+fn doStuff(stuff: TestTrait) {
+    printu8(stuff.provided());
+    printu8(stuff.required());
+}
 
 fn main() {
-    for _ in 0..3 {
-        prints("Hello, world");
-    }
+    let a = StructA { a: 10 };
+    let b = StructB { b: 9876543210 };
+    doStuff(a);
+    doStuff(b);
+    //a.provided(); // TODO: this should not vcall, leaves element on heap
+    a.required();
 }
