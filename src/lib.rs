@@ -138,7 +138,7 @@ macro_rules! vm_func {
     (@handle_ret $vm:ident, String, $value:ident) => { {
         let raw_bytes = &$value.as_bytes();
         let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
-        $vm.stack.push($crate::runtime::HeapRef::new(index, 0));
+        $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, $_:tt, $value:ident) => {
         compile_error!("Unsupported return type");
