@@ -10,8 +10,7 @@ pub trait TestTrait {
     fn required(self: Self, value: u8) -> u8;
     fn provided(self: Self, value: u8) -> u8 {
         prints("TestTrait::provided");
-        //self.required() // TODO: requires dynamic constructor resolution (for refcounting)
-        value
+        self.required(value) + value
     }
 }
 

@@ -9,7 +9,7 @@ pub mod infos;
 
 #[cfg(feature="compiler")]
 use std::{ops::Add, fmt};
-use crate::{StackAddress, shared::{typed_ids::TypeId, types::Type}};
+use crate::{StackAddress, shared::{typed_ids::TypeId, types::{Type, Array}}};
 #[cfg(feature="compiler")]
 use crate::shared::{infos::BindingInfo, typed_ids::BindingId};
 
@@ -32,6 +32,22 @@ pub(crate) trait TypeContainer {
             },
             Type::Enum(_)   => unimplemented!("enum size"),
             _               => ty.primitive_size() as StackAddress
+        }
+    }
+    /// Returns whether type_id is acceptable by the type expectation for expected_type_id (but not necessarily the inverse).
+    fn types_match(self: &Self, type_id: TypeId, expected_type_id: TypeId) -> bool {
+        if type_id == expected_type_id {
+            true
+        } else {
+            match (self.type_by_id(type_id), self.type_by_id(expected_type_id)) {
+                (&Type::Array(Array { len: a_len, type_id: Some(a_type_id) }), &Type::Array(Array { len: b_len, type_id: Some(b_type_id) })) => {
+                    a_len == b_len && self.types_match(a_type_id, b_type_id)
+                },
+                (Type::Struct(struct_), Type::Trait(_)) => {
+                    struct_.impl_traits.contains_key(&expected_type_id)
+                },
+                _ => false,
+            }
         }
     }
 }

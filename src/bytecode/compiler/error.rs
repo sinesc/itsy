@@ -2,8 +2,9 @@ use std::fmt::{self, Display};
 use crate::frontend::ast::{Positioned, Position};
 
 /// Represents the various possible compiler error-kinds.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum CompileErrorKind {
+    IncompatibleTraitMethod(String),
     Uninitialized,
     Internal,
 }

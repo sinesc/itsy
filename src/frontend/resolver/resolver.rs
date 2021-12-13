@@ -5,7 +5,7 @@ mod scopes;
 pub mod error;
 pub mod resolved;
 
-use crate::prelude::{UnorderedMap, Map, Set};
+use crate::prelude::*;
 use std::marker::PhantomData;
 use crate::ast::Visibility;
 use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
@@ -234,23 +234,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         })
     }
 
-    /// Returns whether type_id is acceptable by the type expectation for expected_type_id (but not necessarily the inverse).
-    fn types_match(self: &Self, type_id: TypeId, expected_type_id: TypeId) -> bool {
-        if type_id == expected_type_id {
-            true
-        } else {
-            match (self.type_by_id(type_id), self.type_by_id(expected_type_id)) {
-                (&Type::Array(Array { len: a_len, type_id: Some(a_type_id) }), &Type::Array(Array { len: b_len, type_id: Some(b_type_id) })) => {
-                    a_len == b_len && self.types_match(a_type_id, b_type_id)
-                },
-                (Type::Struct(struct_), Type::Trait(_)) => {
-                    struct_.impl_traits.contains_key(&expected_type_id)
-                },
-                _ => false,
-            }
-        }
-    }
-
     /// Returns Ok if types_match() is satisfied for the given types. Otherwise a TypeMismatch error.
     fn check_types_match(self: &Self, item: &impl Positioned, type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
         if !self.types_match(type_id, expected_type_id) {
@@ -472,16 +455,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             for function in &mut item.functions {
                 self.resolve_function(function, Some((parent_scope_id, type_id)))?;
-                // if this is a trait impl
+                // if this is a trait impl and the trait is resolved
                 if let Some(trait_type_id) = trait_type_id {
-                    // and the trait is resolved (then this is ugly)
                     if let Some(trait_type_id) = trait_type_id {
                         let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
                         let function_id = function.function_id;
-                        let function_name = function.sig.ident.name.clone();
-                        if !trt.provided.contains_key(&function_name) && !trt.required.contains_key(&function_name) {
-                            let function_name = function_name.clone();
-                            return Err(Error::new(function, ErrorKind::NotATraitMethod(function_name), self.module_path));
+                        let function_name = &function.sig.ident.name;
+                        // check if function is defined in trait
+                        if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
+                            return Err(Error::new(function, ErrorKind::NotATraitMethod(function_name.clone()), self.module_path));
                         }
                         if let Some(struct_) = self.scopes.type_mut(type_id).as_struct_mut() {
                             let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());

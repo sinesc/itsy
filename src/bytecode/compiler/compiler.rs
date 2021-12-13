@@ -9,8 +9,8 @@ mod init_state;
 use crate::prelude::*;
 use std::{cell::RefCell, cell::Cell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Typeable, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
+use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -173,13 +173,6 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 /// Methods for compiling individual code structures.
 impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
-    /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
-    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
-        let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
-        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
-        (self.trait_vtable_base + (function_index as usize) * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
-    }
-
     /// Compiles the given statement.
     fn compile_statement(self: &Self, item: &ast::Statement) -> CompileResult {
         use self::ast::Statement as S;
@@ -192,6 +185,20 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             S::ImplBlock(impl_block) => {
                 for function in &impl_block.functions {
                     self.compile_function(function)?;
+                    // if this is a trait impl check compatibility to trait
+                    if let Some(TypeName { type_id, .. }) = impl_block.trt {
+                        let trait_type_id = type_id.expect("Unresolved trait encountered");
+                        let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
+                        let function_id = function.function_id;
+                        let function_name = &function.sig.ident.name;
+                        // check if function is defined in trait
+                        let trait_function_id = trt.provided.get(function_name).or(trt.required.get(function_name)).unwrap();
+                        let trait_function = self.id_mappings.function(trait_function_id.unwrap());
+                        let impl_function = self.id_mappings.function(function_id.unwrap());
+                        if !self.is_compatible_function(trait_function, impl_function) {
+                            return Err(CompileError::new(function, CompileErrorKind::IncompatibleTraitMethod(function_name.clone()), &self.module_path));
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -1003,6 +1010,32 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Returns constructor index for given type.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
+    }
+
+    /// Checks if the given functions are compatible.
+    fn is_compatible_function(self: &Self, target: &FunctionInfo, other: &FunctionInfo) -> bool {
+        if discriminant(&target.kind.unwrap()) != discriminant(&other.kind.unwrap()) {
+            return false;
+        }
+        if target.ret_type != other.ret_type {
+            return false;
+        }
+        if target.arg_type.len() != other.arg_type.len() {
+            return false;
+        }
+        for (target_arg, other_arg) in target.arg_type.iter().zip(other.arg_type.iter()) {
+            if !self.types_match(other_arg.unwrap(), target_arg.unwrap()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
+    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
+        let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
+        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
+        (self.trait_vtable_base + (function_index as usize) * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
     }
 
     /// Fixes function call targets for previously not generated functions.
