@@ -1,5 +1,4 @@
-use std::fmt::{self, Debug};
-use crate::prelude::{Map, Hash, Hasher};
+use crate::prelude::*;
 use crate::{StackAddress, HeapAddress};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
@@ -96,6 +95,30 @@ impl Debug for Type {
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
             Type::Trait(_) => write!(f, "<Trait>"),
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::void => write!(f, "void"),
+            Type::u8 => write!(f, "u8"),
+            Type::u16 => write!(f, "u16"),
+            Type::u32 => write!(f, "u32"),
+            Type::u64 => write!(f, "u64"),
+            Type::i8 => write!(f, "i8"),
+            Type::i16 => write!(f, "i16"),
+            Type::i32 => write!(f, "i32"),
+            Type::i64 => write!(f, "i64"),
+            Type::f32 => write!(f, "f32"),
+            Type::f64 => write!(f, "f64"),
+            Type::bool => write!(f, "bool"),
+            Type::String => write!(f, "String"),
+            Type::Array(v) => if let Some(len) = v.len { write!(f, "[ _, {} ]", len) } else { write!(f, "[ _ ]") },
+            Type::Enum(_) => write!(f, "enum"),
+            Type::Struct(_) => write!(f, "struct"),
+            Type::Trait(_) => write!(f, "trait"),
         }
     }
 }

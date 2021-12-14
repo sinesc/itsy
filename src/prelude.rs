@@ -5,3 +5,4 @@ pub use std::collections::HashSet as UnorderedSet;
 pub use std::hash::{Hash, Hasher};
 pub use std::mem::{size_of, discriminant};
 pub use std::cmp::min;
+pub use std::fmt::{self, Display, Debug};

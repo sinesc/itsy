@@ -1,7 +1,7 @@
 //! A type that can represent a signed or unsigned integer value.
 
+use crate::prelude::*;
 use std::cmp::Ordering;
-use std::fmt::{self, Debug};
 //use std::ops::{Add, Sub, Mul, Div, Rem};
 //use std::{i64, u64, f64};
 
@@ -243,11 +243,17 @@ impl Rem for Numeric {
 */
 impl Debug for Numeric {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
+impl Display for Numeric {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Numeric::Signed(v) => write!(f, "Signed({})", v),
-            Numeric::Unsigned(v) => write!(f, "Unsigned({})", v),
-            Numeric::Float(v) => write!(f, "Float({})", v),
-            Numeric::Overflow => write!(f, "Overflow"),
+            Numeric::Signed(v) => write!(f, "{} (signed)", v),
+            Numeric::Unsigned(v) => write!(f, "{} (unsigned)", v),
+            Numeric::Float(v) => write!(f, "{} (float)", v),
+            Numeric::Overflow => write!(f, "/ (numeric value too large)"),
         }
     }
 }

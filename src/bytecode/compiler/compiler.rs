@@ -280,7 +280,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             _ => {
                 if !self.init_state.borrow().initialized(binding_id) {
-                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized, &self.module_path));
+                    let variable = item.left.as_variable().unwrap();
+                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized(variable.ident.name.clone()), &self.module_path));
                 }
                 self.write_load(local.index as StackOffset, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
@@ -432,7 +433,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
             if !self.init_state.borrow().initialized(binding_id) {
-                return Err(CompileError::new(item, CompileErrorKind::Uninitialized, &self.module_path));
+                return Err(CompileError::new(item, CompileErrorKind::Uninitialized(item.ident.name.clone()), &self.module_path));
             }
             local.index
         };

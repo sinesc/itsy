@@ -5,7 +5,7 @@ use crate::frontend::ast::{Positioned, Position};
 #[derive(Clone, Debug)]
 pub enum CompileErrorKind {
     IncompatibleTraitMethod(String),
-    Uninitialized,
+    Uninitialized(String),
     Internal,
 }
 
@@ -37,8 +37,11 @@ impl CompileError {
 
 impl Display for CompileError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[allow(unreachable_patterns)]
         match &self.kind {
-            CompileErrorKind::Internal => write!(f, "Internal error"),
+            CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method '{}'", method),
+            CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable '{}'", variable),
+            CompileErrorKind::Internal => write!(f, "Internal compiler error"),
             _ => write!(f, "{:?}", self.kind),
         }
     }

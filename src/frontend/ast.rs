@@ -3,6 +3,7 @@
 use std::{fmt::{self, Debug, Display}, collections::HashMap};
 use crate::{ItemIndex, StackAddress, shared::BindingContainer};
 use crate::shared::{typed_ids::{BindingId, FunctionId, ScopeId, TypeId}, numeric::Numeric, Progress, parts_to_path};
+use crate::frontend::resolver::error::ResolveErrorKind;
 
 /// TypeId handling for typeable AST structures.
 pub(crate) trait Typeable {
@@ -28,11 +29,15 @@ macro_rules! impl_typeable {
 
 /// Resolvable AST structures.
 pub(crate) trait Resolvable {
-    /// Number of resolved and total items
+    /// Number of resolved and total items.
     fn num_resolved(self: &Self) -> Progress;
-    /// Whether the structure is fully resolved
+    /// Whether the structure is fully resolved.
     fn is_resolved(self: &Self) -> bool {
         self.num_resolved().done()
+    }
+    /// Error kind incase the item could not be resolved.
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve("".to_string())
     }
 }
 
@@ -300,6 +305,9 @@ impl Resolvable for Binding {
         + self.ty.as_ref().map_or(Progress::zero(), |ty| ty.num_resolved())
         + self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve(self.ident.name.clone())
+    }
 }
 
 /// A function definition, e.g. `fn myfunc(a: u8, b: String) -> u16 { ... }`.
@@ -319,6 +327,9 @@ impl Resolvable for Function {
         self.sig.num_resolved()
         + self.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved())
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve(self.sig.ident.name.clone())
     }
 }
 
@@ -365,6 +376,9 @@ impl_typeable!(TypeName);
 impl Resolvable for TypeName {
     fn num_resolved(self: &Self) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::UndefinedType(format!("{}", &self.path))
     }
 }
 

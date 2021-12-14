@@ -192,7 +192,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
     let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::void()))
-        .unwrap_or_err(None, ErrorKind::CannotResolveFunction(entry_function.to_string()), "")?;
+        .unwrap_or_err(None, ErrorKind::UndefinedFunction(entry_function.to_string()), "")?;
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
@@ -237,7 +237,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns Ok if types_match() is satisfied for the given types. Otherwise a TypeMismatch error.
     fn check_types_match(self: &Self, item: &impl Positioned, type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
         if !self.types_match(type_id, expected_type_id) {
-            let error_kind = ErrorKind::TypeMismatch(self.type_by_id(type_id).clone(), self.type_by_id(expected_type_id).clone());
+            let name_given = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
+            let name_expected = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(expected_type_id))).clone();
+            let error_kind = ErrorKind::TypeMismatch(name_given, name_expected);
             Err(Error::new(item, error_kind, self.module_path))
         } else {
             Ok(())
@@ -258,7 +260,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     None => Ok(())
                 }
             } else {
-                Err(Error::new(item, ErrorKind::CannotResolveBinding("Cannot resolve binding".to_string()), self.module_path))
+                Err(Error::new(item, item.unresolved_error(), self.module_path))
             }
         } else {
             match (item.type_id(self), expected_result) {
@@ -347,7 +349,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if !self.stage.must_resolve() || unresolved.is_none() {
             Ok(())
         } else {
-            Err(Error::new(item, ErrorKind::CannotResolveUseDeclaration(unresolved.unwrap()), self.module_path))
+            Err(Error::new(item, ErrorKind::UndefinedItem(unresolved.unwrap()), self.module_path))
         }
     }
 
@@ -463,7 +465,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
                         if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
-                            return Err(Error::new(function, ErrorKind::NotATraitMethod(function_name.clone()), self.module_path));
+                            let trait_name = format!("{}", &item.trt.as_ref().unwrap().path);
+                            return Err(Error::new(function, ErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                         }
                         if let Some(struct_) = self.scopes.type_mut(type_id).as_struct_mut() {
                             let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
@@ -570,7 +573,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.scope_id = parent_scope_id;
         if self.stage.must_resolve() && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
-            Err(Error::new(item, ErrorKind::CannotResolveBinding(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
+            Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
         } else {
             Ok(())
         }
@@ -578,7 +581,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
-        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()), self.module_path)?;
+        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type;
         if let Some(expr) = &mut item.expr {
             self.resolved_or_err(expr, None)?;
@@ -624,7 +627,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 },
             }
             if item.function_id.is_none() && self.stage.must_resolve() {
-                return Err(Error::new(item, ErrorKind::CannotResolveFunction(path), self.module_path));
+                return Err(Error::new(item, ErrorKind::UndefinedFunction(path), self.module_path));
             }
         }
 
@@ -644,7 +647,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             // argument count
             if function_info.arg_type.len() != item.args.len() {
-                return Err(Error::new(item, ErrorKind::NumberOfArguments(function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
+                return Err(Error::new(item, ErrorKind::NumberOfArguments(item.ident.name.clone(), function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
             }
 
             // arguments
@@ -669,7 +672,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.binding_id.is_none() {
             item.binding_id = self.scopes.lookup_binding_id(self.scope_id, &item.ident.name);
             if item.binding_id.is_none() {
-                return Err(Error::new(item, ErrorKind::UnknownValue(item.ident.name.to_string()), self.module_path));
+                return Err(Error::new(item, ErrorKind::UndefinedVariable(item.ident.name.to_string()), self.module_path));
             }
         }
         // set expected type, if any
@@ -772,7 +775,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_expression(result, expected_result)?;
         }
         if let Some(ref mut returns) = item.returns {
-            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(returns), ErrorKind::InvalidOperation("Encountered return outside of function".to_string()), self.module_path)?;
+            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(returns), ErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
             let ret_type_id = self.scopes.function_ref(function_id).ret_type;
             self.resolve_expression(returns, ret_type_id)?;
         }
@@ -809,12 +812,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *item.type_id_mut(self) = Some(type_id);
             let ty = self.type_by_id(type_id);
             if !ty.is_primitive() && !ty.is_string() {
-                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone()), self.module_path));
+                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
+                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(name), self.module_path));
             }
         }
         if let Some(ty) = self.item_type(&item.expr) {
             if !ty.is_primitive() && !ty.is_string() {
-                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(ty.clone()), self.module_path));
+                let type_id = item.expr.type_id(self).unwrap();
+                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
+                return Err(Error::new(item, ErrorKind::NonPrimitiveCast(name), self.module_path));
             }
         }
         Ok(())
@@ -890,7 +896,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     let field = item.right.as_member_mut().unwrap_or_ice("Member access using a non-field")?;
                     if field.index.is_none() {
                         let index = struct_.fields.iter().position(|f| f.0 == field.ident.name)
-                            .unwrap_or_err(Some(field), ErrorKind::UnknownMember(format!("Unknown struct member '{}'", field.ident.name)), self.module_path)?;
+                            .unwrap_or_err(Some(field), ErrorKind::UndefinedMember(field.ident.name.clone()), self.module_path)?;
                         field.index = Some(index as ItemIndex);
                     }
                     if let Some(type_id) = struct_.fields[field.index.unwrap_or_ice(ICE)? as usize].1 {

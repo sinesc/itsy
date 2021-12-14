@@ -10,20 +10,20 @@ pub const ICE: &'static str = "Internal compiler error";
 /// Represents the various possible resolver error-kinds.
 #[derive(Clone, Debug)]
 pub enum ResolveErrorKind {
-    TypeMismatch(Type, Type),
-    NonPrimitiveCast(Type),
+    TypeMismatch(String, String),
+    NonPrimitiveCast(String),
     IncompatibleNumeric(Type, Numeric),
-    UnknownValue(String),
-    UnknownMember(String),
-    NumberOfArguments(ItemIndex, ItemIndex),
+    UndefinedVariable(String),
+    UndefinedMember(String),
+    NumberOfArguments(String, ItemIndex, ItemIndex),
     MutabilityEscalation,
     AssignToImmutable,
-    CannotResolveBinding(String),
-    CannotResolveFunction(String),
-    CannotResolveType(String),
-    CannotResolveUseDeclaration(String),
+    CannotResolve(String),
+    UndefinedFunction(String),
+    UndefinedType(String),
+    UndefinedItem(String),
     InvalidOperation(String),
-    NotATraitMethod(String),
+    NotATraitMethod(String, String),
     Internal(String),
     Unsupported(String),
 }
@@ -56,13 +56,24 @@ impl ResolveError {
 
 impl Display for ResolveError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[allow(unreachable_patterns)]
         match &self.kind {
-            ResolveErrorKind::TypeMismatch(t1, t2) => write!(f, "Incompatible types {:?} and {:?}", t1, t2),
-            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {:?} for expected type {:?}", n, t),
-            ResolveErrorKind::NumberOfArguments(e, g) => write!(f, "Expected {} arguments, got {}", e, g),
+            ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {}, got {}", e, g),
+            ResolveErrorKind::NonPrimitiveCast(t1) => write!(f, "Non-primitive cast of type {}", t1),
+            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {} for expected type {}", n, t),
+            ResolveErrorKind::UndefinedVariable(v) => write!(f, "Undefined variable '{}'", v),
+            ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{}'", m),
+            ResolveErrorKind::NumberOfArguments(func, e, g) => write!(f, "Invalid number of arguments. Function '{}' expects {} argument, got {}", func, e, g),
             ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
             ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
-            // Todo: handle the others
+            ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {}", b), // fallback case
+            ResolveErrorKind::UndefinedFunction(func) => write!(f, "Undefined function '{}'", func),
+            ResolveErrorKind::UndefinedType(t) => write!(f, "Undefined type '{}'", t),
+            ResolveErrorKind::UndefinedItem(i) => write!(f, "Undefined item '{}'", i),
+            ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
+            ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
+            ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
+            ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
             _ => write!(f, "{:?}", self.kind),
         }
     }
