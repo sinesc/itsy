@@ -673,9 +673,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         // set expected type, if any
-        if let Some(expected_result) = expected_result {
-            if self.stage.infer_as_trait() || !self.type_by_id(expected_result).as_trait().is_some() {
-                self.set_type_id(item, expected_result)?;
+        if item.type_id(self).is_none() {
+            if let Some(expected_result) = expected_result {
+                if self.stage.infer_as_trait() || !self.type_by_id(expected_result).as_trait().is_some() {
+                    self.set_type_id(item, expected_result)?;
+                }
             }
         }
         self.resolved_or_err(item, expected_result)
