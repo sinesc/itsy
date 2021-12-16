@@ -540,6 +540,44 @@ fn array_mixed_construction() {
 }
 
 #[test]
+fn array_simple_dynamic_constructor() {
+    let result = run("
+        let abc = \"abc\";
+        let cba = \"cba\";
+        let x = [ abc, cba ];
+        ret_str(x[0]);
+        ret_str(x[1]);
+    ");
+    assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
+}
+
+#[test]
+fn array_flattened_dynamic_constructor() {
+    let result = run("
+        let ghj = \"ghj\";
+        let abc = \"abc\";
+        let cba = \"cba\";
+        let jhg = \"jhg\";
+        let x = [ [ ghj, abc ], [ cba, jhg ] ];
+        ret_str(x[0][1]);
+        ret_str(x[1][0]);
+    ");
+    assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
+}
+
+#[test]
+fn array_nested_dynamic_constructor() {
+    let result = run("
+        let ghj_abc = [ \"ghj\", \"abc\" ];
+        let cba_jhg = [ \"cba\", \"jhg\" ];
+        let x = [ ghj_abc, cba_jhg ];
+        ret_str(x[0][1]);
+        ret_str(x[1][0]);
+    ");
+    assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
+}
+
+#[test]
 fn struct_access() {
     let result = run("
         struct Test {
