@@ -826,8 +826,8 @@ pub enum LiteralValue {
 impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
         match self {
-            LiteralValue::Array(v) => !v.elements.iter().any(|e| !e.is_literal()),
-            LiteralValue::Struct(v) => !v.fields.iter().any(|(_, e)| !e.is_literal()),
+            LiteralValue::Array(v) => !v.elements.iter().any(|e| e.as_literal().map(|l| !l.value.is_const()).unwrap_or(true)),
+            LiteralValue::Struct(v) => !v.fields.iter().any(|(_, e)| e.as_literal().map(|l| !l.value.is_const()).unwrap_or(true)),
             _ => true,
         }
     }
