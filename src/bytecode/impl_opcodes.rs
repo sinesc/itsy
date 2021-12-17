@@ -23,6 +23,7 @@ macro_rules! impl_opcodes {
     (read f64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f64, $from, $counter) );
     (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
     (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
+    (read ItemIndex, $from:ident, $counter:expr) => ( impl_opcodes!(do_read ItemIndex, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
         let len = impl_opcodes!(do_read StackAddress, $from, $counter);
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];

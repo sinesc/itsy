@@ -599,16 +599,17 @@ impl_opcodes!{
     /// Constructs an instance of a non-primitive type.
     fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
         let mut constructor = constructor; // impl_opcodes macro does not allow mut arguments
-        let mut prototype = prototype; //if prototype < 0 { self.stack.sp() as i32 + prototype } else { prototype } as u32;
+        let mut prototype = prototype;
         self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, false);
     }
 
-    /// Constructs an instance of a non-primitive type from a prototype that was dynamically constructed on the stack.
-    /// This opcode expects any contained strings to already be constructed on the heap and be stored as references on the stack.
-    fn construct_dyn(&mut self, constructor: StackAddress, relative_prototype: StackAddress) {
-        let mut constructor = constructor; // impl_opcodes macro does not allow mut arguments
-        let mut prototype = (self.stack.sp() as i32 - relative_prototype as i32) as StackAddress;
-        self.construct_value(&mut constructor, &mut prototype, CopyTarget::Stack, true);
+    /// Moves an instance that was constructed on the stack to the heap.
+    fn move_heap(&mut self, size: StackAddress, implementor_index: ItemIndex) {
+        let mut data = Vec::with_capacity(size as usize);
+        let data_start = self.stack.sp() as usize - size as usize;
+        data.extend_from_slice(&self.stack.data()[data_start..]);
+        self.stack.truncate(data_start);
+        self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
     }
 
     /// Increase reference count for the top heap reference on the stack. Does not pop the object off the stack.

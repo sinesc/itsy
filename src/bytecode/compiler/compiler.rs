@@ -7,7 +7,7 @@ mod util;
 mod init_state;
 
 use crate::prelude::*;
-use std::{cell::RefCell, cell::Cell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind}, numeric::Numeric, types::{Type, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
@@ -31,8 +31,6 @@ struct Compiler<'ty, T> {
     functions: RefCell<HashMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
     unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<StackAddress>>>,
-    /// Set to true while compiling expressions within a Struct/Array constructor. Prevents writing additional constructors for nested structures. TODO: Crappy solution.
-    writing_protype_instructions: Cell<bool>,
     /// Tracks variable initialization state.
     init_state: RefCell<BindingState>,
     /// Module base path. For error reporting only
@@ -113,7 +111,6 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         functions   : RefCell::new(HashMap::new()),
         unfixed_function_calls: RefCell::new(HashMap::new()),
         constructors: HashMap::new(),
-        writing_protype_instructions: Cell::new(false),
         init_state  : RefCell::new(BindingState::new()),
         module_path : "".to_string(),
 
@@ -737,21 +734,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
                 let constructor = self.get_constructor(ty);
-                if !self.writing_protype_instructions.get() {
-                    if item.value.is_const() {
-                        // simple constant constructor, construct from const pool prototypes
-                        let prototype = self.store_literal_prototype(item);
-                        self.writer.construct(constructor, prototype);
-                    } else {
-                        // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
-                        self.writing_protype_instructions.set(true);
-                        self.compile_prototype_instructions(item)?;
-                        self.writer.construct_dyn(constructor, self.type_size(ty)); //FIXME need to take size of references to strings into account
-                        self.writing_protype_instructions.set(false);
-                    }
+                if item.value.is_const() {
+                    // simple constant constructor, construct from const pool prototypes
+                    let prototype = self.store_literal_prototype(item);
+                    self.writer.construct(constructor, prototype);
                 } else {
-                    // continuing non-constant constructor
+                    // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
+                    let type_id = item.type_id(self).unwrap();
                     self.compile_prototype_instructions(item)?;
+                    self.writer.move_heap(self.flat_size(ty), *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
                 }
             },
         }
@@ -1011,6 +1002,22 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Returns constructor index for given type.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
+    }
+
+    /// Computes the flat size of given type, which is the data-size of the types heap object.
+    fn flat_size(self: &Self, ty: &Type) -> StackAddress {
+        match ty {
+            Type::Array(a)  => {
+                let element_type = self.type_by_id(a.type_id.unwrap());
+                let element_size = element_type.primitive_size() as StackAddress;
+                element_size * a.len.unwrap()
+            },
+            Type::Struct(s) => {
+                s.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
+            },
+            Type::Enum(_)   => unimplemented!("enum size"),
+            _               => ty.primitive_size() as StackAddress
+        }
     }
 
     /// Checks if the given functions are compatible.
@@ -1718,7 +1725,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_ceq();
         } else {
-            self.writer.heap_ceq(self.type_size(ty)); //FIXME: check this
+            self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
         }
     }
 
@@ -1735,7 +1742,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cneq();
         } else {
-            self.writer.heap_cneq(self.type_size(ty)); //FIXME: check this
+            self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this
         }
     }
 

@@ -9,7 +9,7 @@ pub mod infos;
 
 #[cfg(feature="compiler")]
 use std::{ops::Add, fmt};
-use crate::{StackAddress, shared::{typed_ids::TypeId, types::{Type, Array}}};
+use crate::shared::{typed_ids::TypeId, types::{Type, Array}};
 #[cfg(feature="compiler")]
 use crate::shared::{infos::BindingInfo, typed_ids::BindingId};
 
@@ -19,21 +19,6 @@ pub(crate) trait TypeContainer {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     /// Returns a mutable reference to the type.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
-    /// Computes the size of given type.
-    fn type_size(self: &Self, ty: &Type) -> StackAddress { // FIXME: remove this and its usages. cannot be correct anymore due to type storage changes
-        match ty {
-            Type::Array(a)  => {
-                let element_type = self.type_by_id(a.type_id.unwrap());
-                let element_size = self.type_size(element_type);
-                element_size * a.len.unwrap()
-            },
-            Type::Struct(s) => {
-                s.fields.iter().fold(0, |acc, f| acc + self.type_size(self.type_by_id(f.1.unwrap())))
-            },
-            Type::Enum(_)   => unimplemented!("enum size"),
-            _               => ty.primitive_size() as StackAddress
-        }
-    }
     /// Returns whether type_id is acceptable by the type expectation for expected_type_id (but not necessarily the inverse).
     fn types_match(self: &Self, type_id: TypeId, expected_type_id: TypeId) -> bool {
         if type_id == expected_type_id {
