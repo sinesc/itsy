@@ -1,7 +1,6 @@
 //! A virtual machine for running Itsy bytecode.
 
-use std::convert::TryInto;
-use std::mem::size_of;
+use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
 use crate::bytecode::{HeapRef, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
 
@@ -27,8 +26,8 @@ pub enum CopyTarget {
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
 pub struct VM<T, U> where T: VMFunc<T> {
-    context_type            : std::marker::PhantomData<U>,
-    func_type               : std::marker::PhantomData<T>,
+    context_type            : PhantomData<U>,
+    func_type               : PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
     pub(crate) pc           : StackAddress,
     pub(crate) state        : VMState,
@@ -43,8 +42,8 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
         let Program { instructions, consts, const_descriptors, .. } = program;
         let stack = Self::init_consts(consts, const_descriptors);
         VM {
-            context_type: std::marker::PhantomData,
-            func_type   : std::marker::PhantomData,
+            context_type: PhantomData,
+            func_type   : PhantomData,
             instructions: instructions.clone(),
             pc          : 0,
             state       : VMState::Ready,
@@ -213,7 +212,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                     let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0);
                     self.write_ref(target, heap_ref);
                     let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
-                    *prototype_offset += ::std::mem::size_of_val(&num_bytes) as StackAddress;
+                    *prototype_offset += size_of_val(&num_bytes) as StackAddress;
                     self.write_proto(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
                     *prototype_offset += num_bytes;
                 }

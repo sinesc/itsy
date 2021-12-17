@@ -1,12 +1,12 @@
 mod repository;
 
-use std::{collections::HashMap, convert::Into};
-use self::repository::Repository;
+use crate::prelude::*;
 use crate::shared::Progress;
 use crate::frontend::resolver::resolved::IdMappings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
 use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
 use crate::shared::types::Type;
+use repository::Repository;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub(crate) struct Scopes {
@@ -17,7 +17,7 @@ pub(crate) struct Scopes {
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<(String, TypeId), FunctionId, FunctionInfo>,
     /// Function scopes (the function containing this scope)
-    scopefunction   : HashMap<ScopeId, Option<FunctionId>>,
+    scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
     parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
 }
@@ -41,7 +41,7 @@ impl Scopes {
             types           : Repository::new(),
             bindings        : Repository::new(),
             functions       : Repository::new(),
-            scopefunction   : HashMap::new(),
+            scopefunction   : UnorderedMap::new(),
             parent_map      : vec![ root_id ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
     }

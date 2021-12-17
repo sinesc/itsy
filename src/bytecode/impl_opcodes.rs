@@ -101,7 +101,7 @@ macro_rules! impl_opcodes {
             pub(crate) fn from_u8(opcode: u8) -> Self {
                 // this is faster but introduces non-safe code
                 /*if (opcode <= Self::comment as u8) {
-                    un safe { ::std::mem::trans mute(opcode) }
+                    un safe { ::std::mem::transmute(opcode) }
                 } else {
                     panic!("Invalid opcode {}", opcode);
                 }*/
@@ -163,7 +163,6 @@ macro_rules! impl_opcodes {
             /// Returns disassembled opcode at given position along with the next opcode position.
             #[cfg(feature="debugging")]
             pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<(OpCode, StackAddress)> {
-                use std::convert::TryInto;
                 let mut pc = position;
                 if pc < self.instructions.len() as StackAddress {
                     let instruction = impl_opcodes!(read u8, self, pc);
@@ -178,7 +177,6 @@ macro_rules! impl_opcodes {
             #[allow(unused_mut)]
             #[cfg(feature="debugging")]
             pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
-                use std::convert::TryInto;
                 if let Some((opcode, mut pc)) = self.read_instruction(position) {
                     #[allow(unreachable_patterns)]
                     match opcode {
@@ -226,7 +224,6 @@ macro_rules! impl_opcodes {
             /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
             #[allow(unused_imports)]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
-                use std::convert::TryInto;
                 loop {
                     let instruction = impl_opcodes!(read u8, self, self.pc);
                     #[allow(unreachable_patterns)]
@@ -262,7 +259,6 @@ macro_rules! impl_opcodes {
             #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
-                use std::convert::TryInto;
                 let instruction = impl_opcodes!(read u8, self, self.pc);
                 #[allow(unreachable_patterns)]
                 match OpCode::from_u8(instruction) {

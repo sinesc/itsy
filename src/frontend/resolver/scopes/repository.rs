@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-//use std::fmt::{Debug, Formatter, Result};
+use crate::prelude::*;
 use crate::shared::typed_ids::ScopeId;
 
 /// A datastructure that stores items by name and index.
 pub(crate) struct Repository<K, I, V> {
-    map     : HashMap<(K, ScopeId), I>,
+    map     : UnorderedMap<(K, ScopeId), I>,
     data    : Vec<(V, ScopeId)>,
 }
 
@@ -13,7 +11,7 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
     /// Creates a new repository.
     pub fn new() -> Self {
         Repository {
-            map: HashMap::new(),
+            map: UnorderedMap::new(),
             data: Vec::new(),
         }
     }

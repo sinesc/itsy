@@ -6,7 +6,6 @@ pub mod error;
 pub mod resolved;
 
 use crate::prelude::*;
-use std::marker::PhantomData;
 use crate::ast::Visibility;
 use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;

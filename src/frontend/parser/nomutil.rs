@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use std::str::{Chars, CharIndices};
 use nom::{Err, FindSubstring, Compare, InputTake, Parser, Needed, IResult, CompareResult, InputIter, InputLength, Offset, UnspecializedInput, Slice};
@@ -8,6 +7,7 @@ use nom::combinator::recognize;
 use nom::multi::{many0, many1};
 use nom::branch::alt;
 use nom::sequence::{delimited, preceded, terminated};
+use crate::prelude::Debug;
 use crate::frontend::parser::{Input, Error, error::ParseErrorKind};
 
 impl<'a> ParseError<Input<'a>> for Error<'a> {

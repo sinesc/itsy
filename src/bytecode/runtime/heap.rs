@@ -1,4 +1,4 @@
-use std::{convert::TryInto, collections::HashMap, mem::{size_of, replace}};
+use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
 use crate::bytecode::{HeapRef, HeapSlice};
 use crate::shared::index_twice;
@@ -163,7 +163,7 @@ impl Heap {
         self.objects[index as usize].implementor_index
     }
     /// Returns a vector of unfreed heap objects.
-    pub fn data(self: &Self) -> HashMap<StackAddress, (StackAddress, &Vec<u8>)> {
+    pub fn data(self: &Self) -> UnorderedMap<StackAddress, (StackAddress, &Vec<u8>)> {
         self.objects.iter()
             .enumerate()
             .filter(|&(i, _)| !self.free.contains(&(i as StackAddress)))

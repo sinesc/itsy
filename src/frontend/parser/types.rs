@@ -1,6 +1,4 @@
-use std::cell::Cell;
-use std::rc::Rc;
-use std::ops::Deref;
+use crate::prelude::*;
 use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
 use crate::shared::typed_ids::ScopeId;
 

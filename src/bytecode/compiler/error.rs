@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use crate::prelude::*;
 use crate::frontend::ast::{Positioned, Position};
 
 /// Represents the various possible compiler error-kinds.

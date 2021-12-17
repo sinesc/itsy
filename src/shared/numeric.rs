@@ -1,9 +1,6 @@
 //! A type that can represent a signed or unsigned integer value.
 
 use crate::prelude::*;
-use std::cmp::Ordering;
-//use std::ops::{Add, Sub, Mul, Div, Rem};
-//use std::{i64, u64, f64};
 
 /// Signed integer value.
 pub(crate) type Signed = i64;

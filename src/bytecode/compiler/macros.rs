@@ -10,7 +10,7 @@ macro_rules! comment {
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
 macro_rules! opcode_signed {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr) => {{
-        use std::{i8, i16};
+        use core::{i8, i16};
         if $value >= i8::MIN as StackOffset && $value <= i8::MAX as StackOffset {
             $self.writer.$variant_8($value as i8)
         } else if $value >= i16::MIN as StackOffset && $value <= i16::MAX as StackOffset {
@@ -24,7 +24,7 @@ macro_rules! opcode_signed {
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
 macro_rules! opcode_unsigned {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr) => {{
-        use std::{u8, u16};
+        use core::{u8, u16};
         if $value <= u8::MAX as StackAddress {
             $self.writer.$variant_8($value as u8)
         } else if $value <= u16::MAX as StackAddress {

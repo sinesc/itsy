@@ -1,7 +1,6 @@
 //! Bytecode buffer and writer.
 
 use crate::prelude::*;
-use std::cell::{Cell, RefCell, RefMut};
 use crate::StackAddress;
 use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor};
 

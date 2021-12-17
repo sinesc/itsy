@@ -11,9 +11,7 @@ pub mod compiler;
 #[path="runtime/runtime.rs"]
 pub mod runtime;
 
-use std::fmt::{self, Debug};
-use std::collections::HashMap;
-use std::marker::PhantomData;
+use crate::prelude::*;
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
@@ -31,7 +29,7 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn into_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
-    fn call_info() -> HashMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
+    fn call_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.
@@ -90,7 +88,7 @@ pub enum Constructor {
 
 impl Constructor {
     pub fn from_u8(raw: u8) -> Constructor {
-        //un safe { ::std::mem::trans mute(raw) }
+        //un safe { ::std::mem::transmute(raw) }
         match raw {
             x if x == Self::Primitive as u8 => Self::Primitive,
             x if x == Self::Array as u8 => Self::Array,
@@ -150,16 +148,16 @@ impl HeapRef {
         }
     }
     /// Returns the HeapRef as byte array.
-    pub fn to_ne_bytes(self: &Self) -> [ u8; ::std::mem::size_of::<HeapAddress>() ] {
+    pub fn to_ne_bytes(self: &Self) -> [ u8; size_of::<HeapAddress>() ] {
         self.address.to_ne_bytes()
     }
     /// Creates a HeapRef from byte array.
-    pub fn from_ne_bytes(bytes: [ u8; ::std::mem::size_of::<HeapAddress>() ]) -> Self {
+    pub fn from_ne_bytes(bytes: [ u8; size_of::<HeapAddress>() ]) -> Self {
         HeapRef { address: HeapAddress::from_ne_bytes(bytes) }
     }
     /// Returns the size of heap references.
     pub const fn primitive_size() -> u8 {
-        std::mem::size_of::<Self>() as u8
+        size_of::<Self>() as u8
     }
 }
 
@@ -205,6 +203,6 @@ impl HeapSlice {
     }
     /// Returns the size of heap references.
     pub fn size() -> u8 {
-        std::mem::size_of::<Self>() as u8
+        size_of::<Self>() as u8
     }
 }

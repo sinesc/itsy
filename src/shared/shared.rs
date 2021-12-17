@@ -7,8 +7,7 @@ pub mod error;
 #[cfg(feature="compiler")]
 pub mod infos;
 
-#[cfg(feature="compiler")]
-use std::{ops::Add, fmt};
+use crate::prelude::*;
 use crate::shared::{typed_ids::TypeId, types::{Type, Array}};
 #[cfg(feature="compiler")]
 use crate::shared::{infos::BindingInfo, typed_ids::BindingId};

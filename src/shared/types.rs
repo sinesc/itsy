@@ -132,12 +132,12 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => ::std::mem::size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Whether the given numeric is compatible with this type.
     pub fn is_compatible_numeric(self: &Self, value: Numeric) -> bool {
-        use std::{u8, u16, u32, u64, i8, i16, i32, i64};
+        use core::{u8, u16, u32, u64, i8, i16, i32, i64};
         if value.is_float() && self.is_float() {
             true
         } else if value.is_integer() && self.is_integer() {

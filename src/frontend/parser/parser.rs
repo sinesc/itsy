@@ -5,7 +5,6 @@ pub mod error;
 mod nomutil;
 pub mod types;
 
-use std::collections::HashMap;
 use nom::Parser;
 use nom::character::{is_alphanumeric, is_alphabetic, complete::{none_of, one_of, digit0, char, digit1}};
 use nom::bytes::complete::{take_while, take_while1, tag, escaped};
@@ -13,6 +12,7 @@ use nom::combinator::{recognize, opt, all_consuming, map, not};
 use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
+use crate::prelude::UnorderedMap;
 use crate::StackAddress;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
@@ -247,7 +247,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
-    fn fields(i: Input<'_>) -> Output<HashMap<String, Expression>> {
+    fn fields(i: Input<'_>) -> Output<UnorderedMap<String, Expression>> {
         map(
             separated_list0(char(','), field),
             |list| {

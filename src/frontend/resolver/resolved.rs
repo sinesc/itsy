@@ -1,5 +1,4 @@
 
-use std::marker::PhantomData;
 use crate::prelude::*;
 use crate::StackAddress;
 use crate::shared::types::{Type, Trait, ImplTrait};

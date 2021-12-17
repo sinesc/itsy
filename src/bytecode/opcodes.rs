@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use std::mem::size_of;
+use crate::prelude::size_of;
 use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, ItemIndex};
 use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 

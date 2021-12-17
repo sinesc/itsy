@@ -7,7 +7,6 @@ mod util;
 mod init_state;
 
 use crate::prelude::*;
-use std::{cell::RefCell, collections::HashMap};
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind}, numeric::Numeric, types::{Type, ImplTrait, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
@@ -26,23 +25,23 @@ struct Compiler<'ty, T> {
     /// Maps from binding id to load-argument for each frame.
     locals: StackFrames,
     /// Non-primitive type constructors.
-    constructors: HashMap<&'ty Type, StackAddress>,
+    constructors: UnorderedMap<&'ty Type, StackAddress>,
     // Maps functions to their call index.
-    functions: RefCell<HashMap<FunctionId, CallInfo>>,
+    functions: RefCell<UnorderedMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    unfixed_function_calls: RefCell<HashMap<FunctionId, Vec<StackAddress>>>,
+    unfixed_function_calls: RefCell<UnorderedMap<FunctionId, Vec<StackAddress>>>,
     /// Tracks variable initialization state.
     init_state: RefCell<BindingState>,
     /// Module base path. For error reporting only.
     module_path: String,
     /// Contiguous trait function enumeration/mapping.
-    trait_function_indices: HashMap<FunctionId, ItemIndex>,
+    trait_function_indices: UnorderedMap<FunctionId, ItemIndex>,
     /// Contiguous Trait implementor enumeration/mapping. Types implementing traits.
-    trait_implementor_indices: HashMap<TypeId, ItemIndex>,
+    trait_implementor_indices: UnorderedMap<TypeId, ItemIndex>,
     /// Base address of the trait vtable in the program const pool/stack.
     trait_vtable_base: StackAddress,
     /// Mapping from trait implementor function ids to trait function ids.
-    trait_function_implementors: HashMap<FunctionId, FunctionId>,
+    trait_function_implementors: UnorderedMap<FunctionId, FunctionId>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -61,9 +60,9 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     let mut compiler = Compiler {
         writer                      : Writer::new(),
         locals                      : StackFrames::new(),
-        functions                   : RefCell::new(HashMap::new()),
-        unfixed_function_calls      : RefCell::new(HashMap::new()),
-        constructors                : HashMap::new(),
+        functions                   : RefCell::new(UnorderedMap::new()),
+        unfixed_function_calls      : RefCell::new(UnorderedMap::new()),
+        constructors                : UnorderedMap::new(),
         init_state                  : RefCell::new(BindingState::new()),
         module_path                 : "".to_string(),
         trait_vtable_base           : trait_implementors.len() * size_of::<StackAddress>(), // offset vtable by size of mapping from constructor => implementor-index
@@ -1426,7 +1425,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     fn write_clone_ref(self: &Self) -> StackAddress {
-        match ::std::mem::size_of::<crate::HeapAddress>() {
+        match size_of::<crate::HeapAddress>() {
             1 => self.writer.clone8(),
             2 => self.writer.clone16(),
             4 => self.writer.clone32(),
@@ -1777,7 +1776,7 @@ impl<'ty, T> Compiler<'ty, T> {
 
     /// Map trait implementor function ids to trait function ids
     fn map_trait_function_implementors(trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> UnorderedMap<FunctionId, FunctionId> {
-        let mut trait_function_implementors = HashMap::new();
+        let mut trait_function_implementors = UnorderedMap::new();
         for &(trait_type_id, function_name, trait_function_id) in trait_functions.iter() {
             for &(_, implementor_traits) in trait_implementors.iter() {
                 if let Some(impl_trait) = implementor_traits.get(&trait_type_id) {

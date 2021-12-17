@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::prelude::*;
 use crate::shared::typed_ids::BindingId;
 
 /// Kind of the branching, either one block or two mutually exclusive blocks.
@@ -28,7 +28,7 @@ struct BranchingBinding {
 /// One block or two mutually exclusive blocks.
 struct Branching {
     /// Bindings activated or initialized in this branching.
-    bindings: HashMap<BindingId, BranchingBinding>,
+    bindings: UnorderedMap<BindingId, BranchingBinding>,
     /// Type of this branching.
     kind: BranchingKind,
     /// The current path within a double branching.
@@ -38,7 +38,7 @@ struct Branching {
 impl Branching {
     fn new(kind: BranchingKind) -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: UnorderedMap::new(),
             kind,
             current_path: BranchingPath::A,
         }

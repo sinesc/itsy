@@ -1,7 +1,5 @@
-use std::num::NonZeroUsize;
-use std::fmt::Debug;
-use std::default::Default;
-use std::convert::Into;
+use core::num::NonZeroUsize;
+use crate::prelude::*;
 
 /// Macro to implement typesafe ids.
 macro_rules! impl_typed_id {
@@ -26,7 +24,7 @@ macro_rules! impl_typed_id {
             }
         }
         impl Debug for $name {
-            fn fmt(self: &Self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}({})", stringify!($name), Into::<usize>::into(self.0))
             }
         }
