@@ -1045,6 +1045,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
+            if self.scopes.type_ref(expected_type_id).as_array().is_none() {
+                let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(expected_type_id))).clone();
+                return Err(Error::new(item, ErrorKind::TypeMismatch("[ _ ]".to_string(), name), self.module_path));
+            }
             self.set_type_id(item, expected_type_id)?;
         }
 
