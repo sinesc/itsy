@@ -78,7 +78,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.id_mappings.types() {
-        if !ty.is_primitive() && !ty.as_trait().is_some() {
+        if !ty.is_primitive() && !ty.as_trait().is_some() && !ty.as_array().map_or(false, |a| a.len.unwrap().is_none()) {
             // store constructor, remember position
             let position = compiler.store_constructor(type_id);
             compiler.constructors.insert(ty, position);
@@ -961,7 +961,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             Type::Array(a)  => {
                 let element_type = self.type_by_id(a.type_id.unwrap());
                 let element_size = element_type.primitive_size() as StackAddress;
-                element_size * a.len.unwrap()
+                element_size * a.len.expect("Unresolved array len").expect("Cannot compute size for dynamically sized array")
             },
             Type::Struct(s) => {
                 s.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
@@ -1077,11 +1077,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes a constructor for non-primitive types.
     fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
         let position = self.writer.const_len();
-        //let prototype_size = 0; // TODO track size here?
         match self.type_by_id(type_id) {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array as u8);
-                self.writer.store_const(array.len.unwrap() as ItemIndex);
+                self.writer.store_const(array.len.expect("Unresolved array len").expect("Cannot store constructor for dynamically sized array") as ItemIndex);
                 self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {
@@ -1438,7 +1437,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes instructions for build-in len method.
     fn write_intrinsic_len(self: &Self, ty: &Type) {
         if let Type::Array(array) = ty {
-            self.write_numeric(Numeric::Unsigned(array.len.unwrap() as u64), &STACK_ADDRESS_TYPE);
+            self.write_numeric(Numeric::Unsigned(array.len.expect("Unresolved array len").expect("FIXME: not implemented") as u64), &STACK_ADDRESS_TYPE);
         } else {
             unreachable!("Unsupported type {:?} for intrinsic len", ty);
         }

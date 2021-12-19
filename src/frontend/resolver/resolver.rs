@@ -1045,15 +1045,28 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
-            if self.scopes.type_ref(expected_type_id).as_array().is_none() {
+            if let Some(expected_array) = self.scopes.type_ref(expected_type_id).as_array() {
+                if let Some(Some(expected_len)) = expected_array.len {
+                    // the type id is only usable if it is a fixed size array (like this literal)
+                    let literal_len = item.value.as_array().unwrap_or_ice(ICE)?.elements.len();
+                    if expected_len == literal_len {
+                        self.set_type_id(item, expected_type_id)?;
+                    } else {
+                        let expected_name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("{}", self.scopes.type_ref(expected_type_id))).clone();
+                        return Err(Error::new(item, ErrorKind::TypeMismatch(format!("[ _; {} ]", literal_len), expected_name), self.module_path));
+                    }
+                } else {
+                    // array is dynamic(or unresolved), try to use alt least elements type
+                    elements_type_id = expected_array.type_id;
+                }
+            } else {
                 let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(expected_type_id))).clone();
                 return Err(Error::new(item, ErrorKind::TypeMismatch("[ _ ]".to_string(), name), self.module_path));
             }
-            self.set_type_id(item, expected_type_id)?;
         }
 
         // if we have a type for the array, check if we also have an inner type. if so we want to apply it to all contained literals later.
-        if let Some(&Type::Array(Array { type_id: Some(type_id), ..})) = self.item_type(item) {
+        if let Some(&Type::Array(Array { type_id: Some(type_id), .. })) = self.item_type(item) {
             elements_type_id = Some(type_id);
         }
 
@@ -1082,7 +1095,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // if we don't yet have one, create type based on the inner type, otherwise check types all match
         if type_id.is_none() {
             let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                len     : Some(array_literal.elements.len() as StackAddress),
+                len     : Some(Some(array_literal.elements.len() as StackAddress)),
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);

@@ -36,7 +36,7 @@ impl Struct {
 /// Information about an array in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
-    pub len: Option<StackAddress>,
+    pub len: Option<Option<StackAddress>>, // -> resolved(has_len(len))
     pub type_id: Option<TypeId>,
 }
 
@@ -115,7 +115,11 @@ impl Display for Type {
             Type::f64 => write!(f, "f64"),
             Type::bool => write!(f, "bool"),
             Type::String => write!(f, "String"),
-            Type::Array(v) => if let Some(len) = v.len { write!(f, "[ _, {} ]", len) } else { write!(f, "[ _ ]") },
+            Type::Array(v) => if let Some(len) = v.len {
+                write!(f, "[ _; {} ]", len.map(|l| format!("{}", l)).unwrap_or("?".to_string()))
+            } else {
+                write!(f, "[ _ ]")
+            },
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
             Type::Trait(_) => write!(f, "trait"),

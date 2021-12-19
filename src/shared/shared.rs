@@ -19,13 +19,13 @@ pub(crate) trait TypeContainer {
     /// Returns a mutable reference to the type.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
     /// Returns whether type_id is acceptable by the type expectation for expected_type_id (but not necessarily the inverse).
-    fn types_match(self: &Self, type_id: TypeId, expected_type_id: TypeId) -> bool {
-        if type_id == expected_type_id {
+    fn types_match(self: &Self, given_type_id: TypeId, expected_type_id: TypeId) -> bool {
+        if given_type_id == expected_type_id {
             true
         } else {
-            match (self.type_by_id(type_id), self.type_by_id(expected_type_id)) {
-                (&Type::Array(Array { len: a_len, type_id: Some(a_type_id) }), &Type::Array(Array { len: b_len, type_id: Some(b_type_id) })) => {
-                    a_len == b_len && self.types_match(a_type_id, b_type_id)
+            match (self.type_by_id(given_type_id), self.type_by_id(expected_type_id)) {
+                (&Type::Array(Array { len: Some(given_len), type_id: Some(given_type_id) }), &Type::Array(Array { len: Some(expected_len), type_id: Some(expected_type_id) })) => {
+                    (given_len == expected_len || (given_len.is_some() && expected_len.is_none())) && self.types_match(given_type_id, expected_type_id)
                 },
                 (Type::Struct(struct_), Type::Trait(_)) => {
                     struct_.impl_traits.contains_key(&expected_type_id)

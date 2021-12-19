@@ -720,11 +720,11 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
 fn array(i: Input<'_>) -> Output<Array> {
     let position = i.position();
     ws(map(
-        delimited(ws(char('[')), tuple((ws(inline_type), ws(char(';')), ws(static_size))), ws(char(']'))),
+        delimited(ws(char('[')), pair(ws(inline_type), opt(preceded(ws(char(';')), ws(static_size))) ), ws(char(']'))),
         move |tuple| Array {
             position    : position,
             element_type: tuple.0,
-            len         : tuple.2,
+            len         : tuple.1,
             type_id     : None,
         }
     ))(i)

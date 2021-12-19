@@ -440,7 +440,7 @@ impl Resolvable for InlineType {
 pub struct Array {
     pub position    : Position,
     pub element_type: InlineType,
-    pub len         : StackAddress,
+    pub len         : Option<StackAddress>,
     pub type_id     : Option<TypeId>,
 }
 
