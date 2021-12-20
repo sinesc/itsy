@@ -234,10 +234,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns Ok if types_match() is satisfied for the given types. Otherwise a TypeMismatch error.
-    fn check_types_match(self: &Self, item: &impl Positioned, type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
-        if !self.types_match(type_id, expected_type_id) {
-            let name_given = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
-            let name_expected = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(expected_type_id))).clone();
+    fn check_types_match(self: &Self, item: &impl Positioned, given_type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
+        if !self.types_match(given_type_id, expected_type_id) {
+            let name_given = self.scopes.type_name(given_type_id).unwrap_or(&format!("<{}>", self.type_by_id(given_type_id))).clone();
+            let name_expected = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.type_by_id(expected_type_id))).clone();
             let error_kind = ErrorKind::TypeMismatch(name_given, name_expected);
             Err(Error::new(item, error_kind, self.module_path))
         } else {
@@ -422,7 +422,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             // insert or update type
             if let Some(type_id) = item.type_id {
-                let ty = self.scopes.type_mut(type_id);
+                let ty = self.type_by_id_mut(type_id);
                 ty.as_struct_mut().unwrap().fields = fields;
             } else {
                 let ty = Type::Struct(Struct { fields: fields, impl_traits: Map::new() });
@@ -467,7 +467,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             let trait_name = format!("{}", &item.trt.as_ref().unwrap().path);
                             return Err(Error::new(function, ErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                         }
-                        if let Some(struct_) = self.scopes.type_mut(type_id).as_struct_mut() {
+                        if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
                             let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
                             impl_trait.functions.insert(function_name.clone(), function_id);
                         }
@@ -505,7 +505,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_function(function, Some((parent_scope_id, item.type_id.unwrap())))?;
         }
         // update trait
-        let trt = self.scopes.type_mut(item.type_id.unwrap()).as_trait_mut().unwrap();
+        let trt = self.type_by_id_mut(item.type_id.unwrap()).as_trait_mut().unwrap();
         for function in &item.functions {
             if function.is_resolved() {
                 let name = &function.sig.ident.name;
@@ -811,14 +811,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *item.type_id_mut(self) = Some(type_id);
             let ty = self.type_by_id(type_id);
             if !ty.is_primitive() && !ty.is_string() {
-                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
+                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.type_by_id(type_id))).clone();
                 return Err(Error::new(item, ErrorKind::NonPrimitiveCast(name), self.module_path));
             }
         }
         if let Some(ty) = self.item_type(&item.expr) {
             if !ty.is_primitive() && !ty.is_string() {
                 let type_id = item.expr.type_id(self).unwrap();
-                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(type_id))).clone();
+                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.type_by_id(type_id))).clone();
                 return Err(Error::new(item, ErrorKind::NonPrimitiveCast(name), self.module_path));
             }
         }
@@ -1045,14 +1045,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
-            if let Some(expected_array) = self.scopes.type_ref(expected_type_id).as_array() {
+            if let Some(expected_array) = self.type_by_id(expected_type_id).as_array() {
                 if let Some(Some(expected_len)) = expected_array.len {
                     // the type id is only usable if it is a fixed size array (like this literal)
                     let literal_len = item.value.as_array().unwrap_or_ice(ICE)?.elements.len();
                     if expected_len == literal_len {
                         self.set_type_id(item, expected_type_id)?;
                     } else {
-                        let expected_name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("{}", self.scopes.type_ref(expected_type_id))).clone();
+                        let expected_name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("{}", self.type_by_id(expected_type_id))).clone();
                         return Err(Error::new(item, ErrorKind::TypeMismatch(format!("[ _; {} ]", literal_len), expected_name), self.module_path));
                     }
                 } else {
@@ -1060,7 +1060,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     elements_type_id = expected_array.type_id;
                 }
             } else {
-                let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.scopes.type_ref(expected_type_id))).clone();
+                let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.type_by_id(expected_type_id))).clone();
                 return Err(Error::new(item, ErrorKind::TypeMismatch("[ _ ]".to_string(), name), self.module_path));
             }
         }
@@ -1101,7 +1101,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *item.type_id_mut(self) = Some(new_type_id);
         } else if let Some(elements_type_id) = elements_type_id {
             let array_type_id = item.type_id(self).unwrap_or_ice(ICE)?;
-            let array_ty = self.scopes.type_mut(array_type_id).as_array_mut().unwrap_or_ice(ICE)?;
+            let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().unwrap_or_ice(ICE)?;
             if let Some(current_element_type_id) = array_ty.type_id {
                 self.check_types_match(item, current_element_type_id, elements_type_id)?;
             } else {
