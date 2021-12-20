@@ -115,10 +115,10 @@ impl Display for Type {
             Type::f64 => write!(f, "f64"),
             Type::bool => write!(f, "bool"),
             Type::String => write!(f, "String"),
-            Type::Array(v) => if let Some(len) = v.len {
-                write!(f, "[ _; {} ]", len.map(|l| format!("{}", l)).unwrap_or("?".to_string()))
-            } else {
-                write!(f, "[ _ ]")
+            Type::Array(v) => match v.len {
+                Some(Some(len)) => write!(f, "[ _; {} ]", len),
+                Some(None) =>  write!(f, "[ _ ]"),
+                None => write!(f, "[ _; ? ]"),
             },
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
