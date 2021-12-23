@@ -82,8 +82,9 @@ pub(crate) struct ConstDescriptor {
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
     Array       = 175,  // Array(num_elements, element constructor): copies an array
-    Struct      = 176,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
-    String      = 177,  // String: copies a string
+    ArrayDyn    = 176,  // ArrayDyn(num_elements, element constructor): copies a fixed number of elements for a dynamic array
+    Struct      = 177,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
+    String      = 178,  // String: copies a string
 }
 
 impl Constructor {
@@ -92,6 +93,7 @@ impl Constructor {
         match raw {
             x if x == Self::Primitive as u8 => Self::Primitive,
             x if x == Self::Array as u8 => Self::Array,
+            x if x == Self::ArrayDyn as u8 => Self::ArrayDyn,
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
             index @ _ => unreachable!("Invalid constructor type {}", index),
@@ -102,7 +104,7 @@ impl Constructor {
 /// A heap reference as it would appear on the stack
 #[derive(Copy, Clone)]
 pub struct HeapRef {
-    pub(crate) address: HeapAddress,
+    address: HeapAddress,
 }
 
 impl HeapRef {

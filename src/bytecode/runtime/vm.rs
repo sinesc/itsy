@@ -183,7 +183,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
                 self.write_proto(target, *prototype_offset, num_bytes);
                 *prototype_offset += num_bytes;
             }
-            Constructor::Array => {
+            Constructor::Array | Constructor::ArrayDyn => {
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
                 self.write_ref(target, heap_ref);
                 let num_elements = self.read_arg(constructor_offset);
@@ -230,12 +230,13 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
     fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
         match constructor {
-            Constructor::Array => {
+            Constructor::Array | Constructor::ArrayDyn => {
                 let num_elements = self.read_arg(&mut constructor_offset);
                 let element_constructor = self.read_op(&mut constructor_offset);
                 if element_constructor != Constructor::Primitive {
                     let original_constructor_offset = *constructor_offset;
-                    for _ in 0..num_elements {
+                    let actual_elements = if constructor == Constructor::ArrayDyn { self.heap.size_of(item.index()) / HeapRef::primitive_size() as usize } else { num_elements };
+                    for _ in 0..actual_elements {
                         // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
                         *constructor_offset = original_constructor_offset;
                         let element: HeapRef = self.heap.read_seq(&mut item);

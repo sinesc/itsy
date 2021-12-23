@@ -18,17 +18,30 @@ pub(crate) trait TypeContainer {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     /// Returns a mutable reference to the type.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
-    /// Returns whether type_id is acceptable by the type expectation for expected_type_id (but not necessarily the inverse).
-    fn types_match(self: &Self, given_type_id: TypeId, expected_type_id: TypeId) -> bool {
-        if given_type_id == expected_type_id {
+    /// Returns whether given_type_id is acceptable to a binding of the accepted_type_id, e.g. [ u8; 3 ] is acceptable to a [ u8 ] binding, but not the inverse.
+    fn type_accepted_for(self: &Self, given_type_id: TypeId, accepted_type_id: TypeId) -> bool {
+        if given_type_id == accepted_type_id {
             true
         } else {
-            match (self.type_by_id(given_type_id), self.type_by_id(expected_type_id)) {
-                (&Type::Array(Array { len: Some(given_len), type_id: Some(given_type_id) }), &Type::Array(Array { len: Some(expected_len), type_id: Some(expected_type_id) })) => {
-                    (given_len == expected_len || (given_len.is_some() && expected_len.is_none())) && self.types_match(given_type_id, expected_type_id)
+            match (self.type_by_id(given_type_id), self.type_by_id(accepted_type_id)) {
+                (&Type::Array(Array { len: Some(given_len), type_id: Some(given_type_id) }), &Type::Array(Array { len: Some(accepted_len), type_id: Some(accepted_type_id) })) => {
+                    (given_len == accepted_len || (given_len.is_some() && accepted_len.is_none())) && self.type_accepted_for(given_type_id, accepted_type_id)
                 },
                 (Type::Struct(struct_), Type::Trait(_)) => {
-                    struct_.impl_traits.contains_key(&expected_type_id)
+                    struct_.impl_traits.contains_key(&accepted_type_id)
+                },
+                _ => false,
+            }
+        }
+    }
+    /// Returns whether the given types are the same. (Anonymous types may have differing type ids but still be the same type)
+    fn type_equals(self: &Self, first_type_id: TypeId, second_type_id: TypeId) -> bool {
+        if first_type_id == second_type_id {
+            true
+        } else {
+            match (self.type_by_id(first_type_id), self.type_by_id(second_type_id)) {
+                (&Type::Array(Array { len: Some(first_len), type_id: Some(first_type_id) }), &Type::Array(Array { len: Some(second_len), type_id: Some(second_type_id) })) => {
+                    first_len == second_len && self.type_equals(first_type_id, second_type_id)
                 },
                 _ => false,
             }

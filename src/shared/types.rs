@@ -218,6 +218,18 @@ impl Type {
             _ => false
         }
     }
+    /// Whether the type is a concrete type. This includes all types but dynamic arrays and traits.
+    /// - Dynamic arrays are not concrete because the can potentially be further narrowed down to a fixed size.
+    ///   A binding for a fixed size array would not accept a dynamically sized value, but the inverse is acceptable.
+    /// - Traits are not concrete because they can potentially be narrowed to a specific trait implementor.
+    ///   A binding for a concrete implementor would not accept the generic trait but the inverse is acceptable
+    pub fn is_concrete(self: &Self) -> bool {
+        match self {
+            Type::Trait(_) => false,
+            Type::Array(array) => array.len.map_or(false, |l| l.is_some()),
+            _ => true
+        }
+    }
     /// Returns the type as an array.
     pub const fn as_array(self: &Self) -> Option<&Array> {
         match self {

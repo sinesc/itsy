@@ -78,7 +78,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.id_mappings.types() {
-        if !ty.is_primitive() && !ty.as_trait().is_some() && !ty.as_array().map_or(false, |a| a.len.unwrap().is_none()) {
+        if !ty.is_primitive() && !ty.as_trait().is_some() /*&& !ty.as_array().map_or(false, |a| a.len.unwrap().is_none()) */ {
             // store constructor, remember position
             let position = compiler.store_constructor(type_id);
             compiler.constructors.insert(ty, position);
@@ -983,7 +983,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             return false;
         }
         for (target_arg, other_arg) in target.arg_type.iter().zip(other.arg_type.iter()) {
-            if !self.types_match(other_arg.unwrap(), target_arg.unwrap()) {
+            if !self.type_accepted_for(other_arg.unwrap(), target_arg.unwrap()) {
                 return false;
             }
         }
@@ -1080,7 +1080,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         match self.type_by_id(type_id) {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array as u8);
-                self.writer.store_const(array.len.expect("Unresolved array len").expect("Cannot store constructor for dynamically sized array") as ItemIndex);
+                self.writer.store_const(array.len.expect("Unresolved array len").unwrap_or(0) as ItemIndex);
                 self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {
