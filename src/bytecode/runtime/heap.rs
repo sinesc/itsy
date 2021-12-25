@@ -67,6 +67,22 @@ impl Heap {
             epoch: 0,
         }
     }
+    /// Deallocates freed chunks of memory.
+    pub fn purge(self: &mut Self) {
+        // todo: truncate if len=0 or items are consecutive
+        for v in self.free.iter() {
+            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), 0, self.epoch));
+        }
+    }
+    /// Number of active heap elements.
+    pub fn len(self: &Self) -> StackAddress {
+        (self.objects.len() - self.free.len()) as StackAddress
+    }
+    /// Resets the heap, freeing all memory.
+    pub fn reset(self: &mut Self) {
+        self.objects.truncate(0);
+        self.free = Vec::with_capacity(16);
+    }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc(self: &mut Self, data: Vec<u8>, implementor_index: ItemIndex) -> StackAddress {
         if let Some(index) = self.free.pop() {
@@ -131,22 +147,6 @@ impl Heap {
         self.free.push(index);
         object.data
     }
-    /// Deallocates freed chunks of memory.
-    pub fn purge(self: &mut Self) {
-        // todo: truncate if len=0 or items are consecutive
-        for v in self.free.iter() {
-            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), 0, self.epoch));
-        }
-    }
-    /// Number of active heap elements.
-    pub fn len(self: &Self) -> StackAddress {
-        (self.objects.len() - self.free.len()) as StackAddress
-    }
-    /// Resets the heap, freeing all memory.
-    pub fn reset(self: &mut Self) {
-        self.objects.truncate(0);
-        self.free = Vec::with_capacity(16);
-    }
     /// Asserts that the given heap object exists.
     #[cfg(debug_assertions)]
     fn assert_exists(self: &Self, index: StackAddress) {
@@ -177,52 +177,40 @@ impl Heap {
         let len = len as usize;
         &self.objects[index as usize].data[offset..offset + len]
     }
-
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
     pub fn copy(self: &mut Self, dest_item: HeapRef, src_item: HeapRef, len: StackAddress) {
-
         if dest_item.index() != src_item.index() {
-
             let (dest, src) = index_twice(&mut self.objects, dest_item.index() as usize, src_item.index() as usize);
-
             let offset_src = src_item.offset() as usize;
             let offset_dest = dest_item.offset() as usize;
             let num_bytes = len as usize;
             let copy_bytes = usize::min(num_bytes, dest.data.len() - offset_dest);
             let push_bytes = num_bytes - copy_bytes;
-
             if copy_bytes > 0 {
                 let slice_dest = &mut dest.data[offset_dest .. offset_dest + copy_bytes];
                 let slice_src = &mut src.data[offset_src .. offset_src + copy_bytes];
                 slice_dest.copy_from_slice(slice_src);
             }
-
             if push_bytes > 0 {
                 let slice_src = &mut src.data[offset_src + copy_bytes .. offset_src + copy_bytes + push_bytes];
                 dest.data.extend_from_slice(slice_src);
             }
-
         } else {
-
             let slice = &mut self.objects[src_item.index() as usize].data;
-
             let offset_src = src_item.offset() as usize;
             let offset_dest = dest_item.offset() as usize;
             let num_bytes = len as usize;
             let copy_bytes = usize::min(len as usize, slice.len() - offset_src);
             let push_bytes = num_bytes - copy_bytes;
-
             if copy_bytes > 0 {
                 slice.copy_within(offset_src..offset_src + copy_bytes, offset_dest);
             }
-
             if push_bytes > 0 {
                 let mut tmp = slice[offset_src + copy_bytes..offset_src + copy_bytes + push_bytes].to_vec();
                 slice.append(&mut tmp);
             }
         }
     }
-
     // Compares bytes of one heap object with another.
     pub fn compare(self: &mut Self, a: HeapRef, b: HeapRef, len: StackAddress, op: HeapCmp) -> bool {
         let slice_a = self.slice(a, len);
@@ -236,14 +224,12 @@ impl Heap {
             HeapCmp::Gte => slice_a >= slice_b,
         }
     }
-
     /// Returns a string slice for the given heap reference.
     pub fn str(self: &Self, item: HeapRef, len: StackAddress) -> &str {
         let slice = self.slice(item, len);
         //un safe { std::str::from_utf8_unchecked(slice) }
         std::str::from_utf8(slice).unwrap()
     }
-
     // Compares string slice of one heap object with another.
     pub fn compare_str(self: &mut Self, a: HeapSlice, b: HeapSlice, op: HeapCmp) -> bool {
         let slice_a = self.str(a.to_ref(), a.len);
@@ -257,7 +243,6 @@ impl Heap {
             HeapCmp::Gte => slice_a >= slice_b,
         }
     }
-
     /// Returns a string slice for the given heap reference.
     pub fn string(self: &Self, item: HeapRef) -> &str {
         let (index, offset) = item.into();
@@ -265,7 +250,6 @@ impl Heap {
         //un safe { str::from_utf8_unchecked(&slice) }
         std::str::from_utf8(slice).unwrap()
     }
-
     // Compares string of one heap object with another.
     pub fn compare_string(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
         let slice_a = self.string(a);

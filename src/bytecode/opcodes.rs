@@ -488,6 +488,12 @@ impl_opcodes!{
         self.stack.push(a % b);
     }
 
+    /// Pops stack address sized value, shifts it by given number of bits and pushes it.
+    fn shrsa(&mut self, num: u8) {
+        let value: StackAddress = self.stack.pop();
+        self.stack.push(value >> num);
+    }
+
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn <
         ceq8<T: Data8>(),
@@ -552,6 +558,7 @@ impl_opcodes!{
     fn jmp(&mut self, addr: StackAddress) {
         self.pc = addr;
     }
+
     /// Pops an 8 bit value and jumps to given address if the value is 0.
     fn j0(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.pop();
@@ -559,6 +566,7 @@ impl_opcodes!{
             self.pc = addr;
         }
     }
+
     /// Pops an 8 bit value and jumps to given address if the value is not 0.
     fn jn0(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.pop();
@@ -566,6 +574,7 @@ impl_opcodes!{
             self.pc = addr;
         }
     }
+
     /// Jumps to given address if the 8 bit stack-top is 0.
     fn j0_nc(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.top();
@@ -573,6 +582,7 @@ impl_opcodes!{
             self.pc = addr;
         }
     }
+
     /// Jumps to given address if the 8 bit stack-top is not 0.
     fn jn0_nc(&mut self, addr: StackAddress) {
         let a: Data8 = self.stack.top();
@@ -588,6 +598,7 @@ impl_opcodes!{
             self.pc = addr;
         }
     }
+
     /// Jumps to given address if the StackAddress sized stack-top does not equal 0.
     fn jn0_sa_nc(&mut self, addr: StackAddress) {
         let a: StackAddress = self.stack.top();
@@ -604,7 +615,7 @@ impl_opcodes!{
     }
 
     /// Moves an instance that was constructed on the stack to the heap.
-    fn move_heap(&mut self, size: StackAddress, implementor_index: ItemIndex) {
+    fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
         let mut data = Vec::with_capacity(size as usize);
         let data_start = self.stack.sp() as usize - size as usize;
         data.extend_from_slice(&self.stack.data()[data_start..]);
@@ -710,6 +721,68 @@ impl_opcodes!{
         self.stack.fp = prev_fp;
     }
 
+    /// Pops 2 heap references to strings, compares the strings for equality and pushes the result.
+    fn string_ceq(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Eq);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+    }
+
+    /// Pops 2 heap references to strings, compares the strings for inequality and pushes the result.
+    fn string_cneq(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Neq);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+    }
+
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
+    fn string_clt(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Lt);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+    }
+
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
+    fn string_clte(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+    }
+
+    /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
+    fn string_concatx(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let b_len = self.heap.size_of(b.index());
+        let a: HeapRef = self.stack.pop();
+        let a_len = self.heap.size_of(a.index());
+        let dest_index: StackAddress = self.heap.alloc(Vec::new(), ItemIndex::MAX);
+        self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
+        self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
+        self.stack.push(HeapRef::new(dest_index, 0));
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+    }
+
+    /// Pops a heap reference and pushes the size of the referenced heap object.
+    fn heap_size(&mut self) {
+        let item: HeapRef = self.stack.pop();
+        let size = self.heap.size_of(item.index());
+        self.stack.push(size);
+        self.heap.ref_item(item.index(), HeapRefOp::FreeTmp);// FIXME: shouldn't this use refcount_value?
+    }
+
     /// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
     fn heap_copy(&mut self, num_bytes: StackAddress) {
         let dest: HeapRef = self.stack.pop();
@@ -723,74 +796,17 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Eq);
         self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
         self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
+
     /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_cneq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Neq);
         self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
-
-    /// Pops 2 heap references to strings, compares the strings for equality and pushes the result.
-    fn string_ceq(&mut self) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare_string(a, b, HeapCmp::Eq);
-        self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
-    /// Pops 2 heap references to strings, compares the strings for inequality and pushes the result.
-    fn string_cneq(&mut self) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare_string(a, b, HeapCmp::Neq);
-        self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
-    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
-    fn string_clt(&mut self) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare_string(a, b, HeapCmp::Lt);
-        self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
-    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
-    fn string_clte(&mut self) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
-        self.stack.push(equals as Data8);
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
-    /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
-    fn string_concatx(&mut self) {
-        let b: HeapRef = self.stack.pop();
-        let b_len = self.heap.size_of(b.index());
-        let a: HeapRef = self.stack.pop();
-        let a_len = self.heap.size_of(a.index());
-
-        let dest_index: StackAddress = self.heap.alloc(Vec::new(), ItemIndex::MAX);
-        self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
-        self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
-        self.stack.push(HeapRef::new(dest_index, 0));
-
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
         self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
 

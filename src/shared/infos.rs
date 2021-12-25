@@ -33,7 +33,7 @@ pub enum FunctionKind {
     Function,
     Method(TypeId),
     Rust(RustFnIndex),
-    Intrinsic(Intrinsic),
+    Intrinsic(TypeId, Intrinsic),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

@@ -16,7 +16,7 @@ use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
 use crate::shared::types::{Array, Struct, Trait, ImplTrait, Type};
-use crate::shared::typed_ids::{BindingId, ScopeId, TypeId};
+use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 
 use crate::bytecode::VMFunc;
@@ -117,9 +117,6 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
     primitives.insert(&Type::f32, scopes.insert_type(root_scope_id, Some("f32"), Type::f32));
     primitives.insert(&Type::f64, scopes.insert_type(root_scope_id, Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(root_scope_id, Some("String"), Type::String));
-
-    // insert intrinsics // todo tie methods to their struct type
-    scopes.insert_function(root_scope_id, "len", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FunctionKind::Intrinsic(Intrinsic::ArrayLen)));
 
     // insert rust functions into root scope
     for (&name, (index, ret_type_name, arg_type_names)) in T::call_info().iter() {
@@ -615,6 +612,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    fn try_create_array_function(self: &mut Self, name: &str, type_id: TypeId) -> Option<FunctionId> {
+
+        let root_scope_id = scopes::Scopes::root_id();
+        let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE).unwrap();
+
+        if name == "len" {
+            Some(
+                self.scopes.insert_function(root_scope_id, "len", Some(sa_type_id), vec![ Some(type_id) ], Some(FunctionKind::Intrinsic(type_id, Intrinsic::ArrayLen)))
+            )
+        } else {
+            None
+        }
+        //scopes.insert_function(root_scope_id, "push", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FunctionKind::Intrinsic(Intrinsic::ArrayPush)));
+
+    }
+
     /// Resolves an occurance of a function call.
     fn resolve_call(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
 
@@ -628,6 +641,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
                     if self.type_by_id(type_id).as_array().is_some() {
                         path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
+                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
+                        if item.function_id.is_none() {
+                            item.function_id = self.try_create_array_function(&item.ident.name, type_id);
+                        }
                     } else {
                         // try method on type
                         let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;

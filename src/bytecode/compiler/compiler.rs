@@ -8,7 +8,7 @@ mod init_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind}, numeric::Numeric, types::{Type, ImplTrait, Struct}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind, Intrinsic}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
@@ -309,11 +309,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             FunctionKind::Rust(rust_fn_index) => {
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
-            FunctionKind::Intrinsic(_intrinsic) => {
-                /* if let CallType::Method(exp) = &item.call_type {
-                    let ty = self.item_type(&**exp);
-                    self.write_intrinsic_len(ty);
-                } */
+            FunctionKind::Intrinsic(type_id, intrinsic) => {
+                self.write_intrinsic(intrinsic, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
 
@@ -500,7 +497,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         self.compile_expression(&item.expr)?;   // stack &array
         self.write_cntinc(array_constructor);
-        self.write_intrinsic_len(array_ty);             // stack &array len
+        self.write_clone_ref();
+        self.write_intrinsic(Intrinsic::ArrayLen, array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index
 
@@ -693,7 +691,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
                     let type_id = item.type_id(self).unwrap();
                     self.compile_prototype_instructions(item)?;
-                    self.writer.move_heap(self.flat_size(ty), *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
+                    self.writer.upload(self.flat_size(ty), *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
                 }
             },
         }
@@ -1250,6 +1248,11 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
     }
 
+    /// Writes an appropriate variant of the cntdec instruction.
+    fn write_cntfreetmp(self: &Self, constructor: StackAddress) {
+        opcode_unsigned!(self, cntfreetmp_8, cntfreetmp_16, cntfreetmp_sa, constructor);
+    }
+
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset > 0 {
@@ -1435,11 +1438,35 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions for build-in len method.
-    fn write_intrinsic_len(self: &Self, ty: &Type) {
-        if let Type::Array(array) = ty {
-            self.write_numeric(Numeric::Unsigned(array.len.expect("Unresolved array len").expect("FIXME: not implemented") as u64), &STACK_ADDRESS_TYPE);
-        } else {
-            unreachable!("Unsupported type {:?} for intrinsic len", ty);
+    fn write_intrinsic(self: &Self, intrinsic: Intrinsic, ty: &Type) {
+        match ty {
+            &Type::Array(Array { len: Some(Some(len)), type_id }) => {
+                let inner_ty = self.type_by_id(type_id.unwrap());
+                match intrinsic {
+                    Intrinsic::ArrayLen => {
+                        self.write_cntfreetmp(self.get_constructor(ty));
+                        self.write_numeric(Numeric::Unsigned(len as u64), &STACK_ADDRESS_TYPE);
+                    }
+                    _ => unreachable!("Unsupported type {:?} for intrinsic len", ty),
+                }
+            }
+            &Type::Array(Array { len: Some(None), type_id }) => {
+                let inner_ty = self.type_by_id(type_id.unwrap());
+                match intrinsic {
+                    Intrinsic::ArrayLen => {
+                        self.writer.heap_size(); // fixme: doesn't do refcounting
+                        self.writer.shrsa(match inner_ty.primitive_size() {
+                            1 => 0,
+                            2 => 1,
+                            4 => 2,
+                            8 => 3,
+                            _ => unreachable!("Unsupported inner size for type {:?} for intrinsic len", ty),
+                        });
+                    }
+                    _ => unreachable!("Unsupported type {:?} for intrinsic len", ty),
+                }
+            }
+            _ => unreachable!("Unsupported type {:?}", ty),
         }
     }
 

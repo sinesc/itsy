@@ -594,6 +594,66 @@ fn array_nested_var_dynamic_constructor() {
 }
 
 #[test]
+fn array_coercion() {
+    let result = run("
+        fn accept(x: [u8; 4], y: [u8]) {
+            ret_u8(x[0]+y[0]);
+            ret_u8(x[1]+y[1]);
+            ret_u8(x[2]+y[2]);
+            ret_u8(x[3]+y[3]);
+        }
+        fn main() {
+            let x: [ u8; 4 ] = [ 1, 2, 3, 4 ];
+            let y: [ u8 ] = [ 4, 3, 2, 1, 0 ];
+            accept(x, y); // dynamic as dynamic
+            let z: [ u8; 5] = [ 5, 4, 3, 2, 1 ];
+            accept(x, z); // fixed as dynamic
+        }
+    ");
+    assert_all(&result, &[ 5u8, 5, 5, 5,  6, 6, 6, 6 ]);
+}
+
+#[test]
+#[should_panic(expected = "Resolver error: Expected type <[ _; 4 ]>, got <[ _; 5 ]> in line 7, column 20.")]
+fn array_coercion_fail1() {
+    run("
+        fn accept(x: [u8; 4]) {
+            ret_u8(x[3]);
+        }
+        fn main() {
+            let x: [ u8; 5 ] = [ 1, 2, 3, 4, 5 ];
+            accept(x);
+        }
+    ");
+}
+
+#[test]
+#[should_panic(expected = "Resolver error: Expected type <[ _; 4 ]>, got <[ _ ]> in line 7, column 20.")]
+fn array_coercion_fail2() {
+    run("
+        fn accept(x: [u8; 4]) {
+            ret_u8(x[3]);
+        }
+        fn main() {
+            let x: [ u8 ] = [ 1, 2, 3, 4, 5 ];
+            accept(x);
+        }
+    ");
+}
+
+#[test]
+fn array_len() {
+    let result = run("
+        let static_array: [ u16; 4 ] = [ 1, 2, 3, 4 ];
+        let dynamic_array: [ u16 ] = [ 4, 3, 2, 1, 0 ];
+        ret_u64(static_array.len());
+        ret_u64(dynamic_array.len());
+        ret_u64([ 5, 4, 3, 2, 1, 0 ].len());
+    ");
+    assert_all(&result, &[ 4u64, 5, 6 ]);
+}
+
+#[test]
 fn struct_access() {
     let result = run("
         struct Test {
