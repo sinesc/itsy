@@ -630,22 +630,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    fn try_create_array_function(self: &mut Self, name: &str, type_id: TypeId) -> Option<FunctionId> {
-
-        let root_scope_id = scopes::Scopes::root_id();
-        let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE).unwrap();
-
-        if name == "len" {
-            Some(
-                self.scopes.insert_function(root_scope_id, "len", Some(sa_type_id), vec![ Some(type_id) ], Some(FunctionKind::Intrinsic(type_id, Intrinsic::ArrayLen)))
-            )
-        } else {
-            None
-        }
-        //scopes.insert_function(root_scope_id, "push", Some(*primitives.get(&STACK_ADDRESS_TYPE).unwrap_or_ice(ICE)?), Vec::new(), Some(FunctionKind::Intrinsic(Intrinsic::ArrayPush)));
-
-    }
-
     /// Resolves an occurance of a function call.
     fn resolve_call(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
 
