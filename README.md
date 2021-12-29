@@ -1,10 +1,10 @@
 # Itsy
 Strongly typed scripting language with a rusty syntax and easy Rust integration written entirely in safe Rust.
 
-***State of the project:** Very incomplete, maybe ok for some tinkering if you're bored. Please don't waste your time with this if you need to get something done though.*
+***State of the project:** Feature-incomplete, NOT ready for production, syntax and APIs may change, expect bugs and bad diagnostic. Possibly fun to play with.*
 
 **Crate reference:** [here](https://docs.rs/itsy/)\
-**Language reference:** non-existent. Its basically Rust without lifetimes and generics (and lots of other stuff for now).
+**Language reference:** non-existent, some differences listed [here](doc/differences.md)
 
 The following example exposes a Rust function `print` to Itsy. It compiles and runs
 an Itsy script that calls the Rust function.
