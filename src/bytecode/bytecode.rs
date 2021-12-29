@@ -4,7 +4,10 @@
 pub mod writer;
 #[macro_use]
 pub mod impl_opcodes;
+#[macro_use]
+pub mod impl_builtins;
 pub mod opcodes;
+pub mod builtins;
 #[path="compiler/compiler.rs"]
 #[cfg(feature="compiler")]
 pub mod compiler;

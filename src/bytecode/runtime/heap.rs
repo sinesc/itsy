@@ -60,7 +60,7 @@ pub struct Heap {
 
 impl Heap {
     /// Creates a new VM heap.
-    pub fn new() -> Self { // todo: accept const pool here?
+    pub fn new() -> Self {
         Self {
             objects: Vec::with_capacity(128),
             free: Vec::with_capacity(16),
@@ -99,6 +99,10 @@ impl Heap {
         let position = self.objects[index as usize].data.len() as StackAddress;
         self.objects[index as usize].data.extend_from_slice(slice);
         position
+    }
+    /// Truncates heap item to given size
+    pub fn truncate(self: &mut Self, index: StackAddress, size: StackAddress) {
+        self.objects[index as usize].data.truncate(size as usize);
     }
     pub fn new_epoch(self: &mut Self) -> usize {
         self.epoch = self.epoch.wrapping_add(1);

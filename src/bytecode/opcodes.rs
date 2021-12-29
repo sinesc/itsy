@@ -1,8 +1,8 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use crate::prelude::size_of;
-use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, ItemIndex};
-use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
+use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
+use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
 type Data16 = u16;
@@ -11,9 +11,9 @@ type Data64 = u64;
 
 impl_opcodes!{
 
-    /// Does nothing.
+    /*/// Does nothing.
     fn noop(&mut self) { }
-
+    */
     /// Moves the stack pointer by given number of bytes to make room for local variables.
     fn reserve(&mut self, num_bytes: u8) { // FIXME u8 is not enough
         self.stack.extend_zero(num_bytes as StackAddress);
@@ -669,10 +669,14 @@ impl_opcodes!{
         self.refcount_value(item, constructor, HeapRefOp::FreeTmp);
     }
 
+    /// Calls the given Rust function.
+    fn rustcall(&mut self, &mut context, index: RustFn) {
+        T::from_index(index).exec(self, context);
+    }
 
     /// Calls the given Rust function.
-    fn rustcall(&mut self, &mut context, func: RustFn) {
-        T::from_index(func).exec(self, context);
+    fn builtincall(&mut self, index: Builtin) {
+        Builtin::from_index(index).exec(self);
     }
 
     /// Function call. Saves state and sets programm counter to given addr.
@@ -783,12 +787,12 @@ impl_opcodes!{
         self.heap.ref_item(item.index(), HeapRefOp::FreeTmp);// FIXME: shouldn't this use refcount_value?
     }
 
-    /// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
+    /*/// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
     fn heap_copy(&mut self, num_bytes: StackAddress) {
         let dest: HeapRef = self.stack.pop();
         let src: HeapRef = self.stack.pop();
         self.heap.copy(dest, src, num_bytes);
-    }
+    }*/
 
     /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_ceq(&mut self, num_bytes: StackAddress) {
@@ -923,10 +927,11 @@ impl_opcodes!{
         self.stack.push(data);
     }
 
-    /// Yield program execution.
+    /* /// Yield program execution.
     fn yld(&mut self) return {
         self.state = VMState::Yielded;
-    }
+    }*/
+
     /// Terminate program execution.
     fn exit(&mut self) return {
         self.state = VMState::Terminated;

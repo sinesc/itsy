@@ -39,4 +39,6 @@ pub enum FunctionKind {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Intrinsic {
     ArrayLen,
+    ArrayPush,
+    ArrayPop,
 }

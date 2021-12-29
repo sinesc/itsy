@@ -10,7 +10,7 @@ use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind, Intrinsic}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
@@ -1447,7 +1447,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         self.write_cntfreetmp(self.get_constructor(ty));
                         self.write_numeric(Numeric::Unsigned(len as u64), &STACK_ADDRESS_TYPE);
                     }
-                    _ => unreachable!("Unsupported type {:?} for intrinsic len", ty),
+                    _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
                 }
             }
             &Type::Array(Array { len: Some(None), type_id }) => {
@@ -1460,13 +1460,15 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                             2 => 1,
                             4 => 2,
                             8 => 3,
-                            _ => unreachable!("Unsupported inner size for type {:?} for intrinsic len", ty),
+                            _ => unreachable!("Unsupported inner size for type {} for intrinsic {:?}", ty, intrinsic),
                         });
                     }
-                    _ => unreachable!("Unsupported type {:?} for intrinsic len", ty),
+                    Intrinsic::ArrayPush => builtin_sized!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
+                    Intrinsic::ArrayPop => builtin_sized!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
+                    _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
                 }
             }
-            _ => unreachable!("Unsupported type {:?}", ty),
+            _ => unreachable!("Unsupported type {}", ty),
         }
     }
 

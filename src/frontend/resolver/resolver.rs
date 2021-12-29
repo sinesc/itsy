@@ -213,6 +213,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         parent_scope_id
     }
 
+    /// Try to create array intrinsic function signature for the given array type
+    fn try_create_array_intrinsic(self: &mut Self, name: &str, type_id: TypeId) -> Result<Option<FunctionId>, Error> {
+        let array_ty = self.type_by_id(type_id).as_array().unwrap_or_ice(ICE)?;
+        let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
+        let void_type_id = self.primitive_type_id(Type::void)?;
+        if let &Array { type_id: Some(element_type_id), len: Some(len) } = array_ty {
+            let mut insert = |i, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Intrinsic(type_id, i))));
+            Ok(match (name, len) {
+                ("len", _)      => insert(Intrinsic::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
+                ("push", None)  => insert(Intrinsic::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
+                ("pop", None)   => insert(Intrinsic::ArrayPop, element_type_id, vec![ Some(type_id) ]),
+                _ => None,
+            })
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
     fn classify_numeric(self: &Self, value: Numeric) -> Result<Option<TypeId>, Error> {
         Ok(if value.is_integer() {
@@ -643,7 +661,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                         if item.function_id.is_none() {
-                            item.function_id = self.try_create_array_function(&item.ident.name, type_id);
+                            item.function_id = self.try_create_array_intrinsic(&item.ident.name, type_id)?;
                         }
                     } else {
                         // try method on type

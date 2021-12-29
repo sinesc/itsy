@@ -25,7 +25,7 @@ pub enum CopyTarget {
 
 /// A virtual machine for running Itsy bytecode.
 #[derive(Debug)]
-pub struct VM<T, U> where T: VMFunc<T> {
+pub struct VM<T, U> {
     context_type            : PhantomData<U>,
     func_type               : PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
@@ -36,9 +36,9 @@ pub struct VM<T, U> where T: VMFunc<T> {
 }
 
 /// Public VM methods.
-impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
+impl<T, U> VM<T, U> {
     /// Create a new VM instance with the given Program.
-    pub fn new(program: &Program<T>) -> Self {
+    pub fn new(program: &Program<T>) -> Self where T: VMFunc<T> + VMData<T, U> {
         let Program { instructions, consts, const_descriptors, .. } = program;
         let stack = Self::init_consts(consts, const_descriptors);
         VM {
@@ -53,7 +53,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self, context: &mut U) -> VMState {
+    pub fn run(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             panic!("Attempted to run in non-ready state");
         }
@@ -66,7 +66,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
 
     /// Executes single bytecode instruction.
     #[cfg(feature="debugging")]
-    pub fn step(self: &mut Self, context: &mut U) -> VMState {
+    pub fn step(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             panic!("Attempted to run in non-ready state");
         }
@@ -87,7 +87,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
 
     /// Disassembles the bytecode and returns it as a string.
     #[cfg(feature="debugging")]
-    pub fn format_program(self: &Self) -> String {
+    pub fn format_program(self: &Self) -> String where T: VMFunc<T> + VMData<T, U> {
         let mut position = 0;
         let mut result = "".to_string();
         while let Some((instruction, next_position)) = self.describe_instruction(position) {
@@ -100,7 +100,7 @@ impl<T, U> VM<T, U> where T: VMFunc<T> + VMData<T, U> {
 
     /// Disassembles the current bytecode instruction and returns it as a string.
     #[cfg(feature="debugging")]
-    pub fn format_instruction(self: &Self) -> Option<String> {
+    pub fn format_instruction(self: &Self) -> Option<String> where T: VMFunc<T> + VMData<T, U> {
         self.describe_instruction(self.pc).map(|result| result.0)
     }
 

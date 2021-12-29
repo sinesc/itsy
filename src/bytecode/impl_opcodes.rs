@@ -1,4 +1,4 @@
-/// The `impl_opcodes` macro to generate bytecode writers and readers from instruction signatures.
+/// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
 
     // perform read from slice
@@ -11,6 +11,7 @@ macro_rules! impl_opcodes {
 
     // wrappers for readers and writers
     (read RustFn, $from:ident, $counter:expr) => ( impl_opcodes!(do_read RustFnIndex, $from, $counter) );
+    (read Builtin, $from:ident, $counter:expr) => ( impl_opcodes!(do_read BuiltinIndex, $from, $counter) );
     (read u8, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u8, $from, $counter) );
     (read u16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u16, $from, $counter) );
     (read u32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u32, $from, $counter) );
@@ -32,6 +33,7 @@ macro_rules! impl_opcodes {
     });
 
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
+    (write Builtin, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
     (write String, $value:expr, $to:ident) => (
         $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
         $to.write(&$value.as_bytes()[..]);
@@ -41,7 +43,9 @@ macro_rules! impl_opcodes {
     (map_writer_type RustFn) => ( T );
     (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
+
     (map_reader_type RustFn) => ( RustFnIndex );
+    (map_reader_type Builtin) => ( BuiltinIndex );
     (map_reader_type $ty:tt) => ( $ty );
 
     // main definition block
@@ -134,7 +138,7 @@ macro_rules! impl_opcodes {
                 $(
                     $(
                         #[allow(unused_imports)]
-                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
+                        pub(crate) fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
                             let insert_pos = self.position();
                             impl_opcodes!(write u8, OpCode::$variant_name as u8, self);
                             $(
@@ -147,7 +151,7 @@ macro_rules! impl_opcodes {
                 // single opcode
                 $(
                     #[allow(unused_imports)]
-                    pub fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
+                    pub(crate) fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
                         impl_opcodes!(write u8, OpCode::$name as u8, self);
                         $( impl_opcodes!(write $arg_type, $arg_name, self); )*

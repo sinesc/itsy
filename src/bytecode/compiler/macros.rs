@@ -34,3 +34,19 @@ macro_rules! opcode_unsigned {
         }
     }}
 }
+
+macro_rules! builtin_sized {
+    ($self:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => {
+        if $ty.is_ref() {
+            $self.writer.builtincall(Builtin::$variant_x);
+        } else {
+            match $ty.primitive_size() {
+                8 => $self.writer.builtincall(Builtin::$variant_64),
+                4 => $self.writer.builtincall(Builtin::$variant_32),
+                2 => $self.writer.builtincall(Builtin::$variant_16),
+                1 => $self.writer.builtincall(Builtin::$variant_8),
+                _ => unreachable!("Invalid type size for builtin call"),
+            };
+        }
+    }
+}
