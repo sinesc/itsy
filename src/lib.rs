@@ -47,7 +47,7 @@ pub type ItemIndex = u16;
 
 /// Type used to index RustFns. Public because it is used by the vm_func macro.
 #[doc(hidden)]
-pub type RustFnIndex = u16;
+pub type RustFnIndex = ItemIndex;
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
@@ -111,6 +111,7 @@ macro_rules! vm_func {
 #[cfg(not(doc))]
 #[macro_export]
 macro_rules! vm_func {
+    // enum: generate rustfn enum
     (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
@@ -123,7 +124,7 @@ macro_rules! vm_func {
             _dummy
         }
     };
-    // handle return values
+    // trait: handle return values
     (@handle_ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
@@ -143,7 +144,7 @@ macro_rules! vm_func {
     (@handle_ret $vm:ident, $_:tt, $value:ident) => {
         compile_error!("Unsupported return type");
     };
-    // handle parameters
+    // trait: handle parameters
     (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
     (@handle_param $vm:ident, u16) => { $vm.stack.pop() };
     (@handle_param $vm:ident, u32) => { $vm.stack.pop() };
@@ -157,23 +158,32 @@ macro_rules! vm_func {
     (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param $vm:ident, String) => { $vm.stack.pop() };
     (@handle_param $vm:ident, str) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
+    // trait: translate parameter types
     (@handle_param_type String) => { $crate::runtime::heap::HeapRef };
     (@handle_param_type str) => { $crate::runtime::heap::HeapRef };
     (@handle_param_type $other:ident) => { $other };
-
+    // trait: translate ref-param values
     (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
     (@handle_ref_param $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
     (@handle_ref_param $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
+    // trait: translate ref-param types
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
     (@handle_ref_param_type $other:ident) => { $other };
-
+    // trait: refcount handling for ref-params
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::FreeTmp) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::FreeTmp) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
-
-    (@handle_param $vm:ident, $_:tt) => { {
-        compile_error!("Unsupported parameter type")
-    } };
+    // trait: reverse argument load order
+    (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
+        $(
+            let $arg_name: vm_func!(@handle_param_type $arg_type) = vm_func!(@handle_param $vm, $arg_type);
+        )*
+    };
+    (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
+        vm_func!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
+    };
+    // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
             fn into_index(self: Self) -> $crate::RustFnIndex {
@@ -207,9 +217,7 @@ macro_rules! vm_func {
                         $type_name::$name => {
                             let $context = context;
                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                            $(
-                                let $arg_name: vm_func!(@handle_param_type $arg_type) = vm_func!(@handle_param vm, $arg_type);
-                            )*
+                            vm_func!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
                             // Run code.
                             let ret = {
                                 // Shadow HeapRef arguments with actual argument value.
