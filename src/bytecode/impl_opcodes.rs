@@ -1,6 +1,5 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
-
     // perform read from slice
     (do_read $ty:tt, $from:ident, $counter:expr) => ( {
         let slice = &$from.instructions[$counter as usize..$counter as usize + ::std::mem::size_of::<$ty>()];
@@ -8,10 +7,7 @@ macro_rules! impl_opcodes {
         $counter += ::std::mem::size_of::<$ty>() as StackAddress;
         dest
     });
-
-    // wrappers for readers and writers
-    (read RustFn, $from:ident, $counter:expr) => ( impl_opcodes!(do_read RustFnIndex, $from, $counter) );
-    (read Builtin, $from:ident, $counter:expr) => ( impl_opcodes!(do_read BuiltinIndex, $from, $counter) );
+    // read parameters
     (read u8, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u8, $from, $counter) );
     (read u16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u16, $from, $counter) );
     (read u32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u32, $from, $counter) );
@@ -22,16 +18,22 @@ macro_rules! impl_opcodes {
     (read i64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i64, $from, $counter) );
     (read f32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f32, $from, $counter) );
     (read f64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f64, $from, $counter) );
-    (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
-    (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
-    (read ItemIndex, $from:ident, $counter:expr) => ( impl_opcodes!(do_read ItemIndex, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
         let len = impl_opcodes!(do_read StackAddress, $from, $counter);
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
     });
-
+    (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
+    (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
+    (read ItemIndex, $from:ident, $counter:expr) => ( impl_opcodes!(do_read ItemIndex, $from, $counter) );
+    (read RustFn, $from:ident, $counter:expr) => ( impl_opcodes!(do_read RustFnIndex, $from, $counter) );
+    (read Builtin, $from:ident, $counter:expr) => ( impl_opcodes!(do_read BuiltinIndex, $from, $counter) );
+    // map parameter types to reader types
+    (map_reader_type RustFn) => ( RustFnIndex );
+    (map_reader_type Builtin) => ( BuiltinIndex );
+    (map_reader_type $ty:tt) => ( $ty );
+    // write parameters
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
     (write Builtin, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
     (write String, $value:expr, $to:ident) => (
@@ -39,15 +41,10 @@ macro_rules! impl_opcodes {
         $to.write(&$value.as_bytes()[..]);
     );
     (write $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
-
+    // map parameter types to writer types
     (map_writer_type RustFn) => ( T );
     (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
-
-    (map_reader_type RustFn) => ( RustFnIndex );
-    (map_reader_type Builtin) => ( BuiltinIndex );
-    (map_reader_type $ty:tt) => ( $ty );
-
     // main definition block
     (
         $(
