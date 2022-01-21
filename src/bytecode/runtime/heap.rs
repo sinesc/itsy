@@ -167,7 +167,7 @@ impl Heap {
         self.objects[index as usize].implementor_index
     }
     /// Returns a vector of unfreed heap objects.
-    pub fn data(self: &Self) -> UnorderedMap<StackAddress, (StackAddress, &Vec<u8>)> {
+    pub fn data(self: &Self) -> Map<StackAddress, (StackAddress, &Vec<u8>)> {
         self.objects.iter()
             .enumerate()
             .filter(|&(i, _)| !self.free.contains(&(i as StackAddress)))
