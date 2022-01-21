@@ -269,7 +269,7 @@ impl<T, U> VM<T, U> {
                 if element_constructor != Constructor::Primitive {
                     let original_constructor_offset = *constructor_offset;
                     // compute number of elements from heap size
-                    let num_elements = self.heap.size_of(item.index()) / HeapRef::primitive_size() as usize;
+                    let num_elements = self.heap.size_of_item(item.index()) / HeapRef::primitive_size() as usize;
                     for _ in 0..num_elements {
                         // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
                         *constructor_offset = original_constructor_offset;

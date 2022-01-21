@@ -26,7 +26,7 @@ impl_builtins! {
         array_pop64<T: u64>(this: HeapRef) -> u64,
     >(&mut vm) {
         let index = this.index();
-        let offset = vm.heap.size_of(index) as usize - size_of::<T>();
+        let offset = vm.heap.size_of_item(index) as usize - size_of::<T>();
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
         vm.heap.truncate(index, offset);
         result
@@ -34,7 +34,7 @@ impl_builtins! {
 
     fn array_popx(&mut vm, this: HeapRef) -> HeapRef {
         let index = this.index();
-        let offset = vm.heap.size_of(index) as usize - size_of::<HeapRef>();
+        let offset = vm.heap.size_of_item(index) as usize - size_of::<HeapRef>();
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
         vm.heap.truncate(index, offset);
         result
@@ -47,7 +47,7 @@ impl_builtins! {
         array_truncate64<T: u64>(this: HeapRef, size: StackAddress),
     >(&mut vm) {
         let index = this.index();
-        let current_size = vm.heap.size_of(index) as usize;
+        let current_size = vm.heap.size_of_item(index) as usize;
         let new_size = size_of::<T>() * size as usize;
         if new_size < current_size {
             vm.heap.truncate(index, new_size);
@@ -56,7 +56,7 @@ impl_builtins! {
 
     fn array_truncatex(&mut vm, this: HeapRef, size: StackAddress) {
         let index = this.index();
-        let current_size = vm.heap.size_of(index) as usize;
+        let current_size = vm.heap.size_of_item(index) as usize;
         let new_size = size_of::<HeapRef>() * size as usize;
         if new_size < current_size {
             vm.heap.truncate(index, new_size);
