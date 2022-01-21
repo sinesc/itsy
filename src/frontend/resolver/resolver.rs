@@ -7,7 +7,7 @@ pub mod resolved;
 
 use crate::prelude::*;
 use crate::ast::Visibility;
-use crate::{StackAddress, ItemIndex, STACK_ADDRESS_TYPE};
+use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
@@ -218,12 +218,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let array_ty = self.type_by_id(type_id).as_array().unwrap_or_ice(ICE)?;
         let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
         let void_type_id = self.primitive_type_id(Type::void)?;
-        if let &Array { type_id: Some(element_type_id), len: Some(len) } = array_ty {
+        if let &Array { type_id: Some(element_type_id) } = array_ty {
             let mut insert = |i, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Intrinsic(type_id, i))));
-            Ok(match (name, len) {
-                ("len", _)      => insert(Intrinsic::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
-                ("push", None)  => insert(Intrinsic::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
-                ("pop", None)   => insert(Intrinsic::ArrayPop, element_type_id, vec![ Some(type_id) ]),
+            Ok(match name {
+                "len"       => insert(Intrinsic::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
+                "push"      => insert(Intrinsic::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
+                "pop"       => insert(Intrinsic::ArrayPop, element_type_id, vec![ Some(type_id) ]),
+                "truncate"  => insert(Intrinsic::ArrayTruncate, void_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
                 _ => None,
             })
         } else {
@@ -305,7 +306,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
-    fn try_set_type_id(self: &mut Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
+    /*fn try_set_type_id(self: &mut Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
         if let Some(item_type_id) = item.type_id(self) {
             self.check_type_accepted_for(item, new_type_id, item_type_id)?;
         }
@@ -313,7 +314,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             *item.type_id_mut(self) = Some(new_type_id);
         }
         Ok(())
-    }
+    }*/
 
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> Option<&Type> {
@@ -431,9 +432,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves an array definition
     fn resolve_array(self: &mut Self, item: &mut ast::Array) -> Result<Option<TypeId>, Error> {
         let inner_type_id = self.resolve_inline_type(&mut item.element_type)?;
-        if item.type_id.is_none() { //FIXME needs to update inner type if it is none
+        if item.type_id.is_none() && inner_type_id.is_some() {
             let ty = Type::Array(Array {
-                len     : Some(item.len),
                 type_id : inner_type_id,
             });
             let new_type_id = self.scopes.insert_type(self.scope_id, None, ty);
@@ -979,16 +979,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // resolve expression, if we have a type, apply it to the expression
         let lhs = item.type_id(self);
+
         if let Some(expr) = &mut item.expr {
             self.resolve_expression(expr, lhs)?;
-            // if the expression has a type and the binding doesn't, apply it back to the binding
-            if let (None, Some(expr_type_id)) = (lhs, expr.type_id(self)) {
+            // if the expression has a type and the binding doesn't specify an explicit type, apply it back to the binding
+            if let (None, None, Some(expr_type_id)) = (&item.ty, lhs, expr.type_id(self)) {
                 self.set_type_id(item, expr_type_id)?;
             }
         };
 
-        self.resolved_or_err(item, None)?;
-        Ok(())
+        self.resolved_or_err(item, None)
     }
 
     /// Resolves a unary operation.
@@ -1085,20 +1085,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
-            if let Some(expected_array) = self.type_by_id(expected_type_id).as_array() {
-                if let Some(Some(expected_len)) = expected_array.len {
-                    // the type id is only usable if it is a fixed size array (like this literal)
-                    let literal_len = item.value.as_array().unwrap_or_ice(ICE)?.elements.len();
-                    if expected_len == literal_len {
-                        self.set_type_id(item, expected_type_id)?;
-                    } else {
-                        let expected_name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("{}", self.type_by_id(expected_type_id))).clone();
-                        return Err(Error::new(item, ErrorKind::TypeMismatch(format!("[ _; {} ]", literal_len), expected_name), self.module_path));
-                    }
-                } else {
-                    // array is dynamic(or unresolved), try to use alt least elements type
-                    elements_type_id = expected_array.type_id;
-                }
+            if self.type_by_id(expected_type_id).as_array().is_some() {
+                //elements_type_id = expected_array.type_id;
+                self.set_type_id(item, expected_type_id)?;
             } else {
                 let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.type_by_id(expected_type_id))).clone();
                 return Err(Error::new(item, ErrorKind::TypeMismatch("[ _ ]".to_string(), name), self.module_path));
@@ -1135,7 +1124,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // if we don't yet have one, create type based on the inner type, otherwise check types all match
         if type_id.is_none() {
             let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
-                len     : Some(Some(array_literal.elements.len() as StackAddress)),
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);

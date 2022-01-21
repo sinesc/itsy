@@ -41,4 +41,5 @@ pub enum Intrinsic {
     ArrayLen,
     ArrayPush,
     ArrayPop,
+    ArrayTruncate,
 }

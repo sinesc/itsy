@@ -17,15 +17,8 @@ macro_rules! impl_builtins {
         let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
         $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
     } };
-    (@handle_ret $vm:ident, HeapRef, $value:ident) => { {
-        //FIXME implement
-        //let raw_bytes = &$value.as_bytes();
-        //let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
-        //$vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
-    } };
-    (@handle_ret $vm:ident, $_:tt, $value:ident) => {
-        compile_error!("Unsupported return type");
-    };
+    (@handle_ret $vm:ident, HeapRef, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, $_:tt, $value:ident) => { compile_error!("Unsupported return type"); };
     // handle parameters
     (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
     (@handle_param $vm:ident, u16) => { $vm.stack.pop() };
@@ -41,7 +34,8 @@ macro_rules! impl_builtins {
     (@handle_param $vm:ident, String) => { $vm.stack.pop() };
     (@handle_param $vm:ident, str) => { $vm.stack.pop() };
     (@handle_param $vm:ident, HeapRef) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
+    (@handle_param $vm:ident, StackAddress) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, $_:tt) => { compile_error!("Unsupported parameter type") };
     // translate parameter types
     (@handle_param_type String) => { $crate::runtime::heap::HeapRef };
     (@handle_param_type str) => { $crate::runtime::heap::HeapRef };

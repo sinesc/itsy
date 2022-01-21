@@ -52,7 +52,7 @@ impl Scopes {
             // resolved counts
             self.bindings.values().fold(0, |acc, b| acc + b.type_id.is_some() as usize)
             + self.types.values().fold(0, |acc, t| acc + match t {
-                Type::Array(array) => if array.len.is_some() && array.type_id.is_some() { 1 } else { 0 },
+                Type::Array(array) => if array.type_id.is_some() { 1 } else { 0 },
                 _ => 1,
             })
             + self.functions.values().fold(0, |acc, f| acc + f.is_resolved() as usize),

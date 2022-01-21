@@ -1,24 +1,32 @@
 # Differences
 
 Itsy is designed to be used as a scripting language within Rust applications. Its syntax closely resembles what the Rust language could look like without generics or lifetimes.
-This document lists only (some of) the differences between the languages.
+This document lists some of the differences between the languages.
 
 ## Arrays
 
-Itsy supports fixed and dynamically sized arrays. Unless explicitly typed, inference will try to assume arrays to be dynamically sized.
+Itsy arrays are dynamically sized.
 
 ```rust
 let x = [ 1, 2, 3 ];
 printu8(x[0]); // -> 1
 ```
 
-The above code is inferred as a dynamically sized array of `u8` elements (assuming the `printu8` function is defined to accept a `u8`). To generate a fixed size array, a type annotation is required:
+The above code is inferred as an array of `u8` elements (assuming `printu8`'s first argument is `u8`).
+
+Arrays support operations like `push` and `pop`.
 
 ```rust
-let x: [ u8; 3 ] = [ 1, 2, 3 ];
+x.pop();
+x.push(4);
+x.push(8);
+
+for i in x {
+    printu8(i); // -> 1 2 4 8
+}
 ```
 
-To annotate a dynamically sized array, omit the semicolon and size.
+Array operations are documented [here](builtin.array.md).
 
 ## References
 

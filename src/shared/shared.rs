@@ -24,8 +24,8 @@ pub(crate) trait TypeContainer {
             true
         } else {
             match (self.type_by_id(given_type_id), self.type_by_id(accepted_type_id)) {
-                (&Type::Array(Array { len: Some(given_len), type_id: Some(given_type_id) }), &Type::Array(Array { len: Some(accepted_len), type_id: Some(accepted_type_id) })) => {
-                    (given_len == accepted_len || (given_len.is_some() && accepted_len.is_none())) && self.type_accepted_for(given_type_id, accepted_type_id)
+                (&Type::Array(Array { type_id: Some(given_type_id), .. }), &Type::Array(Array { type_id: Some(accepted_type_id), .. })) => {
+                    self.type_accepted_for(given_type_id, accepted_type_id)
                 },
                 (Type::Struct(struct_), Type::Trait(_)) => {
                     struct_.impl_traits.contains_key(&accepted_type_id)
@@ -40,8 +40,8 @@ pub(crate) trait TypeContainer {
             true
         } else {
             match (self.type_by_id(first_type_id), self.type_by_id(second_type_id)) {
-                (&Type::Array(Array { len: Some(first_len), type_id: Some(first_type_id) }), &Type::Array(Array { len: Some(second_len), type_id: Some(second_type_id) })) => {
-                    first_len == second_len && self.type_equals(first_type_id, second_type_id)
+                (&Type::Array(Array { type_id: Some(first_type_id), .. }), &Type::Array(Array { type_id: Some(second_type_id), .. })) => {
+                    self.type_equals(first_type_id, second_type_id)
                 },
                 _ => false,
             }

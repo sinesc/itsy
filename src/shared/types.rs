@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::{StackAddress, HeapAddress};
+use crate::HeapAddress;
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 
@@ -36,7 +36,6 @@ impl Struct {
 /// Information about an array in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
-    pub len: Option<Option<StackAddress>>, // -> resolved(has_len(len))
     pub type_id: Option<TypeId>,
 }
 
@@ -115,11 +114,7 @@ impl Display for Type {
             Type::f64 => write!(f, "f64"),
             Type::bool => write!(f, "bool"),
             Type::String => write!(f, "String"),
-            Type::Array(v) => match v.len {
-                Some(Some(len)) => write!(f, "[ _; {} ]", len),
-                Some(None) =>  write!(f, "[ _ ]"),
-                None => write!(f, "[ _; ? ]"),
-            },
+            Type::Array(_) => write!(f, "[ _ ]"),
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
             Type::Trait(_) => write!(f, "trait"),
@@ -218,15 +213,12 @@ impl Type {
             _ => false
         }
     }
-    /// Whether the type is a concrete type. This includes all types but dynamic arrays and traits.
-    /// - Dynamic arrays are not concrete because the can potentially be further narrowed down to a fixed size.
-    ///   A binding for a fixed size array would not accept a dynamically sized value, but the inverse is acceptable.
-    /// - Traits are not concrete because they can potentially be narrowed to a specific trait implementor.
-    ///   A binding for a concrete implementor would not accept the generic trait but the inverse is acceptable
+    /// Whether the type is a concrete type. This includes all types but traits.
+    /// Traits are not concrete because they can potentially be narrowed to a specific trait implementor.
+    /// A binding for a concrete implementor would not accept the generic trait but the inverse is acceptable
     pub fn is_concrete(self: &Self) -> bool {
         match self {
             Type::Trait(_) => false,
-            Type::Array(array) => array.len.map_or(false, |l| l.is_some()),
             _ => true
         }
     }

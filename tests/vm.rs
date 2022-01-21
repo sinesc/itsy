@@ -594,63 +594,58 @@ fn array_nested_var_dynamic_constructor() {
 }
 
 #[test]
-fn array_coercion() {
+fn array_casting() {
     let result = run("
-        fn accept(x: [u8; 4], y: [u8]) {
-            ret_u8(x[0]+y[0]);
-            ret_u8(x[1]+y[1]);
-            ret_u8(x[2]+y[2]);
-            ret_u8(x[3]+y[3]);
+        fn accept(x: [ u8 ], y: [ u16 ]) {
+            ret_u16((x[0] as u16) + y[0]);
+            ret_u16((x[1] as u16) + y[1]);
+            ret_u16((x[2] as u16) + y[2]);
+            ret_u16((x[3] as u16) + y[3]);
         }
         fn main() {
-            let x: [ u8; 4 ] = [ 1, 2, 3, 4 ];
-            let y: [ u8 ] = [ 4, 3, 2, 1, 0 ];
-            accept(x, y); // dynamic as dynamic
-            let z: [ u8; 5] = [ 5, 4, 3, 2, 1 ];
-            accept(x, z); // fixed as dynamic
+            let x: [ u8 ] = [ 1, 2, 3, 4 ];
+            let y: [ u16 ] = [ 4, 3, 2, 1, 0 ];
+            accept(x, y);
         }
     ");
-    assert_all(&result, &[ 5u8, 5, 5, 5,  6, 6, 6, 6 ]);
+    assert_all(&result, &[ 5u16, 5, 5, 5 ]);
 }
-
+/*
 #[test]
 #[should_panic(expected = "Resolver error: Expected type <[ _; 4 ]>, got <[ _; 5 ]> in line 7, column 20.")]
-fn array_coercion_fail1() {
+fn array_type_fail() {
     run("
-        fn accept(x: [u8; 4]) {
+        fn accept(x: [ u8 ]) {
             ret_u8(x[3]);
         }
         fn main() {
-            let x: [ u8; 5 ] = [ 1, 2, 3, 4, 5 ];
+            let x: [ u16 ] = [ 1, 2, 3, 4, 5 ];
             accept(x);
         }
     ");
 }
-
-#[test]
-#[should_panic(expected = "Resolver error: Expected type <[ _; 4 ]>, got <[ _ ]> in line 7, column 20.")]
-fn array_coercion_fail2() {
-    run("
-        fn accept(x: [u8; 4]) {
-            ret_u8(x[3]);
-        }
-        fn main() {
-            let x: [ u8 ] = [ 1, 2, 3, 4, 5 ];
-            accept(x);
-        }
-    ");
-}
-
+*/
 #[test]
 fn array_len() {
     let result = run("
-        let static_array: [ u16; 4 ] = [ 1, 2, 3, 4 ];
-        let dynamic_array: [ u16 ] = [ 4, 3, 2, 1, 0 ];
-        ret_u64(static_array.len());
-        ret_u64(dynamic_array.len());
+        let array_u16: [ u16 ] = [ 1, 2, 3, 4 ];
+        let array_u8: [ u8 ] = [ 4, 3, 2, 1, 0 ];
+        ret_u64(array_u16.len());
+        ret_u64(array_u8.len());
         ret_u64([ 5, 4, 3, 2, 1, 0 ].len());
     ");
     assert_all(&result, &[ 4u64, 5, 6 ]);
+}
+
+#[test]
+fn array_infer_dynamic() {
+    let result = run("
+        let dynamic_array = [ 1u16, 2, 3 ];
+        dynamic_array.push(4u16);
+        ret_u64(dynamic_array.len());
+        ret_u64(dynamic_array[3] as u64);
+    ");
+    assert_all(&result, &[ 4u64, 4 ]);
 }
 
 #[test]
@@ -748,7 +743,7 @@ fn struct_array() {
     let result = run("
         struct Inner {
             ia: u8,
-            ib: [ u64; 3 ],
+            ib: [ u64 ],
         }
         struct Outer {
             oa: i16,
@@ -781,7 +776,7 @@ fn member_assign_primitive() {
     let result = run("
         struct Inner {
             ia: u8,
-            ib: [ u64; 3 ],
+            ib: [ u64 ],
         }
         struct Outer {
             oa: i16,
@@ -810,10 +805,10 @@ fn index_assign_primitive() {
     let result = run("
         struct Inner {
             ia: u8,
-            ib: [ u64; 3 ],
+            ib: [ u64 ],
         }
         struct Outer {
-            oa: [ u8; 3 ],
+            oa: [ u8 ],
             ob: Inner,
         }
         fn main() {

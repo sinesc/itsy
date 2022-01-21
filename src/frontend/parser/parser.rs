@@ -13,7 +13,6 @@ use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::UnorderedMap;
-use crate::StackAddress;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedModule, ParsedProgram};
@@ -175,10 +174,6 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     }
 
     Err(nom::Err::Failure(Error { input: i, kind: ParseErrorKind::InvalidNumerical }))
-}
-
-fn static_size(i: Input<'_>) -> Output<StackAddress> {
-    ws(map(recognize(digit1), |digits: Input<'_>| str::parse::<StackAddress>(*digits).unwrap()))(i)
 }
 
 // literal boolean (true)
@@ -720,11 +715,10 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
 fn array(i: Input<'_>) -> Output<Array> {
     let position = i.position();
     ws(map(
-        delimited(ws(char('[')), pair(ws(inline_type), opt(preceded(ws(char(';')), ws(static_size))) ), ws(char(']'))),
-        move |tuple| Array {
+        delimited(ws(char('[')), inline_type, ws(char(']'))),
+        move |ty| Array {
             position    : position,
-            element_type: tuple.0,
-            len         : tuple.1,
+            element_type: ty,
             type_id     : None,
         }
     ))(i)

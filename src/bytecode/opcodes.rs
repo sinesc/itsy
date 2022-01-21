@@ -659,7 +659,7 @@ impl_opcodes!{
         self.cntdec_sa(address);
     }
 
-    /// Pops a heap reference off the stack and frees it if it has a reference count of 0.
+    /*/// Pops a heap reference off the stack and frees it if it has a reference count of 0.
     fn <
         cntfreetmp_8(constructor: u8 as StackAddress),
         cntfreetmp_16(constructor: u16 as StackAddress),
@@ -667,7 +667,7 @@ impl_opcodes!{
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         self.refcount_value(item, constructor, HeapRefOp::FreeTmp);
-    }
+    }*/
 
     /// Calls the given Rust function.
     fn rustcall(&mut self, &mut context, index: RustFn) {
@@ -794,7 +794,7 @@ impl_opcodes!{
         self.heap.copy(dest, src, num_bytes);
     }*/
 
-    /// Pops 2 heap references and compares num_bytes bytes.
+    /* /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_ceq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
@@ -812,7 +812,7 @@ impl_opcodes!{
         self.stack.push(equals as Data8);
         self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
         self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }
+    }*/
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn <

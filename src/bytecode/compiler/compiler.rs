@@ -119,7 +119,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 }
 
 /// Methods for compiling individual code structures.
-impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
     fn compile_statement(self: &Self, item: &ast::Statement) -> CompileResult {
@@ -652,22 +652,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    // FIXME: to handle ret instruction this may need to run recursively
-    fn decref_block_locals(self: &Self) {
-        let frame = self.locals.pop();
-        for (&binding_id, local) in frame.map.iter() {
-            if self.init_state.borrow().activated(binding_id) && self.init_state.borrow().initialized(binding_id) && local.origin == LocalOrigin::Binding {
-                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
-                let ty = self.type_by_id(type_id);
-                if ty.is_ref() {
-                    self.write_load(local.index as StackOffset, ty);
-                    self.write_cntdec(self.get_constructor(ty));
-                }
-            }
-        }
-        self.locals.push(frame);
-    }
-
     /// Compiles the given literal
     fn compile_literal(self: &Self, item: &ast::Literal) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
@@ -688,10 +672,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     let prototype = self.store_literal_prototype(item);
                     self.writer.construct(constructor, prototype);
                 } else {
-                    // non-constant constructor, construct from stack, set flag to avoid writing additional constructor instructions during recursion
+                    // non-constant constructor, construct from stack
                     let type_id = item.type_id(self).unwrap();
-                    self.compile_prototype_instructions(item)?;
-                    self.writer.upload(self.flat_size(ty), *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
+                    let size = self.compile_prototype_instructions(item)?;
+                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
                 }
             },
         }
@@ -699,14 +683,16 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to assemble a prototype.
-    fn compile_prototype_instructions(self: &Self, item: &ast::Literal) -> CompileResult {
+    fn compile_prototype_instructions(self: &Self, item: &ast::Literal) -> Result<usize, CompileError> {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
-        match &item.value {
+        Ok(match &item.value {
             LiteralValue::Array(array_literal) => {
                 for element in &array_literal.elements {
                     self.compile_expression(element)?;
                 }
+                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
+                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
             }
             LiteralValue::Struct(struct_literal) => {
                 let struct_def = ty.as_struct().expect("Expected struct, got something else");
@@ -714,6 +700,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
                     self.compile_expression(field)?;
                 }
+                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
+                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
             }
             LiteralValue::String(_) => {
                 // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
@@ -722,10 +710,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let constructor = self.get_constructor(ty);
                 let prototype = self.store_literal_prototype(item);
                 self.writer.construct(constructor, prototype);
+                Type::String.primitive_size() as StackAddress
             }
             _ => unreachable!("Invalid prototype type")
-        };
-        Ok(())
+        })
     }
 
     /// Compiles the given unary operation.
@@ -933,7 +921,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 }
 
-impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> &Type {
@@ -951,22 +939,6 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Returns constructor index for given type.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
-    }
-
-    /// Computes the flat size of given type, which is the data-size of the types heap object.
-    fn flat_size(self: &Self, ty: &Type) -> StackAddress {
-        match ty {
-            Type::Array(a)  => {
-                let element_type = self.type_by_id(a.type_id.unwrap());
-                let element_size = element_type.primitive_size() as StackAddress;
-                element_size * a.len.expect("Unresolved array len").expect("Cannot compute size for dynamically sized array")
-            },
-            Type::Struct(s) => {
-                s.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
-            },
-            Type::Enum(_)   => unimplemented!("enum size"),
-            _               => ty.primitive_size() as StackAddress
-        }
     }
 
     /// Checks if the given functions are compatible.
@@ -1072,13 +1044,28 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
+    // FIXME: to handle ret instruction this may need to run recursively
+    fn decref_block_locals(self: &Self) {
+        let frame = self.locals.pop();
+        for (&binding_id, local) in frame.map.iter() {
+            if self.init_state.borrow().activated(binding_id) && self.init_state.borrow().initialized(binding_id) && local.origin == LocalOrigin::Binding {
+                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
+                let ty = self.type_by_id(type_id);
+                if ty.is_ref() {
+                    self.write_load(local.index as StackOffset, ty);
+                    self.write_cntdec(self.get_constructor(ty));
+                }
+            }
+        }
+        self.locals.push(frame);
+    }
+
     /// Writes a constructor for non-primitive types.
     fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
-                self.writer.store_const(Constructor::Array as u8);
-                self.writer.store_const(array.len.expect("Unresolved array len").unwrap_or(0) as ItemIndex);
+                self.writer.store_const(Constructor::ArrayDyn as u8);
                 self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {
@@ -1121,6 +1108,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 self.writer.store_const(string_literal.as_str());
             },
             LiteralValue::Array(array_literal) => {
+                self.writer.store_const(array_literal.elements.len() as ItemIndex);
                 for element in &array_literal.elements {
                     self.store_literal_prototype(element.as_literal().unwrap());
                 }
@@ -1178,7 +1166,9 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
         offset
     }
+}
 
+impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes a cast from one float to another or from/to a 64 bit integer.
     fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
         match (from, to) {
@@ -1248,10 +1238,10 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
     }
 
-    /// Writes an appropriate variant of the cntdec instruction.
+    /*/// Writes an appropriate variant of the cntdec instruction.
     fn write_cntfreetmp(self: &Self, constructor: StackAddress) {
         opcode_unsigned!(self, cntfreetmp_8, cntfreetmp_16, cntfreetmp_sa, constructor);
-    }
+    }*/
 
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
@@ -1439,22 +1429,13 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes instructions for build-in len method.
     fn write_intrinsic(self: &Self, intrinsic: Intrinsic, ty: &Type) {
+        #[allow(unreachable_patterns)]
         match ty {
-            &Type::Array(Array { len: Some(Some(len)), type_id }) => {
+            &Type::Array(Array { type_id }) => {
                 let inner_ty = self.type_by_id(type_id.unwrap());
                 match intrinsic {
                     Intrinsic::ArrayLen => {
-                        self.write_cntfreetmp(self.get_constructor(ty));
-                        self.write_numeric(Numeric::Unsigned(len as u64), &STACK_ADDRESS_TYPE);
-                    }
-                    _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
-                }
-            }
-            &Type::Array(Array { len: Some(None), type_id }) => {
-                let inner_ty = self.type_by_id(type_id.unwrap());
-                match intrinsic {
-                    Intrinsic::ArrayLen => {
-                        self.writer.heap_size(); // fixme: doesn't do refcounting
+                        self.writer.heap_size(); // fixme: doesn't do refcounting // self.write_cntfreetmp(self.get_constructor(ty));
                         self.writer.shrsa(match inner_ty.primitive_size() {
                             1 => 0,
                             2 => 1,
@@ -1465,6 +1446,7 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     }
                     Intrinsic::ArrayPush => builtin_sized!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
                     Intrinsic::ArrayPop => builtin_sized!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
+                    Intrinsic::ArrayTruncate => builtin_sized!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
                     _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
                 }
             }
@@ -1704,7 +1686,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_ceq();
         } else {
-            self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
+            unimplemented!("general heap compare not yet implemented");
+            //self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
         }
     }
 
@@ -1721,7 +1704,8 @@ impl<'ast, 'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cneq();
         } else {
-            self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this
+            unimplemented!("general heap compare not yet implemented");
+            //self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this
         }
     }
 
