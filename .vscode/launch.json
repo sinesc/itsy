@@ -17,7 +17,7 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             //"environment": [],
-            //"externalConsole": true
+            //"console": "integratedTerminal"
             "sourceLanguages": ["rust"],
         }/*,
         {
@@ -28,7 +28,7 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             //"environment": [],
-            //"externalConsole": true
+            //"console": "integratedTerminal"
             "sourceLanguages": ["rust"],
         }*/,
         {
@@ -40,7 +40,7 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": true
+            "console": "integratedTerminal"
         }/*,
         {
             "name": "vsdebug release",
@@ -51,7 +51,7 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": true
+            "console": "integratedTerminal"
         }*/
     ]
 }
