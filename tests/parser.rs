@@ -59,3 +59,11 @@ fn comments_without_whitespace() {
         }
     ", "").unwrap();
 }
+
+#[test]
+fn binary_as() {
+    parse_module("
+        fn test() -> u8 {
+            a as u8 + 1
+        }\n", "").unwrap();
+}
