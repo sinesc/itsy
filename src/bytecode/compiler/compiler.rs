@@ -27,7 +27,7 @@ struct Compiler<T> {
     /// Non-primitive type constructors.
     constructors: UnorderedMap<TypeId, StackAddress>,
     // Maps functions to their call index.
-    functions: RefCell<UnorderedMap<FunctionId, CallInfo>>,
+    functions: UnorderedMap<FunctionId, CallInfo>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
     call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
     /// Tracks variable initialization state.
@@ -60,7 +60,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     let mut compiler = Compiler {
         writer                      : Writer::new(),
         locals                      : StackFrames::new(),
-        functions                   : RefCell::new(UnorderedMap::new()),
+        functions                   : UnorderedMap::new(),
         call_placeholder            : UnorderedMap::new(),
         constructors                : UnorderedMap::new(),
         init_state                  : RefCell::new(BindingState::new()),
@@ -104,14 +104,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     // write actual function offsets to vtable
     for (implementor_index, selected_function_id) in trait_function_implementations {
         if let Some(selected_function_id) = selected_function_id {
-            let selected_function_offset = compiler.functions.borrow().get(&selected_function_id).expect("Missing function callinfo").addr;
+            let selected_function_offset = compiler.functions.get(&selected_function_id).expect("Missing function callinfo").addr;
             let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
             compiler.writer.set_const_data(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
     // overwrite placeholder with actual entry position
-    let &entry_call = compiler.functions.borrow().get(&entry_fn).expect("Failed to locate entry function in generated code.");
+    let &entry_call = compiler.functions.get(&entry_fn).expect("Failed to locate entry function in generated code.");
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
 
     // return generated program
@@ -323,7 +323,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
                 } else {
 
-                    let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
+                    let target = if let Some(&target) = self.functions.get(&function_id) {
                         target
                     } else {
                         let call_position = self.writer.position();
@@ -339,7 +339,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
                 let call_position = self.writer.position();
 
-                let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
+                let target = if let Some(&target) = self.functions.get(&function_id) {
                     target
                 } else {
                     self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
@@ -587,7 +587,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store call info required to compile calls to this function
         let function_id = item.function_id.unwrap();
         let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
-        self.functions.borrow_mut().insert(function_id, call_info);
+        self.functions.insert(function_id, call_info);
         self.fix_targets(function_id, call_info);
 
         // push local environment on the locals stack so that it is accessible from nested compile_*
