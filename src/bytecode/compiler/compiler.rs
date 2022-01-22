@@ -29,7 +29,7 @@ struct Compiler<T> {
     // Maps functions to their call index.
     functions: RefCell<UnorderedMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    call_placeholder: RefCell<UnorderedMap<FunctionId, Vec<StackAddress>>>,
+    call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
     /// Tracks variable initialization state.
     init_state: RefCell<BindingState>,
     /// Module base path. For error reporting only.
@@ -61,7 +61,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         writer                      : Writer::new(),
         locals                      : StackFrames::new(),
         functions                   : RefCell::new(UnorderedMap::new()),
-        call_placeholder            : RefCell::new(UnorderedMap::new()),
+        call_placeholder            : UnorderedMap::new(),
         constructors                : UnorderedMap::new(),
         init_state                  : RefCell::new(BindingState::new()),
         module_path                 : "".to_string(),
@@ -327,7 +327,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         target
                     } else {
                         let call_position = self.writer.position();
-                        self.call_placeholder.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                        self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
                         CallInfo::PLACEHOLDER
                     };
 
@@ -342,7 +342,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
                     target
                 } else {
-                    self.call_placeholder.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                    self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
                     CallInfo::PLACEHOLDER
                 };
 
@@ -968,8 +968,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &Self, function_id: FunctionId, info: CallInfo) {
-        if let Some(targets) = self.call_placeholder.borrow_mut().remove(&function_id) {
+    fn fix_targets(self: &mut Self, function_id: FunctionId, info: CallInfo) {
+        if let Some(targets) = self.call_placeholder.remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
