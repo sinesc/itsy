@@ -17,6 +17,7 @@ impl_builtins! {
 
     fn array_pushx(&mut vm, this: HeapRef, value: HeapRef) {
         vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
+        // TODO refcount
     }
 
     fn <
@@ -38,6 +39,7 @@ impl_builtins! {
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
         vm.heap.item_mut(index).data.truncate(offset);
         result
+        // TODO refcount
     }
 
     fn <
@@ -61,5 +63,34 @@ impl_builtins! {
         if new_size < current_size {
             vm.heap.item_mut(index).data.truncate(new_size);
         }
+        // TODO refcount
+    }
+
+    fn <
+        array_remove8<T: u8>(this: HeapRef, element: StackAddress) -> u8,
+        array_remove16<T: u16>(this: HeapRef, element: StackAddress) -> u16,
+        array_remove32<T: u32>(this: HeapRef, element: StackAddress) -> u32,
+        array_remove64<T: u64>(this: HeapRef, element: StackAddress) -> u64,
+    >(&mut vm) {
+        let element_size = size_of::<T>();
+        let offset = element as usize * element_size;
+        let index = this.index();
+        let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+        let data = &mut vm.heap.item_mut(index).data;
+        data.copy_within(offset + element_size .., offset);
+        data.truncate(data.len() - element_size);
+        result
+    }
+
+    fn array_removex(&mut vm, this: HeapRef, element: StackAddress) -> HeapRef {
+        let element_size = size_of::<HeapRef>();
+        let offset = element as usize * element_size;
+        let index = this.index();
+        let result: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+        let data = &mut vm.heap.item_mut(index).data;
+        data.copy_within(offset + element_size .., offset);
+        data.truncate(data.len() - element_size);
+        result
+        // TODO refcount
     }
 }

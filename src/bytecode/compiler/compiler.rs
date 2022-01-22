@@ -1457,6 +1457,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     Intrinsic::ArrayPush => builtin_sized!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
                     Intrinsic::ArrayPop => builtin_sized!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
                     Intrinsic::ArrayTruncate => builtin_sized!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
+                    Intrinsic::ArrayRemove => builtin_sized!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
                     _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
                 }
             }
