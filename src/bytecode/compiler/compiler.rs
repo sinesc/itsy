@@ -4,7 +4,7 @@ mod stack_frame;
 #[macro_use] mod macros;
 pub mod error;
 mod util;
-mod init_state;
+mod binding_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
@@ -14,10 +14,10 @@ use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, AR
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-use init_state::{BindingState, BranchingKind, BranchingPath};
+use binding_state::{BindingState, BranchingKind, BranchingPath};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-struct Compiler<'ty, T> {
+struct Compiler<T> {
     /// Bytecode writer used to output to.
     writer: Writer<T>,
     /// Type and mutability data.
@@ -25,11 +25,11 @@ struct Compiler<'ty, T> {
     /// Maps from binding id to load-argument for each frame.
     locals: StackFrames,
     /// Non-primitive type constructors.
-    constructors: UnorderedMap<&'ty Type, StackAddress>,
+    constructors: UnorderedMap<TypeId, StackAddress>,
     // Maps functions to their call index.
     functions: RefCell<UnorderedMap<FunctionId, CallInfo>>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    unfixed_function_calls: RefCell<UnorderedMap<FunctionId, Vec<StackAddress>>>,
+    call_placeholder: RefCell<UnorderedMap<FunctionId, Vec<StackAddress>>>,
     /// Tracks variable initialization state.
     init_state: RefCell<BindingState>,
     /// Module base path. For error reporting only.
@@ -61,7 +61,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         writer                      : Writer::new(),
         locals                      : StackFrames::new(),
         functions                   : RefCell::new(UnorderedMap::new()),
-        unfixed_function_calls      : RefCell::new(UnorderedMap::new()),
+        call_placeholder            : RefCell::new(UnorderedMap::new()),
         constructors                : UnorderedMap::new(),
         init_state                  : RefCell::new(BindingState::new()),
         module_path                 : "".to_string(),
@@ -78,10 +78,10 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.id_mappings.types() {
-        if !ty.is_primitive() && !ty.as_trait().is_some() /*&& !ty.as_array().map_or(false, |a| a.len.unwrap().is_none()) */ {
+        if !ty.is_primitive() && !ty.as_trait().is_some() {
             // store constructor, remember position
             let position = compiler.store_constructor(type_id);
-            compiler.constructors.insert(ty, position);
+            compiler.constructors.insert(type_id, position);
             // for trait implementing types, link constructor to trait implementor (trait objects still need proper reference counting, which requires the constructor of the concrete type)
             if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
                 compiler.writer.set_const_data((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
@@ -119,7 +119,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 }
 
 /// Methods for compiling individual code structures.
-impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given statement.
     fn compile_statement(self: &Self, item: &ast::Statement) -> CompileResult {
@@ -323,7 +323,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         target
                     } else {
                         let call_position = self.writer.position();
-                        self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                        self.call_placeholder.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
                         CallInfo::PLACEHOLDER
                     };
 
@@ -338,7 +338,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let target = if let Some(&target) = self.functions.borrow().get(&function_id) {
                     target
                 } else {
-                    self.unfixed_function_calls.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
+                    self.call_placeholder.borrow_mut().entry(function_id).or_insert(Vec::new()).push(call_position);
                     CallInfo::PLACEHOLDER
                 };
 
@@ -598,8 +598,8 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         for arg in item.sig.args.iter() {
             let ty = self.item_type(arg);
             if ty.is_ref() {
-                let arg = frame.lookup(arg.binding_id.unwrap());
-                self.write_load(arg.index as StackOffset, ty);
+                let local = frame.lookup(arg.binding_id.unwrap());
+                self.write_load(local.index as StackOffset, ty);
                 if ty.as_trait().is_some() {
                     self.writer.vcnt(HeapRefOp::Dec);
                 } else {
@@ -716,9 +716,6 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles the given unary operation.
     fn compile_unary_op(self: &Self, item: &ast::UnaryOp) -> CompileResult {
         use crate::frontend::ast::{UnaryOperator as UO, BinaryOperator};
-
-        let exp_type = self.item_type(&item.expr);
-
         match item.op {
             // logical
             UO::Not => {
@@ -734,6 +731,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
                         self.locals.lookup(binding_id).index
                     };
+                    let exp_type = self.item_type(&item.expr);
                     match item.op {
                         UO::IncBefore => self.write_preinc(load_index as StackOffset, &exp_type),
                         UO::DecBefore => self.write_predec(load_index as StackOffset, &exp_type),
@@ -745,6 +743,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;           // stack: &left
                     comment!(self, "{}", item);
+                    let exp_type = self.item_type(&item.expr);
                     match item.op {
                         UO::IncBefore => self.write_heap_preinc(&exp_type),
                         UO::DecBefore => self.write_heap_predec(&exp_type),
@@ -762,16 +761,13 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Compiles a simple, non-shortcutting binary operation.
     fn compile_binary_op_simple(self: &Self, item: &ast::BinaryOp) -> CompileResult {
-
         use crate::frontend::ast::BinaryOperator as BO;
-        let ty_result = self.item_type(item);
-        let ty_left = self.item_type(&item.left);
-
         // compile left, right and store references, left and right will be consumed
         self.compile_expression(&item.left)?; // stack: left
         comment!(self, "{}", item.op);
         self.compile_expression(&item.right)?; // stack: left right
-
+        let ty_result = self.item_type(item);
+        let ty_left = self.item_type(&item.left);
         match item.op {                             // stack: result
             // arithmetic/concat
             BO::Add => self.write_add(ty_result),
@@ -788,7 +784,6 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
             BO::NotEqual    => self.write_neq(ty_left),
             _ => unreachable!("Invalid simple-operation {:?} in compile_binary_op", item.op),
         }
-
         Ok(())
     }
 
@@ -820,10 +815,10 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Compiles an offsetting binary operation, i.e.. indexing and member access.
     fn compile_binary_op_offseting(self: &Self, item: &ast::BinaryOp) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
-        let result_type = self.item_type(item);
-        let compare_type = self.item_type(&item.left);
         self.compile_expression(&item.left)?;
         self.compile_expression(&item.right)?;
+        let result_type = self.item_type(item);
+        let compare_type = self.item_type(&item.left);
         match item.op {
             BO::Index => {
                 comment!(self, "[{}]", &item.right);
@@ -918,7 +913,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 }
 
-impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> &Type {
@@ -928,14 +923,10 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Returns type for given type_id.
-    fn get_type(self: &Self, type_id: Option<TypeId>) -> &Type {
-        self.type_by_id(type_id.expect("Unresolved binding encountered."))
-    }
-
     /// Returns constructor index for given type.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
-        *self.constructors.get(ty).expect(&format!("Undefined constructor for type {:?}", ty))
+        let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
+        *self.constructors.get(&type_id).expect(&format!("Undefined constructor for type {:?}", self.type_by_id(type_id)))
     }
 
     /// Checks if the given functions are compatible.
@@ -966,7 +957,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &Self, function_id: FunctionId, info: CallInfo) {
-        if let Some(targets) = self.unfixed_function_calls.borrow_mut().remove(&function_id) {
+        if let Some(targets) = self.call_placeholder.borrow_mut().remove(&function_id) {
             let backup_position = self.writer.position();
             for &target in targets.iter() {
                 self.writer.set_position(target);
@@ -1175,7 +1166,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn compute_member_offset(self: &Self, struct_: &Struct, member_index: ItemIndex) -> StackAddress {
         let mut offset = 0;
         for index in 0 .. member_index {
-            let field_type = self.get_type(struct_.fields[index as usize].1);
+            let field_type = self.type_by_id(struct_.fields[index as usize].1.expect("Unresolved struct field encountered"));
             // use reference size for references, otherwise shallow type size
             offset += field_type.primitive_size() as StackAddress;
         }
@@ -1183,7 +1174,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 }
 
-impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
+impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes a cast from one float to another or from/to a 64 bit integer.
     fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
         match (from, to) {
@@ -1245,27 +1236,27 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
     /// Writes an appropriate variant of the cnt_nc instruction.
     fn write_cnt_nc(self: &Self, constructor: StackAddress, op: HeapRefOp) {
-        opcode_unsigned!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op);
+        select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op);
     }
 
     /// Writes an appropriate variant of the cnt instruction.
     fn write_cnt(self: &Self, constructor: StackAddress, op: HeapRefOp) {
-        opcode_unsigned!(self, cnt_8, cnt_16, cnt_sa, constructor, op);
+        select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op);
     }
 
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset > 0 {
-            opcode_signed!(self, offsetx_8, offsetx_16, offsetx_sa, offset as StackOffset);
+            select_signed_opcode!(self, offsetx_8, offsetx_16, offsetx_sa, offset as StackOffset);
         }
     }
 
     /// Writes an appropriate variant of the const instruction.
     fn write_const(self: &Self, index: StackAddress, ty: &Type) {
         match ty.primitive_size() {
-            2 => opcode_unsigned!(self, const16_8, const16_16, const16_sa, index),
-            4 => opcode_unsigned!(self, const32_8, const32_16, const32_sa, index),
-            8 => opcode_unsigned!(self, const64_8, const64_16, const64_sa, index),
+            2 => select_unsigned_opcode!(self, const16_8, const16_16, const16_sa, index),
+            4 => select_unsigned_opcode!(self, const32_8, const32_16, const32_sa, index),
+            8 => select_unsigned_opcode!(self, const64_8, const64_16, const64_sa, index),
             //16 => opcode_unsigned!(self, const128_8, const128_16, const128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
@@ -1348,10 +1339,10 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, local: Local, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => opcode_signed!(self, store8_8, store8_16, store8_sa, local.index as StackOffset),
-            2 => opcode_signed!(self, store16_8, store16_16, store16_sa, local.index as StackOffset),
-            4 => opcode_signed!(self, store32_8, store32_16, store32_sa, local.index as StackOffset),
-            8 => opcode_signed!(self, store64_8, store64_16, store64_sa, local.index as StackOffset),
+            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local.index as StackOffset),
+            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local.index as StackOffset),
+            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local.index as StackOffset),
+            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local.index as StackOffset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1375,15 +1366,15 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, index: StackOffset, ty: &Type) {
         match ty.primitive_size() {
-            1 => opcode_signed!(self, load8_8, load8_16, load8_sa, index),
-            2 => opcode_signed!(self, load16_8, load16_16, load16_sa, index),
+            1 => select_signed_opcode!(self, load8_8, load8_16, load8_sa, index),
+            2 => select_signed_opcode!(self, load16_8, load16_16, load16_sa, index),
             4 => match index {
                 ARG1 => self.writer.load_arg1(),
                 ARG2 => self.writer.load_arg2(),
                 ARG3 => self.writer.load_arg3(),
-                _ => opcode_signed!(self, load32_8, load32_16, load32_sa, index),
+                _ => select_signed_opcode!(self, load32_8, load32_16, load32_sa, index),
             },
-            8 => opcode_signed!(self, load64_8, load64_16, load64_sa, index),
+            8 => select_signed_opcode!(self, load64_8, load64_16, load64_sa, index),
             //16 => opcode_signed!(self, load128_8, load128_16, load128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         };
@@ -1454,10 +1445,10 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                             _ => unreachable!("Unsupported inner size for type {} for intrinsic {:?}", ty, intrinsic),
                         });
                     }
-                    Intrinsic::ArrayPush => builtin_sized!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
-                    Intrinsic::ArrayPop => builtin_sized!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
-                    Intrinsic::ArrayTruncate => builtin_sized!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
-                    Intrinsic::ArrayRemove => builtin_sized!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
+                    Intrinsic::ArrayPush => select_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
+                    Intrinsic::ArrayPop => select_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
+                    Intrinsic::ArrayTruncate => select_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
+                    Intrinsic::ArrayRemove => select_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
                     _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
                 }
             }
@@ -1767,7 +1758,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 }
 
-impl<'ty, T> Compiler<'ty, T> {
+impl<T> Compiler<T> {
 
     /// Generate flat list of all traits and their functions
     fn filter_trait_functions(id_mappings: &IdMappings) -> Vec<(TypeId, &String, FunctionId)> {
@@ -1833,7 +1824,7 @@ impl<'ty, T> Compiler<'ty, T> {
 
 /// Support TypeContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
 /// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
-impl<'ty, T> TypeContainer for Compiler<'ty, T> {
+impl<T> TypeContainer for Compiler<T> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         let index: usize = type_id.into();
         &self.id_mappings.type_map[index]
@@ -1846,7 +1837,7 @@ impl<'ty, T> TypeContainer for Compiler<'ty, T> {
 
 /// A container holding binding id to BindingInfo mappings
 #[cfg(feature="compiler")]
-impl<'ty, T> BindingContainer for Compiler<'ty, T> {
+impl<T> BindingContainer for Compiler<T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
         let binding_index = Into::<usize>::into(binding_id);
         &self.id_mappings.binding_map[binding_index]

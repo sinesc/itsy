@@ -8,7 +8,7 @@ macro_rules! comment {
 }
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
-macro_rules! opcode_signed {
+macro_rules! select_signed_opcode {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{i8, i16};
         if $value >= i8::MIN as StackOffset && $value <= i8::MAX as StackOffset {
@@ -22,7 +22,7 @@ macro_rules! opcode_signed {
 }
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
-macro_rules! opcode_unsigned {
+macro_rules! select_unsigned_opcode {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{u8, u16};
         if $value <= u8::MAX as StackAddress {
@@ -35,7 +35,7 @@ macro_rules! opcode_unsigned {
     }}
 }
 
-macro_rules! builtin_sized {
+macro_rules! select_builtin {
     ($self:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => {
         if $ty.is_ref() {
             $self.writer.builtincall(Builtin::$variant_x);
