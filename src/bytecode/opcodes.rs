@@ -623,60 +623,50 @@ impl_opcodes!{
         self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
     }
 
-    /// Increase reference count for the top heap reference on the stack. Does not pop the object off the stack.
+    /// Pops a heap reference off the stack and performs a reference count operation.
     fn <
-        cntinc_8_nc(constructor: u8 as StackAddress),
-        cntinc_16_nc(constructor: u16 as StackAddress),
-        cntinc_sa_nc(constructor: StackAddress),
+        cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
+        cnt_16(constructor: u16 as StackAddress, op: HeapRefOp),
+        cnt_sa(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
-        let item: HeapRef = self.stack.top();
-        self.refcount_value(item, constructor, HeapRefOp::Inc);
+        let item: HeapRef = self.stack.pop();
+        self.refcount_value(item, constructor, op);
     }
 
-    /// Increase reference count for the top heap reference on the stack. Does not pop the object off the stack. Uses dynamic type information to select the constructor.
-    fn vcntinc_nc(&mut self) {
+    /// Pops a heap reference off the stack and performs a reference count operation. Uses dynamic type information to select the constructor.
+    fn vcnt(&mut self, op: HeapRefOp) {
         let item: HeapRef = self.stack.top();
         let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
         let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cntinc_sa_nc(address);
+        self.cnt_sa(address, op);
     }
 
-    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0.
+    /// Performs a non-consuming reference count operation for the top heap reference on the stack.
     fn <
-        cntdec_8(constructor: u8 as StackAddress),
-        cntdec_16(constructor: u16 as StackAddress),
-        cntdec_sa(constructor: StackAddress),
+        cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
+        cnt_16_nc(constructor: u16 as StackAddress, op: HeapRefOp),
+        cnt_sa_nc(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
-        let item: HeapRef = self.stack.pop();
-        self.refcount_value(item, constructor, HeapRefOp::Dec);
+        let item: HeapRef = self.stack.top();
+        self.refcount_value(item, constructor, op);
     }
 
-    /// Pops a heap reference off the stack and decreases its reference count by 1, freeing it on 0. Uses dynamic type information to select the constructor.
-    fn vcntdec(&mut self) {
+    /// Performs a non-consuming reference count operation for the top heap reference on the stack. Uses dynamic type information to select the constructor.
+    fn vcnt_nc(&mut self, op: HeapRefOp) {
         let item: HeapRef = self.stack.top();
         let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
         let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cntdec_sa(address);
-    }
-
-    /*/// Pops a heap reference off the stack and frees it if it has a reference count of 0.
-    fn <
-        cntfreetmp_8(constructor: u8 as StackAddress),
-        cntfreetmp_16(constructor: u16 as StackAddress),
-        cntfreetmp_sa(constructor: StackAddress),
-    >(&mut self) {
-        let item: HeapRef = self.stack.pop();
-        self.refcount_value(item, constructor, HeapRefOp::FreeTmp);
-    }*/
-
-    /// Calls the given Rust function.
-    fn rustcall(&mut self, &mut context, index: RustFn) {
-        T::from_index(index).exec(self, context);
+        self.cnt_sa_nc(address, op);
     }
 
     /// Calls the given Rust function.
-    fn builtincall(&mut self, index: Builtin) {
-        Builtin::from_index(index).exec(self);
+    fn rustcall(&mut self, &mut context, rustfn: RustFn) {
+        rustfn.exec(self, context);
+    }
+
+    /// Calls the given Rust function.
+    fn builtincall(&mut self, builtin: Builtin) {
+        builtin.exec(self);
     }
 
     /// Function call. Saves state and sets programm counter to given addr.

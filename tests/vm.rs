@@ -1323,6 +1323,36 @@ fn heap_return() {
 }
 
 #[test]
+fn heap_result() {
+    let result = run("
+        struct Inner {
+            c: u32,
+        }
+        struct Outer {
+            a: u32,
+            b: Inner,
+        }
+        fn main() {
+            let mut y = {
+                let x = Outer {
+                    a: 11,
+                    b: Inner {
+                        c: 13,
+                    }
+                };
+                x.b
+            };
+            ret_u32(y.c);
+            y.c += 1;
+            ret_u32(y.c);
+        }
+    ");
+    assert_all(&result, &[
+        13u32, 14
+    ]);
+}
+
+#[test]
 fn heap_compare() {
     let result = run("
         let array = [ 7u8, 7 ];

@@ -610,7 +610,7 @@ impl Returns for IfBlock {
 
 impl Typeable for IfBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.if_block.result.as_ref().map_or(None, |e| e.type_id(bindings))
+        self.if_block.result.as_ref().map_or(Some(TypeId::void()), |e| e.type_id(bindings))
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         if let Some(result) = &mut self.if_block.result {
@@ -644,7 +644,7 @@ impl Resolvable for Block {
 
 impl Typeable for Block {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.result.as_ref().map_or(None, |e| e.type_id(bindings))
+        self.result.as_ref().map_or(Some(TypeId::void()), |e| e.type_id(bindings))
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         if let Some(result) = &mut self.result {

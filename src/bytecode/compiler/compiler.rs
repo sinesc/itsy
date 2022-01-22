@@ -10,7 +10,7 @@ use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind, Intrinsic}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
@@ -292,14 +292,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
             match function_info.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
-                    let ty = self.item_type(arg);
-                    if ty.is_ref() {
-                        if ty.as_trait().is_some() {
-                            self.writer.vcntinc_nc();
-                        } else {
-                            self.write_cntinc(self.get_constructor(ty));
-                        }
-                    }
+                    self.item_cnt(arg, true, HeapRefOp::Inc);
                 },
                 _ => { }
             }
@@ -496,7 +489,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let array_constructor = self.get_constructor(array_ty);
 
         self.compile_expression(&item.expr)?;   // stack &array
-        self.write_cntinc(array_constructor);
+        self.write_cnt_nc(array_constructor, HeapRefOp::Inc);
         self.write_clone_ref();
         self.write_intrinsic(Intrinsic::ArrayLen, array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
@@ -510,14 +503,14 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
 
         if element_ty.is_ref() {
             self.write_clone(element_ty);       // stack &array index element element
-            self.write_cntinc(element_constructor);
+            self.write_cnt_nc(element_constructor, HeapRefOp::Inc);
         }
 
         self.write_store(element_local, element_ty);      // stack &array index <is_ref ? element>
         self.compile_block(&item.block)?;       // stack &array index <is_ref ? element>
 
         if element_ty.is_ref() {
-            self.write_cntdec(element_constructor);         // stack &array index
+            self.write_cnt(element_constructor, HeapRefOp::Dec);         // stack &array index
         }
 
         self.writer.jn0_sa_nc(loop_start);
@@ -526,7 +519,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0_sa_nc(exit_target));
         self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
-        self.write_cntdec(array_constructor);         // stack --
+        self.write_cnt(array_constructor, HeapRefOp::Dec);         // stack --
         Ok(())
     }
 
@@ -608,9 +601,9 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let arg = frame.lookup(arg.binding_id.unwrap());
                 self.write_load(arg.index as StackOffset, ty);
                 if ty.as_trait().is_some() {
-                    self.writer.vcntdec();
+                    self.writer.vcnt(HeapRefOp::Dec);
                 } else {
-                    self.write_cntdec(self.get_constructor(ty));
+                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
                 }
             }
         }
@@ -636,13 +629,17 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         if let Some(returns) = &item.returns {
             comment!(self, "block returning");
             self.compile_expression(returns)?;
+            self.item_cnt(returns, true, HeapRefOp::Inc);
             self.decref_block_locals();
+            self.item_cnt(returns, true, HeapRefOp::Zero);
             let exit_jump = self.writer.jmp(123);
             self.locals.add_forward_jmp(exit_jump);
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
+            self.item_cnt(result, true, HeapRefOp::Inc);
             self.decref_block_locals();
+            self.item_cnt(result, true, HeapRefOp::Zero);
         } else {
             self.decref_block_locals();
         }
@@ -1044,6 +1041,24 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
+    /// Writes reference counting operation on given item.
+    fn item_cnt(self: &Self, item: &impl Typeable, nc: bool, op: HeapRefOp) {
+        let ty = self.item_type(item);
+        if ty.is_ref() {
+            if ty.as_trait().is_some() {
+                match nc {
+                    true => self.writer.vcnt_nc(op),
+                    false => self.writer.vcnt(op),
+                };
+            } else {
+                match nc {
+                    true => self.write_cnt_nc(self.get_constructor(ty), op),
+                    false => self.write_cnt(self.get_constructor(ty), op),
+                };
+            }
+        }
+    }
+
     // FIXME: to handle ret instruction this may need to run recursively
     fn decref_block_locals(self: &Self) {
         let frame = self.locals.pop();
@@ -1053,7 +1068,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
                 let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
                     self.write_load(local.index as StackOffset, ty);
-                    self.write_cntdec(self.get_constructor(ty));
+                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
                 }
             }
         }
@@ -1228,20 +1243,15 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes an appropriate variant of the cntinc instruction.
-    fn write_cntinc(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntinc_8_nc, cntinc_16_nc, cntinc_sa_nc, constructor);
+    /// Writes an appropriate variant of the cnt_nc instruction.
+    fn write_cnt_nc(self: &Self, constructor: StackAddress, op: HeapRefOp) {
+        opcode_unsigned!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op);
     }
 
-    /// Writes an appropriate variant of the cntdec instruction.
-    fn write_cntdec(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntdec_8, cntdec_16, cntdec_sa, constructor);
+    /// Writes an appropriate variant of the cnt instruction.
+    fn write_cnt(self: &Self, constructor: StackAddress, op: HeapRefOp) {
+        opcode_unsigned!(self, cnt_8, cnt_16, cnt_sa, constructor, op);
     }
-
-    /*/// Writes an appropriate variant of the cntdec instruction.
-    fn write_cntfreetmp(self: &Self, constructor: StackAddress) {
-        opcode_unsigned!(self, cntfreetmp_8, cntfreetmp_16, cntfreetmp_sa, constructor);
-    }*/
 
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {

@@ -4,7 +4,7 @@ use crate::bytecode::{HeapRef, HeapSlice};
 use crate::shared::index_twice;
 
 // Asserts that a heap item exists when debug_assertions are enabled
-macro_rules! assert_item_exists {
+macro_rules! debug_assert_index {
     ($self:ident, $index:expr) => {
         #[cfg(debug_assertions)]
         if $self.free.iter().find(|&&pos| pos == $index).is_some() {
@@ -29,6 +29,7 @@ pub enum HeapCmp {
 
 /// Allowed heap reference counting operations.
 #[derive(Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum HeapRefOp {
     /// Increase reference counter.
     Inc,
@@ -38,6 +39,18 @@ pub enum HeapRefOp {
     FreeTmp,
     /// Decrease reference counter but do not free on zero.
     Zero,
+}
+
+impl HeapRefOp {
+    pub(crate) fn from_u8(index: u8) -> Self {
+        match index {
+            x if x == Self::Inc as u8 => Self::Inc,
+            x if x == Self::Dec as u8 => Self::Dec,
+            x if x == Self::FreeTmp as u8 => Self::FreeTmp,
+            x if x == Self::Zero as u8 => Self::Zero,
+            _ => panic!("Invalid HeapRefOp index {}", index),
+        }
+    }
 }
 
 /// A reference counted heap object.
@@ -123,23 +136,23 @@ impl Heap {
     }
     /// Extends heap item with given data.
     pub fn extend_from(self: &mut Self, index: StackAddress, slice: &[u8]) -> StackAddress {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         let position = self.objects[index as usize].data.len() as StackAddress;
         self.objects[index as usize].data.extend_from_slice(slice);
         position
     }
     /// Truncates heap item to given size
     pub fn truncate(self: &mut Self, index: StackAddress, size: StackAddress) {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         self.objects[index as usize].data.truncate(size as usize);
     }
     pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         self.objects[index as usize].epoch
     }
     /// Increase/decrease reference count for given heap object, optionally freeing it at count 0.
     pub fn ref_item(self: &mut Self, index: StackAddress, op: HeapRefOp) {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         let refs = &mut self.objects[index as usize].refs;
         match op {
             HeapRefOp::Inc => {
@@ -166,38 +179,38 @@ impl Heap {
     }
     /// Free a chunk of memory.
     pub fn free_item(self: &mut Self, index: StackAddress) {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         self.free.push(index);
     }
     /// Removes and returns a chunk of memory, freeing its slot on the heap.
     pub fn remove_item(self: &mut Self, index: StackAddress) -> Vec<u8> {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         let object = replace(&mut self.objects[index as usize], HeapObject::new(Vec::new(), 0, self.epoch));
         self.free.push(index);
         object.data
     }
     /// Returns the size in bytes of the given heap object.
     pub fn size_of_item(self: &Self, index: StackAddress) -> StackAddress {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         self.objects[index as usize].data.len() as StackAddress
     }
     /// Returns the size in bytes of the given heap object.
     pub fn item_implementor_index(self: &Self, index: StackAddress) -> ItemIndex {
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         self.objects[index as usize].implementor_index
     }
     /// Returns a byte slice for the given heap reference.
     pub fn slice(self: &Self, item: HeapRef, len: StackAddress) -> &[u8] {
         let (index, offset) = item.into();
-        assert_item_exists!(self, index);
+        debug_assert_index!(self, index);
         let offset = offset as usize;
         let len = len as usize;
         &self.objects[index as usize].data[offset..offset + len]
     }
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
     pub fn copy(self: &mut Self, dest_item: HeapRef, src_item: HeapRef, len: StackAddress) {
-        assert_item_exists!(self, dest_item.index());
-        assert_item_exists!(self, src_item.index());
+        debug_assert_index!(self, dest_item.index());
+        debug_assert_index!(self, src_item.index());
         if dest_item.index() != src_item.index() {
             let (dest, src) = index_twice(&mut self.objects, dest_item.index() as usize, src_item.index() as usize);
             let offset_src = src_item.offset() as usize;
@@ -232,8 +245,8 @@ impl Heap {
     }
     // Compares bytes of one heap object with another.
     pub fn compare(self: &mut Self, a: HeapRef, b: HeapRef, len: StackAddress, op: HeapCmp) -> bool {
-        assert_item_exists!(self, a.index());
-        assert_item_exists!(self, b.index());
+        debug_assert_index!(self, a.index());
+        debug_assert_index!(self, b.index());
         let slice_a = self.slice(a, len);
         let slice_b = self.slice(b, len);
         match op {
@@ -247,15 +260,15 @@ impl Heap {
     }
     /// Returns a string slice for the given heap reference.
     pub fn str(self: &Self, item: HeapRef, len: StackAddress) -> &str {
-        assert_item_exists!(self, item.index());
+        debug_assert_index!(self, item.index());
         let slice = self.slice(item, len);
         //un safe { std::str::from_utf8_unchecked(slice) }
         std::str::from_utf8(slice).unwrap()
     }
     // Compares string slice of one heap object with another.
     pub fn compare_str(self: &mut Self, a: HeapSlice, b: HeapSlice, op: HeapCmp) -> bool {
-        assert_item_exists!(self, a.heap_ref.index());
-        assert_item_exists!(self, b.heap_ref.index());
+        debug_assert_index!(self, a.heap_ref.index());
+        debug_assert_index!(self, b.heap_ref.index());
         let slice_a = self.str(a.to_ref(), a.len);
         let slice_b = self.str(b.to_ref(), b.len);
         match op {
@@ -269,7 +282,7 @@ impl Heap {
     }
     /// Returns a string slice for the given heap reference.
     pub fn string(self: &Self, item: HeapRef) -> &str {
-        assert_item_exists!(self, item.index());
+        debug_assert_index!(self, item.index());
         let (index, offset) = item.into();
         let slice = &self.objects[index as usize].data[offset as usize..];
         //un safe { str::from_utf8_unchecked(&slice) }
@@ -277,8 +290,8 @@ impl Heap {
     }
     // Compares string of one heap object with another.
     pub fn compare_string(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
-        assert_item_exists!(self, a.index());
-        assert_item_exists!(self, b.index());
+        debug_assert_index!(self, a.index());
+        debug_assert_index!(self, b.index());
         let slice_a = self.string(a);
         let slice_b = self.string(b);
         match op {

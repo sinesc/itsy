@@ -27,15 +27,16 @@ macro_rules! impl_opcodes {
     (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
     (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
     (read ItemIndex, $from:ident, $counter:expr) => ( impl_opcodes!(do_read ItemIndex, $from, $counter) );
-    (read RustFn, $from:ident, $counter:expr) => ( impl_opcodes!(do_read RustFnIndex, $from, $counter) );
-    (read Builtin, $from:ident, $counter:expr) => ( impl_opcodes!(do_read BuiltinIndex, $from, $counter) );
+    (read RustFn, $from:ident, $counter:expr) => ( T::from_index(impl_opcodes!(do_read RustFnIndex, $from, $counter)) );
+    (read Builtin, $from:ident, $counter:expr) => ( Builtin::from_index(impl_opcodes!(do_read BuiltinIndex, $from, $counter)) );
+    (read HeapRefOp, $from:ident, $counter:expr) => ( HeapRefOp::from_u8(impl_opcodes!(do_read u8, $from, $counter)) );
     // map parameter types to reader types
-    (map_reader_type RustFn) => ( RustFnIndex );
-    (map_reader_type Builtin) => ( BuiltinIndex );
+    (map_reader_type RustFn) => ( T );
     (map_reader_type $ty:tt) => ( $ty );
     // write parameters
     (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
     (write Builtin, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
+    (write HeapRefOp, $value:expr, $to:ident) => ( $to.write(&[ $value as u8 ]) );
     (write String, $value:expr, $to:ident) => (
         $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
         $to.write(&$value.as_bytes()[..]);
@@ -184,7 +185,7 @@ macro_rules! impl_opcodes {
                         // implement special formatting for some opcodes
                         OpCode::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", T::from_index( impl_opcodes!(read RustFn, self, pc) )));
+                            result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, pc)));
                             Some((result, pc))
                         }
                         OpCode::comment => {
