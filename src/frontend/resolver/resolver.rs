@@ -767,8 +767,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             },
             Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
                 self.resolve_expression(&mut item.expr, None)?;
-                if let Some(&Type::Array(Array { type_id: Some(elements_type_id), ..})) = self.item_type(&item.expr) {
+                if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
+                    // infer iter type from array element type
                     self.set_type_id(&mut item.iter, elements_type_id)?;
+                } else if let (Some(iter_type_id), Some(elements_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
+                    // infer array element type from iter
+                    if let Some(array) = self.type_by_id_mut(elements_type_id).as_array_mut() {
+                        array.type_id = Some(iter_type_id);
+                    }
                 }
             },
             _ => return Err(Error::new(&item.iter, ErrorKind::InvalidOperation("Unsupported for in operand".to_string()), self.module_path)),
