@@ -11,7 +11,7 @@ macro_rules! debug_assert_index {
             panic!("HEAP: operation on previously freed object {}", $index);
         }
         #[cfg(debug_assertions)]
-        if $index >= $self.objects.len() {
+        if $index as usize >= $self.objects.len() {
             panic!("HEAP: invalid heap object index {}", $index);
         }
     }
@@ -55,9 +55,9 @@ impl HeapRefOp {
 
 /// A reference counted heap object.
 #[derive(Debug)]
-pub(crate) struct HeapObject {
+pub struct HeapObject {
     /// Data stored in the heap object.
-    data                : Vec<u8>,
+    pub data            : Vec<u8>,
     /// For trait implementing types, the type index to use for dynamic dispatch.
     implementor_index   : ItemIndex,
     /// Number of references to the heap object.
@@ -97,8 +97,8 @@ impl Heap {
     /// Deallocates freed chunks of memory.
     pub fn purge(self: &mut Self) {
         // todo: truncate if len=0 or items are consecutive
-        for v in self.free.iter() {
-            let _drop = replace(&mut self.objects[*v as usize], HeapObject::new(Vec::new(), 0, self.epoch));
+        for &v in self.free.iter() {
+            let _drop = replace(&mut self.objects[v as usize].data, Vec::new());
         }
     }
     /// Number of active heap elements.
@@ -110,7 +110,7 @@ impl Heap {
         self.objects.truncate(0);
         self.free = Vec::with_capacity(16);
     }
-    /// Returns a vector of unfreed heap objects.
+    /// Returns a map of unfreed heap objects and their reference counts.
     pub fn data(self: &Self) -> Map<StackAddress, (StackAddress, &Vec<u8>)> {
         self.objects.iter()
             .enumerate()
@@ -133,18 +133,6 @@ impl Heap {
             self.objects.push(HeapObject::new(data, implementor_index, self.epoch));
             index as StackAddress
         }
-    }
-    /// Extends heap item with given data.
-    pub fn extend_from(self: &mut Self, index: StackAddress, slice: &[u8]) -> StackAddress {
-        debug_assert_index!(self, index);
-        let position = self.objects[index as usize].data.len() as StackAddress;
-        self.objects[index as usize].data.extend_from_slice(slice);
-        position
-    }
-    /// Truncates heap item to given size
-    pub fn truncate(self: &mut Self, index: StackAddress, size: StackAddress) {
-        debug_assert_index!(self, index);
-        self.objects[index as usize].data.truncate(size as usize);
     }
     pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
         debug_assert_index!(self, index);
@@ -182,23 +170,29 @@ impl Heap {
         debug_assert_index!(self, index);
         self.free.push(index);
     }
-    /// Removes and returns a chunk of memory, freeing its slot on the heap.
-    pub fn remove_item(self: &mut Self, index: StackAddress) -> Vec<u8> {
-        debug_assert_index!(self, index);
-        let object = replace(&mut self.objects[index as usize], HeapObject::new(Vec::new(), 0, self.epoch));
-        self.free.push(index);
-        object.data
-    }
-    /// Returns the size in bytes of the given heap object.
-    pub fn size_of_item(self: &Self, index: StackAddress) -> StackAddress {
-        debug_assert_index!(self, index);
-        self.objects[index as usize].data.len() as StackAddress
-    }
     /// Returns the size in bytes of the given heap object.
     pub fn item_implementor_index(self: &Self, index: StackAddress) -> ItemIndex {
         debug_assert_index!(self, index);
         self.objects[index as usize].implementor_index
     }
+    /// Returns a reference to a HeapObject.
+    pub fn item(self: &Self, index: StackAddress) -> &HeapObject {
+        debug_assert_index!(self, index);
+        &self.objects[index as usize]
+    }
+    /// Returns a mutable reference to a HeapObject.
+    pub fn item_mut(self: &mut Self, index: StackAddress) -> &mut HeapObject {
+        debug_assert_index!(self, index);
+        &mut self.objects[index as usize]
+    }
+    /// Returns mutable references to two distinct HeapObjects.
+    pub fn items_mut(self: &mut Self, index_a: StackAddress, index_b: StackAddress) -> (&mut HeapObject, &mut HeapObject) {
+        debug_assert_index!(self, index_a);
+        debug_assert_index!(self, index_b);
+        debug_assert!(index_a != index_b);
+        index_twice(&mut self.objects, index_a as usize, index_b as usize)
+    }
+
     /// Returns a byte slice for the given heap reference.
     pub fn slice(self: &Self, item: HeapRef, len: StackAddress) -> &[u8] {
         let (index, offset) = item.into();

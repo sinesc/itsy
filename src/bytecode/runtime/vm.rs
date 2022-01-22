@@ -159,7 +159,7 @@ impl<T, U> VM<T, U> {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
                 let src = self.stack.data();
-                self.heap.extend_from(target_heap_ref.index(), &src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
+                self.heap.item_mut(target_heap_ref.index()).data.extend_from_slice(&src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
             },
             CopyTarget::Stack => self.stack.extend(prototype_offset, num_bytes),
         }
@@ -169,7 +169,7 @@ impl<T, U> VM<T, U> {
     fn write_ref(self: &mut Self, target: CopyTarget, heap_ref: HeapRef) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
-                self.heap.extend_from(target_heap_ref.index(), &heap_ref.to_ne_bytes());
+                self.heap.item_mut(target_heap_ref.index()).data.extend_from_slice(&heap_ref.to_ne_bytes());
             }
             CopyTarget::Stack => self.stack.push(heap_ref),
         }
@@ -269,7 +269,7 @@ impl<T, U> VM<T, U> {
                 if element_constructor != Constructor::Primitive {
                     let original_constructor_offset = *constructor_offset;
                     // compute number of elements from heap size
-                    let num_elements = self.heap.size_of_item(item.index()) / HeapRef::primitive_size() as usize;
+                    let num_elements = self.heap.item(item.index()).data.len() / HeapRef::primitive_size() as usize;
                     for _ in 0..num_elements {
                         // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
                         *constructor_offset = original_constructor_offset;

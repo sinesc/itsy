@@ -12,11 +12,11 @@ impl_builtins! {
         array_push32<T: u32>(this: HeapRef, value: u32),
         array_push64<T: u64>(this: HeapRef, value: u64),
     >(&mut vm) {
-        vm.heap.extend_from(this.index(), &value.to_ne_bytes());
+        vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
     }
 
     fn array_pushx(&mut vm, this: HeapRef, value: HeapRef) {
-        vm.heap.extend_from(this.index(), &value.to_ne_bytes());
+        vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
     }
 
     fn <
@@ -26,17 +26,17 @@ impl_builtins! {
         array_pop64<T: u64>(this: HeapRef) -> u64,
     >(&mut vm) {
         let index = this.index();
-        let offset = vm.heap.size_of_item(index) as usize - size_of::<T>();
+        let offset = vm.heap.item(index).data.len() - size_of::<T>();
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
-        vm.heap.truncate(index, offset);
+        vm.heap.item_mut(index).data.truncate(offset);
         result
     }
 
     fn array_popx(&mut vm, this: HeapRef) -> HeapRef {
         let index = this.index();
-        let offset = vm.heap.size_of_item(index) as usize - size_of::<HeapRef>();
+        let offset = vm.heap.item(index).data.len() - size_of::<HeapRef>();
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
-        vm.heap.truncate(index, offset);
+        vm.heap.item_mut(index).data.truncate(offset);
         result
     }
 
@@ -47,19 +47,19 @@ impl_builtins! {
         array_truncate64<T: u64>(this: HeapRef, size: StackAddress),
     >(&mut vm) {
         let index = this.index();
-        let current_size = vm.heap.size_of_item(index) as usize;
+        let current_size = vm.heap.item(index).data.len();
         let new_size = size_of::<T>() * size as usize;
         if new_size < current_size {
-            vm.heap.truncate(index, new_size);
+            vm.heap.item_mut(index).data.truncate(new_size);
         }
     }
 
     fn array_truncatex(&mut vm, this: HeapRef, size: StackAddress) {
         let index = this.index();
-        let current_size = vm.heap.size_of_item(index) as usize;
+        let current_size = vm.heap.item(index).data.len();
         let new_size = size_of::<HeapRef>() * size as usize;
         if new_size < current_size {
-            vm.heap.truncate(index, new_size);
+            vm.heap.item_mut(index).data.truncate(new_size);
         }
     }
 }

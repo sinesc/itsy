@@ -65,7 +65,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         constructors                : UnorderedMap::new(),
         init_state                  : RefCell::new(BindingState::new()),
         module_path                 : "".to_string(),
-        trait_vtable_base           : trait_implementors.len() * size_of::<StackAddress>(), // offset vtable by size of mapping from constructor => implementor-index
+        trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
         trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&trait_functions, &trait_implementors),
@@ -74,7 +74,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
     // reserve space for the trait vtable as well as an implementor-index => constructor mapping (required for trait object reference counting) in const pool
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
-    compiler.writer.reserve_const_data((compiler.trait_vtable_base + vtable_size) as StackAddress);
+    compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress);
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.id_mappings.types() {
@@ -106,7 +106,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         if let Some(selected_function_id) = selected_function_id {
             let selected_function_offset = compiler.functions.borrow().get(&selected_function_id).expect("Missing function callinfo").addr;
             let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
-            compiler.writer.set_const_data(vtable_function_offset + implementor_index * size_of::<StackAddress>(), selected_function_offset);
+            compiler.writer.set_const_data(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
@@ -680,7 +680,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to assemble a prototype.
-    fn compile_prototype_instructions(self: &Self, item: &ast::Literal) -> Result<usize, CompileError> {
+    fn compile_prototype_instructions(self: &Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
         Ok(match &item.value {
@@ -961,7 +961,7 @@ impl<'ty, T> Compiler<'ty, T> where T: VMFunc<T> {
     fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
         let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
         let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
-        (self.trait_vtable_base + (function_index as usize) * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
+        self.trait_vtable_base + (function_index as usize * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
     }
 
     /// Fixes function call targets for previously not generated functions.

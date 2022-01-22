@@ -619,7 +619,7 @@ impl_opcodes!{
         let mut data = Vec::with_capacity(size as usize);
         let data_start = self.stack.sp() as usize - size as usize;
         data.extend_from_slice(&self.stack.data()[data_start..]);
-        self.stack.truncate(data_start);
+        self.stack.truncate(data_start as StackAddress);
         self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
     }
 
@@ -683,7 +683,7 @@ impl_opcodes!{
     fn vcall(&mut self, function_base_address: StackAddress, arg_size: StackAddress) {
         let item: HeapRef = self.stack.load_sp(-(arg_size as StackOffset));
         let implementor_index = self.heap.item_implementor_index(item.index());
-        let address: StackAddress = self.stack.load(function_base_address + (implementor_index as usize) * size_of::<StackAddress>());
+        let address: StackAddress = self.stack.load(function_base_address + ((implementor_index as usize) * size_of::<StackAddress>()) as StackAddress);
         self.call(address, arg_size);
     }
 
@@ -758,9 +758,9 @@ impl_opcodes!{
     /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
     fn string_concatx(&mut self) {
         let b: HeapRef = self.stack.pop();
-        let b_len = self.heap.size_of_item(b.index());
+        let b_len = self.heap.item(b.index()).data.len() as StackAddress;
         let a: HeapRef = self.stack.pop();
-        let a_len = self.heap.size_of_item(a.index());
+        let a_len = self.heap.item(a.index()).data.len() as StackAddress;
         let dest_index: StackAddress = self.heap.alloc(Vec::new(), ItemIndex::MAX);
         self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
         self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
@@ -772,8 +772,8 @@ impl_opcodes!{
     /// Pops a heap reference and pushes the size of the referenced heap object.
     fn heap_size(&mut self) {
         let item: HeapRef = self.stack.pop();
-        let size = self.heap.size_of_item(item.index());
-        self.stack.push(size);
+        let size = self.heap.item(item.index()).data.len();
+        self.stack.push(size as StackAddress);
         self.heap.ref_item(item.index(), HeapRefOp::FreeTmp);// FIXME: shouldn't this use refcount_value?
     }
 
@@ -912,7 +912,7 @@ impl_opcodes!{
     >(&mut self) {
         let element_index: StackAddress = self.stack.top();
         let item: HeapRef = self.stack.load_sp(-((STACK_ADDRESS_TYPE.primitive_size() + HeapRef::primitive_size()) as StackOffset));
-        let offset = self.heap.size_of_item(item.index()) - size_of::<T>() as StackAddress * (element_index + 1);
+        let offset = self.heap.item(item.index()).data.len() as StackAddress - size_of::<T>() as StackAddress * (element_index + 1);
         let data: T = self.heap.read(item.with_offset(offset as StackOffset));
         self.stack.push(data);
     }

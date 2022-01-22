@@ -71,7 +71,7 @@ impl<T> Writer<T> where T: VMFunc<T> {
         let position = self.program().consts.len() as StackAddress;
         self.program().const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
         let pool_size = self.program().consts.len();
-        self.program().consts.resize(pool_size + size, 0);
+        self.program().consts.resize(pool_size + size as usize, 0);
         position
     }
     /// Writes to a data-block on the const pool.
