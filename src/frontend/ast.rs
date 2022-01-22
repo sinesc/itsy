@@ -350,7 +350,7 @@ impl Signature {
         self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id(bindings))
     }
     pub(crate) fn args_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
-        !self.args.iter().any(|arg| arg.ty.as_ref().map_or(true, |type_name| type_name.type_id(bindings).is_none()))
+        self.args.iter().all(|arg| arg.ty.as_ref().map_or(false, |type_name| type_name.type_id(bindings).is_some()))
     }
     pub(crate) fn arg_type_ids(self: &Self, bindings: &impl BindingContainer) -> Vec<Option<TypeId>> {
         self.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id(bindings))).collect()
@@ -825,8 +825,8 @@ pub enum LiteralValue {
 impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
         match self {
-            LiteralValue::Array(v) => !v.elements.iter().any(|e| e.as_literal().map(|l| !l.value.is_const()).unwrap_or(true)),
-            LiteralValue::Struct(v) => !v.fields.iter().any(|(_, e)| e.as_literal().map(|l| !l.value.is_const()).unwrap_or(true)),
+            LiteralValue::Array(v) => v.elements.iter().all(|e| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
+            LiteralValue::Struct(v) => v.fields.iter().all(|(_, e)| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
             _ => true,
         }
     }

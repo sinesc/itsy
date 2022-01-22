@@ -23,7 +23,7 @@ impl FunctionInfo {
         }
     }
     pub fn is_resolved(self: &Self) -> bool {
-        self.ret_type.is_some() && self.kind.is_some() && !self.arg_type.iter().any(|arg| arg.is_none())
+        self.ret_type.is_some() && self.kind.is_some() && self.arg_type.iter().all(|arg| arg.is_some())
     }
 }
 
