@@ -299,6 +299,12 @@ macro_rules! impl_opcodes {
                 $(
                     #[cfg_attr(not(debug_assertions), inline(always))]
                     fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(map_reader_type $arg_type)),* ) {
+                        #[allow(dead_code)]
+                        /// Single variant opcodes don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
+                        trait T { }
+                        #[allow(dead_code)]
+                        /// Single variant opcodes don't provide U. This definition of U is intended to shadow the VM's generic U in order to trigger an error on accidental use. This is not the U you are looking for.
+                        trait U { }
                         $code
                     }
                 )?

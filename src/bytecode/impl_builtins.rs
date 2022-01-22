@@ -133,6 +133,10 @@ macro_rules! impl_builtins {
                         $(
                             $(
                                 Builtin::$variant_name => {
+                                    $(
+                                        #[allow(dead_code)]
+                                        $( type $generic_name = $generic_type; )+
+                                    )?
                                     // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
                                     impl_builtins!(@load_args_reverse vm [ $( $variant_arg $variant_type )* ]);
                                     // Run code.
@@ -159,6 +163,12 @@ macro_rules! impl_builtins {
                         // single variant
                         $(
                             Builtin::$name => {
+                                #[allow(dead_code)]
+                                /// Single variant builtins don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
+                                trait T { }
+                                #[allow(dead_code)]
+                                /// Single variant builtins don't provide U. This definition of U is intended to shadow the VM's generic U in order to trigger an error on accidental use. This is not the U you are looking for.
+                                trait U { }
                                 // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
                                 impl_builtins!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
                                 // Run code.
