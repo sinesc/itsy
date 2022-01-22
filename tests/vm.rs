@@ -1083,6 +1083,17 @@ fn for_in_array_string() {
 }
 
 #[test]
+fn for_in_inference() {
+    let result = run("
+        let array = [ 1, 2, 3, 4 ];
+        for i in array {
+            ret_u8(i);
+        }
+    ");
+    assert_all(&result, &[ 1u8, 2, 3, 4 ]);
+}
+
+#[test]
 fn recursion() {
     let result = run("
         fn fib(n: i32) -> i32 {
