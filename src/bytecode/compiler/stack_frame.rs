@@ -1,6 +1,7 @@
 use crate::prelude::*;
 use crate::StackAddress;
 use crate::shared::typed_ids::BindingId;
+use std::cell::RefCell;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum LocalOrigin {

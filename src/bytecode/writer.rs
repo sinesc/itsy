@@ -3,6 +3,7 @@
 use crate::prelude::*;
 use crate::StackAddress;
 use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor};
+use std::cell::{Cell, RefCell, RefMut};
 
 /// Bytecode buffer and writer.
 ///

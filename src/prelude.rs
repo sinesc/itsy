@@ -7,6 +7,4 @@ pub use std::mem::{size_of, size_of_val, replace, discriminant};
 pub use std::cmp::{Ordering, min};
 pub use std::fmt::{self, Display, Debug};
 pub use std::marker::PhantomData;
-pub use std::cell::{Cell, RefCell, RefMut};
-pub use std::rc::Rc;
 pub use std::ops::{Add, Index, IndexMut, Deref};
