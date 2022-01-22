@@ -1,7 +1,6 @@
 use crate::prelude::*;
 use crate::StackAddress;
 use crate::shared::typed_ids::BindingId;
-use std::cell::RefCell;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum LocalOrigin {
@@ -54,21 +53,21 @@ impl StackFrame {
 }
 
 /// A stack of Locals mappings.
-pub struct StackFrames(RefCell<Vec<StackFrame>>);
+pub struct StackFrames(Vec<StackFrame>);
 
 impl StackFrames {
     const NO_STACK: &'static str = "Attempted to access empty LocalsStack";
     /// Create new local stack frame descriptor stack.
     pub fn new() -> Self {
-        StackFrames(RefCell::new(Vec::new()))
+        StackFrames(Vec::new())
     }
     /// Push stack frame descriptor.
-    pub fn push(self: &Self, frame: StackFrame) {
-        self.0.borrow_mut().push(frame);
+    pub fn push(self: &mut Self, frame: StackFrame) {
+        self.0.push(frame);
     }
     /// Pop stack frame descriptor and return it.
-    pub fn pop(self: &Self) -> StackFrame {
-        self.0.borrow_mut().pop().expect(Self::NO_STACK)
+    pub fn pop(self: &mut Self) -> StackFrame {
+        self.0.pop().expect(Self::NO_STACK)
     }
     // /// Returns the argument size in bytes for the top stack frame descriptor.
     //pub fn arg_size(self: &Self) -> StackAddress {
@@ -79,11 +78,11 @@ impl StackFrames {
     //    self.0.borrow().last().expect(Self::NO_STACK).ret_size
     //}
     /// Look up local variable descriptor for the given BindingId.
-    pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
-        self.0.borrow().last().expect(Self::NO_STACK).lookup(binding_id)
+    pub fn lookup(self: &mut Self, binding_id: BindingId) -> Local {
+        self.0.last().expect(Self::NO_STACK).lookup(binding_id)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
-    pub fn add_forward_jmp(self: &Self, address: StackAddress) {
-        self.0.borrow_mut().last_mut().expect(Self::NO_STACK).unfixed_exit_jmps.push(address);
+    pub fn add_forward_jmp(self: &mut Self, address: StackAddress) {
+        self.0.last_mut().expect(Self::NO_STACK).unfixed_exit_jmps.push(address);
     }
 }
