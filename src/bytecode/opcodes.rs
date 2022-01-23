@@ -637,8 +637,8 @@ impl_opcodes!{
     fn vcnt(&mut self, op: HeapRefOp) {
         let item: HeapRef = self.stack.top();
         let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
-        let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cnt_sa(address, op);
+        let constructor: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
+        self.cnt_sa(constructor, op);
     }
 
     /// Performs a non-consuming reference count operation for the top heap reference on the stack.
@@ -655,8 +655,8 @@ impl_opcodes!{
     fn vcnt_nc(&mut self, op: HeapRefOp) {
         let item: HeapRef = self.stack.top();
         let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
-        let address: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cnt_sa_nc(address, op);
+        let constructor: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
+        self.cnt_sa_nc(constructor, op);
     }
 
     /// Calls the given Rust function.

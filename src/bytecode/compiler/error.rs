@@ -21,7 +21,7 @@ impl CompileError {
     pub(crate) fn new(item: &impl Positioned, kind: CompileErrorKind, module_path: &str) -> CompileError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
     }
-    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
         self.position.loc(input)
     }

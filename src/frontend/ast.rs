@@ -50,7 +50,7 @@ impl Position {
     pub fn new(input: &str, offset: usize) -> Self {
         Self(input.len() - offset)
     }
-    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
         let offset = input.len() - self.0;
         let mut parsed = &input[0..offset];

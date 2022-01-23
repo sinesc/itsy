@@ -3,7 +3,7 @@
 
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
-//! Look at the [build] or [run] examples to get started.
+//! Look at the [build_str] or [run] examples to get started.
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
@@ -308,7 +308,8 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F
 
 /// Parses, resolves and compiles given Itsy source file. The name of the
 /// entry function must be `main`. Modules are loaded from disk relative to the
-/// given source file. For more control, see [parser::parse], [resolver::resolve] and [compiler::compile].
+/// given source file. For more control about how the files are loaded and processed,
+/// see [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM] to execute the given program.
 #[cfg(feature="compiler")]
 pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: VMFunc<F>, P: AsRef<std::path::Path> {

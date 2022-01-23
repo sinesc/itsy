@@ -20,7 +20,7 @@ pub enum Error {
 
 #[cfg(feature="compiler")]
 impl Error {
-    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
         match self {
             Self::ParseError(e) => e.loc(input),
@@ -97,7 +97,7 @@ impl BuildError {
     pub fn source(self: &Self) -> &str {
         &self.source
     }
-    /// Compute 1-based line/column number from Position (absolute offset from end) in string.
+    /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self) -> (u32, u32) {
         match &self.error {
             Error::ParseError(e) => e.loc(&self.source),

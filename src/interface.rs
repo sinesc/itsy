@@ -28,7 +28,7 @@ pub mod resolver {
         }
         pub mod meta {
             //! Resolved program type information.
-            pub use crate::shared::types::{Type, Struct, Enum, Array};
+            pub use crate::shared::types::{Type, Struct, Enum, Array, Trait, ImplTrait};
             pub use crate::shared::numeric::Numeric;
             pub use crate::shared::infos::{FunctionInfo, BindingInfo, FunctionKind};
         }
@@ -54,6 +54,6 @@ pub mod runtime {
     pub mod heap {
         //! Virtual machine heap.
         pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapRefOp, HeapOp};
-        pub use crate::bytecode::{HeapRef, HeapSlice};
+        pub use crate::bytecode::{HeapRef /*, HeapSlice*/};
     }
 }

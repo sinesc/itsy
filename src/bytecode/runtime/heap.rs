@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
-use crate::bytecode::{HeapRef, HeapSlice};
+use crate::bytecode::{HeapRef /*, HeapSlice*/};
 use crate::shared::index_twice;
 
 // Asserts that a heap item exists when debug_assertions are enabled
@@ -118,7 +118,7 @@ impl Heap {
             .map(|(i, h)| (i as StackAddress, (h.refs, &h.data)))
             .collect()
     }
-    /// Starts a new epoch for reference counting purposes.
+    /// Starts a new reference counting epoch. Epochs are used to avoid revisiting already visited (circular) references.
     pub fn new_epoch(self: &mut Self) -> usize {
         self.epoch = self.epoch.wrapping_add(1);
         self.epoch
@@ -134,6 +134,7 @@ impl Heap {
             index as StackAddress
         }
     }
+    /// Returns the epoch of the last reference counting operation on the item. Epochs are used to avoid revisiting already visited (circular) references.
     pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
         debug_assert_index!(self, index);
         self.objects[index as usize].epoch
@@ -170,7 +171,7 @@ impl Heap {
         debug_assert_index!(self, index);
         self.free.push(index);
     }
-    /// Returns the size in bytes of the given heap object.
+    /// Returns the dynamic dispatch implementor index of the given heap object.
     pub fn item_implementor_index(self: &Self, index: StackAddress) -> ItemIndex {
         debug_assert_index!(self, index);
         self.objects[index as usize].implementor_index
@@ -237,7 +238,8 @@ impl Heap {
             }
         }
     }
-    // Compares bytes of one heap object with another.
+    /*
+    /// Compares bytes of one heap object with another.
     pub fn compare(self: &mut Self, a: HeapRef, b: HeapRef, len: StackAddress, op: HeapCmp) -> bool {
         debug_assert_index!(self, a.index());
         debug_assert_index!(self, b.index());
@@ -274,6 +276,7 @@ impl Heap {
             HeapCmp::Gte => slice_a >= slice_b,
         }
     }
+    */
     /// Returns a string slice for the given heap reference.
     pub fn string(self: &Self, item: HeapRef) -> &str {
         debug_assert_index!(self, item.index());
