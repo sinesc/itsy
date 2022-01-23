@@ -131,7 +131,8 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "test"
+                "test"/*,
+                "--no-fail-fast"*/
             ],
             "group": "test",
             "problemMatcher": []

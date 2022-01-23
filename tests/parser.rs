@@ -61,6 +61,7 @@ fn comments_without_whitespace() {
 }
 
 #[test]
+#[ignore]
 fn binary_as() {
     parse_module("
         fn test() -> u8 {
