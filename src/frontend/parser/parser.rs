@@ -176,7 +176,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     Err(nom::Err::Failure(Error { input: i, kind: ParseErrorKind::InvalidNumerical }))
 }
 
-// literal boolean (true)
+// literal boolean (true, false)
 
 fn boolean(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
@@ -424,6 +424,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
 }
 
 // expression
+
 fn expression(i: Input<'_>) -> Output<Expression> {
     fn parens(i: Input<'_>) -> Output<Expression> {
         ws(delimited(char('('), expression, char(')')))(i)
@@ -581,6 +582,62 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     )))(i)
 }
 
+// module
+
+fn module(i: Input<'_>) -> Output<Module> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_state(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
+            terminated(ident, char(';'))
+        ),
+        move |ident| Module {
+            position: position,
+            ident   : ident,
+        }
+    ))(i)
+}
+
+// use (TODO: capture paths as AST so that we can report exact error positions)
+
+fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
+    ws(alt((
+        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
+            let mut flattened = Vec::new();
+            let parent = parts_to_path(&path.name);
+            for elements in list  {
+                for (ident, (path, _)) in elements {
+                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
+                }
+            }
+            flattened
+        }),
+        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
+            vec![(ident.name, (parts_to_path(&path.name), false))]
+        }),
+        map(path, |path| {
+            vec![(path.name.last().unwrap().clone(), (parts_to_path(&path.name), false))]
+        }),
+    )))(i)
+}
+
+fn use_declaration(i: Input<'_>) -> Output<Use> {
+    let position = i.position();
+    ws(map(
+        delimited(
+            check_state(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
+            use_item,
+            char(';')
+        ),
+        move |items| {
+            Use {
+                position,
+                mapping: items.into_iter().collect(),
+            }
+        }
+    ))(i)
+}
+
 // let
 
 fn binding(i: Input<'_>) -> Output<Binding> {
@@ -643,62 +700,6 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
     ))(i)
 }
 
-// module
-
-fn module(i: Input<'_>) -> Output<Module> {
-    let position = i.position();
-    ws(map(
-        preceded(
-            check_state(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
-            terminated(ident, char(';'))
-        ),
-        move |ident| Module {
-            position: position,
-            ident   : ident,
-        }
-    ))(i)
-}
-
-// use (TODO: capture paths as AST so that we can report exact error positions)
-
-fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
-    ws(alt((
-        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
-            let mut flattened = Vec::new();
-            let parent = parts_to_path(&path.name);
-            for elements in list  {
-                for (ident, (path, _)) in elements {
-                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
-                }
-            }
-            flattened
-        }),
-        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
-            vec![(ident.name, (parts_to_path(&path.name), false))]
-        }),
-        map(path, |path| {
-            vec![(path.name.last().unwrap().clone(), (parts_to_path(&path.name), false))]
-        }),
-    )))(i)
-}
-
-fn use_declaration(i: Input<'_>) -> Output<Use> {
-    let position = i.position();
-    ws(map(
-        delimited(
-            check_state(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
-            use_item,
-            char(';')
-        ),
-        move |items| {
-            Use {
-                position,
-                mapping: items.into_iter().collect(),
-            }
-        }
-    ))(i)
-}
-
 // impl block
 
 fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
@@ -714,20 +715,6 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
             scope_id    : None,
             ty          : tuple.0,
             trt         : None,
-        }
-    ))(i)
-}
-
-// array definition
-
-fn array(i: Input<'_>) -> Output<Array> {
-    let position = i.position();
-    ws(map(
-        delimited(ws(char('[')), inline_type, ws(char(']'))),
-        move |ty| Array {
-            position    : position,
-            element_type: ty,
-            type_id     : None,
         }
     ))(i)
 }
@@ -774,44 +761,57 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     ))(i)
 }
 
-// function definition
+// array definition
 
-fn function_signature(i: Input<'_>) -> Output<Signature> {
-    fn argument(i: Input<'_>) -> Output<Binding> {
-        let position = i.position();
-        ws(map(
-            tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-            move |tuple| Binding {
-                position    : position,
-                ident       : tuple.1,
-                expr        : None,
-                mutable     : tuple.0.is_some(),
-                ty          : Some(tuple.3),
-                binding_id  : None,
-            }
-        ))(i)
-    }
-    fn argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
-        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(argument)), ws(char(')')))(i)
-    }
-    fn return_part(i: Input<'_>) -> Output<InlineType> {
-        preceded(ws(tag("->")), inline_type)(i)
-    }
+fn array(i: Input<'_>) -> Output<Array> {
+    let position = i.position();
     ws(map(
-        pair(
-            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
-            tuple((ident, ws(argument_list), opt(ws(return_part))))
-        ),
-        |sig| Signature {
-            ident   : sig.1.0,
-            args    : sig.1.1,
-            ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
-            vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
-        },
+        delimited(ws(char('[')), inline_type, ws(char(']'))),
+        move |ty| Array {
+            position    : position,
+            element_type: ty,
+            type_id     : None,
+        }
     ))(i)
 }
 
+// function definition
+
 fn function(i: Input<'_>) -> Output<Function> {
+    fn function_signature(i: Input<'_>) -> Output<Signature> {
+        fn argument(i: Input<'_>) -> Output<Binding> {
+            let position = i.position();
+            ws(map(
+                tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
+                move |tuple| Binding {
+                    position    : position,
+                    ident       : tuple.1,
+                    expr        : None,
+                    mutable     : tuple.0.is_some(),
+                    ty          : Some(tuple.3),
+                    binding_id  : None,
+                }
+            ))(i)
+        }
+        fn argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
+            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(argument)), ws(char(')')))(i)
+        }
+        fn return_part(i: Input<'_>) -> Output<InlineType> {
+            preceded(ws(tag("->")), inline_type)(i)
+        }
+        ws(map(
+            pair(
+                terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
+                tuple((ident, ws(argument_list), opt(ws(return_part))))
+            ),
+            |sig| Signature {
+                ident   : sig.1.0,
+                args    : sig.1.1,
+                ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
+                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
+            },
+        ))(i)
+    }
     let position = i.position();
     ws(map(
         tuple((function_signature, with_state(&|state: &mut ParserState| state.in_function = true, alt((
