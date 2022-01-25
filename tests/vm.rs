@@ -1364,6 +1364,7 @@ fn heap_result() {
 }
 
 #[test]
+#[ignore]
 fn heap_compare() {
     let result = run("
         let array = [ 7u8, 7 ];
