@@ -364,6 +364,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Expression(expression)   => self.resolve_expression(expression, None),
             S::Module(_)                => { Ok(()) /* nothing to do here */ },
             S::Use(use_declaration)                => self.resolve_use_declaration(use_declaration),
+            S::EnumDef(_enum_def)                => { Err(Error::new(item, ErrorKind::Unsupported("enum not yet implemented".to_string()), self.module_path)) }, // TODO
         }
     }
 

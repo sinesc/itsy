@@ -128,6 +128,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::StructDef(_) => Ok(()),
             S::Module(_) => Ok(()),
             S::Use(_) => Ok(()),
+            S::EnumDef(_) => Ok(()),
             S::Return(_) => unreachable!("Return AST nodes should have been rewritten"),
             S::Function(function) => self.compile_function(function),
             S::ImplBlock(impl_block) => {

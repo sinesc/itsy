@@ -106,7 +106,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module, Use)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module, Use, EnumDef)
     };
     ($self:ident, $enum_name:ident, $val_name:ident, $code:tt $(, $variant_name:ident)+) => {
         match $self {
@@ -181,6 +181,7 @@ pub enum Statement {
     Expression(Expression),
     Module(Module),
     Use(Use),
+    EnumDef(EnumDef),
 }
 
 impl Statement {
@@ -453,7 +454,27 @@ impl Resolvable for Array {
     }
 }
 
-/// An struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
+/// An enum definition, e.g. `enum MyEnum { A, B(u32) }`.
+#[derive(Debug)]
+pub struct EnumDef {
+    pub position: Position,
+    pub ident   : Ident,
+    pub variants: Vec<(String, Vec<InlineType>)>,
+    pub type_id : Option<TypeId>,
+    pub vis     : Visibility,
+}
+impl_positioned!(EnumDef);
+
+impl Resolvable for EnumDef {
+    fn num_resolved(self: &Self) -> Progress {
+        self.variants.iter().fold(Progress::zero(), |variant_acc, (_, variants)| {
+            variant_acc + variants.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved())
+        })
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+}
+
+/// A struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
 #[derive(Debug)]
 pub struct StructDef {
     pub position: Position,
@@ -463,15 +484,7 @@ pub struct StructDef {
     pub vis     : Visibility,
 }
 impl_positioned!(StructDef);
-
-impl Typeable for StructDef {
-    fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
-        self.type_id
-    }
-    fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {
-        &mut self.type_id
-    }
-}
+impl_typeable!(StructDef);
 
 impl Resolvable for StructDef {
     fn num_resolved(self: &Self) -> Progress {
