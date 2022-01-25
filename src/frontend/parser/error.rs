@@ -16,6 +16,7 @@ pub enum ParseErrorKind {
     IllegalLetStatement,
     IllegalModuleDef,
     IllegalTraitDef,
+    IllegalEnumDef,
     DisabledFeature(&'static str),
 }
 

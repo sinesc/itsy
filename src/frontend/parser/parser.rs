@@ -667,6 +667,40 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
     )))(i)
 }
 
+// enum definition
+
+fn enum_def(i: Input<'_>) -> Output<EnumDef> {
+    fn variant(i: Input<'_>) -> Output<(String, Vec<InlineType>)> {
+        pair(
+            map(ws(label), move |i| i.to_string()),
+            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')'))))
+        )(i)
+    }
+    fn variants(i: Input<'_>) -> Output<Vec<(String, Vec<InlineType>)>> {
+        map(
+            separated_list1(ws(char(',')), variant),
+            |list| {
+                list.into_iter().map(|item| (item.0, item.1)).collect()
+            }
+        )(i)
+    }
+    let position = i.position();
+    ws(map(
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
+            tuple((ident, ws(char('{')), variants, opt(ws(char(','))), ws(char('}'))))
+        ),
+        move |pair| EnumDef {
+            position: position,
+            ident   : pair.1.0,
+            variants: pair.1.2,
+            type_id : None,
+            vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+        }
+    ))(i)
+}
+
+
 // struct definition
 
 fn struct_def(i: Input<'_>) -> Output<StructDef> {
@@ -909,6 +943,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(if_block, |m| Statement::IfBlock(m)),
         map(function, |m| Statement::Function(m)),
         map(struct_def, |m| Statement::StructDef(m)),
+        map(enum_def, |m| Statement::EnumDef(m)),
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
