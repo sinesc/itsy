@@ -202,7 +202,7 @@ macro_rules! vm_func {
                 }
             }
             #[allow(unused_mut)]
-            fn call_info() -> ::std::collections::HashMap<&'static str, ($crate::RustFnIndex, &'static str, Vec<&'static str>)> {
+            fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
                     map.insert(stringify!($name), ($type_name::$name.into_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));

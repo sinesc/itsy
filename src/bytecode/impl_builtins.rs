@@ -117,7 +117,7 @@ macro_rules! impl_builtins {
                 }
             }
             /*#[allow(unused_mut)]
-            pub(crate) fn call_info() -> ::std::collections::HashMap<&'static str, ($crate::BuiltinIndex, &'static str, Vec<&'static str>)> {
+            pub(crate) fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::BuiltinIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
                     map.insert(stringify!($name), (Builtin::$name.into_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));

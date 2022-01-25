@@ -119,7 +119,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> Result<Re
     primitives.insert(&Type::String, scopes.insert_type(root_scope_id, Some("String"), Type::String));
 
     // insert rust functions into root scope
-    for (&name, (index, ret_type_name, arg_type_names)) in T::call_info().iter() {
+    for (&name, (index, ret_type_name, arg_type_names)) in T::resolve_info().iter() {
         let ret_type = if *ret_type_name == "" {
             Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
         } else {

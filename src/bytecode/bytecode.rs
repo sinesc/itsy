@@ -32,7 +32,7 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn into_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
-    fn call_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
+    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.
