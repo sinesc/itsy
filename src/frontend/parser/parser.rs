@@ -502,7 +502,24 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         )(init.0)
     }
     fn prec6(i: Input<'_>) -> Output<Expression> {
-        alt((prec7, unary))(i)
+        let position = i.position();
+        ws(map(
+            pair(
+                alt((prec7, unary)), opt(preceded(ws(sepr(tag("as"))), path))
+            ),
+            move |(expr, path)| {
+                if let Some(path) = path {
+                    Expression::Cast(Box::new(Cast {
+                        position: position,
+                        expr    : expr,
+                        ty      : TypeName::from_path(path),
+                        type_id : None,
+                    }))
+                } else {
+                    expr
+                }
+            }
+        ))(i)
     }
     fn prec5(i: Input<'_>) -> Output<Expression> {
         let init = prec6(i)?;
@@ -558,18 +575,9 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
         )(init.0)
     }
-    fn precn(i: Input<'_>) -> Output<Expression> {
-        let init = prec0(i)?;
-        let position = init.0.position();
-        fold_many0(
-            preceded(sepr(tag("as")), path),
-            init.1,
-            |acc, val| Expression::Cast(Box::new(Cast { position: position, expr: acc, ty: TypeName::from_path(val), type_id: None }))
-        )(init.0)
-    }
     ws(alt((
         map(assignment, |m| Expression::Assignment(Box::new(m))),
-        precn
+        prec0
     )))(i)
 }
 
