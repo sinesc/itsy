@@ -2,7 +2,7 @@ use itsy::*;
 use std::{path::PathBuf, collections::HashMap};
 
 /*
-    This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/playground/playground.itsy
+    This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM. It runs the code in itsy/playground/main.itsy
     To enable logging, create a "logs" directoy parallel to the "src" directory. To disable logging again, simply delete the directory.
     Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
 */
@@ -52,7 +52,7 @@ vm_func!(MyFns, (), {
 fn main() {
     let mut files: HashMap<String, (PathBuf, String)> = HashMap::new();
     let write_logs = std::path::Path::new("./logs/").is_dir();
-    match build("itsy/playground/playground.itsy", &mut files, write_logs) {
+    match build("itsy/playground/main.itsy", &mut files, write_logs) {
         Ok(program) => {
             let mut vm = runtime::VM::new(&program);
             if write_logs {

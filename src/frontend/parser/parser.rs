@@ -997,7 +997,7 @@ pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseE
 /// use std::fs;
 ///
 /// fn main() {
-///     let source_file = "itsy/playground/playground.itsy";
+///     let source_file = "itsy/examples/parse.itsy";
 ///     let parsed = parser::parse(|module_path| {
 ///         let filename = parser::module_filename(source_file, module_path);
 ///         let file = fs::read_to_string(filename).unwrap();

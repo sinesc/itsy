@@ -1,0 +1,6 @@
+// example code used by parser::parse inline documentation
+fn main() {
+    let message = "This parses just fine!";
+    let error = this_wont_resolve();
+    prints(message + error);
+}
