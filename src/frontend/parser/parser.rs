@@ -279,7 +279,7 @@ fn assignable(i: Input<'_>) -> Output<Expression> {
     fold_many0(
         alt((
             map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, e)),
-            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, type_id: None, index: None })))
+            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, type_id: None })))
         )),
         init.1,
         |mut acc, (op, val)| {
@@ -329,22 +329,22 @@ fn call_argument_list(i: Input<'_>) -> Output<Vec<Expression>> {
     delimited(ws(char('(')), separated_list0(ws(char(',')), expression), ws(char(')')))(i)
 }
 
-fn call(i: Input<'_>) -> Output<Call> {
+fn call_ident(i: Input<'_>) -> Output<Call> {
     let position = i.position();
-    ws(map(
+    map(
         tuple((ident, space0, call_argument_list)),
         move |m| Call {
             position    : position,
             ident       : m.0,
             args        : m.2,
-            call_type   : CallType::Function,
+            call_syntax : CallSyntax::Ident,
             function_id : None,
             type_id     : None,
         }
-    ))(i)
+    )(i)
 }
 
-fn call_static(i: Input<'_>) -> Output<Call> {
+fn call_path(i: Input<'_>) -> Output<Call> {
     let position = i.position();
     map(
         tuple((path, call_argument_list)),
@@ -354,7 +354,7 @@ fn call_static(i: Input<'_>) -> Output<Call> {
                 position    : position,
                 ident       : ident,
                 args        : m.1,
-                call_type   : CallType::Static(m.0),
+                call_syntax : CallSyntax::Path(m.0),
                 function_id : None,
                 type_id     : None,
             }
@@ -462,8 +462,8 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             parens,
             map(suffix, |m| Expression::UnaryOp(Box::new(m))),
             map(prefix, |m| Expression::UnaryOp(Box::new(m))),
-            map(call, |m| Expression::Call(m)),
-            map(call_static, |m| Expression::Call(m)),
+            map(call_ident, |m| Expression::Call(m)),
+            map(call_path, |m| Expression::Call(m)),
             map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None }))
         )))(i)
     }
@@ -487,15 +487,15 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0(
             alt((
                 map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, e)),
-                map(preceded(ws(tag(".")), call), |i| (BinaryOperator::Access, Expression::Call(i))),
-                map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, type_id: None, index: None })))
+                map(preceded(ws(tag(".")), ws(call_ident)), |i| (BinaryOperator::Access, Expression::Call(i))),
+                map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, type_id: None })))
             )),
             init.1,
             move |acc, (op, mut val)| match &mut val {
                 Expression::Call(call) if op == BinaryOperator::Access => {
                     // prepend object argument
                     call.args.insert(0, acc);
-                    call.call_type = CallType::Method;
+                    call.call_syntax = CallSyntax::Method;
                     val
                 },
                 _ => Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -670,17 +670,20 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
 // enum definition
 
 fn enum_def(i: Input<'_>) -> Output<EnumDef> {
-    fn variant(i: Input<'_>) -> Output<(String, Vec<InlineType>)> {
-        pair(
-            map(ws(label), move |i| i.to_string()),
-            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')'))))
-        )(i)
-    }
-    fn variants(i: Input<'_>) -> Output<Vec<(String, Vec<InlineType>)>> {
+    fn variant(i: Input<'_>) -> Output<EnumVariant> {
+        let position = i.position();
         map(
-            separated_list1(ws(char(',')), variant),
-            |list| {
-                list.into_iter().map(|item| (item.0, item.1)).collect()
+            pair(
+            ws(ident),
+            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')'))))
+            ),
+            move |(ident, fields)| EnumVariant {
+                position    : position,
+                ident       : ident,
+                fields      : fields,
+                function_id : None,
+                scope_id    : None,
+                //type_id     : None,
             }
         )(i)
     }
@@ -688,13 +691,14 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     ws(map(
         pair(
             terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
-            tuple((ident, ws(char('{')), variants, opt(ws(char(','))), ws(char('}'))))
+            tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
         ),
         move |pair| EnumDef {
             position: position,
             ident   : pair.1.0,
             variants: pair.1.2,
             type_id : None,
+            scope_id: None,
             vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
     ))(i)

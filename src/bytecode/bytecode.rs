@@ -74,7 +74,7 @@ pub(crate) enum ConstEndianness {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ConstDescriptor {
+pub(crate) struct ConstDescriptor { // todo: order serially, remove position, reduce size to u8 (requires reserve_const_data removal)
     pub(crate) position    : StackAddress,
     pub(crate) size        : StackAddress,
     pub(crate) endianness  : ConstEndianness,
@@ -84,8 +84,7 @@ pub(crate) struct ConstDescriptor {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
-    Array       = 175,  // Array(num_elements, element constructor): copies an array
-    ArrayDyn    = 176,  // ArrayDyn(num_elements, element constructor): copies a fixed number of elements for a dynamic array
+    ArrayDyn    = 176,  // ArrayDyn(element constructor): copies an array, determining element count from prototype or heap object size
     Struct      = 177,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
 }
@@ -95,12 +94,14 @@ impl Constructor {
         //un safe { ::std::mem::transmute(raw) }
         match raw {
             x if x == Self::Primitive as u8 => Self::Primitive,
-            x if x == Self::Array as u8 => Self::Array,
             x if x == Self::ArrayDyn as u8 => Self::ArrayDyn,
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
             index @ _ => unreachable!("Invalid constructor type {}", index),
         }
+    }
+    pub fn to_u8(self: Self) -> u8 {
+        self as u8
     }
 }
 

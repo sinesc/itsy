@@ -74,7 +74,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
 
     // reserve space for the trait vtable as well as an implementor-index => constructor mapping (required for trait object reference counting) in const pool
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
-    compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress);
+    compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress); // FIXME: this does not consider endianess
 
     // serialize constructors onto const pool
     for (type_id, ty) in compiler.id_mappings.types() {
@@ -310,19 +310,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_intrinsic(intrinsic, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
-
-                let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
-
-                // handle virtual/static calls
-
+                let function_id = item.function_id.expect("Unresolved function encountered");
                 if self.type_by_id(object_type_id).as_trait().is_some() {
-
+                    // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id);
                     let function_arg_size = self.id_mappings.function_arg_size(function_id);
                     self.writer.vcall(function_offset, function_arg_size);
-
                 } else {
-
+                    // static dispatch
                     let target = if let Some(&target) = self.functions.get(&function_id) {
                         target
                     } else {
@@ -330,26 +325,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
                         CallInfo::PLACEHOLDER
                     };
-
                     self.writer.call(target.addr, target.arg_size);
                 }
             },
             FunctionKind::Function => {
-
-                let function_id = item.function_id.expect(&format!("Unresolved function \"{}\" encountered", item.ident.name));
+                let function_id = item.function_id.expect("Unresolved function encountered");
                 let call_position = self.writer.position();
-
                 let target = if let Some(&target) = self.functions.get(&function_id) {
                     target
                 } else {
                     self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
                     CallInfo::PLACEHOLDER
                 };
-
                 self.writer.call(target.addr, target.arg_size);
             },
         }
-
         Ok(())
     }
 
@@ -665,7 +655,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "{}", item);
         let ty = self.item_type(item);
         match item.value {
-            LiteralValue::Numeric(numeric) => self.write_numeric(numeric, ty),
+            LiteralValue::Numeric(numeric) => self.write_literal_numeric(numeric, ty),
             LiteralValue::Bool(v) =>  {
                 match ty {
                     Type::bool => { if v { self.writer.one8(); } else { self.writer.zero8(); } },
@@ -673,55 +663,20 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 };
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
-                let constructor = self.get_constructor(ty);
                 if item.value.is_const() {
                     // simple constant constructor, construct from const pool prototypes
+                    let constructor = self.get_constructor(ty);
                     let prototype = self.store_literal_prototype(item);
                     self.writer.construct(constructor, prototype);
                 } else {
                     // non-constant constructor, construct from stack
                     let type_id = item.type_id(self).unwrap();
-                    let size = self.compile_prototype_instructions(item)?;
-                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0)); // TODO implementor index
+                    let size = self.write_literal_prototype_builder(item)?;
+                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                 }
             },
         }
         Ok(())
-    }
-
-    /// Writes instructions to assemble a prototype.
-    fn compile_prototype_instructions(self: &mut Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.item_type(item);
-        Ok(match &item.value {
-            LiteralValue::Array(array_literal) => {
-                for element in &array_literal.elements {
-                    self.compile_expression(element)?;
-                }
-                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
-                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
-            }
-            LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
-                // collect fields first to avoid borrow checker
-                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
-                for field in fields {
-                    self.compile_expression(field)?;
-                }
-                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
-                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
-            }
-            LiteralValue::String(_) => {
-                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
-                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
-                // later use a special constructor instruction that assumes strings are already on the heap.
-                let constructor = self.get_constructor(ty);
-                let prototype = self.store_literal_prototype(item);
-                self.writer.construct(constructor, prototype);
-                Type::String.primitive_size() as StackAddress
-            }
-            _ => unreachable!("Invalid prototype type")
-        })
     }
 
     /// Compiles the given unary operation.
@@ -845,14 +800,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 comment!(self, ".{}", &item.right);
                 // fetch heap value at reference-target
                 let struct_ = compare_type.as_struct().unwrap();
-                let offset = self.compute_member_offset(struct_, item.right.as_member().unwrap().index.unwrap());
+                let offset = self.compute_member_offset(struct_, &item.right.as_member().unwrap().ident.name);
                 self.write_heap_fetch_member(result_type, offset);
             },
             BO::AccessWrite => {
                 comment!(self, ".{} (writing)", &item.right);
                 // compute and push the address of the reference-target
                 let struct_ = compare_type.as_struct().unwrap();
-                let offset = self.compute_member_offset(struct_, item.right.as_member().unwrap().index.unwrap());
+                let offset = self.compute_member_offset(struct_, &item.right.as_member().unwrap().ident.name);
                 self.write_member_offset(offset);
 
             },
@@ -937,7 +892,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Returns constructor index for given type.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
-        *self.constructors.get(&type_id).expect(&format!("Undefined constructor for type {:?}", self.type_by_id(type_id)))
+        *self.constructors.get(&type_id).expect("Undefined constructor")
     }
 
     /// Checks if the given functions are compatible.
@@ -957,6 +912,20 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
         }
         true
+    }
+
+    /// Computes struct member offset in bytes.
+    fn compute_member_offset(self: &Self, struct_: &Struct, member_name: &str) -> StackAddress {
+        let mut offset = 0;
+        for (field_name, field_type_id) in struct_.fields.iter() {
+            if field_name == member_name {
+                break;
+            }
+            let field_type = self.type_by_id(field_type_id.expect("Unresolved struct field encountered"));
+            // use reference size for references, otherwise shallow type size
+            offset += field_type.primitive_size() as StackAddress;
+        }
+        offset
     }
 
     /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
@@ -1076,37 +1045,107 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         self.locals.push(frame);
     }
+}
 
-    /// Writes a constructor for non-primitive types.
+impl<T> Compiler<T> where T: VMFunc<T> {
+    /// Writes an instance constructor.
     fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
-                self.writer.store_const(Constructor::ArrayDyn as u8);
+                self.writer.store_const(Constructor::ArrayDyn);
                 self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {
-                self.writer.store_const(Constructor::Struct as u8);
-                self.writer.store_const(structure.fields.len() as ItemIndex);
+                self.writer.store_const(Constructor::Struct);
                 self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                self.writer.store_const(structure.fields.len() as ItemIndex);
                 for field in &structure.fields {
                     self.store_constructor(field.1.expect("Unresolved struct field type"));
                 }
             }
             Type::String => {
-                self.writer.store_const(Constructor::String as u8);
+                self.writer.store_const(Constructor::String);
             }
             Type::Enum(_) => unimplemented!("enum constructor"),
             Type::Trait(_) => unimplemented!("trait constructor"),
             ty @ _ => {
-                self.writer.store_const(Constructor::Primitive as u8);
+                self.writer.store_const(Constructor::Primitive);
                 self.writer.store_const(ty.primitive_size() as ItemIndex);
             }
         }
         position
     }
 
-    /// Stores given literal on the const pool.
+    /// Writes given numeric, using const pool if necessary.
+    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) {
+        match numeric { // todo: try to refactor this mess
+
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
+
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
+
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
+
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
+
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
+
+            _ if ty.is_integer() || ty.is_float() => {
+                let address = self.store_numeric_prototype(numeric, ty);
+                self.write_const(address, ty);
+            },
+            _ => panic!("Unexpected numeric literal type: {:?}", ty),
+        }
+    }
+
+    /// Writes instructions to assemble a prototype.
+    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
+        use crate::frontend::ast::LiteralValue;
+        let ty = self.item_type(item);
+        Ok(match &item.value {
+            LiteralValue::Numeric(_) | LiteralValue::Bool(_) => unreachable!("Invalid prototype type"),
+            LiteralValue::String(_) => {
+                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
+                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
+                // later use a special constructor instruction that assumes strings are already on the heap.
+                let constructor = self.get_constructor(ty);
+                let prototype = self.store_literal_prototype(item);
+                self.writer.construct(constructor, prototype);
+                Type::String.primitive_size() as StackAddress
+            },
+            LiteralValue::Array(array_literal) => {
+                for element in &array_literal.elements {
+                    self.compile_expression(element)?;
+                }
+                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
+                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
+            },
+            LiteralValue::Struct(struct_literal) => {
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                // collect fields first to avoid borrow checker
+                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
+                for field in fields {
+                    self.compile_expression(field)?;
+                }
+                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
+                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
+            },
+        })
+    }
+
+    /// Stores constant literal prototype on the const pool.
     fn store_literal_prototype(self: &Self, item: &ast::Literal) -> StackAddress {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
@@ -1129,14 +1168,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 for element in &array_literal.elements {
                     self.store_literal_prototype(element.as_literal().unwrap());
                 }
-            }
+            },
             LiteralValue::Struct(struct_literal) => {
                 let struct_def = ty.as_struct().expect("Expected struct, got something else");
                 for (name, _) in struct_def.fields.iter() {
-                    let field = struct_literal.fields.get(&name[..]).expect(&format!("Missing struct field {}", &name));
+                    let field = struct_literal.fields.get(&name[..]).expect("Missing struct field");
                     self.store_literal_prototype(field.as_literal().unwrap());
                 }
-            }
+            },
         };
         pos
     }
@@ -1171,17 +1210,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             Numeric::Overflow => panic!("Literal computation overflow")
         }
-    }
-
-    /// Computes struct member offset in bytes.
-    fn compute_member_offset(self: &Self, struct_: &Struct, member_index: ItemIndex) -> StackAddress {
-        let mut offset = 0;
-        for index in 0 .. member_index {
-            let field_type = self.type_by_id(struct_.fields[index as usize].1.expect("Unresolved struct field encountered"));
-            // use reference size for references, otherwise shallow type size
-            offset += field_type.primitive_size() as StackAddress;
-        }
-        offset
     }
 }
 
@@ -1465,39 +1493,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             }
             _ => unreachable!("Unsupported type {}", ty),
-        }
-    }
-
-    /// Writes given numeric, using const pool if necessary.
-    fn write_numeric(self: &Self, numeric: Numeric, ty: &Type) {
-        match numeric { // todo: try to refactor this mess
-
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
-
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
-
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
-
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
-
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
-
-            _ if ty.is_integer() || ty.is_float() => {
-                let address = self.store_numeric_prototype(numeric, ty);
-                self.write_const(address, ty);
-            },
-            _ => panic!("Unexpected numeric literal type: {:?}", ty),
         }
     }
 

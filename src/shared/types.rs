@@ -22,14 +22,14 @@ impl Hash for Enum {
 /// Information about a struct in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Struct {
-    pub fields: Vec<(String, Option<TypeId>)>,
+    pub fields: Map<String, Option<TypeId>>,
     pub impl_traits: Map<TypeId, ImplTrait>,
 }
 
 impl Struct {
     /// Returns the TypeId for given field name.
     pub fn type_id(self: &Self, field: &str) -> Option<TypeId> {
-        self.fields.iter().find(|f| &f.0 == field).expect("Field not found").1
+        *self.fields.get(field).expect("Field not found")
     }
 }
 
@@ -42,7 +42,7 @@ pub struct Array {
 /// Information about a trait-implementation for a type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImplTrait {
-    pub functions: Map<String, Option<FunctionId>>, // TODO: don't like String here, maybe index trait functions?
+    pub functions: Map<String, Option<FunctionId>>,
 }
 
 impl ImplTrait {
@@ -54,7 +54,7 @@ impl ImplTrait {
 /// Information about a trait definition in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
-    pub provided: Map<String, Option<FunctionId>>, // TODO: don't like String here, maybe index trait functions?
+    pub provided: Map<String, Option<FunctionId>>,
     pub required: Map<String, Option<FunctionId>>,
 }
 

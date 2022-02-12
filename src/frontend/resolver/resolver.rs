@@ -9,13 +9,13 @@ use crate::prelude::*;
 use crate::ast::Visibility;
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
-use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallType};
+use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallSyntax};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError as Error, ResolveErrorKind as ErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
-use crate::shared::types::{Array, Struct, Trait, ImplTrait, Type};
+use crate::shared::types::{Array, Struct, Enum, Trait, ImplTrait, Type};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 
@@ -448,32 +448,28 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a struct definition.
     fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
         if item.is_resolved() {
-            Ok(())
-        } else {
-            // resolve ast fields
-            for (_, field) in &mut item.fields {
-                self.resolve_inline_type(field)?;
-            }
-            // assemble type field list
-            let mut fields = Vec::new();
-            for (_, (field_name, field_type)) in item.fields.iter().enumerate() {
-                fields.push((field_name.to_string(), field_type.type_id(self)));
-            }
-            // insert or update type
-            if let Some(type_id) = item.type_id {
-                let ty = self.type_by_id_mut(type_id);
-                ty.as_struct_mut().unwrap().fields = fields;
-            } else {
-                let ty = Type::Struct(Struct { fields: fields, impl_traits: Map::new() });
-                let qualified = self.abs_path(&[ &item.ident.name ]);
-                let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), ty);
-                item.type_id = Some(type_id);
-                if item.vis == Visibility::Public {
-                    self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
-                }
-            }
-            self.resolved_or_err(item, None)
+            return Ok(());
         }
+        // resolve struct fields
+        for (_, field) in &mut item.fields {
+            self.resolve_inline_type(field)?;
+        }
+        // assemble type field list
+        let fields: Map<_, _> = item.fields.iter()
+            .map(|(field_name, field)| (field_name.clone(), field.type_id(self)))
+            .collect();
+        // insert or update type
+        if let Some(type_id) = item.type_id {
+            self.type_by_id_mut(type_id).as_struct_mut().unwrap().fields = fields;
+        } else {
+            let qualified = self.abs_path(&[ &item.ident.name ]);
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Struct(Struct { fields: fields, impl_traits: Map::new() }));
+            item.type_id = Some(type_id);
+            if item.vis == Visibility::Public {
+                self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+            }
+        }
+        self.resolved_or_err(item, None)
     }
 
     /// Resolves a struct definition.
@@ -611,7 +607,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.scope_id = parent_scope_id;
         if self.stage.must_resolve() && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
-            Err(Error::new(item, ErrorKind::CannotResolve(format!("Cannot resolve arguments/return types for '{}'", item.sig.ident.name)), self.module_path))
+            Err(Error::new(item, ErrorKind::CannotResolve(format!("signature for '{}'", item.sig.ident.name)), self.module_path))
         } else {
             Ok(())
         }
@@ -638,8 +634,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // locate function definition
         if item.function_id.is_none() {
             let path;
-            match &item.call_type {
-                CallType::Method => {
+            match &item.call_syntax {
+                CallSyntax::Method => {
                     let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
                     self.resolve_expression(arg, None)?;
                     let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
@@ -663,11 +659,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         }
                     }
                 },
-                CallType::Function => {
+                CallSyntax::Ident => {
                     path = self.make_path(&[ &item.ident.name ]);
                     item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                 },
-                CallType::Static(static_path) => {
+                CallSyntax::Path(static_path) => {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
                     item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                 },
@@ -771,9 +767,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
                     // infer iter type from array element type
                     self.set_type_id(&mut item.iter, elements_type_id)?;
-                } else if let (Some(iter_type_id), Some(elements_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
+                } else if let (Some(iter_type_id), Some(array_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
                     // infer array element type from iter
-                    if let Some(array) = self.type_by_id_mut(elements_type_id).as_array_mut() {
+                    if let Some(array) = self.type_by_id_mut(array_type_id).as_array_mut() {
                         array.type_id = Some(iter_type_id);
                     }
                 }
@@ -946,14 +942,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(ty) = self.item_type(&item.left) {
                     let struct_ = ty.as_struct().unwrap_or_err(Some(item), ErrorKind::InvalidOperation("Member access on a non-struct".to_string()), self.module_path)?;
                     let field = item.right.as_member_mut().unwrap_or_ice("Member access using a non-field")?;
-                    if field.index.is_none() {
-                        let index = struct_.fields.iter().position(|f| f.0 == field.ident.name)
-                            .unwrap_or_err(Some(field), ErrorKind::UndefinedMember(field.ident.name.clone()), self.module_path)?;
-                        field.index = Some(index as ItemIndex);
-                    }
-                    if let Some(type_id) = struct_.fields[field.index.unwrap_or_ice(ICE)? as usize].1 {
-                        self.set_type_id(item, type_id)?;
-                        self.set_type_id(&mut item.right, type_id)?;
+                    let field_type_id = *struct_.fields.get(&field.ident.name).unwrap_or_err(Some(field), ErrorKind::UndefinedMember(field.ident.name.clone()), self.module_path)?;
+                    if let Some(field_type_id) = field_type_id {
+                        self.set_type_id(item, field_type_id)?;
+                        self.set_type_id(&mut item.right, field_type_id)?;
                     }
                 }
             }
@@ -1094,7 +1086,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
         if let Some(expected_type_id) = expected_type_id {
             if self.type_by_id(expected_type_id).as_array().is_some() {
-                //elements_type_id = expected_array.type_id;
                 self.set_type_id(item, expected_type_id)?;
             } else {
                 let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.type_by_id(expected_type_id))).clone();
