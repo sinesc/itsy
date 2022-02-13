@@ -14,8 +14,8 @@ use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, Resolv
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::infos::{BindingInfo, FunctionKind, Intrinsic};
-use crate::shared::types::{Array, Struct, Enum, Trait, ImplTrait, Type};
+use crate::shared::infos::{BindingInfo};
+use crate::shared::types::{Array, Struct, Enum, Trait, ImplTrait, Type, FunctionKind, Intrinsic};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 

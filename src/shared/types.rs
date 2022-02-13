@@ -2,6 +2,7 @@ use crate::prelude::*;
 use crate::HeapAddress;
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
+use crate::RustFnIndex;
 
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +57,44 @@ impl ImplTrait {
 pub struct Trait {
     pub provided: Map<String, Option<FunctionId>>,
     pub required: Map<String, Option<FunctionId>>,
+}
+
+/// Function mata information.
+#[derive(Clone)]
+pub struct Function {
+    pub kind    : Option<FunctionKind>,
+    pub arg_type: Vec<Option<TypeId>>,
+    pub ret_type: Option<TypeId>,
+}
+
+impl Function {
+    pub fn rust_fn_index(self: &Self) -> Option<RustFnIndex> {
+        match self.kind {
+            Some(FunctionKind::Rust(index)) => Some(index),
+            _ => None,
+        }
+    }
+    pub fn is_resolved(self: &Self) -> bool {
+        self.ret_type.is_some() && self.kind.is_some() && self.arg_type.iter().all(|arg| arg.is_some())
+    }
+}
+
+/// The kind of a function described by a FunctionInfo.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum FunctionKind {
+    Function,
+    Method(TypeId),
+    Rust(RustFnIndex),
+    Intrinsic(TypeId, Intrinsic),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Intrinsic {
+    ArrayLen,
+    ArrayPush,
+    ArrayPop,
+    ArrayTruncate,
+    ArrayRemove,
 }
 
 /// Information about a data type in a resolved program.

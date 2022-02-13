@@ -4,8 +4,8 @@ use crate::prelude::*;
 use crate::shared::Progress;
 use crate::frontend::resolver::resolved::IdMappings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
-use crate::shared::infos::{BindingInfo, FunctionInfo, FunctionKind};
-use crate::shared::types::Type;
+use crate::shared::infos::{BindingInfo};
+use crate::shared::types::{Type, Function, FunctionKind};
 use repository::Repository;
 
 /// Flat lists of types and bindings and which scope the belong to.
@@ -15,7 +15,7 @@ pub(crate) struct Scopes {
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings        : Repository<String, BindingId, BindingInfo>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions       : Repository<(String, TypeId), FunctionId, FunctionInfo>,
+    functions       : Repository<(String, TypeId), FunctionId, Function>,
     /// Function scopes (the function containing this scope)
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -120,7 +120,7 @@ impl Scopes {
             Some(FunctionKind::Intrinsic(type_id, _)) => type_id,
             _ => TypeId::void(),
         };
-        self.functions.insert(scope_id, Some((name.into(), type_id)), FunctionInfo { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
+        self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
     }
 
     /// Aliases an existing function into the given scope, returning a function id.
@@ -162,7 +162,7 @@ impl Scopes {
     }
 
     /// Returns a reference to the signature of the given function id.
-    pub fn function_ref(self: &Self, function_id: FunctionId) -> &FunctionInfo {
+    pub fn function_ref(self: &Self, function_id: FunctionId) -> &Function {
         self.functions.value_by_id(function_id)
     }
 }

@@ -8,7 +8,7 @@ mod binding_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo, FunctionInfo, FunctionKind, Intrinsic}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array, Function, FunctionKind, Intrinsic}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
@@ -896,7 +896,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Checks if the given functions are compatible.
-    fn is_compatible_function(self: &Self, target: &FunctionInfo, other: &FunctionInfo) -> bool {
+    fn is_compatible_function(self: &Self, target: &Function, other: &Function) -> bool {
         if discriminant(&target.kind.unwrap()) != discriminant(&other.kind.unwrap()) {
             return false;
         }

@@ -28,9 +28,9 @@ pub mod resolver {
         }
         pub mod meta {
             //! Resolved program type information.
-            pub use crate::shared::types::{Type, Struct, Enum, Array, Trait, ImplTrait};
+            pub use crate::shared::types::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind};
             pub use crate::shared::numeric::Numeric;
-            pub use crate::shared::infos::{FunctionInfo, BindingInfo, FunctionKind};
+            pub use crate::shared::infos::{BindingInfo};
         }
     }
 }

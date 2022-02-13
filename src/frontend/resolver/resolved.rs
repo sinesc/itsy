@@ -1,8 +1,8 @@
 
 use crate::prelude::*;
 use crate::StackAddress;
-use crate::shared::types::{Type, Trait, ImplTrait};
-use crate::shared::{infos::{BindingInfo, FunctionInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
+use crate::shared::types::{Type, Trait, ImplTrait, Function};
+use crate::shared::{infos::{BindingInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
 use crate::frontend::parser::types::ParsedModule;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -24,11 +24,11 @@ pub struct IdMappings {
     /// Maps type ids to types.
     pub(crate) type_map    : Vec<Type>,
     /// Maps function ids to functions.
-    pub(crate) function_map: Vec<FunctionInfo>,
+    pub(crate) function_map: Vec<Function>,
 }
 
 impl IdMappings {
-    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<FunctionInfo>) -> Self {
+    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
         for info in binding_map.iter() {
             info.type_id.expect("Unresolved binding type encountered.");
         }
@@ -42,7 +42,7 @@ impl IdMappings {
         }
     }
     /// Returns an iterator over the function mapping.
-    pub fn functions(self: &Self) -> impl Iterator<Item=(FunctionId, &FunctionInfo)> {
+    pub fn functions(self: &Self) -> impl Iterator<Item=(FunctionId, &Function)> {
         self.function_map.iter().enumerate().map(|(index, info)| (FunctionId::from(index), info))
     }
     /// Returns an iterator over the type mapping.
@@ -68,7 +68,7 @@ impl IdMappings {
         self.binding_map.iter().enumerate().map(|(index, info)| (BindingId::from(index), info))
     }
     /// Returns function information for given function id.
-    pub fn function(self: &Self, function_id: FunctionId) -> &FunctionInfo {
+    pub fn function(self: &Self, function_id: FunctionId) -> &Function {
         &self.function_map[Into::<usize>::into(function_id)]
     }
     /// Returns binding information for given binding id.
