@@ -8,7 +8,7 @@ mod binding_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, infos::{BindingInfo}, numeric::Numeric, types::{Type, ImplTrait, Struct, Array, Function, FunctionKind, Intrinsic}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Function, FunctionKind, Intrinsic, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
@@ -1845,11 +1845,11 @@ impl<T> TypeContainer for Compiler<T> {
 /// A container holding binding id to BindingInfo mappings
 #[cfg(feature="compiler")]
 impl<T> BindingContainer for Compiler<T> {
-    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         let binding_index = Into::<usize>::into(binding_id);
         &self.id_mappings.binding_map[binding_index]
     }
-    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
         let binding_index = Into::<usize>::into(binding_id);
         &mut self.id_mappings.binding_map[binding_index]
     }

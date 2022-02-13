@@ -2,7 +2,7 @@
 use crate::prelude::*;
 use crate::ItemIndex;
 use crate::frontend::ast::{Position, Positioned};
-use crate::shared::types::Type;
+use crate::shared::meta::Type;
 use crate::shared::numeric::Numeric;
 
 pub const ICE: &'static str = "Internal compiler error";

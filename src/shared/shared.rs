@@ -2,15 +2,13 @@
 
 pub mod numeric;
 pub mod typed_ids;
-pub mod types;
+pub mod meta;
 pub mod error;
-#[cfg(feature="compiler")]
-pub mod infos;
 
 use crate::prelude::*;
-use crate::shared::{typed_ids::TypeId, types::{Type, Array}};
+use crate::shared::{typed_ids::TypeId, meta::{Type, Array, Binding}};
 #[cfg(feature="compiler")]
-use crate::shared::{infos::BindingInfo, typed_ids::BindingId};
+use crate::shared::typed_ids::BindingId;
 
 /// A container holding type id to type mappings
 pub(crate) trait TypeContainer {
@@ -53,9 +51,9 @@ pub(crate) trait TypeContainer {
 #[cfg(feature="compiler")]
 pub(crate) trait BindingContainer {
     /// Returns a reference to the type id.
-    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo;
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
     /// Returns a mutable reference to the type id.
-    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo;
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding;
 }
 
 #[derive(Copy, Clone, PartialEq)]

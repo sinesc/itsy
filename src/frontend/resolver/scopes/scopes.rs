@@ -4,8 +4,7 @@ use crate::prelude::*;
 use crate::shared::Progress;
 use crate::frontend::resolver::resolved::IdMappings;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
-use crate::shared::infos::{BindingInfo};
-use crate::shared::types::{Type, Function, FunctionKind};
+use crate::shared::meta::{Type, Function, FunctionKind, Binding};
 use repository::Repository;
 
 /// Flat lists of types and bindings and which scope the belong to.
@@ -13,7 +12,7 @@ pub(crate) struct Scopes {
     /// Flat bytecode type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings        : Repository<String, BindingId, BindingInfo>,
+    bindings        : Repository<String, BindingId, Binding>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<(String, TypeId), FunctionId, Function>,
     /// Function scopes (the function containing this scope)
@@ -172,7 +171,7 @@ impl Scopes {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
     pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, mutable: bool, type_id: Option<TypeId>) -> BindingId {
-        self.bindings.insert(scope_id, name.map(|n| n.into()), BindingInfo { mutable, type_id })
+        self.bindings.insert(scope_id, name.map(|n| n.into()), Binding { mutable, type_id })
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
@@ -194,12 +193,12 @@ impl Scopes {
     }
 
     /// Returns a mutable reference to the binding info of the given binding id.
-    pub fn binding_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
+    pub fn binding_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
         self.bindings.value_by_id_mut(binding_id)
     }
 
     /// Returns a reference to the binding info of the given binding id.
-    pub fn binding_ref(self: &Self, binding_id: BindingId) -> &BindingInfo {
+    pub fn binding_ref(self: &Self, binding_id: BindingId) -> &Binding {
         self.bindings.value_by_id(binding_id)
     }
 }

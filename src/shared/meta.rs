@@ -4,6 +4,12 @@ use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 use crate::RustFnIndex;
 
+/// Binding meta information.
+pub struct Binding {
+    pub mutable: bool,
+    pub type_id: Option<TypeId>,
+}
+
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Enum {

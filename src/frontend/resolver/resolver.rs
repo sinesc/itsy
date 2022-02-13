@@ -14,8 +14,7 @@ use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, Resolv
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::infos::{BindingInfo};
-use crate::shared::types::{Array, Struct, Enum, Trait, ImplTrait, Type, FunctionKind, Intrinsic};
+use crate::shared::meta::{Array, Struct, Enum, Trait, ImplTrait, Type, FunctionKind, Intrinsic, Binding};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 
@@ -1153,10 +1152,10 @@ impl<'ctx> TypeContainer for Resolver<'ctx> {
 
 /// A container holding binding id to BindingInfo mappings
 impl<'ctx> BindingContainer for Resolver<'ctx> {
-    fn binding_by_id(self: &Self, binding_id: BindingId) -> &BindingInfo {
+    fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         self.scopes.binding_ref(binding_id)
     }
-    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut BindingInfo {
+    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
         self.scopes.binding_mut(binding_id)
     }
 }

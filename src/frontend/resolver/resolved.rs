@@ -1,8 +1,8 @@
 
 use crate::prelude::*;
 use crate::StackAddress;
-use crate::shared::types::{Type, Trait, ImplTrait, Function};
-use crate::shared::{infos::{BindingInfo}, typed_ids::{BindingId, TypeId, FunctionId}};
+use crate::shared::meta::{Type, Trait, ImplTrait, Function, Binding};
+use crate::shared::typed_ids::{BindingId, TypeId, FunctionId};
 use crate::frontend::parser::types::ParsedModule;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -20,7 +20,7 @@ pub struct ResolvedProgram<T> {
 /// Resolved program meta data.
 pub struct IdMappings {
     /// Maps binding ids to binding info descriptors.
-    pub(crate) binding_map : Vec<BindingInfo>,
+    pub(crate) binding_map : Vec<Binding>,
     /// Maps type ids to types.
     pub(crate) type_map    : Vec<Type>,
     /// Maps function ids to functions.
@@ -28,7 +28,7 @@ pub struct IdMappings {
 }
 
 impl IdMappings {
-    pub(crate) fn new(binding_map: Vec<BindingInfo>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
+    pub(crate) fn new(binding_map: Vec<Binding>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
         for info in binding_map.iter() {
             info.type_id.expect("Unresolved binding type encountered.");
         }
@@ -64,7 +64,7 @@ impl IdMappings {
             .filter_map(|i| if i.1.impl_traits.len() > 0 { Some((i.0, &i.1.impl_traits)) } else { None })
     }
     /// Returns an iterator over the type mapping.
-    pub fn bindings(self: &Self) -> impl Iterator<Item=(BindingId, &BindingInfo)> {
+    pub fn bindings(self: &Self) -> impl Iterator<Item=(BindingId, &Binding)> {
         self.binding_map.iter().enumerate().map(|(index, info)| (BindingId::from(index), info))
     }
     /// Returns function information for given function id.
@@ -72,7 +72,7 @@ impl IdMappings {
         &self.function_map[Into::<usize>::into(function_id)]
     }
     /// Returns binding information for given binding id.
-    pub fn binding(self: &Self, binding_id: BindingId) -> &BindingInfo {
+    pub fn binding(self: &Self, binding_id: BindingId) -> &Binding {
         &self.binding_map[Into::<usize>::into(binding_id)]
     }
     /// Returns type information for given type id.

@@ -34,7 +34,7 @@ type StackAddress = usize;
 type StackOffset = isize;
 /// Itsy type used to store stack addresses and vector indices. Public only so that tests can access this.
 #[doc(hidden)]
-pub const STACK_ADDRESS_TYPE: shared::types::Type = shared::types::Type::u64; // TODO: assumes usize is 64 bit
+pub const STACK_ADDRESS_TYPE: shared::meta::Type = shared::meta::Type::u64; // TODO: assumes usize is 64 bit
 
 /// Type representing a heap address.
 type HeapAddress = usize;
