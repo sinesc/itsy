@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::HeapAddress;
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
-use crate::RustFnIndex;
+use crate::{VariantIndex, RustFnIndex};
 
 /// Binding meta information.
 pub struct Binding {
@@ -11,19 +11,10 @@ pub struct Binding {
 }
 
 /// Information about an enum in a resolved program.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Enum {
-    //repr: u8,
-    pub keys: Map<usize, u64>
-}
-
-impl Hash for Enum {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for (k, v) in self.keys.iter() {
-            k.hash(state);
-            v.hash(state);
-        };
-    }
+    pub variants: Vec<(String, Vec<Option<TypeId>>)>,
+    pub impl_traits: Map<TypeId, ImplTrait>,
 }
 
 /// Information about a struct in a resolved program.
@@ -92,6 +83,7 @@ pub enum FunctionKind {
     Method(TypeId),
     Rust(RustFnIndex),
     Intrinsic(TypeId, Intrinsic),
+    Variant(TypeId, VariantIndex),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -292,6 +284,20 @@ impl Type {
     pub fn as_struct_mut(self: &mut Self) -> Option<&mut Struct> {
         match self {
             Type::Struct(struct_) => Some(struct_),
+            _ => None
+        }
+    }
+    /// Returns the type as an enum.
+    pub const fn as_enum(self: &Self) -> Option<&Enum> {
+        match self {
+            Type::Enum(enum_) => Some(enum_),
+            _ => None
+        }
+    }
+    /// Returns the type as a mutable enum.
+    pub fn as_enum_mut(self: &mut Self) -> Option<&mut Enum> {
+        match self {
+            Type::Enum(enum_) => Some(enum_),
             _ => None
         }
     }

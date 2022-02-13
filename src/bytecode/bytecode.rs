@@ -87,6 +87,7 @@ pub enum Constructor {
     ArrayDyn    = 176,  // ArrayDyn(element constructor): copies an array, determining element count from prototype or heap object size
     Struct      = 177,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
+    Enum        = 179,  // Enum(num_variants, implementor index, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
 }
 
 impl Constructor {
@@ -97,6 +98,7 @@ impl Constructor {
             x if x == Self::ArrayDyn as u8 => Self::ArrayDyn,
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
+            x if x == Self::Enum as u8 => Self::Enum,
             index @ _ => unreachable!("Invalid constructor type {}", index),
         }
     }

@@ -52,6 +52,9 @@ pub type RustFnIndex = ItemIndex;
 /// Type used to index builtins.
 type BuiltinIndex = ItemIndex;
 
+/// Type used to index enum variants. Must be ItemIndex alias.
+type VariantIndex = ItemIndex;
+
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).

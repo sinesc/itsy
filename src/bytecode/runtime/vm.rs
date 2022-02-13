@@ -1,7 +1,7 @@
 //! A virtual machine for running Itsy bytecode.
 
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex};
+use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
 use crate::bytecode::{HeapRef, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
 
 /// Current state of the vm, checked after each instruction.
@@ -213,6 +213,24 @@ impl<T, U> VM<T, U> {
                     self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             },
+            Constructor::Enum => {
+                let implementor_index = self.construct_read_index(constructor_offset);
+                let num_variants = self.construct_read_index(constructor_offset);
+                // read variant index from prototype
+                let variant_index: ItemIndex = self.stack.load(*prototype_offset);
+                *prototype_offset += size_of_val(&variant_index) as StackAddress;
+                assert!(variant_index < num_variants, "Prototype specifies invalid enum variant");
+                // seek to variant offset, read it from constructor and seek to the offset
+                *constructor_offset += (size_of::<StackAddress>() * variant_index as usize) as StackAddress;
+                *constructor_offset = self.construct_read_address(constructor_offset);
+                // read and construct fields for the variant
+                let num_fields = self.construct_read_index(constructor_offset);
+                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
+                self.construct_write_ref(target, heap_ref);
+                for _ in 0..num_fields {
+                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
+                }
+            },
             Constructor::String => {
                 if existing_strings {
                     let num_bytes = HeapRef::primitive_size() as StackAddress;
@@ -277,6 +295,30 @@ impl<T, U> VM<T, U> {
                 }
                 self.heap.ref_item(item.index(), op);
             },
+            Constructor::Enum => {
+                let variant_index: VariantIndex = self.heap.read_seq(&mut item);
+                let _implementor_index = self.construct_read_index(constructor_offset);
+                let num_variants = self.construct_read_index(constructor_offset);
+                assert!(variant_index < num_variants, "Enum object specifies invalid enum variant");
+                // seek to variant offset, read it from constructor and seek to the offset
+                *constructor_offset += (size_of::<StackAddress>() * variant_index as usize) as StackAddress;
+                *constructor_offset = self.construct_read_address(constructor_offset);
+                // handle fields
+                let num_fields = self.construct_read_index(&mut constructor_offset);
+                for _ in 0..num_fields {
+                    let field_constructor = self.construct_read_op(&mut constructor_offset);
+                    if field_constructor != Constructor::Primitive {
+                        let field: HeapRef = self.heap.read_seq(&mut item);
+                        if epoch != self.heap.item_epoch(field.index()) {
+                            self.refcount_recurse(field_constructor, field, &mut constructor_offset, op, epoch);
+                        }
+                    } else {
+                        let num_bytes = self.construct_read_index(&mut constructor_offset) as StackOffset;
+                        item.add_offset(num_bytes);
+                    }
+                }
+                self.heap.ref_item(item.index(), op);
+            }
             Constructor::String => {
                 self.heap.ref_item(item.index(), op);
             },

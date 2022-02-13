@@ -281,36 +281,39 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Compiles the given call.
-    fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
-        if item.args.len() == 0 {
-            comment!(self, "{}()", item.ident.name);
-        }
-
-        let function_info = self.id_mappings.function(item.function_id.unwrap()).clone();
-
+    fn write_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
         // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, _index);
             self.compile_expression(arg)?;
-
-            match function_info.kind.unwrap() {
+            match function.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
                     self.item_cnt(arg, true, HeapRefOp::Inc);
                 },
                 _ => { }
             }
         }
+        Ok(())
+    }
 
-        match function_info.kind.unwrap() {
+    /// Compiles the given call.
+    fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
+        if item.args.len() == 0 {
+            comment!(self, "{}()", item.ident.name);
+        }
+        let function_id = item.function_id.expect("Unresolved function encountered");
+        let function = self.id_mappings.function(function_id).clone();
+        match function.kind.unwrap() {
             FunctionKind::Rust(rust_fn_index) => {
+                self.write_call_args(&function, item)?;
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
             FunctionKind::Intrinsic(type_id, intrinsic) => {
+                self.write_call_args(&function, item)?;
                 self.write_intrinsic(intrinsic, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
-                let function_id = item.function_id.expect("Unresolved function encountered");
+                self.write_call_args(&function, item)?;
                 if self.type_by_id(object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id);
@@ -329,7 +332,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             FunctionKind::Function => {
-                let function_id = item.function_id.expect("Unresolved function encountered");
+                self.write_call_args(&function, item)?;
                 let call_position = self.writer.position();
                 let target = if let Some(&target) = self.functions.get(&function_id) {
                     target
@@ -338,6 +341,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     CallInfo::PLACEHOLDER
                 };
                 self.writer.call(target.addr, target.arg_size);
+            },
+            FunctionKind::Variant(type_id, variant_index) => {
+                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                self.write_call_args(&function, item)?;
+                let function_id = item.function_id.expect("Unresolved function encountered");
+                let arg_size = self.id_mappings.function_arg_size(function_id);
+                self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
         Ok(())
@@ -1067,7 +1078,29 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::String => {
                 self.writer.store_const(Constructor::String);
             }
-            Type::Enum(_) => unimplemented!("enum constructor"),
+            Type::Enum(enumeration) => {
+                self.writer.store_const(Constructor::Enum);
+                self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                self.writer.store_const(enumeration.variants.len() as ItemIndex);
+                let variant_offsets_pos = self.writer.const_len();
+                // reserve space for variant offsets
+                for _ in &enumeration.variants {
+                    self.writer.store_const(123 as StackAddress);
+                }
+                // write variants, remember offsets
+                let mut variant_offsets = Vec::with_capacity(enumeration.variants.len());
+                for (_, fields) in &enumeration.variants {
+                    let variant_offset = self.writer.store_const(fields.len() as ItemIndex);
+                    variant_offsets.push(variant_offset);
+                    for field in fields {
+                        self.store_constructor(field.expect("Unresolved enum field type"));
+                    }
+                }
+                // write variant offsets
+                for (index, &variant_offset) in variant_offsets.iter().enumerate() {
+                    self.writer.set_const_data(variant_offsets_pos + index * size_of::<StackAddress>() as StackAddress, variant_offset);
+                }
+            }
             Type::Trait(_) => unimplemented!("trait constructor"),
             ty @ _ => {
                 self.writer.store_const(Constructor::Primitive);

@@ -5,7 +5,7 @@ mod scopes;
 pub mod error;
 pub mod resolved;
 
-use crate::prelude::*;
+use crate::{prelude::*, VariantIndex};
 use crate::ast::Visibility;
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
@@ -363,7 +363,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Expression(expression)   => self.resolve_expression(expression, None),
             S::Module(_)                => { Ok(()) /* nothing to do here */ },
             S::Use(use_declaration)                => self.resolve_use_declaration(use_declaration),
-            S::EnumDef(_enum_def)                => { Err(Error::new(item, ErrorKind::Unsupported("enum not yet implemented".to_string()), self.module_path)) }, // TODO
+            S::EnumDef(enum_def)        => self.resolve_enum_def(enum_def),
         }
     }
 
@@ -468,6 +468,46 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
             }
         }
+        self.resolved_or_err(item, None)
+    }
+
+    /// Resolves an enum definition.
+    fn resolve_enum_def(self: &mut Self, item: &mut ast::EnumDef) -> ResolveResult {
+        if item.is_resolved() {
+            return Ok(());
+        }
+        // resolve enum variant fields
+        for variant in &mut item.variants {
+            for field in &mut variant.fields {
+                self.resolve_inline_type(field)?;
+            }
+        }
+        // assemble variant field lists
+        let variants: Vec<_> = item.variants.iter()
+            .map(|variant| (variant.ident.name.clone(), variant.fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>()))
+            .collect();
+        // insert or update type
+        if let Some(type_id) = item.type_id {
+            self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
+        } else {
+            let qualified = self.abs_path(&[ &item.ident.name ]);
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { variants: variants, impl_traits: Map::new() }));
+            item.type_id = Some(type_id);
+            if item.vis == Visibility::Public {
+                self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+            }
+        }
+        // create variant constructors
+        //let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        for (index, variant) in item.variants.iter_mut().enumerate() {
+            if variant.is_resolved() {
+                let arg_type_ids: Vec<_> = variant.fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
+                let path = self.abs_path(&[ &item.ident.name, &variant.ident.name ]);
+                let function_id = self.scopes.insert_function(self.scope_id, &path, item.type_id, arg_type_ids, Some(FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex)));
+                variant.function_id = Some(function_id);
+            }
+        }
+        //self.scope_id = parent_scope_id;
         self.resolved_or_err(item, None)
     }
 
