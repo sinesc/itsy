@@ -281,7 +281,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn write_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
+    /// Compiles function call arguments.
+    fn compile_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
         // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, _index);
@@ -305,15 +306,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let function = self.id_mappings.function(function_id).clone();
         match function.kind.unwrap() {
             FunctionKind::Rust(rust_fn_index) => {
-                self.write_call_args(&function, item)?;
+                self.compile_call_args(&function, item)?;
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
             FunctionKind::Intrinsic(type_id, intrinsic) => {
-                self.write_call_args(&function, item)?;
+                self.compile_call_args(&function, item)?;
                 self.write_intrinsic(intrinsic, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
-                self.write_call_args(&function, item)?;
+                self.compile_call_args(&function, item)?;
                 if self.type_by_id(object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id);
@@ -332,7 +333,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             FunctionKind::Function => {
-                self.write_call_args(&function, item)?;
+                self.compile_call_args(&function, item)?;
                 let call_position = self.writer.position();
                 let target = if let Some(&target) = self.functions.get(&function_id) {
                     target
@@ -345,7 +346,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
                 self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
-                self.write_call_args(&function, item)?;
+                self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.expect("Unresolved function encountered");
                 let arg_size = self.id_mappings.function_arg_size(function_id);
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
@@ -1247,6 +1248,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 }
 
 impl<T> Compiler<T> where T: VMFunc<T> {
+
     /// Writes a cast from one float to another or from/to a 64 bit integer.
     fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
         match (from, to) {

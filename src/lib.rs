@@ -32,7 +32,7 @@ use frontend::{parser::parse_module, resolver::resolve};
 type StackAddress = usize;
 /// Type representing a stack offset, must be same size as addresses.
 type StackOffset = isize;
-/// Itsy type used to store stack addresses and vector indices. Public only so that tests can access this.
+/// Itsy type used to store stack addresses and vector indices. Must match Rust type. Public only so that tests can access this.
 #[doc(hidden)]
 pub const STACK_ADDRESS_TYPE: shared::meta::Type = shared::meta::Type::u64; // TODO: assumes usize is 64 bit
 
@@ -49,7 +49,7 @@ pub type ItemIndex = u16;
 #[doc(hidden)]
 pub type RustFnIndex = ItemIndex;
 
-/// Type used to index builtins.
+/// Type used to index builtins. Must be ItemIndex alias.
 type BuiltinIndex = ItemIndex;
 
 /// Type used to index enum variants. Must be ItemIndex alias.

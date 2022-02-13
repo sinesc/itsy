@@ -81,9 +81,9 @@ impl IdMappings {
     }
     /// Computes the total primitive size of the function parameters.
     pub fn function_arg_size(self: &Self, function_id: FunctionId) -> StackAddress {
-        let info = self.function(function_id);
+        let function = self.function(function_id);
         let mut arg_size = 0;
-        for arg in &info.arg_type {
+        for arg in &function.arg_type {
             let arg_type_id = arg.expect("Function arg is not resolved");
             arg_size += self.ty(arg_type_id).primitive_size() as StackAddress;
         }
@@ -91,8 +91,8 @@ impl IdMappings {
     }
     /// Returns the primitive size of the function return type.
     pub fn function_ret_size(self: &Self, function_id: FunctionId) -> StackAddress {
-        let info = self.function(function_id);
-        let ret_type_id = info.ret_type.expect("Function result is not resolved");
+        let function = self.function(function_id);
+        let ret_type_id = function.ret_type.expect("Function result is not resolved");
         self.ty(ret_type_id).primitive_size() as StackAddress
     }
 }
