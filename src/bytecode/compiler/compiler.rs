@@ -7,7 +7,7 @@ mod util;
 mod binding_state;
 
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex, STACK_ADDRESS_TYPE};
+use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Function, FunctionKind, Intrinsic, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
@@ -674,7 +674,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
-            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) => {
+            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) | LiteralValue::Variant(_) => {
                 if item.value.is_const() {
                     // simple constant constructor, construct from const pool prototypes
                     let constructor = self.get_constructor(ty);
@@ -1176,6 +1176,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
                 struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
             },
+            LiteralValue::Variant(variant) => {
+                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
+                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
+                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                index_type.primitive_size() as StackAddress
+            },
         })
     }
 
@@ -1209,6 +1216,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     let field = struct_literal.fields.get(&name[..]).expect("Missing struct field");
                     self.store_literal_prototype(field.as_literal().unwrap());
                 }
+            },
+            LiteralValue::Variant(variant) => {
+                let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
+                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
+                self.store_numeric_prototype(Numeric::Unsigned(variant_index as u64), &index_type);
             },
         };
         pos

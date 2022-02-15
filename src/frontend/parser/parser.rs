@@ -74,7 +74,7 @@ fn ident(i: Input<'_>) -> Output<Ident> {
 
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(ws(tag("::")), label), move |m| Path { position: position, name: m.into_iter().map(|s| s.to_string()).collect() })(i)
+    map(separated_list1(ws(tag("::")), ident), move |name| Path { position, name })(i)
 }
 
 // literal numerical (-3.14f32)
@@ -264,6 +264,24 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
     )(i)
 }
 
+// literal simple enum variant (MyEnum::MyVariant)
+
+fn variant_literal(i: Input<'_>) -> Output<Literal> {
+    let position = i.position();
+    map(
+        tuple((ident, ws(tag("::")), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
+        move |(ident, _, mut path)| {
+            path.unshift(ident); // prepend path with ident
+            Literal {
+                position    : position,
+                value       : LiteralValue::Variant(VariantLiteral { ident: path.pop(), path: path }),
+                type_name   : None, //Some(TypeName::from_path(m)),
+                type_id     : None,
+            }
+        }
+    )(i)
+}
+
 // literal
 
 fn literal(i: Input<'_>) -> Output<Literal> {
@@ -347,17 +365,14 @@ fn call_ident(i: Input<'_>) -> Output<Call> {
 fn call_path(i: Input<'_>) -> Output<Call> {
     let position = i.position();
     map(
-        tuple((path, call_argument_list)),
-        move |mut m| {
-            let ident = Ident { position: position, name: m.0.pop() };
-            Call {
-                position    : position,
-                ident       : ident,
-                args        : m.1,
-                call_syntax : CallSyntax::Path(m.0),
-                function_id : None,
-                type_id     : None,
-            }
+        tuple((path, space0, call_argument_list)),
+        move |mut m| Call {
+            position    : position,
+            ident       : m.0.pop(),
+            args        : m.2,
+            call_syntax : CallSyntax::Path(m.0),
+            function_id : None,
+            type_id     : None,
         }
     )(i)
 }
@@ -464,6 +479,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(prefix, |m| Expression::UnaryOp(Box::new(m))),
             map(call_ident, |m| Expression::Call(m)),
             map(call_path, |m| Expression::Call(m)),
+            map(variant_literal, |m| Expression::Literal(m)),
             map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None }))
         )))(i)
     }
@@ -616,7 +632,7 @@ fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
             vec![(ident.name, (parts_to_path(&path.name), false))]
         }),
         map(path, |path| {
-            vec![(path.name.last().unwrap().clone(), (parts_to_path(&path.name), false))]
+            vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
         }),
     )))(i)
 }
@@ -675,15 +691,15 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         map(
             pair(
             ws(ident),
-            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')'))))
+            opt(delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))))
             ),
-            move |(ident, fields)| EnumVariant {
-                position    : position,
-                ident       : ident,
-                fields      : fields,
-                function_id : None,
-                scope_id    : None,
-                //type_id     : None,
+            move |(ident, optional_fields)| EnumVariant {
+                position,
+                ident,
+                kind: match optional_fields {
+                    Some(fields) => EnumVariantKind::Data(None, fields),
+                    None => EnumVariantKind::Simple,
+                }
             }
         )(i)
     }
@@ -696,6 +712,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         move |pair| EnumDef {
             position: position,
             ident   : pair.1.0,
+            simple  : pair.1.2.iter().all(|variant| match variant.kind { EnumVariantKind::Simple => true, _ => false }),
             variants: pair.1.2,
             type_id : None,
             scope_id: None,

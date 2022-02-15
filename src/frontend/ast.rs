@@ -136,24 +136,35 @@ pub struct Ident {
     pub name: String,
 }
 
+impl_positioned!(Ident);
+
 impl Display for Ident {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
-impl_positioned!(Ident);
+impl AsRef<str> for Ident {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
 
 /// A path to an item, e.g. `path::to::item`.
 #[derive(Debug)]
 pub struct Path {
     pub position: Position,
-    pub name: Vec<String>,
+    pub name: Vec<Ident>,
 }
 
 impl Path {
-    pub fn pop(self: &mut Self) -> String {
+    pub fn pop(self: &mut Self) -> Ident {
         self.name.pop().unwrap()
+    }
+    pub fn unshift(self: &mut Self, other: Ident) {
+        let old = replace(&mut self.name, Vec::new());
+        self.name.push(other);
+        self.name.extend(old.into_iter());
     }
 }
 
@@ -392,7 +403,7 @@ impl TypeName {
     }
     pub fn from_str(name: &str, position: Position) -> Self {
         TypeName {
-            path    : Path { name: vec! [ name.to_string() ], position: position },
+            path    : Path { name: vec! [ Ident { position: position, name: name.to_string() } ], position: position },
             type_id : None,
         }
     }
@@ -454,21 +465,26 @@ impl Resolvable for Array {
 }
 
 #[derive(Debug)]
+pub enum EnumVariantKind {
+    Simple,
+    Data(Option<FunctionId>, Vec<InlineType>),
+}
+
+#[derive(Debug)]
 pub struct EnumVariant {
     pub position    : Position,
     pub ident       : Ident,
-    pub fields      : Vec<InlineType>,
-    pub function_id : Option<FunctionId>,
-    pub scope_id    : Option<ScopeId>,
-    //pub type_id     : Option<TypeId>,
+    pub kind        : EnumVariantKind,
 }
+
 impl_positioned!(EnumVariant);
-//impl_typeable!(EnumVariant);
 
 impl Resolvable for EnumVariant {
     fn num_resolved(self: &Self) -> Progress {
-        self.fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved())
-        //+ self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        match &self.kind {
+            EnumVariantKind::Data(_, fields) => fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved()),
+            EnumVariantKind::Simple => Progress::new(1, 1),
+        }
     }
 }
 
@@ -477,11 +493,13 @@ impl Resolvable for EnumVariant {
 pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
+    pub simple  : bool,
     pub variants: Vec<EnumVariant>,
     pub scope_id: Option<ScopeId>,
     pub type_id : Option<TypeId>,
     pub vis     : Visibility,
 }
+
 impl_positioned!(EnumDef);
 impl_typeable!(EnumDef);
 
@@ -504,6 +522,7 @@ pub struct StructDef {
     pub type_id : Option<TypeId>,
     pub vis     : Visibility,
 }
+
 impl_positioned!(StructDef);
 impl_typeable!(StructDef);
 
@@ -843,6 +862,7 @@ impl Display for Literal {
             LiteralValue::String(v) => write!(f, "{:?}", v),
             LiteralValue::Array(_) => write!(f, "[ ]"),
             LiteralValue::Struct(_) => write!(f, "struct {}", &self.type_name.as_ref().unwrap().path),
+            LiteralValue::Variant(v) => write!(f, "enum {}", v),
         }
     }
 }
@@ -854,6 +874,7 @@ pub enum LiteralValue {
     String(String),
     Array(ArrayLiteral),
     Struct(StructLiteral),
+    Variant(VariantLiteral),
 }
 
 impl LiteralValue {
@@ -920,9 +941,19 @@ impl Debug for LiteralValue {
             LiteralValue::String(v) => write!(f, "String({:?})", v),
             LiteralValue::Array(v) => write!(f, "Array({:#?})", v),
             LiteralValue::Struct(v) => write!(f, "Struct({:#?})", v),
+            LiteralValue::Variant(v) => write!(f, "Enum({:#?})", v),
         }
     }
 }
+
+/// An enum variant literal (simple)
+#[derive(Debug)]
+pub struct VariantLiteral {
+    pub path: Path,
+    pub ident: Ident,
+}
+
+impl_display!(VariantLiteral, "{}", path);
 
 /// An inline array literal, e.g. `[ 2, 3, 5, 7 ]`.
 #[derive(Debug)]

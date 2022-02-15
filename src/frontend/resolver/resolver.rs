@@ -6,7 +6,7 @@ pub mod error;
 pub mod resolved;
 
 use crate::{prelude::*, VariantIndex};
-use crate::ast::Visibility;
+use crate::ast::{Visibility, LiteralValue};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallSyntax};
@@ -476,16 +476,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.is_resolved() {
             return Ok(());
         }
-        // resolve enum variant fields
+        // resolve enum variant fields, assemble variant field lists
+        let mut variants = Vec::new();
         for variant in &mut item.variants {
-            for field in &mut variant.fields {
-                self.resolve_inline_type(field)?;
+            match &mut variant.kind {
+                ast::EnumVariantKind::Data(_, fields) => {
+                    let mut field_type_ids = Vec::new();
+                    for field in fields.iter_mut() {
+                        self.resolve_inline_type(field)?;
+                        field_type_ids.push(field.type_id(self));
+                    }
+                    variants.push((variant.ident.name.clone(), field_type_ids));
+                },
+                ast::EnumVariantKind::Simple => variants.push((variant.ident.name.clone(), Vec::new())),
             }
         }
-        // assemble variant field lists
-        let variants: Vec<_> = item.variants.iter()
-            .map(|variant| (variant.ident.name.clone(), variant.fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>()))
-            .collect();
         // insert or update type
         if let Some(type_id) = item.type_id {
             self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
@@ -501,10 +506,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         //let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         for (index, variant) in item.variants.iter_mut().enumerate() {
             if variant.is_resolved() {
-                let arg_type_ids: Vec<_> = variant.fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
-                let path = self.abs_path(&[ &item.ident.name, &variant.ident.name ]);
-                let function_id = self.scopes.insert_function(self.scope_id, &path, item.type_id, arg_type_ids, Some(FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex)));
-                variant.function_id = Some(function_id);
+                match &mut variant.kind {
+                    ast::EnumVariantKind::Data(function_id @ None, fields) => {
+                        let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
+                        let path = self.abs_path(&[ &item.ident.name, &variant.ident.name ]);
+                        let kind = FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex);
+                        *function_id = Some(self.scopes.insert_function(self.scope_id, &path, item.type_id, arg_type_ids, Some(kind)));
+                    },
+                    _ => { },
+                }
             }
         }
         //self.scope_id = parent_scope_id;
@@ -745,6 +755,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         self.resolved_or_err(item, expected_result)
+    }
+
+    /// Resolves a simple enum variant. (Data variants are handled by resolve_call.)
+    fn resolve_variant_literal(self: &mut Self, item: &mut ast::Literal, expected_type: Option<TypeId>) -> Result<Option<TypeId>, Error> {
+        if item.type_id.is_none() {
+            let variant = match &item.value {
+                LiteralValue::Variant(v) => v,
+                _ => unreachable!("expected variant literal"),
+            };
+            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&variant.path.name)) {
+                item.type_id = Some(new_type_id);
+            }
+        }
+        if let (Some(item_type_id), Some(expected_type)) = (item.type_id, expected_type) {
+            self.check_type_accepted_for(item, item_type_id, expected_type)?;
+        }
+        self.resolved_or_err(item, expected_type)?;
+        Ok(item.type_id)
     }
 
     /// Resolves an occurance of a variable.
@@ -1069,6 +1097,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_array_literal(item, expected_type)?;
         } else if let LV::Struct(_) = item.value {
             self.resolve_struct_literal(item)?;
+        } else if let LV::Variant(_) = item.value {
+            self.resolve_variant_literal(item, expected_type)?; // handles simple variants only. data variants are parsed as calls.
         } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
             if let Some(explicit_type_id) = self.resolve_type(type_name, expected_type)? {
