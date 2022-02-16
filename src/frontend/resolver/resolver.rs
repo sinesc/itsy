@@ -480,7 +480,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let mut variants = Vec::new();
         for variant in &mut item.variants {
             match &mut variant.kind {
-                ast::EnumVariantKind::Data(_, fields) => {
+                ast::VariantKind::Data(_, fields) => {
                     let mut field_type_ids = Vec::new();
                     for field in fields.iter_mut() {
                         self.resolve_inline_type(field)?;
@@ -488,7 +488,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                     variants.push((variant.ident.name.clone(), field_type_ids));
                 },
-                ast::EnumVariantKind::Simple => variants.push((variant.ident.name.clone(), Vec::new())),
+                ast::VariantKind::Simple => variants.push((variant.ident.name.clone(), Vec::new())),
             }
         }
         // insert or update type
@@ -507,7 +507,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for (index, variant) in item.variants.iter_mut().enumerate() {
             if variant.is_resolved() {
                 match &mut variant.kind {
-                    ast::EnumVariantKind::Data(function_id @ None, fields) => {
+                    ast::VariantKind::Data(function_id @ None, fields) => {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
                         let path = self.abs_path(&[ &item.ident.name, &variant.ident.name ]);
                         let kind = FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex);

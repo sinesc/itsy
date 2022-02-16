@@ -686,19 +686,19 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
 // enum definition
 
 fn enum_def(i: Input<'_>) -> Output<EnumDef> {
-    fn variant(i: Input<'_>) -> Output<EnumVariant> {
+    fn variant(i: Input<'_>) -> Output<VariantDef> {
         let position = i.position();
         map(
             pair(
             ws(ident),
             opt(delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))))
             ),
-            move |(ident, optional_fields)| EnumVariant {
+            move |(ident, optional_fields)| VariantDef {
                 position,
                 ident,
                 kind: match optional_fields {
-                    Some(fields) => EnumVariantKind::Data(None, fields),
-                    None => EnumVariantKind::Simple,
+                    Some(fields) => VariantKind::Data(None, fields),
+                    None => VariantKind::Simple,
                 }
             }
         )(i)
@@ -712,7 +712,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         move |pair| EnumDef {
             position: position,
             ident   : pair.1.0,
-            simple  : pair.1.2.iter().all(|variant| match variant.kind { EnumVariantKind::Simple => true, _ => false }),
+            simple  : pair.1.2.iter().all(|variant| match variant.kind { VariantKind::Simple => true, _ => false }),
             variants: pair.1.2,
             type_id : None,
             scope_id: None,

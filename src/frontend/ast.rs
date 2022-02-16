@@ -464,26 +464,28 @@ impl Resolvable for Array {
     }
 }
 
+/// The kind of a variant, either `Simple` (without associated data) or `Data`.
 #[derive(Debug)]
-pub enum EnumVariantKind {
+pub enum VariantKind {
     Simple,
     Data(Option<FunctionId>, Vec<InlineType>),
 }
 
+/// An enum variant definition, e.g. `MyVariant(u16, f32)` or `MySimpleVariant`.
 #[derive(Debug)]
-pub struct EnumVariant {
+pub struct VariantDef {
     pub position    : Position,
     pub ident       : Ident,
-    pub kind        : EnumVariantKind,
+    pub kind        : VariantKind,
 }
 
-impl_positioned!(EnumVariant);
+impl_positioned!(VariantDef);
 
-impl Resolvable for EnumVariant {
+impl Resolvable for VariantDef {
     fn num_resolved(self: &Self) -> Progress {
         match &self.kind {
-            EnumVariantKind::Data(_, fields) => fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved()),
-            EnumVariantKind::Simple => Progress::new(1, 1),
+            VariantKind::Data(_, fields) => fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved()),
+            VariantKind::Simple => Progress::new(1, 1),
         }
     }
 }
@@ -494,7 +496,7 @@ pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
     pub simple  : bool,
-    pub variants: Vec<EnumVariant>,
+    pub variants: Vec<VariantDef>,
     pub scope_id: Option<ScopeId>,
     pub type_id : Option<TypeId>,
     pub vis     : Visibility,
@@ -946,7 +948,7 @@ impl Debug for LiteralValue {
     }
 }
 
-/// An enum variant literal (simple)
+/// An enum variant literal (simple, without data), e.g. `MyEnum::MySimpleVariant`.
 #[derive(Debug)]
 pub struct VariantLiteral {
     pub path: Path,
@@ -1037,7 +1039,7 @@ pub enum CallSyntax {
     Method,
 }
 
-/// A function or method call.
+/// A function or method call or an enum variant constructor (variant with data).
 #[derive(Debug)]
 pub struct Call {
     pub position        : Position,
