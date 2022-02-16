@@ -1,3 +1,4 @@
+use crate::StackAddress;
 use crate::prelude::*;
 use crate::HeapAddress;
 use crate::shared::typed_ids::{TypeId, FunctionId};
@@ -169,6 +170,26 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
+        }
+    }
+    /// Returns the type for an unsigned integer of the given byte-size.
+    pub const fn unsigned(size: StackAddress) -> Self { // TODO return option once const unwrap becomes stable
+        match size {
+            1 => Self::u8,
+            2 => Self::u16,
+            4 => Self::u32,
+            8 => Self::u64,
+            _ => panic!("Unsupported unsigned integer size"), // unreachable! with string argument causes compile error
+        }
+    }
+    /// Returns the type for a signed integer of the given byte-size.
+    pub const fn signed(size: StackAddress) -> Self { // TODO return option once const unwrap becomes stable
+        match size {
+            1 => Self::i8,
+            2 => Self::i16,
+            4 => Self::i32,
+            8 => Self::i64,
+            _ => panic!("Unsupported signed integer size"), // unreachable! with string argument causes compile error
         }
     }
     /// Whether the given numeric is compatible with this type.
