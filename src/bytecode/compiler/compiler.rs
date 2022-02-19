@@ -1099,7 +1099,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
                 // write variant offsets
                 for (index, &variant_offset) in variant_offsets.iter().enumerate() {
-                    self.writer.set_const_data(variant_offsets_pos + index * size_of::<StackAddress>() as StackAddress, variant_offset);
+                    self.writer.set_const_data(variant_offsets_pos + (index as StackAddress) * size_of::<StackAddress>() as StackAddress, variant_offset);
                 }
             }
             Type::Trait(_) => unimplemented!("trait constructor"),

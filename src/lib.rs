@@ -39,7 +39,7 @@ type VariantIndex = ItemIndex;
 
 /// Itsy type used to store stack addresses and vector indices. Public only so that tests can access this.
 #[doc(hidden)]
-pub const STACK_ADDRESS_TYPE: shared::meta::Type = shared::meta::Type::unsigned(prelude::size_of::<StackAddress>());
+pub const STACK_ADDRESS_TYPE: shared::meta::Type = shared::meta::Type::unsigned(prelude::size_of::<StackAddress>() as StackAddress);
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
