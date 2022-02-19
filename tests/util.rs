@@ -1,4 +1,4 @@
-pub use itsy::{build_str, run as itsy_run, parser::parse_module};
+pub use itsy::{build_str, run as itsy_run, parser::parse_module, sizes::{StackAddress, STACK_ADDRESS_TYPE}, resolver::resolved::meta::Type};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
@@ -28,6 +28,17 @@ pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debu
         }
     }
     assert!(result.len() == expected.len(), "Result length {} did not match expected length {}", result.len(), expected.len());
+}
+
+#[allow(dead_code)]
+pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
+    match STACK_ADDRESS_TYPE {
+        Type::u8 => assert_all(&result, &expected.iter().map(|u| *u as u8).collect::<Vec<_>>()),
+        Type::u16 => assert_all(&result, &expected.iter().map(|u| *u as u16).collect::<Vec<_>>()),
+        Type::u32 => assert_all(&result, &expected.iter().map(|u| *u as u32).collect::<Vec<_>>()),
+        Type::u64 => assert_all(&result, expected),
+        _ => panic!("this test does not support the selected StackAddress type"),
+    }
 }
 
 // Implement some VM methods to write values of specific types to the VM context.

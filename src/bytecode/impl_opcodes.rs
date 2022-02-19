@@ -136,7 +136,7 @@ macro_rules! impl_opcodes {
                 $(
                     $(
                         #[allow(unused_imports)]
-                        pub(crate) fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
+                        pub fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
                             let insert_pos = self.position();
                             impl_opcodes!(write u8, OpCode::$variant_name as u8, self);
                             $(
@@ -149,7 +149,7 @@ macro_rules! impl_opcodes {
                 // single opcode
                 $(
                     #[allow(unused_imports)]
-                    pub(crate) fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
+                    pub fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
                         impl_opcodes!(write u8, OpCode::$name as u8, self);
                         $( impl_opcodes!(write $arg_type, $arg_name, self); )*

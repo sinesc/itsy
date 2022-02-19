@@ -20,26 +20,26 @@ mod prelude;
 mod config;
 
 pub use interface::*;
+
 use config::*;
+mod config_derived {
+    use crate::{shared::meta::Type, prelude::size_of, StackAddress};
+    /// Type used to index RustFns.
+    pub type RustFnIndex = crate::ItemIndex;
+    /// Type used to index builtins.
+    pub type BuiltinIndex = crate::ItemIndex;
+    /// Type used to index enum variants.
+    pub type VariantIndex = crate::ItemIndex;
+    /// Itsy type used to store stack addresses and vector indices.
+    pub const STACK_ADDRESS_TYPE: Type = Type::unsigned(size_of::<StackAddress>() as StackAddress);
+}
+use config_derived::*;
+
 use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
 #[cfg(feature="compiler")]
 use bytecode::compiler::compile;
 #[cfg(feature="compiler")]
 use frontend::{parser::parse_module, resolver::resolve};
-
-/// Type used to index RustFns. Public because it is used by the vm_func macro.
-#[doc(hidden)]
-pub type RustFnIndex = ItemIndex;
-
-/// Type used to index builtins.
-type BuiltinIndex = ItemIndex;
-
-/// Type used to index enum variants.
-type VariantIndex = ItemIndex;
-
-/// Itsy type used to store stack addresses and vector indices. Public only so that tests can access this.
-#[doc(hidden)]
-pub const STACK_ADDRESS_TYPE: shared::meta::Type = shared::meta::Type::unsigned(prelude::size_of::<StackAddress>() as StackAddress);
 
 /// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
 ///
@@ -178,20 +178,20 @@ macro_rules! vm_func {
     // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::runtime::VMFunc<$type_name> for $type_name {
-            fn into_index(self: Self) -> $crate::RustFnIndex {
-                self as $crate::RustFnIndex
+            fn into_index(self: Self) -> $crate::sizes::RustFnIndex {
+                self as $crate::sizes::RustFnIndex
             }
-            fn from_index(index: $crate::RustFnIndex) -> Self {
+            fn from_index(index: $crate::sizes::RustFnIndex) -> Self {
                 //un safe { ::std::mem::trans mute(index) }
                 match index {
                     $(
-                        x if x == Self::$name as $crate::RustFnIndex => Self::$name,
+                        x if x == Self::$name as $crate::sizes::RustFnIndex => Self::$name,
                     )+
                     _ => panic!("Invalid VMFunc index {}", index),
                 }
             }
             #[allow(unused_mut)]
-            fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::RustFnIndex, &'static str, Vec<&'static str>)> {
+            fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::sizes::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
                     map.insert(stringify!($name), ($type_name::$name.into_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));

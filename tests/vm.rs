@@ -627,25 +627,27 @@ fn array_type_fail() {
 */
 #[test]
 fn array_len() {
-    let result = run("
+    let sa_type = STACK_ADDRESS_TYPE;
+    let result = run(&format!("
         let array_u16: [ u16 ] = [ 1, 2, 3, 4 ];
         let array_u8: [ u8 ] = [ 4, 3, 2, 1, 0 ];
-        ret_u64(array_u16.len());
-        ret_u64(array_u8.len());
-        ret_u64([ 5, 4, 3, 2, 1, 0 ].len());
-    ");
-    assert_all(&result, &[ 4u64, 5, 6 ]);
+        ret_{sa_type:?}(array_u16.len());
+        ret_{sa_type:?}(array_u8.len());
+        ret_{sa_type:?}([ 5, 4, 3, 2, 1, 0 ].len());
+    ", ));
+    assert_all_sa(&result, &[ 4, 5, 6 ]);
 }
 
 #[test]
-fn array_infer_dynamic() {
-    let result = run("
+fn array_push() {
+    let sa_type = STACK_ADDRESS_TYPE;
+    let result = run(&format!("
         let dynamic_array = [ 1u16, 2, 3 ];
         dynamic_array.push(4u16);
-        ret_u64(dynamic_array.len());
-        ret_u64(dynamic_array[3] as u64);
-    ");
-    assert_all(&result, &[ 4u64, 4 ]);
+        ret_{sa_type:?}(dynamic_array.len());
+        ret_{sa_type:?}(dynamic_array[3] as {sa_type:?});
+    "));
+    assert_all_sa(&result, &[ 4, 4 ]);
 }
 
 #[test]
@@ -843,8 +845,9 @@ fn index_assign_primitive() {
 
 #[test]
 fn heap_compound_assign() {
+    let sa_type = STACK_ADDRESS_TYPE;
     let result = run(&format!("
-        fn left() -> {:?} {{
+        fn left() -> {sa_type:?} {{
             ret_u8(9);
             0
         }}
@@ -858,14 +861,15 @@ fn heap_compound_assign() {
             test[left()] += right();
             ret_u8(test[0]);
         }}
-    ", itsy::STACK_ADDRESS_TYPE));
+    "));
     assert_all(&result, &[ 0u8, 9, 6, 1 ]);
 }
 
 #[test]
 fn heap_compound_assign64() {
+    let sa_type = STACK_ADDRESS_TYPE;
     let result = run(&format!("
-        fn left() -> {:?} {{
+        fn left() -> {sa_type:?} {{
             ret_u64(9);
             0
         }}
@@ -883,7 +887,7 @@ fn heap_compound_assign64() {
             test[left()] -= right();
             ret_u64(test[0]);
         }}
-    ", itsy::STACK_ADDRESS_TYPE));
+    "));
     assert_all(&result, &[ 0u64, 9, 6, 1, 9, 6, 2, 9, 6, 1 ]);
 }
 

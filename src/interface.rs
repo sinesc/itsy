@@ -40,7 +40,7 @@ pub mod compiler {
     pub use crate::bytecode::Program;
     pub use crate::bytecode::compiler::{compile, error::{CompileError, CompileErrorKind}};
     pub use crate::bytecode::writer::{Writer, StoreConst};
-    pub use crate::bytecode::opcodes::OpCode;
+    pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
 }
 
 pub mod runtime {
@@ -55,4 +55,10 @@ pub mod runtime {
         pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapRefOp, HeapOp};
         pub use crate::bytecode::{HeapRef /*, HeapSlice*/};
     }
+}
+
+pub mod sizes {
+    //! Defines the sizes of fundamental VM types.
+    pub use crate::config::*;
+    pub use crate::config_derived::*;
 }

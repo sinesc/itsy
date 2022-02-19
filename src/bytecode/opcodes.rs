@@ -664,7 +664,7 @@ impl_opcodes!{
         rustfn.exec(self, context);
     }
 
-    /// Calls the given Rust function.
+    /// Calls the given builtin function.
     fn builtincall(&mut self, builtin: Builtin) {
         builtin.exec(self);
     }

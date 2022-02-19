@@ -77,9 +77,10 @@ macro_rules! impl_builtins {
         )*
     ) => {
 
+        /// Builtin functions callable via the `builtincall` opcode. Generated from method signatures defined via the impl_builtins! macro.
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
-        pub(crate) enum Builtin {
+        pub enum Builtin {
             $(
                 $( #[ $attr ] )*
                 // builtin variants
