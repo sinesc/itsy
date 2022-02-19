@@ -1065,7 +1065,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
-                self.writer.store_const(Constructor::ArrayDyn);
+                self.writer.store_const(Constructor::Array);
                 self.store_constructor(array.type_id.expect("Unresolved array element type"));
             }
             Type::Struct(structure) => {

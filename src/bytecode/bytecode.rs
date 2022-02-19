@@ -84,7 +84,7 @@ pub(crate) struct ConstDescriptor { // todo: order serially, remove position, re
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
-    ArrayDyn    = 176,  // ArrayDyn(element constructor): copies an array, determining element count from prototype or heap object size
+    Array       = 176,  // Array(element constructor): copies an array, determining element count from prototype or heap object size
     Struct      = 177,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
     Enum        = 179,  // Enum(num_variants, implementor index, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
@@ -95,7 +95,7 @@ impl Constructor {
         //un safe { ::std::mem::transmute(raw) }
         match raw {
             x if x == Self::Primitive as u8 => Self::Primitive,
-            x if x == Self::ArrayDyn as u8 => Self::ArrayDyn,
+            x if x == Self::Array as u8 => Self::Array,
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
             x if x == Self::Enum as u8 => Self::Enum,

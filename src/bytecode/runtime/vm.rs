@@ -191,7 +191,7 @@ impl<T, U> VM<T, U> {
                 self.construct_copy_value(target, *prototype_offset, num_bytes);
                 *prototype_offset += num_bytes;
             },
-            Constructor::ArrayDyn => {
+            Constructor::Array => {
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
                 self.construct_write_ref(target, heap_ref);
                 // read size from prototype instead of constructor
@@ -258,7 +258,7 @@ impl<T, U> VM<T, U> {
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
     fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
         match constructor {
-            Constructor::ArrayDyn => {
+            Constructor::Array => {
                 let element_constructor = self.construct_read_op(&mut constructor_offset);
                 if element_constructor != Constructor::Primitive {
                     let original_constructor_offset = *constructor_offset;
