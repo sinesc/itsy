@@ -227,6 +227,7 @@ impl<T, U> VM<T, U> {
                 let num_fields = self.construct_read_index(constructor_offset);
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
                 self.construct_write_ref(target, heap_ref);
+                self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&variant_index.to_ne_bytes());
                 for _ in 0..num_fields {
                     self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
