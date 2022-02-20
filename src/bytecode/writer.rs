@@ -98,6 +98,12 @@ macro_rules! impl_store_const {
                 program.consts.extend_from_slice(&value.to_le_bytes());
                 position
             }
+            fn update_const(self: &Self, position: StackAddress, value: $type) {
+                let mut program = self.program();
+                for (index, &byte) in value.to_le_bytes().iter().enumerate() {
+                    program.consts[(position as usize) + index] = byte;
+                }
+            }
         }
     };
 }
@@ -106,6 +112,8 @@ macro_rules! impl_store_const {
 pub trait StoreConst<T> {
     /// Write a constant to the constant pool
     fn store_const(self: &Self, value: T) -> StackAddress;
+    /// Update a previously written (placeholder) constant.
+    fn update_const(self: &Self, position: StackAddress, value: T);
 }
 
 impl_store_const!(u8, ConstEndianness::None);
@@ -134,6 +142,10 @@ impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
         program.consts.extend_from_slice(raw_bytes);
         position
     }
+    fn update_const(self: &Self, _position: StackAddress, _value: &str) {
+        // this probably won't be needed and changing string length would be hairy
+        unimplemented!("Cannot update constant string");
+    }
 }
 
 impl<P> StoreConst<Constructor> for Writer<P> where P: VMFunc<P> {
@@ -142,7 +154,11 @@ impl<P> StoreConst<Constructor> for Writer<P> where P: VMFunc<P> {
         let size = size_of::<Constructor>() as StackAddress;
         let mut program = self.program();
         program.const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
-        program.consts.extend_from_slice(&value.to_u8().to_le_bytes());
+        program.consts.push(value.to_u8());
         position
+    }
+    fn update_const(self: &Self, position: StackAddress, value: Constructor) {
+        let mut program = self.program();
+        program.consts[position as usize] = value.to_u8();
     }
 }
