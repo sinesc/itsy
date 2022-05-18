@@ -1044,6 +1044,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     // FIXME: to handle ret instruction this may need to run recursively
     fn decref_block_locals(self: &mut Self) {
+        comment!(self, "freeing locals");
         let frame = self.locals.pop();
         for (&binding_id, local) in frame.map.iter() {
             if self.init_state.activated(binding_id) && self.init_state.initialized(binding_id) && local.origin == LocalOrigin::Binding {
@@ -1060,48 +1061,62 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 }
 
 impl<T> Compiler<T> where T: VMFunc<T> {
+    fn store_constructor_len(self: &Self, mut inner: impl FnMut()) {
+        let len_position = self.writer.const_len();
+        self.writer.store_const(123 as ItemIndex);
+        let inner_position = self.writer.const_len();
+        inner();
+        let inner_len = self.writer.const_len() - inner_position;
+        self.writer.update_const(len_position, inner_len as ItemIndex);
+    }
     /// Writes an instance constructor.
     fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array);
-                self.store_constructor(array.type_id.expect("Unresolved array element type"));
+                self.store_constructor_len(|| {
+                    self.store_constructor(array.type_id.expect("Unresolved array element type"));
+                });
             }
             Type::Struct(structure) => {
                 self.writer.store_const(Constructor::Struct);
-                self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-                self.writer.store_const(structure.fields.len() as ItemIndex);
-                for field in &structure.fields {
-                    self.store_constructor(field.1.expect("Unresolved struct field type"));
-                }
+                self.store_constructor_len(|| {
+                    self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                    self.writer.store_const(structure.fields.len() as ItemIndex);
+                    for field in &structure.fields {
+                        self.store_constructor(field.1.expect("Unresolved struct field type"));
+                    }
+                });
             }
             Type::String => {
                 self.writer.store_const(Constructor::String);
             }
             Type::Enum(enumeration) => {
                 self.writer.store_const(Constructor::Enum);
-                self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-                self.writer.store_const(enumeration.variants.len() as ItemIndex);
-                let variant_offsets_pos = self.writer.const_len();
-                // reserve space for variant offsets
-                for _ in &enumeration.variants {
-                    self.writer.store_const(123 as StackAddress);
-                }
-                // write variants, remember offsets
-                let mut variant_offsets = Vec::with_capacity(enumeration.variants.len());
-                for (_, fields) in &enumeration.variants {
-                    let variant_offset = self.writer.store_const(fields.len() as ItemIndex);
-                    variant_offsets.push(variant_offset);
-                    for field in fields {
-                        self.store_constructor(field.expect("Unresolved enum field type"));
+                self.store_constructor_len(|| {
+                    self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                    self.writer.store_const(enumeration.variants.len() as ItemIndex);
+                    let variant_offsets_pos = self.writer.const_len();
+                    // reserve space for variant offsets
+                    for _ in &enumeration.variants {
+                        self.writer.store_const(123 as StackAddress);
                     }
-                }
-                // write variant offsets
-                for (index, &variant_offset) in variant_offsets.iter().enumerate() {
-                    let const_position = variant_offsets_pos + (index as StackAddress) * size_of::<StackAddress>() as StackAddress;
-                    self.writer.update_const(const_position, variant_offset as StackAddress);
-                }
+                    // write variants, remember offsets
+                    let mut variant_offsets = Vec::with_capacity(enumeration.variants.len());
+                    for (_, fields) in &enumeration.variants {
+                        let variant_offset = self.writer.store_const(fields.len() as ItemIndex);
+                        variant_offsets.push(variant_offset);
+                        for field in fields {
+                            self.store_constructor(field.expect("Unresolved enum field type"));
+                        }
+                    }
+                    // write variant offsets
+                    for (index, &variant_offset) in variant_offsets.iter().enumerate() {
+                        let const_position = variant_offsets_pos + (index as StackAddress) * size_of::<StackAddress>() as StackAddress;
+                        self.writer.update_const(const_position, variant_offset as StackAddress);
+                    }
+                });
             }
             Type::Trait(_) => unimplemented!("trait constructor"),
             ty @ _ => {

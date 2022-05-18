@@ -17,8 +17,8 @@ pub mod runtime;
 use crate::prelude::*;
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
-use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
-use crate::bytecode::runtime::vm::VM;
+use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, ItemIndex, RustFnIndex};
+use crate::bytecode::runtime::{vm::VM, stack::{Stack, StackOp}};
 
 const ARG1: StackOffset = 0;
 const ARG2: StackOffset = 4;
@@ -84,10 +84,20 @@ pub(crate) struct ConstDescriptor { // todo: order serially, remove position, re
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
-    Array       = 176,  // Array(element constructor): copies an array, determining element count from prototype or heap object size
-    Struct      = 177,  // Struct(num_fields, implementor index, field constructor, field constructor, ...): copies a struct
+    Array       = 176,  // Array(constructor_size, element constructor): copies an array, determining element count from prototype or heap object size
+    Struct      = 177,  // Struct(constructor_size, implementor index, num_fields, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
-    Enum        = 179,  // Enum(num_variants, implementor index, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
+    Enum        = 179,  // Enum(constructor_size, implementor index, num_variants, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
+}
+
+/// Information about a serialized constructor
+pub struct ConstructorData {
+    /// Construction operation
+    pub op: Constructor,
+    /// Offset to construction parameters (after size-info and operation)
+    pub offset: StackAddress,
+    /// Address of the next constructor
+    pub next: StackAddress,
 }
 
 impl Constructor {
@@ -105,6 +115,65 @@ impl Constructor {
     pub fn to_u8(self: Self) -> u8 {
         self as u8
     }
+    // Parses a constructor.
+    pub fn parse(stack: &Stack, mut offset: StackAddress) -> ConstructorData {
+        let constructor = Constructor::from_u8(stack.load(offset));
+        offset += size_of_val(&constructor) as StackAddress;
+        Self::parse_with(stack, offset, constructor)
+    }
+    // Parses serialized constructor parameters with given constructor op.
+    pub fn parse_with(stack: &Stack, mut offset: StackAddress, constructor: Constructor) -> ConstructorData {
+        match constructor {
+            Constructor::Array | Constructor::Struct | Constructor::Enum => {
+                // first value is the total constructor size
+                let constructor_size: ItemIndex = stack.load(offset);
+                offset += size_of_val(&constructor_size) as StackAddress;
+                ConstructorData {
+                    op: constructor,
+                    offset,
+                    next: offset + constructor_size as StackAddress,
+                }
+            },
+            Constructor::Primitive => {
+                // constructor size is size of one ItemIndex
+                const SIZE: StackAddress = size_of::<ItemIndex>() as StackAddress;
+                ConstructorData {
+                    op: constructor,
+                    offset,
+                    next: offset + SIZE,
+                }
+            },
+            Constructor::String => {
+                // no additional data attached to string
+                ConstructorData {
+                    op: constructor,
+                    offset,
+                    next: offset,
+                }
+            },
+        }
+    }
+    // Parses primitive constructor parameters.
+    pub fn parse_primitive(stack: &Stack, offset: StackAddress) -> ItemIndex {
+        stack.load(offset)
+    }
+    // Parses struct constructor parameters.
+    pub fn parse_struct(stack: &Stack, mut offset: StackAddress) -> (ItemIndex, ItemIndex, StackAddress) {
+        let implementor_index: ItemIndex = stack.load(offset);
+        offset += size_of_val(&implementor_index) as StackAddress;
+        let num_fields: ItemIndex = stack.load(offset);
+        (implementor_index, num_fields, offset + size_of_val(&implementor_index) as StackAddress)
+    }
+    // Parses an enum variant table and returns the number of fields and the offset of the given variant.
+    pub fn parse_variant_table(stack: &Stack, mut offset: StackAddress, variant_index: ItemIndex) -> (ItemIndex, StackAddress) {
+        // load variant offset from index
+        offset += (size_of::<StackAddress>() * variant_index as usize) as StackAddress;
+        // jump to variant offset
+        offset = stack.load(offset);
+        // read and construct fields for the variant
+        let num_fields = stack.load(offset);
+        (num_fields, offset + size_of_val(&num_fields) as StackAddress)
+    }
 }
 
 /// A heap reference as it would appear on the stack
@@ -117,7 +186,7 @@ impl HeapRef {
     /// Mask for extracting the index of HeapRef.
     const INDEX_MASK: HeapAddress = !((1 << HEAP_OFFSET_BITS) - 1);
 
-    /// Mask for extracting the offset of HeapRef
+    /// Mask for extracting the offset of HeapRef.
     const OFFSET_MASK: HeapAddress = (1 << HEAP_OFFSET_BITS) - 1;
 
     /// Creates a new HeapRef.

@@ -28,7 +28,7 @@ pub enum HeapCmp {
 }
 
 /// Allowed heap reference counting operations.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
 pub enum HeapRefOp {
     /// Increase reference counter.
@@ -138,6 +138,11 @@ impl Heap {
     pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
         debug_assert_index!(self, index);
         self.objects[index as usize].epoch
+    }
+    /// Returns the number of references on the given item.
+    pub fn item_refs(self: &Self, index: StackAddress) -> StackAddress {
+        debug_assert_index!(self, index);
+        self.objects[index as usize].refs
     }
     /// Increase/decrease reference count for given heap object, optionally freeing it at count 0.
     pub fn ref_item(self: &mut Self, index: StackAddress, op: HeapRefOp) {
@@ -312,11 +317,13 @@ pub trait HeapOp<T> {
         item.add_offset(size_of::<T>() as StackOffset);
         result
     }
+    /*
     /// Writes to the given HeapRef and increments its offset by the number of written bytes.
     fn write_seq(self: &mut Self, item: &mut HeapRef, value: T) {
         self.write(*item, value);
         item.add_offset(size_of::<T>() as StackOffset);
     }
+    */
 }
 
 macro_rules! impl_heap {

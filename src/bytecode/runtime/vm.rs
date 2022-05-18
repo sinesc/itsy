@@ -154,14 +154,6 @@ impl<T, U> VM<T, U> {
         arg
     }
 
-    /// Reads a StackAddress sized constructor argument.
-    #[inline(always)]
-    fn construct_read_address(self: &Self, constructor_offset: &mut StackAddress) -> StackAddress {
-        let arg: StackAddress = self.stack.load(*constructor_offset);
-        *constructor_offset += size_of_val(&arg) as StackAddress;
-        arg
-    }
-
     /// Writes prototype copy to given target (stack or heap).
     fn construct_copy_value(self: &mut Self, target: CopyTarget, prototype_offset: StackAddress, num_bytes: StackAddress) {
         match target {
@@ -184,12 +176,13 @@ impl<T, U> VM<T, U> {
     }
 
     /// Constructs instance from given constructor and prototype. Modifies input for internal purposes.
-    pub(crate) fn construct_value(self: &mut Self, constructor_offset: &mut StackAddress, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) {
-        match self.construct_read_op(constructor_offset) {
+    pub(crate) fn construct_value(self: &mut Self, constructor_offset: StackAddress, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) -> StackAddress {
+        let parsed = Constructor::parse(&self.stack, constructor_offset);
+        match parsed.op {
             Constructor::Primitive => {
-                let num_bytes = self.construct_read_index(constructor_offset) as StackAddress;
-                self.construct_copy_value(target, *prototype_offset, num_bytes);
-                *prototype_offset += num_bytes;
+                let primitive_size = Constructor::parse_primitive(&self.stack, parsed.offset) as StackAddress;
+                self.construct_copy_value(target, *prototype_offset, primitive_size);
+                *prototype_offset += primitive_size;
             },
             Constructor::Array => {
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
@@ -197,39 +190,34 @@ impl<T, U> VM<T, U> {
                 // read size from prototype instead of constructor
                 let num_elements: ItemIndex = self.stack.load(*prototype_offset);
                 *prototype_offset += size_of_val(&num_elements) as StackAddress;
-                let original_constructor_offset = *constructor_offset;
                 for _ in 0..num_elements {
-                    // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
-                    *constructor_offset = original_constructor_offset;
-                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
+                    // reuse offset for each array element
+                    self.construct_value(parsed.offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             },
             Constructor::Struct => {
-                let implementor_index = self.construct_read_index(constructor_offset);
-                let num_fields = self.construct_read_index(constructor_offset);
+                let (implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
                 self.construct_write_ref(target, heap_ref);
                 for _ in 0..num_fields {
-                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
+                    field_offset = self.construct_value(field_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             },
             Constructor::Enum => {
-                let implementor_index = self.construct_read_index(constructor_offset);
-                let num_variants = self.construct_read_index(constructor_offset);
+                // TODO: this is never used, enum literals are compiled to use upload instruction
+                let (implementor_index, num_variants, variant_table_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
                 // read variant index from prototype
                 let variant_index: ItemIndex = self.stack.load(*prototype_offset);
                 *prototype_offset += size_of_val(&variant_index) as StackAddress;
                 assert!(variant_index < num_variants, "Prototype specifies invalid enum variant");
                 // seek to variant offset, read it from constructor and seek to the offset
-                *constructor_offset += (size_of::<StackAddress>() * variant_index as usize) as StackAddress;
-                *constructor_offset = self.construct_read_address(constructor_offset);
+                let (num_fields, mut variant_field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
                 // read and construct fields for the variant
-                let num_fields = self.construct_read_index(constructor_offset);
                 let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
                 self.construct_write_ref(target, heap_ref);
                 self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&variant_index.to_ne_bytes());
                 for _ in 0..num_fields {
-                    self.construct_value(constructor_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
+                    variant_field_offset = self.construct_value(variant_field_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
                 }
             },
             Constructor::String => {
@@ -247,6 +235,7 @@ impl<T, U> VM<T, U> {
                 }
             },
         };
+        parsed.next
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references.
@@ -257,75 +246,94 @@ impl<T, U> VM<T, U> {
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
-    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, mut constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
-        match constructor {
-            Constructor::Array => {
-                let element_constructor = self.construct_read_op(&mut constructor_offset);
-                if element_constructor != Constructor::Primitive {
-                    let original_constructor_offset = *constructor_offset;
-                    // compute number of elements from heap size
-                    let num_elements = self.heap.item(item.index()).data.len() / HeapRef::primitive_size() as usize;
-                    for _ in 0..num_elements {
-                        // reset offset each iteration to keep constructing the same type for each element but make sure we have advanced once at the end of the loop
-                        *constructor_offset = original_constructor_offset;
-                        let element: HeapRef = self.heap.read_seq(&mut item);
-                        if epoch != self.heap.item_epoch(element.index()) {
-                            self.refcount_recurse(element_constructor, element, &mut constructor_offset, op, epoch);
-                        }
-                    }
-                } else {
-                    // skip primitive num_bytes
-                    self.construct_read_index(&mut constructor_offset);
-                }
-                self.heap.ref_item(item.index(), op);
-            },
-            Constructor::Struct => {
-                let _implementor_index = self.construct_read_index(constructor_offset);
-                let num_fields = self.construct_read_index(&mut constructor_offset);
-                for _ in 0..num_fields {
-                    let field_constructor = self.construct_read_op(&mut constructor_offset);
-                    if field_constructor != Constructor::Primitive {
-                        let field: HeapRef = self.heap.read_seq(&mut item);
-                        if epoch != self.heap.item_epoch(field.index()) {
-                            self.refcount_recurse(field_constructor, field, &mut constructor_offset, op, epoch);
-                        }
-                    } else {
-                        let num_bytes = self.construct_read_index(&mut constructor_offset) as StackOffset;
-                        item.add_offset(num_bytes);
-                    }
-                }
-                self.heap.ref_item(item.index(), op);
-            },
-            Constructor::Enum => {
-                let variant_index: VariantIndex = self.heap.read_seq(&mut item);
-                let _implementor_index = self.construct_read_index(constructor_offset);
-                let num_variants = self.construct_read_index(constructor_offset);
-                assert!(variant_index < num_variants, "Enum object specifies invalid enum variant");
-                // seek to variant offset, read it from constructor and seek to the offset
-                *constructor_offset += (size_of::<StackAddress>() * variant_index as usize) as StackAddress;
-                *constructor_offset = self.construct_read_address(constructor_offset);
-                // handle fields
-                let num_fields = self.construct_read_index(&mut constructor_offset);
-                for _ in 0..num_fields {
-                    let field_constructor = self.construct_read_op(&mut constructor_offset);
-                    if field_constructor != Constructor::Primitive {
-                        let field: HeapRef = self.heap.read_seq(&mut item);
-                        if epoch != self.heap.item_epoch(field.index()) {
-                            self.refcount_recurse(field_constructor, field, &mut constructor_offset, op, epoch);
+    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
+
+        let item_index = item.index();
+        let refs = self.heap.item_refs(item_index);
+        let transitions = (op == HeapRefOp::Dec && refs == 1) || (op == HeapRefOp::FreeTmp && refs == 0) || (op == HeapRefOp::Inc && refs == 0);
+        let parsed = Constructor::parse_with(&self.stack, *constructor_offset, constructor);
+
+        if !transitions {
+            // No recursion is required if only the refcount changes, but we need to skip the constructor
+            self.heap.ref_item(item_index, op);
+            *constructor_offset = parsed.next;
+        } else {
+            // Value will either be be..
+            //         dropped: recursively decrease reference count for referenced values
+            // or materialized: recursively increase reference count for referenced values
+            *constructor_offset = parsed.offset;
+            match constructor {
+                Constructor::Array => {
+                    let element_constructor = self.construct_read_op(constructor_offset);
+                    if element_constructor != Constructor::Primitive {
+                        let original_constructor_offset = *constructor_offset;
+                        // compute number of elements from heap size
+                        let num_elements = self.heap.item(item_index).data.len() / HeapRef::primitive_size() as usize;
+                        for _ in 0..num_elements {
+                            // reset offset each iteration to keep referencing the same type for each element but make sure we have advanced once at the end of the loop
+                            *constructor_offset = original_constructor_offset;
+                            let element: HeapRef = self.heap.read_seq(&mut item);
+                            let element_index = element.index();
+                            if epoch != self.heap.item_epoch(element_index) {
+                                self.refcount_recurse(element_constructor, element, constructor_offset, op, epoch);
+                            }
                         }
                     } else {
-                        let num_bytes = self.construct_read_index(&mut constructor_offset) as StackOffset;
-                        item.add_offset(num_bytes);
+                        // skip primitive num_bytes
+                        self.construct_read_index(constructor_offset);
                     }
+                    self.heap.ref_item(item_index, op);
+                },
+                Constructor::Struct => {
+                    let (_implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
+                    // handle fields // TODO dedup with enum code
+                    for _ in 0..num_fields {
+                        let field_constructor = self.construct_read_op(&mut field_offset);
+                        if field_constructor != Constructor::Primitive {
+                            let field: HeapRef = self.heap.read_seq(&mut item);
+                            let field_index = field.index();
+                            if epoch != self.heap.item_epoch(field_index) {
+                                self.refcount_recurse(field_constructor, field, &mut field_offset, op, epoch);
+                                // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
+                            }
+                        } else {
+                            let num_bytes = self.construct_read_index(&mut field_offset) as StackOffset;
+                            item.add_offset(num_bytes);
+                        }
+                    }
+                    self.heap.ref_item(item_index, op);
+                },
+                Constructor::Enum => {
+                    let variant_index: VariantIndex = self.heap.read_seq(&mut item);
+                    let (_implementor_index, num_variants, variant_table_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
+                    assert!(variant_index < num_variants, "Enum object specifies invalid enum variant");
+                    // seek to variant offset, read it from constructor and seek to the offset
+                    let (num_fields, mut field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
+                    // handle fields // TODO dedup with struct code
+                    for _ in 0..num_fields {
+                        let field_constructor = self.construct_read_op(&mut field_offset);
+                        if field_constructor != Constructor::Primitive {
+                            let field: HeapRef = self.heap.read_seq(&mut item);
+                            let field_index = field.index();
+                            if epoch != self.heap.item_epoch(field_index) {
+                                self.refcount_recurse(field_constructor, field, &mut field_offset, op, epoch);
+                                // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
+                            }
+                        } else {
+                            let num_bytes = self.construct_read_index(&mut field_offset) as StackOffset;
+                            item.add_offset(num_bytes);
+                        }
+                    }
+                    self.heap.ref_item(item_index, op);
                 }
-                self.heap.ref_item(item.index(), op);
-            }
-            Constructor::String => {
-                self.heap.ref_item(item.index(), op);
-            },
-            Constructor::Primitive => {
-                panic!("Unexpected primitive constructor");
-            },
-        };
+                Constructor::String => {
+                    self.heap.ref_item(item_index, op);
+                },
+                Constructor::Primitive => {
+                    panic!("Unexpected primitive constructor");
+                },
+            };
+            *constructor_offset = parsed.next;
+        }
     }
 }
