@@ -20,7 +20,7 @@ pub struct Local {
 /// Maps bindings and arguments to indices relative to the stack frame.
 pub struct StackFrame {
     /// Maps a binding ID to a variable or argument position on the stack.
-    pub map     : UnorderedMap<BindingId, Local>,
+    pub map     : Map<BindingId, Local>,
     /// Index of the NEXT argument to be inserted.
     pub arg_pos : StackAddress,
     /// Index for the NEXT variable to be inserted.
@@ -35,7 +35,7 @@ impl StackFrame {
     const UNKNOWN_BINDING: &'static str = "Unknown local binding";
     pub fn new() -> Self {
         StackFrame {
-            map     : UnorderedMap::new(),
+            map     : Map::new(),
             arg_pos : 0,
             var_pos : 0,
             ret_size: 0,
