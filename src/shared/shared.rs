@@ -16,6 +16,8 @@ pub(crate) trait TypeContainer {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     /// Returns a mutable reference to the type.
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
+    /// Returns the flat type name or None if that cannot represent a type (e.g. an array)
+    fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String>;
     /// Returns whether given_type_id is acceptable to a binding of the accepted_type_id, e.g. [ u8; 3 ] is acceptable to a [ u8 ] binding, but not the inverse.
     fn type_accepted_for(self: &Self, given_type_id: TypeId, accepted_type_id: TypeId) -> bool {
         if given_type_id == accepted_type_id {
@@ -42,6 +44,23 @@ pub(crate) trait TypeContainer {
                     self.type_equals(first_type_id, second_type_id)
                 },
                 _ => false,
+            }
+        }
+    }
+    // Returns recursively resolved type name.
+    fn type_name(self: &Self, type_id: TypeId) -> String {
+        let ty = self.type_by_id(type_id);
+        if let Some(type_name) = self.type_flat_name(type_id) {
+            type_name.to_string()
+        } else {
+            match ty {
+                &Type::Array(Array { type_id: Some(type_id) }) => {
+                    format!("[ {} ]", self.type_name(type_id))
+                }
+                Type::Array(Array { type_id: None }) => {
+                    "[ _ ]".to_string()
+                }
+                _ => "?".to_string()
             }
         }
     }

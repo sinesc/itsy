@@ -1904,6 +1904,9 @@ impl<T> TypeContainer for Compiler<T> {
         let index: usize = type_id.into();
         &mut self.id_mappings.type_map[index]
     }
+    fn type_flat_name(self: &Self, _type_id: TypeId) -> Option<&String> {
+        None // TODO
+    }
 }
 
 /// A container holding binding id to BindingInfo mappings

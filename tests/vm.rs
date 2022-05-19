@@ -610,9 +610,9 @@ fn array_casting() {
     ");
     assert_all(&result, &[ 5u16, 5, 5, 5 ]);
 }
-/*
+
 #[test]
-#[should_panic(expected = "Resolver error: Expected type <[ _; 4 ]>, got <[ _; 5 ]> in line 7, column 20.")]
+#[should_panic(expected = "Resolver error: Expected type [ u8 ], got [ u16 ] in line 7, column 20.")]
 fn array_type_fail() {
     run("
         fn accept(x: [ u8 ]) {
@@ -624,7 +624,7 @@ fn array_type_fail() {
         }
     ");
 }
-*/
+
 #[test]
 fn array_len() {
     let sa_type = STACK_ADDRESS_TYPE;

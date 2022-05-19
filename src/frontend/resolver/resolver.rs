@@ -252,8 +252,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns Ok if given_type_id is acceptable to a binding of the accepted_type_id, otherwise a TypeMismatch error.
     fn check_type_accepted_for(self: &Self, item: &impl Positioned, given_type_id: TypeId, accepted_type_id: TypeId) -> ResolveResult  {
         if !self.type_accepted_for(given_type_id, accepted_type_id) {
-            let name_given = self.scopes.type_name(given_type_id).unwrap_or(&format!("<{}>", self.type_by_id(given_type_id))).clone();
-            let name_accepted = self.scopes.type_name(accepted_type_id).unwrap_or(&format!("<{}>", self.type_by_id(accepted_type_id))).clone();
+            let name_given = self.type_name(given_type_id);
+            let name_accepted = self.type_name(accepted_type_id);
             let error_kind = ErrorKind::TypeMismatch(name_given, name_accepted);
             Err(Error::new(item, error_kind, self.module_path))
         } else {
@@ -264,8 +264,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns Ok if given types are the same, otherwise a TypeMismatch error.
     fn check_type_equals(self: &Self, item: &impl Positioned, first_type_id: TypeId, second_type_id: TypeId) -> ResolveResult  {
         if !self.type_equals(first_type_id, second_type_id) {
-            let name_first = self.scopes.type_name(first_type_id).unwrap_or(&format!("<{}>", self.type_by_id(first_type_id))).clone();
-            let name_second = self.scopes.type_name(second_type_id).unwrap_or(&format!("<{}>", self.type_by_id(second_type_id))).clone();
+            let name_first = self.type_name(first_type_id);
+            let name_second = self.type_name(second_type_id);
             let error_kind = ErrorKind::TypeMismatch(name_first, name_second);
             Err(Error::new(item, error_kind, self.module_path))
         } else {
@@ -1157,8 +1157,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if self.type_by_id(expected_type_id).as_array().is_some() {
                 self.set_type_id(item, expected_type_id)?;
             } else {
-                let name = self.scopes.type_name(expected_type_id).unwrap_or(&format!("<{}>", self.type_by_id(expected_type_id))).clone();
-                return Err(Error::new(item, ErrorKind::TypeMismatch("[ _ ]".to_string(), name), self.module_path));
+                let expected_name = self.type_name(expected_type_id);
+                let received_name = if let Some(type_id) = item.type_id { self.type_name(type_id) } else { "?".to_string() };
+                return Err(Error::new(item, ErrorKind::TypeMismatch(received_name, expected_name), self.module_path));
             }
         }
 
@@ -1217,6 +1218,9 @@ impl<'ctx> TypeContainer for Resolver<'ctx> {
     }
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
         self.scopes.type_mut(type_id)
+    }
+    fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String> {
+        self.scopes.type_name(type_id)
     }
 }
 
