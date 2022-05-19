@@ -940,13 +940,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         offset
     }
 
-    /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
-    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
-        let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
-        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
-        self.trait_vtable_base + (function_index as usize * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
-    }
-
     /// Fixes function call targets for previously not generated functions.
     fn fix_targets(self: &mut Self, function_id: FunctionId, info: CallInfo) {
         if let Some(targets) = self.call_placeholder.remove(&function_id) {
@@ -1060,28 +1053,30 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 }
 
+/// Const pool writer functions.
 impl<T> Compiler<T> where T: VMFunc<T> {
-    fn store_constructor_len(self: &Self, mut inner: impl FnMut()) {
-        let len_position = self.writer.const_len();
-        self.writer.store_const(123 as ItemIndex);
-        let inner_position = self.writer.const_len();
-        inner();
-        let inner_len = self.writer.const_len() - inner_position;
-        self.writer.update_const(len_position, inner_len as ItemIndex);
-    }
-    /// Writes an instance constructor.
+
+    /// Stores an instance constructor on the const pool.
     fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
+        let store_len = |inner: &mut dyn FnMut()| {
+            let len_position = self.writer.const_len();
+            self.writer.store_const(123 as ItemIndex);
+            let inner_position = self.writer.const_len();
+            inner();
+            let inner_len = self.writer.const_len() - inner_position;
+            self.writer.update_const(len_position, inner_len as ItemIndex);
+        };
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
                 self.writer.store_const(Constructor::Array);
-                self.store_constructor_len(|| {
+                store_len(&mut || {
                     self.store_constructor(array.type_id.expect("Unresolved array element type"));
                 });
             }
             Type::Struct(structure) => {
                 self.writer.store_const(Constructor::Struct);
-                self.store_constructor_len(|| {
+                store_len(&mut || {
                     self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                     self.writer.store_const(structure.fields.len() as ItemIndex);
                     for field in &structure.fields {
@@ -1094,7 +1089,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
             Type::Enum(enumeration) => {
                 self.writer.store_const(Constructor::Enum);
-                self.store_constructor_len(|| {
+                store_len(&mut || {
                     self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                     self.writer.store_const(enumeration.variants.len() as ItemIndex);
                     let variant_offsets_pos = self.writer.const_len();
@@ -1125,81 +1120,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
         }
         position
-    }
-
-    /// Writes given numeric, using const pool if necessary.
-    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) {
-        match numeric { // todo: try to refactor this mess
-
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
-
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
-
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
-
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
-
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
-
-            _ if ty.is_integer() || ty.is_float() => {
-                let address = self.store_numeric_prototype(numeric, ty);
-                self.write_const(address, ty);
-            },
-            _ => panic!("Unexpected numeric literal type: {:?}", ty),
-        }
-    }
-
-    /// Writes instructions to assemble a prototype.
-    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.item_type(item);
-        Ok(match &item.value {
-            LiteralValue::Numeric(_) | LiteralValue::Bool(_) => unreachable!("Invalid prototype type"),
-            LiteralValue::String(_) => {
-                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
-                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
-                // later use a special constructor instruction that assumes strings are already on the heap.
-                let constructor = self.get_constructor(ty);
-                let prototype = self.store_literal_prototype(item);
-                self.writer.construct(constructor, prototype);
-                Type::String.primitive_size() as StackAddress
-            },
-            LiteralValue::Array(array_literal) => {
-                for element in &array_literal.elements {
-                    self.compile_expression(element)?;
-                }
-                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
-                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
-            },
-            LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
-                // collect fields first to avoid borrow checker
-                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
-                for field in fields {
-                    self.compile_expression(field)?;
-                }
-                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
-                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
-            },
-            LiteralValue::Variant(variant) => {
-                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
-                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
-                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
-                index_type.primitive_size() as StackAddress
-            },
-        })
     }
 
     /// Stores constant literal prototype on the const pool.
@@ -1276,7 +1196,83 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 }
 
+/// Opcode writer functions.
 impl<T> Compiler<T> where T: VMFunc<T> {
+
+    /// Writes given numeric, using const pool if necessary.
+    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) {
+        match numeric { // todo: try to refactor this mess
+
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
+            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
+
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
+            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
+
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
+            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
+
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
+            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
+
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
+            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
+
+            _ if ty.is_integer() || ty.is_float() => {
+                let address = self.store_numeric_prototype(numeric, ty);
+                self.write_const(address, ty);
+            },
+            _ => panic!("Unexpected numeric literal type: {:?}", ty),
+        }
+    }
+
+    /// Writes instructions to assemble a prototype.
+    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
+        use crate::frontend::ast::LiteralValue;
+        let ty = self.item_type(item);
+        Ok(match &item.value {
+            LiteralValue::Numeric(_) | LiteralValue::Bool(_) => unreachable!("Invalid prototype type"),
+            LiteralValue::String(_) => {
+                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
+                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
+                // later use a special constructor instruction that assumes strings are already on the heap.
+                let constructor = self.get_constructor(ty);
+                let prototype = self.store_literal_prototype(item);
+                self.writer.construct(constructor, prototype);
+                Type::String.primitive_size() as StackAddress
+            },
+            LiteralValue::Array(array_literal) => {
+                for element in &array_literal.elements {
+                    self.compile_expression(element)?;
+                }
+                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
+                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
+            },
+            LiteralValue::Struct(struct_literal) => {
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                // collect fields first to avoid borrow checker
+                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
+                for field in fields {
+                    self.compile_expression(field)?;
+                }
+                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
+                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
+            },
+            LiteralValue::Variant(variant) => {
+                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
+                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
+                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                index_type.primitive_size() as StackAddress
+            },
+        })
+    }
 
     /// Writes a cast from one float to another or from/to a 64 bit integer.
     fn write_float_integer_cast(self: &Self, from: &Type, to: &Type) {
@@ -1829,7 +1825,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 }
 
+/// Itsy-trait support functions.
 impl<T> Compiler<T> {
+
+    /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
+    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
+        let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
+        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
+        self.trait_vtable_base + (function_index as usize * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
+    }
 
     /// Generate flat list of all traits and their functions
     fn filter_trait_functions(id_mappings: &IdMappings) -> Vec<(TypeId, &String, FunctionId)> {
