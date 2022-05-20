@@ -1629,3 +1629,33 @@ fn trait_resolution() {
         "B S:999 P:8".to_string(),
     ]);
 }
+
+#[test]
+fn simple_enum() {
+    let result = run("
+        enum Simple {
+            A, B, C
+        }
+        fn accept(ty: Simple) {
+            if ty == Simple::A {
+                ret_u8(1);
+            } else if ty == Simple::B {
+                ret_u8(2);
+            } else if ty == Simple::C {
+                ret_u8(3);
+            }
+        }
+        fn main() {
+            accept(Simple::A);
+            accept(Simple::B);
+            accept(Simple::C);
+            let b = Simple::B;
+            if b != Simple::B {
+                ret_u8(101);
+            } else {
+                ret_u8(4);
+            }
+        }
+    ");
+    assert_all(&result, &[ 1u8, 2, 3, 4 ]);
+}

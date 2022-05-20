@@ -271,6 +271,15 @@ impl Type {
             _ => false
         }
     }
+    /// Whether the type is a simple enum.
+    pub fn is_simple_enum(self: &Self) -> bool {
+        match self {
+            Type::Enum(e) => {
+                e.impl_traits.len() == 0 && e.variants.iter().all(|(_, v)| v.len() == 0)
+            },
+            _ => false
+        }
+    }
     /// Whether the type is a concrete type. This includes all types but traits.
     /// Traits are not concrete because they can potentially be narrowed to a specific trait implementor.
     /// A binding for a concrete implementor would not accept the generic trait but the inverse is acceptable

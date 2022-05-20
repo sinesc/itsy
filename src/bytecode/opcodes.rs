@@ -783,12 +783,13 @@ impl_opcodes!{
         self.heap.copy(dest, src, num_bytes);
     }*/
 
-    /* /// Pops 2 heap references and compares num_bytes bytes.
+    /// Pops 2 heap references and compares num_bytes bytes.
     fn heap_ceq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Eq);
-        self.stack.push(equals as Data8);
+        let data_a = self.heap.slice(a, num_bytes);
+        let data_b = self.heap.slice(b, num_bytes);
+        self.stack.push((data_a == data_b) as Data8);
         self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
         self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
     }
@@ -797,11 +798,12 @@ impl_opcodes!{
     fn heap_cneq(&mut self, num_bytes: StackAddress) {
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
-        let equals = self.heap.compare(a, b, num_bytes, HeapCmp::Neq);
-        self.stack.push(equals as Data8);
+        let data_a = self.heap.slice(a, num_bytes);
+        let data_b = self.heap.slice(b, num_bytes);
+        self.stack.push((data_a != data_b) as Data8);
         self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
         self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
-    }*/
+    }
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
     fn <

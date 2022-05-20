@@ -1754,6 +1754,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         } else if ty.is_string() {
             self.writer.string_ceq();
+        } else if ty.is_simple_enum() {
+            self.writer.heap_ceq(size_of::<ItemIndex>() as StackAddress); // TODO size of simple enums TBD, need this as a constant/func somewhere
         } else {
             unimplemented!("general heap compare not yet implemented");
             //self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
@@ -1772,6 +1774,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         } else if ty.is_string() {
             self.writer.string_cneq();
+        } else if ty.is_simple_enum() {
+            self.writer.heap_cneq(size_of::<ItemIndex>() as StackAddress); // TODO size of simple enums TBD, need this as a constant/func somewhere
         } else {
             unimplemented!("general heap compare not yet implemented");
             //self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this
