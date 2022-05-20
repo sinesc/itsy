@@ -712,7 +712,6 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         move |pair| EnumDef {
             position: position,
             ident   : pair.1.0,
-            simple  : pair.1.2.iter().all(|variant| match variant.kind { VariantKind::Simple => true, _ => false }),
             variants: pair.1.2,
             type_id : None,
             scope_id: None,

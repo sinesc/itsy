@@ -674,6 +674,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
+            LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive) => {
+                // primitive enums don't need to be heap allocated
+                let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
+                let index_type = Type::unsigned(size_of::<VariantIndex>() as StackAddress);
+                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
+                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+            },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) | LiteralValue::Variant(_) => {
                 if item.value.is_const() {
                     // simple constant constructor, construct from const pool prototypes
@@ -1155,8 +1162,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Variant(variant) => {
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
-                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
+                let index_type = Type::unsigned(size_of::<VariantIndex>() as StackAddress);
+                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.store_numeric_prototype(Numeric::Unsigned(variant_index as u64), &index_type);
             },
         };
@@ -1267,7 +1274,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             LiteralValue::Variant(variant) => {
                 let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
                 let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
-                let variant_index = enum_def.variants.iter().position(|(name, _)| name == &variant.ident.name).unwrap() as VariantIndex;
+                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
                 index_type.primitive_size() as StackAddress
             },
@@ -1754,8 +1761,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         } else if ty.is_string() {
             self.writer.string_ceq();
-        } else if ty.is_simple_enum() {
-            self.writer.heap_ceq(size_of::<ItemIndex>() as StackAddress); // TODO size of simple enums TBD, need this as a constant/func somewhere
         } else {
             unimplemented!("general heap compare not yet implemented");
             //self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
@@ -1774,8 +1779,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         } else if ty.is_string() {
             self.writer.string_cneq();
-        } else if ty.is_simple_enum() {
-            self.writer.heap_cneq(size_of::<ItemIndex>() as StackAddress); // TODO size of simple enums TBD, need this as a constant/func somewhere
         } else {
             unimplemented!("general heap compare not yet implemented");
             //self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this

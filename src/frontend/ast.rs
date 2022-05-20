@@ -495,7 +495,6 @@ impl Resolvable for VariantDef {
 pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
-    pub simple  : bool,
     pub variants: Vec<VariantDef>,
     pub scope_id: Option<ScopeId>,
     pub type_id : Option<TypeId>,
@@ -504,6 +503,12 @@ pub struct EnumDef {
 
 impl_positioned!(EnumDef);
 impl_typeable!(EnumDef);
+
+impl EnumDef {
+    pub fn only_simple_variants(self: &Self) -> bool {
+        self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple => true, _ => false })
+    }
+}
 
 impl Resolvable for EnumDef {
     fn num_resolved(self: &Self) -> Progress {

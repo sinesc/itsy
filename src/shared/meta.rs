@@ -1,9 +1,7 @@
-use crate::StackAddress;
 use crate::prelude::*;
-use crate::HeapAddress;
+use crate::{HeapAddress, StackAddress, VariantIndex, RustFnIndex};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
-use crate::{VariantIndex, RustFnIndex};
 
 /// Binding meta information.
 pub struct Binding {
@@ -14,8 +12,16 @@ pub struct Binding {
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Enum {
+    pub primitive: bool,
     pub variants: Vec<(String, Vec<Option<TypeId>>)>,
     pub impl_traits: Map<TypeId, ImplTrait>,
+}
+
+impl Enum {
+    /// Returns the numeric variant index of given named variant.
+    pub fn variant_index(self: &Self, variant: &str) -> Option<VariantIndex> {
+        self.variants.iter().position(|(name, _)| name == variant).map(|i| i as VariantIndex)
+    }
 }
 
 /// Information about a struct in a resolved program.
@@ -169,6 +175,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
+            Type::Enum(e) if e.primitive => size_of::<VariantIndex>() as u8,
             Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
         }
     }
@@ -217,6 +224,7 @@ impl Type {
     /// Whether the type is a reference type.
     pub const fn is_ref(self: &Self) -> bool {
         match self {
+            Type::Enum(e) if e.primitive => false,
             Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) => true,
             _ => false,
         }
@@ -268,15 +276,6 @@ impl Type {
     pub const fn is_string(self: &Self) -> bool {
         match self {
             Type::String => true,
-            _ => false
-        }
-    }
-    /// Whether the type is a simple enum.
-    pub fn is_simple_enum(self: &Self) -> bool {
-        match self {
-            Type::Enum(e) => {
-                e.impl_traits.len() == 0 && e.variants.iter().all(|(_, v)| v.len() == 0)
-            },
             _ => false
         }
     }

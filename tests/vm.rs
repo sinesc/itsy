@@ -1631,7 +1631,7 @@ fn trait_resolution() {
 }
 
 #[test]
-fn simple_enum() {
+fn primitive_enum() {
     let result = run("
         enum Simple {
             A, B, C
