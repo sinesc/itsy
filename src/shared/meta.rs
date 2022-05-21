@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::{HeapAddress, StackAddress, VariantIndex, RustFnIndex};
+use crate::{HeapAddress, VariantIndex, RustFnIndex};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
 
@@ -180,7 +180,7 @@ impl Type {
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
-    pub const fn unsigned(size: StackAddress) -> Self { // TODO return option once const unwrap becomes stable
+    pub const fn unsigned(size: usize) -> Self { // TODO return option once const unwrap becomes stable
         match size {
             1 => Self::u8,
             2 => Self::u16,
@@ -190,7 +190,7 @@ impl Type {
         }
     }
     /// Returns the type for a signed integer of the given byte-size.
-    pub const fn signed(size: StackAddress) -> Self { // TODO return option once const unwrap becomes stable
+    pub const fn signed(size: usize) -> Self { // TODO return option once const unwrap becomes stable
         match size {
             1 => Self::i8,
             2 => Self::i16,

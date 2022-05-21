@@ -344,7 +344,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.writer.call(target.addr, target.arg_size);
             },
             FunctionKind::Variant(type_id, variant_index) => {
-                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                let index_type = Type::unsigned(size_of::<VariantIndex>());
                 self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.expect("Unresolved function encountered");
@@ -677,7 +677,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive) => {
                 // primitive enums don't need to be heap allocated
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::unsigned(size_of::<VariantIndex>() as StackAddress);
+                let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
             },
@@ -1162,7 +1162,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Variant(variant) => {
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::unsigned(size_of::<VariantIndex>() as StackAddress);
+                let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.store_numeric_prototype(Numeric::Unsigned(variant_index as u64), &index_type);
             },
@@ -1273,7 +1273,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Variant(variant) => {
                 let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::u16; // FIXME: depends on ItemIndex = u16
+                let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
                 index_type.primitive_size() as StackAddress

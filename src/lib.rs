@@ -31,7 +31,7 @@ mod config_derived {
     /// Type used to index enum variants.
     pub type VariantIndex = crate::ItemIndex;
     /// Itsy type used to store stack addresses and vector indices.
-    pub const STACK_ADDRESS_TYPE: Type = Type::unsigned(size_of::<StackAddress>() as StackAddress);
+    pub const STACK_ADDRESS_TYPE: Type = Type::unsigned(size_of::<StackAddress>());
 }
 use config_derived::*;
 
