@@ -102,7 +102,7 @@ macro_rules! impl_display {
 /// Implements a match block with cases for all variants of Expression or Statement
 macro_rules! impl_matchall {
     ($self:ident, Expression, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock)
+        impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock, MatchBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module, Use, EnumDef)
@@ -635,6 +635,39 @@ impl Resolvable for Return {
     }
 }
 
+#[derive(Debug)]
+pub enum Pattern {
+    SimpleVariant(Literal),
+}
+
+/// A match block, e.g. `match e { Enum::Variant => { ... } }`.
+#[derive(Debug)]
+pub struct MatchBlock {
+    pub position    : Position,
+    pub expr        : Expression,
+    pub patterns    : Vec<(Pattern, Block)>,
+    pub scope_id    : Option<ScopeId>,
+}
+
+impl_positioned!(MatchBlock);
+impl_display!(MatchBlock, "match {} {{ ... }}", expr);
+
+impl Resolvable for MatchBlock {
+    fn num_resolved(self: &Self) -> Progress {
+        self.expr.num_resolved()
+        + self.patterns.iter().fold(Progress::zero(), |acc, (_, block)| acc + block.num_resolved())
+    }
+}
+
+impl Typeable for MatchBlock {
+    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+        self.patterns.first().unwrap().1.type_id(bindings)
+    }
+    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+        self.patterns.first_mut().unwrap().1.type_id_mut(bindings)
+    }
+}
+
 /// An if block, e.g. `if a { ... } else { ... }`.
 #[derive(Debug)]
 pub struct IfBlock {
@@ -733,6 +766,7 @@ pub enum Expression {
     Cast(Box<Cast>),
     Block(Box<Block>),
     IfBlock(Box<IfBlock>),
+    MatchBlock(Box<MatchBlock>),
 }
 
 impl Expression {

@@ -201,6 +201,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             E::Cast(cast)               => self.compile_cast(cast),
             E::Block(block)             => self.compile_block(block),
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
+            E::MatchBlock(match_block)        => self.compile_match_block(match_block),
         }
     }
 
@@ -435,6 +436,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else {
             self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap())
         }
+    }
+
+    /// Compiles a match block.
+    fn compile_match_block(self: &mut Self, item: &ast::MatchBlock) -> CompileResult {
+        Ok(())
     }
 
     /// Compiles a while loop.

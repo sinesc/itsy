@@ -438,6 +438,51 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
     ))(i)
 }
 
+// match
+
+fn match_block(i: Input<'_>) -> Output<MatchBlock> {
+    fn match_pattern(i: Input<'_>) -> Output<Pattern> {
+        //let position = i.position();
+        ws(
+            //alt((
+            map(variant_literal, |v| Pattern::SimpleVariant(v)),
+            //))
+        )(i)
+    }
+    fn match_case(i: Input<'_>) -> Output<Block> {
+        let position = i.position();
+        ws(alt((
+            block,
+            map(expression, move |e| Block {
+                position        : position,
+                statements      : Vec::new(),
+                result          : Some(e),
+                returns         : None,
+                scope_id        : None,
+            }),
+        )))(i)
+    }
+    fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
+        ws(separated_list1(
+            char(','),
+            pair(match_pattern, preceded(tag("=>"), match_case))
+        ))(i)
+    }
+    let position = i.position();
+    ws(preceded(
+        check_state(sepr(tag("match")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        map(
+            pair(expression, delimited(char('{'), match_list, preceded(opt(char(',')), ws(char('}'))))),
+            move |m| MatchBlock {
+                    position    : position,
+                    expr        : m.0,
+                    patterns    : m.1,
+                    scope_id    : None,
+                }
+            )
+    ))(i)
+}
+
 // expression
 
 fn expression(i: Input<'_>) -> Output<Expression> {
@@ -473,6 +518,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         ws(alt((
             map(literal, |m| Expression::Literal(m)),
             map(if_block, |m| Expression::IfBlock(Box::new(m))),
+            map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
             parens,
             map(suffix, |m| Expression::UnaryOp(Box::new(m))),
@@ -959,28 +1005,42 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
 
 fn statement(i: Input<'_>) -> Output<Statement> {
     ws(alt((
-        map(binding,|m| Statement::Binding(m)),
-        map(if_block, |m| Statement::IfBlock(m)),
+        map(use_declaration, |m| Statement::Use(m)),
+        map(module, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
         map(struct_def, |m| Statement::StructDef(m)),
         map(enum_def, |m| Statement::EnumDef(m)),
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
+
+        map(binding,|m| Statement::Binding(m)),
+        map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
         map(block, |m| Statement::Block(m)),
-        map(use_declaration, |m| Statement::Use(m)),
-        map(module, |m| Statement::Module(m)),
         map(terminated(expression, char(';')), |m| Statement::Expression(m)),
     )))(i)
 }
 
 // root
 
+fn root_items(i: Input<'_>) -> Output<Statement> {
+    ws(alt((
+        map(use_declaration, |m| Statement::Use(m)),
+        map(module, |m| Statement::Module(m)),
+        map(function, |m| Statement::Function(m)),
+        map(struct_def, |m| Statement::StructDef(m)),
+        map(enum_def, |m| Statement::EnumDef(m)),
+        map(trait_impl_block,|m| Statement::ImplBlock(m)),
+        map(impl_block,|m| Statement::ImplBlock(m)),
+        map(trait_def, |m| Statement::TraitDef(m)),
+    )))(i)
+}
+
 fn root(i: Input<'_>) -> Output<Vec<Statement>> {
-    all_consuming(ws(many0(statement)))(i)
+    all_consuming(ws(many0(root_items)))(i)
 }
 
 /// Parses Itsy source code into a program AST structure.

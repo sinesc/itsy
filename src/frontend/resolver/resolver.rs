@@ -405,6 +405,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             E::Cast(cast)               => self.resolve_cast(cast, expected_result),
             E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block, expected_result),
+            E::MatchBlock(match_block)        => self.resolve_match_block(match_block, expected_result),
         }
     }
 
@@ -813,6 +814,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.check_type_accepted_for(item, if_type_id, TypeId::void())?; // Todo: meh, using this to generate an error when we already know there is an error.
         }
         self.scope_id = parent_scope_id;
+        Ok(())
+    }
+
+    /// Resolves a match expression.
+    fn resolve_match_block(self: &mut Self, item: &mut ast::MatchBlock, expected_result: Option<TypeId>) -> ResolveResult {
         Ok(())
     }
 
