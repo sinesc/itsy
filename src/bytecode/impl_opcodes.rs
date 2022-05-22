@@ -97,34 +97,20 @@ macro_rules! impl_opcodes {
             )+
         }
 
-        impl OpCode {
-            /// Converts u8 to bytecode.
-            #[cfg_attr(not(debug_assertions), inline(always))]
-            pub(crate) fn from_u8(opcode: u8) -> Self {
-                // this is faster but introduces non-safe code
-                /*if (opcode <= Self::comment as u8) {
-                    un safe { ::std::mem::transmute(opcode) }
-                } else {
-                    panic!("Invalid opcode {}", opcode);
-                }*/
-                // note: also tried generating contants first and then match those (to avoid the x if x match guard). turned out to be slightly slower.
-                match opcode {
+        #[allow(non_upper_case_globals)]
+        mod opcodes {
+            $(
+                // handle single opcode
+                $(
+                    pub(super) const $name: u8 = super::OpCode::$name as u8;
+                )?
+                // handle opcode variants
+                $(
                     $(
-                        // opcode variants
-                        $(
-
-                            $(
-                                x if x == Self::$variant_name as u8 => Self::$variant_name,
-                            )+
-                        )?
-                        // single opcode
-                        $(
-                            x if x == Self::$name as u8 => Self::$name,
-                        )?
+                        pub(super) const $variant_name: u8 = super::OpCode::$variant_name as u8;
                     )+
-                    _ => panic!("Invalid opcode {}", opcode),
-                }
-            }
+                )?
+            )+
         }
 
         /// Bytecode writers. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
@@ -162,64 +148,54 @@ macro_rules! impl_opcodes {
         /// Bytecode execution/output/debug.
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
 
-            /// Returns disassembled opcode at given position along with the next opcode position.
-            #[cfg(feature="debugging")]
-            pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<(OpCode, StackAddress)> {
-                let mut pc = position;
-                if pc < self.instructions.len() as StackAddress {
-                    let instruction = impl_opcodes!(read u8, self, pc);
-                    Some((OpCode::from_u8(instruction), pc))
-                } else {
-                    None
-                }
-            }
-
             /// Returns disassembled opcode as string at given position along with the next opcode position.
             //#[allow(unused_imports)]
             #[allow(unused_mut)]
             #[cfg(feature="debugging")]
-            pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
-                if let Some((opcode, mut pc)) = self.read_instruction(position) {
+            pub(crate) fn describe_instruction(self: &Self, mut position: StackAddress) -> Option<(String, StackAddress)> {
+                if position >= self.instructions.len() as StackAddress {
+                    None
+                } else {
+                    let instruction = impl_opcodes!(read u8, self, position);
                     #[allow(unreachable_patterns)]
-                    match opcode {
+                    match instruction {
                         // implement special formatting for some opcodes
-                        OpCode::rustcall => {
+                        opcodes::rustcall => {
                             let mut result = format!("{:?} {} ", position, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, pc)));
-                            Some((result, pc))
+                            result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, position)));
+                            Some((result, position))
                         }
-                        OpCode::comment => {
-                            let message = impl_opcodes!(read String, self, pc);
+                        opcodes::comment => {
+                            let message = impl_opcodes!(read String, self, position);
                             let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
-                            Some((result, pc))
+                            Some((result, position))
                         }
                         $(
                             // handle opcode
                             $(
-                                OpCode::$name => {
+                                opcodes::$name => {
                                     let mut result = format!("{:?} {} ", position, stringify!($name));
                                     $(
-                                        result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, pc) ));
+                                        result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, position) ));
                                     )*
-                                    Some((result, pc))
+                                    Some((result, position))
                                 }
                             )?
                             // handle opcode variants
                             $(
                                 $(
-                                    OpCode::$variant_name => {
+                                    opcodes::$variant_name => {
                                         let mut result = format!("{:?} {} ", position, stringify!($variant_name));
                                         $(
-                                            result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, pc) ));
+                                            result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, position) ));
                                         )*
-                                        Some((result, pc))
+                                        Some((result, position))
                                     }
                                 )+
                             )?
                         ),+,
+                        _ => unreachable!("Invalid opcode"),
                     }
-                } else {
-                    None
                 }
             }
 
@@ -229,11 +205,11 @@ macro_rules! impl_opcodes {
                 loop {
                     let instruction = impl_opcodes!(read u8, self, self.pc);
                     #[allow(unreachable_patterns)]
-                    match OpCode::from_u8(instruction) {
+                    match instruction {
                         $(
                             // handle single opcode
                             $(
-                                OpCode::$name => {
+                                opcodes::$name => {
                                     let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
@@ -243,7 +219,7 @@ macro_rules! impl_opcodes {
                             // handle opcode variants
                             $(
                                 $(
-                                    OpCode::$variant_name => {
+                                    opcodes::$variant_name => {
                                         $(
                                             let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                         )*
@@ -252,6 +228,7 @@ macro_rules! impl_opcodes {
                                 )+
                             )?
                         ),+
+                        _ => unreachable!("Invalid opcode"),
                     }
                 }
             }
@@ -263,11 +240,11 @@ macro_rules! impl_opcodes {
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 let instruction = impl_opcodes!(read u8, self, self.pc);
                 #[allow(unreachable_patterns)]
-                match OpCode::from_u8(instruction) {
+                match instruction {
                     $(
                         // handle single opcode
                         $(
-                            OpCode::$name => {
+                            opcodes::$name => {
                                 let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
@@ -277,7 +254,7 @@ macro_rules! impl_opcodes {
                         // handle opcode variants
                         $(
                             $(
-                                OpCode::$variant_name => {
+                                opcodes::$variant_name => {
                                     $(
                                         let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                     )*
@@ -286,6 +263,7 @@ macro_rules! impl_opcodes {
                             )+
                         )?
                     ),+
+                    _ => unreachable!("Invalid opcode"),
                 }
             }
         }
