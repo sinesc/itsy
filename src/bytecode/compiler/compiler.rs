@@ -84,7 +84,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
             compiler.constructors.insert(type_id, position);
             // for trait implementing types, link constructor to trait implementor (trait objects still need proper reference counting, which requires the constructor of the concrete type)
             if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
-                compiler.writer.set_const_data((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
+                compiler.writer.update_const((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
             }
         }
     }
@@ -106,7 +106,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
         if let Some(selected_function_id) = selected_function_id {
             let selected_function_offset = compiler.functions.get(&selected_function_id).expect("Missing function callinfo").addr;
             let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
-            compiler.writer.set_const_data(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
+            compiler.writer.update_const(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
@@ -516,7 +516,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         //self.write_clone(&STACK_ADDRESS_TYPE, array_ty.primitive_size());    // stack &array index &array index
 
         let element_ty = self.type_by_id(element_type_id);
-        self.write_heap_tail_element_nc(element_ty);   // stack &array index element
+        self.write_heap_tail_element_nc(array_ty, element_ty);   // stack &array index element
 
         if element_ty.is_ref() {
             self.write_clone(element_ty);       // stack &array index element element
@@ -816,7 +816,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::Index => {
                 comment!(self, "[{}]", &item.right);
                 // fetch heap value at reference-target
-                self.write_heap_fetch_element(result_type);
+                self.write_heap_fetch_element(compare_type, result_type);
             },
             BO::IndexWrite => {
                 comment!(self, "[{}] (writing)", &item.right);
@@ -828,7 +828,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 // fetch heap value at reference-target
                 let struct_ = compare_type.as_struct().unwrap();
                 let offset = self.compute_member_offset(struct_, &item.right.as_member().unwrap().ident.name);
-                self.write_heap_fetch_member(result_type, offset);
+                self.write_heap_fetch_member(compare_type, result_type, offset);
             },
             BO::AccessWrite => {
                 comment!(self, ".{} (writing)", &item.right);
@@ -1417,37 +1417,40 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
-    fn write_heap_fetch_member(self: &Self, ty: &Type, offset: StackAddress) {
-        match ty.primitive_size() {
-            1 => { self.writer.heap_fetch_member8(offset); },
-            2 => { self.writer.heap_fetch_member16(offset); },
-            4 => { self.writer.heap_fetch_member32(offset); },
-            8 => { self.writer.heap_fetch_member64(offset); },
+    fn write_heap_fetch_member(self: &Self, container_type: &Type, result_type: &Type, offset: StackAddress) {
+        let constructor = self.get_constructor(container_type);
+        match result_type.primitive_size() {
+            1 => { self.writer.heap_fetch_member8(offset, constructor); },
+            2 => { self.writer.heap_fetch_member16(offset, constructor); },
+            4 => { self.writer.heap_fetch_member32(offset, constructor); },
+            8 => { self.writer.heap_fetch_member64(offset, constructor); },
             //16 => { self.writer.heap_fetch_member128(offset); },
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
         }
     }
 
     /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
-    fn write_heap_fetch_element(self: &Self, ty: &Type) {
-        match ty.primitive_size() {
-            1 => { self.writer.heap_fetch_element8(); },
-            2 => { self.writer.heap_fetch_element16(); },
-            4 => { self.writer.heap_fetch_element32(); },
-            8 => { self.writer.heap_fetch_element64(); },
+    fn write_heap_fetch_element(self: &Self, container_type: &Type, result_type: &Type) {
+        let constructor = self.get_constructor(container_type);
+        match result_type.primitive_size() {
+            1 => { self.writer.heap_fetch_element8(constructor); },
+            2 => { self.writer.heap_fetch_element16(constructor); },
+            4 => { self.writer.heap_fetch_element32(constructor); },
+            8 => { self.writer.heap_fetch_element64(constructor); },
             //16 => { self.writer.heap_fetch_element128(); },
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
         }
     }
 
     /// Writes instructions to fetch an element from the end of the array whose reference is at the top of the stack.
-    fn write_heap_tail_element_nc(self: &Self, ty: &Type) {
-        match ty.primitive_size() {
-            1 => { self.writer.heap_tail_element8_nc(); },
-            2 => { self.writer.heap_tail_element16_nc(); },
-            4 => { self.writer.heap_tail_element32_nc(); },
-            8 => { self.writer.heap_tail_element64_nc(); },
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+    fn write_heap_tail_element_nc(self: &Self, container_type: &Type, result_type: &Type) {
+        let constructor = self.get_constructor(container_type);
+        match result_type.primitive_size() {
+            1 => { self.writer.heap_tail_element8_nc(constructor); },
+            2 => { self.writer.heap_tail_element16_nc(constructor); },
+            4 => { self.writer.heap_tail_element32_nc(constructor); },
+            8 => { self.writer.heap_tail_element64_nc(constructor); },
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
         }
     }
 
@@ -1546,13 +1549,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions for build-in len method.
     fn write_intrinsic(self: &Self, intrinsic: Intrinsic, ty: &Type) {
+        let constructor = self.get_constructor(ty);
         #[allow(unreachable_patterns)]
         match ty {
             &Type::Array(Array { type_id }) => {
                 let inner_ty = self.type_by_id(type_id.unwrap());
                 match intrinsic {
                     Intrinsic::ArrayLen => {
-                        self.writer.heap_size(); // fixme: doesn't do refcounting // self.write_cntfreetmp(self.get_constructor(ty));
+                        self.writer.heap_size(constructor);
                         self.writer.shrsa(match inner_ty.primitive_size() {
                             1 => 0,
                             2 => 1,
@@ -1772,7 +1776,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.string_ceq();
         } else {
             unimplemented!("general heap compare not yet implemented");
-            //self.writer.heap_ceq(self.flat_size(ty)); //FIXME: check this
         }
     }
 
@@ -1790,7 +1793,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.string_cneq();
         } else {
             unimplemented!("general heap compare not yet implemented");
-            //self.writer.heap_cneq(self.flat_size(ty)); //FIXME: check this
         }
     }
 
