@@ -17,7 +17,7 @@ impl Stack {
     /// Creates a new VM value stack.
     pub fn new() -> Self {
         Stack {
-            data    : Vec::new(),
+            data    : Vec::with_capacity(4096),
             fp      : 0,
             base_fp : 0,
         }
@@ -76,6 +76,7 @@ impl Stack {
     pub fn extend_from(self: &mut Self, slice: &[u8]) {
         self.data.extend_from_slice(slice);
     }
+    /// Extends stack with zeroed data.
     pub fn extend_zero(self: &mut Self, num_bytes: StackAddress) {
         self.data.resize(self.data.len() + num_bytes as usize, 0);
     }
@@ -84,14 +85,14 @@ impl Stack {
 impl Index<StackAddress> for Stack {
     type Output = u8;
 
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline)]
     fn index(&self, index: StackAddress) -> &Self::Output {
         Index::index(&*self.data, index as usize)
     }
 }
 
 impl IndexMut<StackAddress> for Stack {
-    #[inline]
+    #[cfg_attr(not(debug_assertions), inline)]
     fn index_mut(&mut self, index: StackAddress) -> &mut Self::Output {
         IndexMut::index_mut(&mut *self.data, index as usize)
     }

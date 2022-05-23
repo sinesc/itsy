@@ -235,7 +235,6 @@ macro_rules! impl_opcodes {
 
             /// Execute the next bytecode from the VMs code buffer.
             #[allow(unused_imports)]
-            #[cfg_attr(not(debug_assertions), inline(always))]
             #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 let instruction = impl_opcodes!(read u8, self, self.pc);

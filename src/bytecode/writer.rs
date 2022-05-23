@@ -75,14 +75,6 @@ impl<T> Writer<T> where T: VMFunc<T> {
         self.program().consts.resize(pool_size + size as usize, 0);
         position
     }
-    /// Writes to a data-block on the const pool.
-    pub fn set_const_data(self: &Self, position: StackAddress, value: StackAddress) {
-        let mut program = self.program();
-        let position = position as usize;
-        for (index, &byte) in value.to_le_bytes().iter().enumerate() {
-            program.consts[position + index] = byte;
-        }
-    }
 }
 
 /// Implements const pool write traits
@@ -100,8 +92,9 @@ macro_rules! impl_store_const {
             }
             fn update_const(self: &Self, position: StackAddress, value: $type) {
                 let mut program = self.program();
+                let position = position as usize;
                 for (index, &byte) in value.to_le_bytes().iter().enumerate() {
-                    program.consts[(position as usize) + index] = byte;
+                    program.consts[position + index] = byte;
                 }
             }
         }

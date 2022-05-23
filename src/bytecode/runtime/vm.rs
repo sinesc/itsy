@@ -124,7 +124,7 @@ impl<T, U> VM<T, U> {
             let start = descriptor.position as usize;
             let end = start + descriptor.size as usize;
             match (descriptor.endianness, descriptor.size) {
-                (_, 1)              => stack.push(u8::from_le_bytes(consts[start..end].try_into().unwrap())),
+                (_, 1)              => stack.push(consts[start]),
                 (CE::Integer, 2)    => stack.push(u16::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Integer, 4)    => stack.push(u32::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Integer, 8)    => stack.push(u64::from_le_bytes(consts[start..end].try_into().unwrap())),
@@ -139,7 +139,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Reads a constructor opcode.
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_read_op(self: &Self, constructor_offset: &mut StackAddress) -> Constructor {
         let op = Constructor::from_u8(self.stack.load(*constructor_offset));
         *constructor_offset += size_of_val(&op) as StackAddress;
@@ -147,7 +147,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Reads an ItemIndex sized constructor argument.
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_read_index(self: &Self, constructor_offset: &mut StackAddress) -> ItemIndex {
         let arg: ItemIndex = self.stack.load(*constructor_offset);
         *constructor_offset += size_of_val(&arg) as StackAddress;
@@ -155,6 +155,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Writes prototype copy to given target (stack or heap).
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_copy_value(self: &mut Self, target: CopyTarget, prototype_offset: StackAddress, num_bytes: StackAddress) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
@@ -166,6 +167,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Writes a heap reference to the given target (stack or heap).
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_write_ref(self: &mut Self, target: CopyTarget, heap_ref: HeapRef) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
@@ -239,6 +241,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: StackAddress, op: HeapRefOp) {
         let constructor = self.construct_read_op(&mut constructor_offset);
         let epoch = self.heap.new_epoch();
@@ -247,12 +250,10 @@ impl<T, U> VM<T, U> {
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
     fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
-
         let item_index = item.index();
         let refs = self.heap.item_refs(item_index);
         let transitions = (op == HeapRefOp::Dec && refs == 1) || (op == HeapRefOp::Free && refs == 0) || (op == HeapRefOp::Inc && refs == 0);
         let parsed = Constructor::parse_with(&self.stack, *constructor_offset, constructor);
-
         if !transitions {
             // No recursion is required if only the refcount changes, but we need to skip the constructor
             self.heap.ref_item(item_index, op);
@@ -325,7 +326,7 @@ impl<T, U> VM<T, U> {
                         }
                     }
                     self.heap.ref_item(item_index, op);
-                }
+                },
                 Constructor::String => {
                     self.heap.ref_item(item_index, op);
                 },
