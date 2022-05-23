@@ -250,7 +250,7 @@ impl<T, U> VM<T, U> {
 
         let item_index = item.index();
         let refs = self.heap.item_refs(item_index);
-        let transitions = (op == HeapRefOp::Dec && refs == 1) || (op == HeapRefOp::FreeTmp && refs == 0) || (op == HeapRefOp::Inc && refs == 0);
+        let transitions = (op == HeapRefOp::Dec && refs == 1) || (op == HeapRefOp::Free && refs == 0) || (op == HeapRefOp::Inc && refs == 0);
         let parsed = Constructor::parse_with(&self.stack, *constructor_offset, constructor);
 
         if !transitions {

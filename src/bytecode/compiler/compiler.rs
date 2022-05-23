@@ -647,17 +647,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if let Some(returns) = &item.returns {
             comment!(self, "block returning");
             self.compile_expression(returns)?;
+            // inc result, then dec everything
             self.item_cnt(returns, true, HeapRefOp::Inc);
             self.decref_block_locals();
-            self.item_cnt(returns, true, HeapRefOp::Zero);
+            self.item_cnt(returns, true, HeapRefOp::DecNoFree);
             let exit_jump = self.writer.jmp(123);
             self.locals.add_forward_jmp(exit_jump);
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
+            // inc result, then dec everything
             self.item_cnt(result, true, HeapRefOp::Inc);
             self.decref_block_locals();
-            self.item_cnt(result, true, HeapRefOp::Zero);
+            self.item_cnt(result, true, HeapRefOp::DecNoFree);
         } else {
             self.decref_block_locals();
         }
@@ -1015,14 +1017,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);
             } else if let ast::Statement::Block(block) = statement {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(&block, frame);
             } else if let ast::Statement::IfBlock(if_block) = statement {
                 self.create_stack_frame_block(&if_block.if_block, frame);
                 if let Some(block) = &if_block.else_block {
                     self.create_stack_frame_block(block, frame);
                 }
             } else if let ast::Statement::Expression(expression) = statement {
-                self.create_stack_frame_exp(expression, frame);
+                self.create_stack_frame_exp(&expression, frame);
             }
         }
         if let Some(result) = &item.result {
@@ -1062,6 +1064,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             }
         }
+        comment!(self, "end freeing locals");
         self.locals.push(frame);
     }
 }

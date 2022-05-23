@@ -35,10 +35,10 @@ pub enum HeapRefOp {
     Inc,
     /// Decrease reference counter, free on zero.
     Dec,
-    /// Free if reference counter is 0, otherwise do nothing.
-    FreeTmp,
     /// Decrease reference counter but do not free on zero.
-    Zero,
+    DecNoFree,
+    /// Free if reference counter is 0, otherwise do nothing.
+    Free,
 }
 
 impl HeapRefOp {
@@ -46,8 +46,8 @@ impl HeapRefOp {
         match index {
             x if x == Self::Inc as u8 => Self::Inc,
             x if x == Self::Dec as u8 => Self::Dec,
-            x if x == Self::FreeTmp as u8 => Self::FreeTmp,
-            x if x == Self::Zero as u8 => Self::Zero,
+            x if x == Self::Free as u8 => Self::Free,
+            x if x == Self::DecNoFree as u8 => Self::DecNoFree,
             _ => panic!("Invalid HeapRefOp index {}", index),
         }
     }
@@ -160,12 +160,12 @@ impl Heap {
                     (*refs) -= 1;
                 }
             }
-            HeapRefOp::FreeTmp => {
+            HeapRefOp::Free => {
                 if *refs == 0 {
                     self.free_item(index);
                 }
             }
-            HeapRefOp::Zero => {
+            HeapRefOp::DecNoFree => {
                 debug_assert!(*refs >= 1, "attempted to decrement reference count of 0");
                 (*refs) -= 1;
             }

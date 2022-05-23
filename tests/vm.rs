@@ -1659,3 +1659,21 @@ fn primitive_enum() {
     ");
     assert_all(&result, &[ 1u8, 2, 3, 4 ]);
 }
+
+#[test]
+fn temporaries() {
+    let result = run("
+        struct Test {
+            val: u8,
+        }
+        fn test(i: u8) -> Test {
+            Test { val: i }
+        }
+        fn main() {
+            ret_u8(test(1).val);
+            ret_u8(test(2).val);
+            ret_u8(test(3).val);
+        }
+    ");
+    assert_all(&result, &[ 1u8, 2, 3 ]);
+}

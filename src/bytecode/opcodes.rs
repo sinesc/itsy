@@ -720,8 +720,8 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Eq);
         self.stack.push(equals as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops 2 heap references to strings, compares the strings for inequality and pushes the result.
@@ -730,8 +730,8 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Neq);
         self.stack.push(equals as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
@@ -740,8 +740,8 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lt);
         self.stack.push(equals as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result.
@@ -750,8 +750,8 @@ impl_opcodes!{
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
         self.stack.push(equals as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops two heap references to strings, concatenates the referenced strings into a new object and pushes its heap reference.
@@ -764,8 +764,8 @@ impl_opcodes!{
         self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
         self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
         self.stack.push(HeapRef::new(dest_index, 0));
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp);
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops a heap reference and pushes the size of the referenced heap object.
@@ -773,7 +773,7 @@ impl_opcodes!{
         let item: HeapRef = self.stack.pop();
         let size = self.heap.item(item.index()).data.len();
         self.stack.push(size as StackAddress);
-        self.heap.ref_item(item.index(), HeapRefOp::FreeTmp);// FIXME: shouldn't this use refcount_value?
+        self.heap.ref_item(item.index(), HeapRefOp::Free);// FIXME: needs constructor offset on heap object and use refcount_value
     }
 
     /*/// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
@@ -790,8 +790,8 @@ impl_opcodes!{
         let data_a = self.heap.slice(a, num_bytes);
         let data_b = self.heap.slice(b, num_bytes);
         self.stack.push((data_a == data_b) as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free); // FIXME: needs constructor offset on heap object and use refcount_value
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Pops 2 heap references and compares num_bytes bytes.
@@ -801,8 +801,8 @@ impl_opcodes!{
         let data_a = self.heap.slice(a, num_bytes);
         let data_b = self.heap.slice(b, num_bytes);
         self.stack.push((data_a != data_b) as Data8);
-        self.heap.ref_item(a.index(), HeapRefOp::FreeTmp); // FIXME: shouldn't this use refcount_value?
-        self.heap.ref_item(b.index(), HeapRefOp::FreeTmp);
+        self.heap.ref_item(a.index(), HeapRefOp::Free); // FIXME: needs constructor offset on heap object and use refcount_value
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
     /// Decrements the stackvalue at given offset (relative to the stack frame) and pushes the result onto the stack.
@@ -842,6 +842,7 @@ impl_opcodes!{
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item);
+        self.heap.ref_item(item.index(), HeapRefOp::Free); // FIXME: needs constructor offset on heap object and use refcount_value
         self.stack.push(data);
     }
 
@@ -888,6 +889,7 @@ impl_opcodes!{
     >(&mut self) {
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item.with_offset(offset as StackOffset));
+        self.heap.ref_item(item.index(), HeapRefOp::Free); // FIXME: needs constructor offset on heap object and use refcount_value
         self.stack.push(data);
     }
 
@@ -901,6 +903,7 @@ impl_opcodes!{
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item.with_offset((size_of::<T>() as StackAddress * element_index) as StackOffset));
+        self.heap.ref_item(item.index(), HeapRefOp::Free); // FIXME: needs constructor offset on heap object and use refcount_value
         self.stack.push(data);
     }
 
