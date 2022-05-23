@@ -22,6 +22,9 @@ vm_func!(BenchFn, Bench, {
     fn rust_fib_i(&mut context, n: i32) -> i32 {
         fib_i(n)
     }
+    fn rust_stringcat(&mut context, n: i32) -> String {
+        stringcat(n)
+    }
 });
 
 fn main() {
@@ -39,6 +42,7 @@ fn main() {
         }
     }
 }
+
 fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
     let parsed = parser::parse_module(source, "")?;
     let mut program = parser::ParsedProgram::new();
@@ -46,6 +50,7 @@ fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
     let resolved = resolver::resolve::<BenchFn>(program, "main")?;
     Ok(compiler::compile(resolved)?)
 }
+
 fn fib_r(n: i32) -> i32 {
     if n < 2 {
         n
@@ -69,4 +74,12 @@ fn fib_i(n: i32) -> i32 {
         k += 1;
     }
     return j;
+}
+
+fn stringcat(n: i32) -> String {
+    let mut s = n.to_string();
+    if n > 0 {
+        s += &stringcat(n - 1);
+    }
+    s
 }

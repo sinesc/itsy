@@ -130,7 +130,7 @@ macro_rules! vm_func {
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret $vm:ident, String, $value:ident) => { {
         let raw_bytes = &$value.as_bytes();
-        let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
+        let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::sizes::ItemIndex::MAX);
         $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, $_:tt, $value:ident) => {

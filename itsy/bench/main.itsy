@@ -8,21 +8,32 @@ fn main() {
     result("rust_fib_i", rust_fib_i, t_rust_fib_i);
 
     start_time();
-    let fib_i = fib_i(46);
+    let fib_i = itsy_fib_i(46);
     let t_fib_i = stop_time();
     result("fib_i", fib_i, t_fib_i);
     ratio(t_fib_i, t_rust_fib_i);
 
     start_time();
-    let rust_fib_r = rust_fib_r(40);
+    let rust_fib_r = rust_fib_r(36);
     let t_rust_fib_r = stop_time();
     result("rust_fib_r", rust_fib_r, t_rust_fib_r);
 
     start_time();
-    let fib_r = fib_r(40);
+    let fib_r = itsy_fib_r(36);
     let t_fib_r = stop_time();
     result("fib_r", fib_r, t_fib_r);
     ratio(t_fib_r, t_rust_fib_r);
+
+    start_time();
+    let rust_stringcat = rust_stringcat(10000);
+    let t_rust_stringcat = stop_time();
+    result("rust_stringcat", 0, t_rust_stringcat);
+
+    start_time();
+    let stringcat = itsy_stringcat(10000);
+    let t_stringcat = stop_time();
+    result("itsy_stringcat", 0, t_stringcat);
+    ratio(t_stringcat, t_rust_stringcat);
 }
 
 fn result(label: String, value: i32, elapsed: f64) {
@@ -33,15 +44,15 @@ fn ratio(itsy: f64, rust: f64) {
     print("ratio: " + ((itsy / rust) as String));
 }
 
-fn fib_r(n: i32) -> i32 {
+fn itsy_fib_r(n: i32) -> i32 {
     if n < 2 {
         n
     } else {
-        fib_r(n - 1) + fib_r(n - 2)
+        itsy_fib_r(n - 1) + itsy_fib_r(n - 2)
     }
 }
 
-fn fib_i(n: i32) -> i32 {
+fn itsy_fib_i(n: i32) -> i32 {
     let mut i = 0;
     let mut j = 1;
     let mut k = 1;
@@ -56,4 +67,12 @@ fn fib_i(n: i32) -> i32 {
         k += 1;
     }
     return j;
+}
+
+fn itsy_stringcat(n: i32) -> String {
+    let s = n as String;
+    if n > 0 {
+        s += itsy_stringcat(n - 1);
+    }
+    s
 }
