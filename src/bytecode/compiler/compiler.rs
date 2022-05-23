@@ -1499,8 +1499,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         };
     }
 
-    /// Discard topmost stack value
+    /// Discard topmost stack value and drop temporaries for reference types.
     fn write_discard(self: &Self, ty: &Type) {
+        if ty.is_ref() {
+            let constructor = self.get_constructor(ty);
+            self.write_cnt_nc(constructor, HeapRefOp::Free);
+        }
         match ty.primitive_size() {
             0 => 0,
             1 => self.writer.discard8(),

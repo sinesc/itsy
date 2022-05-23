@@ -1661,7 +1661,7 @@ fn primitive_enum() {
 }
 
 #[test]
-fn temporaries() {
+fn tempory_access() {
     let result = run("
         struct Test {
             val: u8,
@@ -1670,10 +1670,25 @@ fn temporaries() {
             Test { val: i }
         }
         fn main() {
+            test(3); // test discard drop
             ret_u8(test(1).val);
             ret_u8(test(2).val);
             ret_u8(test(3).val);
         }
     ");
     assert_all(&result, &[ 1u8, 2, 3 ]);
+}
+
+#[test]
+fn temporary_string() {
+    let result = run("
+        fn to_string(n: i32) -> String {
+            n as String
+        }
+        fn main() {
+            to_string(100); // test discard drop
+            ret_string(to_string(321));
+        }
+    ");
+    assert_all(&result, &[ "321".to_string() ]);
 }
