@@ -13,7 +13,7 @@ pub enum LocalOrigin {
 pub struct Local {
     /// The load-index for this variable.
     pub index: StackAddress,
-    /// Whether is is an argument passed into a function or a binding.
+    /// Whether this is an argument passed into a function or a binding.
     pub origin: LocalOrigin,
 }
 
@@ -21,14 +21,14 @@ pub struct Local {
 pub struct StackFrame {
     /// Maps a binding ID to a variable or argument position on the stack.
     pub map     : Map<BindingId, Local>,
-    /// Index of the NEXT argument to be inserted.
+    /// Index for the NEXT argument to be inserted.
     pub arg_pos : StackAddress,
     /// Index for the NEXT variable to be inserted.
     pub var_pos : StackAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
     /// Addresses of forward jumps within the function that need to be replaced with the return location.
-    pub unfixed_exit_jmps: Vec<StackAddress>,
+    pub exit_placeholder: Vec<StackAddress>,
 }
 
 impl StackFrame {
@@ -39,7 +39,7 @@ impl StackFrame {
             arg_pos : 0,
             var_pos : 0,
             ret_size: 0,
-            unfixed_exit_jmps: Vec::new(),
+            exit_placeholder: Vec::new(),
         }
     }
     /// Add new local variable.
@@ -82,7 +82,7 @@ impl StackFrames {
         self.0.last().expect(Self::NO_STACK).lookup(binding_id)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
-    pub fn add_forward_jmp(self: &mut Self, address: StackAddress) {
-        self.0.last_mut().expect(Self::NO_STACK).unfixed_exit_jmps.push(address);
+    pub fn add_exit_placeholder(self: &mut Self, address: StackAddress) {
+        self.0.last_mut().expect(Self::NO_STACK).exit_placeholder.push(address);
     }
 }

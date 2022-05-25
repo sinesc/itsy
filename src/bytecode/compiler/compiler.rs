@@ -597,7 +597,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         // fix forward-to-exit jmps within the function
         let exit_address = self.writer.position();
-        while let Some(jmp_address) = frame.unfixed_exit_jmps.pop() {
+        while let Some(jmp_address) = frame.exit_placeholder.pop() {
             self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
         }
 
@@ -640,7 +640,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.decref_block_locals();
             self.item_cnt(returns, true, HeapRefOp::DecNoFree);
             let exit_jump = self.writer.jmp(123);
-            self.locals.add_forward_jmp(exit_jump);
+            self.locals.add_exit_placeholder(exit_jump);
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;

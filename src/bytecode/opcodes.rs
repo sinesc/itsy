@@ -1,6 +1,6 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
-use crate::prelude::size_of;
+use crate::prelude::*;
 use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
 use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
@@ -652,11 +652,11 @@ impl_opcodes!{
         builtin.exec(self);
     }
 
-    /// Function call. Saves state and sets programm counter to given addr.
+    /// Function call. Creates a new stack frame at SP - arg_size and sets programm counter to given addr.
     fn call(&mut self, addr: StackAddress, arg_size: StackAddress) {
         // stack: ... | ARGS
         self.stack.push(self.stack.fp);
-        self.stack.fp = self.stack.sp() - arg_size - (size_of::<StackAddress>() as StackAddress);
+        self.stack.fp = self.stack.sp() - arg_size - (size_of_val(&self.stack.fp) as StackAddress);
         self.stack.push(self.pc);
         self.pc = addr;
         // stack: ARGS | previous FP | previous PC | (local vars and dynamic stack follow here)
@@ -674,7 +674,7 @@ impl_opcodes!{
     fn ret0(&mut self, arg_size: StackAddress) {
         // stack: ARGS | previous FP | previous PC | local vars
         let prev_fp = self.stack.load_fp(arg_size as StackOffset);
-        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of::<StackAddress>() as StackOffset);
+        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of_val(&prev_fp) as StackOffset);
         self.stack.truncate(self.stack.fp);
         self.pc = prev_pc;
         self.stack.fp = prev_fp;
@@ -690,7 +690,7 @@ impl_opcodes!{
     >(&mut self) {
         // stack: ARGS | previous FP | previous PC | local vars | RESULT
         let prev_fp = self.stack.load_fp(arg_size as StackOffset);
-        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of::<StackAddress>() as StackOffset);
+        let prev_pc = self.stack.load_fp(arg_size as StackOffset + size_of_val(&prev_fp) as StackOffset);
         let ret: T = self.stack.top();
         self.stack.store_fp(0, ret);
         self.stack.truncate(self.stack.fp + size_of::<T>() as StackAddress);
