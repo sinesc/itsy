@@ -76,7 +76,10 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileErro
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
     compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress); // FIXME: this does not consider endianess
 
-    // serialize constructors onto const pool
+    // serialize constructors onto const pool, ensure position 0 is not used as that indicates a virtual constructor
+    if compiler.writer.position() == 0 {
+        compiler.writer.store_const(101 as u8);
+    }
     for (type_id, ty) in compiler.id_mappings.types() {
         if !ty.is_primitive() && !ty.as_trait().is_some() {
             // store constructor, remember position
@@ -286,7 +289,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
         // put args on stack, increase ref count here, decrease in function
         for (_index, arg) in item.args.iter().enumerate() {
-            comment!(self, "{}() arg {}", item.ident.name, _index);
+            comment!(self, "{}() arg {}", item.ident.name, arg);
             self.compile_expression(arg)?;
             match function.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
@@ -300,18 +303,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
-        if item.args.len() == 0 {
-            comment!(self, "{}()", item.ident.name);
-        }
+        comment!(self, "prepare {}() args", item.ident.name);
         let function_id = item.function_id.expect("Unresolved function encountered");
         let function = self.id_mappings.function(function_id).clone();
         match function.kind.unwrap() {
             FunctionKind::Rust(rust_fn_index) => {
                 self.compile_call_args(&function, item)?;
+                comment!(self, "call {}()", item.ident.name);
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
             FunctionKind::Intrinsic(type_id, intrinsic) => {
                 self.compile_call_args(&function, item)?;
+                comment!(self, "call {}()", item.ident.name);
                 self.write_intrinsic(intrinsic, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
@@ -320,29 +323,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id);
                     let function_arg_size = self.id_mappings.function_arg_size(function_id);
+                    comment!(self, "call {}()", item.ident.name);
                     self.writer.vcall(function_offset, function_arg_size);
                 } else {
                     // static dispatch
-                    let target = if let Some(&target) = self.functions.get(&function_id) {
-                        target
-                    } else {
-                        let call_position = self.writer.position();
-                        self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
-                        CallInfo::PLACEHOLDER
-                    };
-                    self.writer.call(target.addr, target.arg_size);
+                    comment!(self, "call {}()", item.ident.name);
+                    self.write_call(function_id);
                 }
             },
             FunctionKind::Function => {
                 self.compile_call_args(&function, item)?;
-                let call_position = self.writer.position();
-                let target = if let Some(&target) = self.functions.get(&function_id) {
-                    target
-                } else {
-                    self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
-                    CallInfo::PLACEHOLDER
-                };
-                self.writer.call(target.addr, target.arg_size);
+                comment!(self, "call {}()", item.ident.name);
+                self.write_call(function_id);
             },
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
@@ -618,11 +610,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if ty.is_ref() {
                 let local = frame.lookup(arg.binding_id.unwrap());
                 self.write_load(local.index as StackOffset, ty);
-                if ty.as_trait().is_some() {
-                    self.writer.vcnt(HeapRefOp::Dec);
-                } else {
-                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
-                }
+                self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
             }
         }
 
@@ -661,6 +649,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.decref_block_locals();
             self.item_cnt(result, true, HeapRefOp::DecNoFree);
         } else {
+            comment!(self, "block ending");
             self.decref_block_locals();
         }
 
@@ -916,10 +905,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Returns constructor index for given type.
+    /// Returns constructor index for given type or 0.
     fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
-        *self.constructors.get(&type_id).expect("Undefined constructor")
+        *self.constructors.get(&type_id).unwrap_or(&0)
     }
 
     /// Checks if the given functions are compatible.
@@ -1036,17 +1025,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn item_cnt(self: &Self, item: &impl Typeable, nc: bool, op: HeapRefOp) {
         let ty = self.item_type(item);
         if ty.is_ref() {
-            if ty.as_trait().is_some() {
-                match nc {
-                    true => self.writer.vcnt_nc(op),
-                    false => self.writer.vcnt(op),
-                };
-            } else {
-                match nc {
-                    true => self.write_cnt_nc(self.get_constructor(ty), op),
-                    false => self.write_cnt(self.get_constructor(ty), op),
-                };
-            }
+            match nc {
+                true => self.write_cnt_nc(self.get_constructor(ty), op),
+                false => self.write_cnt(self.get_constructor(ty), op),
+            };
         }
     }
 
@@ -1549,6 +1531,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             //16 => self.writer.clone128(offset),
             size @ _ => unreachable!("Unsupported size {} for heap address", size),
         }
+    }
+
+    /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
+    fn write_call(self: &mut Self, function_id: FunctionId) -> StackAddress {
+        let target = if let Some(&target) = self.functions.get(&function_id) {
+            target
+        } else {
+            let call_position = self.writer.position();
+            self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
+            CallInfo::PLACEHOLDER
+        };
+        self.writer.call(target.addr, target.arg_size)
     }
 
     /// Writes instructions for build-in len method.

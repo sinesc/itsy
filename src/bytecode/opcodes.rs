@@ -632,14 +632,6 @@ impl_opcodes!{
         self.refcount_value(item, constructor, op);
     }
 
-    /// Pops a heap reference off the stack and performs a reference count operation. Uses dynamic type information to select the constructor.
-    fn vcnt(&mut self, op: HeapRefOp) {
-        let item: HeapRef = self.stack.top();
-        let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
-        let constructor: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cnt_sa(constructor, op);
-    }
-
     /// Performs a non-consuming reference count operation for the top heap reference on the stack.
     fn <
         cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
@@ -648,14 +640,6 @@ impl_opcodes!{
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, op);
-    }
-
-    /// Performs a non-consuming reference count operation for the top heap reference on the stack. Uses dynamic type information to select the constructor.
-    fn vcnt_nc(&mut self, op: HeapRefOp) {
-        let item: HeapRef = self.stack.top();
-        let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
-        let constructor: StackAddress = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
-        self.cnt_sa_nc(constructor, op);
     }
 
     /// Calls the given Rust function.
