@@ -821,7 +821,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_match_block(self: &mut Self, item: &mut ast::MatchBlock, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None)?;
-        for (_, block) in &mut item.patterns {
+        for (_, block) in &mut item.branches {
             self.resolve_block(block, expected_result)?;
         }
         self.scope_id = parent_scope_id;

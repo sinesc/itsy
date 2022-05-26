@@ -476,7 +476,7 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
             move |m| MatchBlock {
                     position    : position,
                     expr        : m.0,
-                    patterns    : m.1,
+                    branches    : m.1,
                     scope_id    : None,
                 }
             )

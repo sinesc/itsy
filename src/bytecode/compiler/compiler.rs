@@ -395,6 +395,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         let else_jump = self.writer.j0(123);
         self.init_state.push(BranchingKind::Double);
+        self.init_state.set_path(BranchingPath::A);
         let result = self.compile_block(if_block);
         let exit_jump = if !if_block.returns() {
             Some(self.writer.jmp(123))
@@ -431,8 +432,43 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
+    /// Write match arm block code.
+    fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, block: &ast::Block) -> CompileResult {
+        self.compile_block(block)?;
+        if !block.returns() {
+            exit_jumps.push(self.writer.jmp(123));
+        }
+        Ok(())
+    }
+
+    /// Split match block into recursive tree of A/B branches.
+    fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
+        if remaining_branches.len() == 1 {
+            self.init_state.push(BranchingKind::Single); // patterns are required to be exhaustive
+            self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
+            self.init_state.pop();
+        } else if remaining_branches.len() > 1 {
+            self.init_state.push(BranchingKind::Double);
+            self.init_state.set_path(BranchingPath::A);
+            self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
+            self.init_state.set_path(BranchingPath::B);
+            self.compile_match_block_recursive(exit_jumps, &remaining_branches[1..])?;
+            self.init_state.pop();
+        }
+        Ok(())
+    }
+
     /// Compiles a match block.
     fn compile_match_block(self: &mut Self, item: &ast::MatchBlock) -> CompileResult {
+        comment!(self, "{}", item);
+        self.compile_expression(&item.expr)?;
+        let mut exit_jumps = Vec::new();
+        self.compile_match_block_recursive(&mut exit_jumps, &item.branches)?;
+        // fix branch jump outs
+        let exit_target = self.writer.position();
+        while let Some(exit_jump) = exit_jumps.pop() {
+            self.writer.overwrite(exit_jump, |w| w.jmp(exit_target));
+        }
         Ok(())
     }
 

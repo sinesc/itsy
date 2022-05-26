@@ -645,7 +645,7 @@ pub enum Pattern {
 pub struct MatchBlock {
     pub position    : Position,
     pub expr        : Expression,
-    pub patterns    : Vec<(Pattern, Block)>,
+    pub branches    : Vec<(Pattern, Block)>,
     pub scope_id    : Option<ScopeId>,
 }
 
@@ -655,16 +655,16 @@ impl_display!(MatchBlock, "match {} {{ ... }}", expr);
 impl Resolvable for MatchBlock {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.num_resolved()
-        + self.patterns.iter().fold(Progress::zero(), |acc, (_, block)| acc + block.num_resolved())
+        + self.branches.iter().fold(Progress::zero(), |acc, (_, block)| acc + block.num_resolved())
     }
 }
 
 impl Typeable for MatchBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.patterns.first().unwrap().1.type_id(bindings)
+        self.branches.first().unwrap().1.type_id(bindings)
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
-        self.patterns.first_mut().unwrap().1.type_id_mut(bindings)
+        self.branches.first_mut().unwrap().1.type_id_mut(bindings)
     }
 }
 
