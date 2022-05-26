@@ -1682,13 +1682,73 @@ fn tempory_access() {
 #[test]
 fn temporary_string() {
     let result = run("
-        fn to_string(n: i32) -> String {
+        fn return_new_string(n: i32) -> String {
             n as String
         }
+        fn passthrough_string(s: String) -> String {
+            s
+        }
+        fn make_temporary_string() -> String {
+            \"World\"
+        }
+        fn make_materialized_string() -> String {
+            let result = \"A string\";
+            result
+        }
         fn main() {
-            to_string(100); // test discard drop
-            ret_string(to_string(321));
+            return_new_string(100); // discard drop
+            let x = return_new_string(200);
+            ret_string(x);
+
+            passthrough_string(\"Hello\"); // discard drop
+            let y = passthrough_string(\"Hello\");
+            ret_string(y);
+
+            make_temporary_string(); // discard drop
+            let z = make_temporary_string();
+            ret_string(z);
+
+            make_materialized_string(); // discard drop
+            let q = make_materialized_string();
+            ret_string(q);
         }
     ");
-    assert_all(&result, &[ "321".to_string() ]);
+    assert_all(&result, &[ "200".to_string(), "Hello".to_string(), "World".to_string(), "A string".to_string() ]);
+}
+
+#[test]
+fn temporary_traitobject() {
+    let result = run("
+        struct Inner {
+            x: u8,
+        }
+        struct Outer {
+            inner: Inner,
+        }
+        pub trait Trait {
+            fn get(self: Self) -> u8;
+            fn double(self: Self) -> u8 {
+                self.get() * 2
+            }
+        }
+        impl Trait for Outer {
+            fn get(self: Self) -> u8 {
+                self.inner.x
+            }
+        }
+        fn erase(obj: Trait) -> Trait {
+            obj
+        }
+        fn get(obj: Trait) -> u8 {
+            obj.get()
+        }
+        fn main() {
+            let o = erase(Outer { inner: Inner { x: 123 } });
+            get(o); // Test discard drop
+            ret_u8(erase(o).get());
+            ret_u8(get(o));
+            ret_u8(erase(o).double());
+        }
+    ");
+    assert_all(&result, &[ 123u8, 123, 246 ]);
 }

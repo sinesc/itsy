@@ -287,7 +287,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles function call arguments.
     fn compile_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
-        // put args on stack, increase ref count here, decrease in function
+        // put args on stack, increase ref count to ensure temporaries won't be dropped after access
+        // function is responsible for decrementing argument ref-count on exit
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, arg);
             self.compile_expression(arg)?;
@@ -601,19 +602,27 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
         }
 
-        // handle exit
-        comment!(self, "exiting fn {}", item.sig.ident.name);
-
-        // decrease argument ref-count
+        // exit-position: decrease argument ref-count
+        // TODO: these are not contained in the root function block and are therefore not handled
+        //   by decref_block_locals. That means we have to inc+decnofree the result again, wasting refcount operations.
+        //   The solution would be to handle this in decref_block_locals.
+        if let Some(ret) = &item.sig.ret {
+            self.item_cnt(ret, true, HeapRefOp::Inc);
+        }
         for arg in item.sig.args.iter() {
             let ty = self.item_type(arg);
             if ty.is_ref() {
                 let local = frame.lookup(arg.binding_id.unwrap());
+                comment!(self, "freeing argument {}", local.index);
                 self.write_load(local.index as StackOffset, ty);
                 self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
             }
         }
+        if let Some(ret) = &item.sig.ret {
+            self.item_cnt(ret, true, HeapRefOp::DecNoFree);
+        }
 
+        comment!(self, "exiting fn {}", item.sig.ident.name);
         match ret_size {
             0 => self.writer.ret0(arg_size),
             1 => self.writer.ret8(arg_size),
@@ -1034,19 +1043,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     // FIXME: to handle ret instruction this may need to run recursively
     fn decref_block_locals(self: &mut Self) {
-        comment!(self, "freeing locals");
         let frame = self.locals.pop();
         for (&binding_id, local) in frame.map.iter() {
-            if self.init_state.activated(binding_id) && self.init_state.initialized(binding_id) && local.origin == LocalOrigin::Binding {
+            if self.init_state.activated(binding_id) && self.init_state.initialized(binding_id) /*&& local.origin == LocalOrigin::Binding*/ {
                 let type_id = self.binding_by_id(binding_id).type_id.unwrap();
                 let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
+                    comment!(self, "freeing local {}", local.index);
                     self.write_load(local.index as StackOffset, ty);
                     self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
                 }
             }
         }
-        comment!(self, "end freeing locals");
         self.locals.push(frame);
     }
 }
@@ -1483,6 +1491,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Discard topmost stack value and drop temporaries for reference types.
     fn write_discard(self: &Self, ty: &Type) {
+        comment!(self, "discarding result");
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             self.write_cnt_nc(constructor, HeapRefOp::Free);

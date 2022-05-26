@@ -151,7 +151,7 @@ impl Heap {
         match op {
             HeapRefOp::Inc => {
                 (*refs) += 1;
-            }
+            },
             HeapRefOp::Dec => {
                 debug_assert!(*refs >= 1, "attempted to decrement reference count of 0");
                 if *refs == 1 {
@@ -159,16 +159,16 @@ impl Heap {
                 } else {
                     (*refs) -= 1;
                 }
-            }
+            },
             HeapRefOp::Free => {
                 if *refs == 0 {
                     self.free_item(index);
                 }
-            }
+            },
             HeapRefOp::DecNoFree => {
                 debug_assert!(*refs >= 1, "attempted to decrement reference count of 0");
                 (*refs) -= 1;
-            }
+            },
         }
     }
     /// Free a chunk of memory.

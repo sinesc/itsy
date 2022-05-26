@@ -256,9 +256,9 @@ impl<T, U> VM<T, U> {
     fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
         let item_index = item.index();
         let refs = self.heap.item_refs(item_index);
-        let transitions = (op == HeapRefOp::Dec && refs == 1) || (op == HeapRefOp::Free && refs == 0) || (op == HeapRefOp::Inc && refs == 0);
+        let recurse = (refs == 1 && (op == HeapRefOp::Dec || op == HeapRefOp::DecNoFree)) || (refs == 0 && (op == HeapRefOp::Inc || op == HeapRefOp::Free));
         let parsed = Constructor::parse_with(&self.stack, *constructor_offset, constructor);
-        if !transitions {
+        if !recurse {
             // No recursion is required if only the refcount changes, but we need to skip the constructor
             self.heap.ref_item(item_index, op);
             *constructor_offset = parsed.next;
