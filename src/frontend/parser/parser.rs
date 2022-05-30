@@ -737,15 +737,20 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         map(
             pair(
             ws(ident),
-            opt(delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))))
-            ),
-            move |(ident, optional_fields)| VariantDef {
+            alt((
+                map(
+                    delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))),
+                    move |fields| VariantKind::Data(None, fields)
+                ),
+                map(
+                    opt(preceded(ws(char('=')), numerical)),
+                    move |variant_value| VariantKind::Simple(variant_value)
+                ),
+            ))),
+            move |(ident, kind)| VariantDef {
                 position,
                 ident,
-                kind: match optional_fields {
-                    Some(fields) => VariantKind::Data(None, fields),
-                    None => VariantKind::Simple,
-                }
+                kind,
             }
         )(i)
     }

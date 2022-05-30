@@ -467,7 +467,7 @@ impl Resolvable for Array {
 /// The kind of a variant, either `Simple` (without associated data) or `Data`.
 #[derive(Debug)]
 pub enum VariantKind {
-    Simple,
+    Simple(Option<Literal>),
     Data(Option<FunctionId>, Vec<InlineType>),
 }
 
@@ -484,8 +484,9 @@ impl_positioned!(VariantDef);
 impl Resolvable for VariantDef {
     fn num_resolved(self: &Self) -> Progress {
         match &self.kind {
+            // TODO why is function id resolution not considered here?
             VariantKind::Data(_, fields) => fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved()),
-            VariantKind::Simple => Progress::new(1, 1),
+            VariantKind::Simple(literal) => literal.as_ref().map_or(Progress::new(1, 1), |l| l.num_resolved()),
         }
     }
 }
@@ -506,7 +507,7 @@ impl_typeable!(EnumDef);
 
 impl EnumDef {
     pub fn only_simple_variants(self: &Self) -> bool {
-        self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple => true, _ => false })
+        self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_) => true, _ => false })
     }
 }
 

@@ -489,7 +489,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                     variants.push((variant.ident.name.clone(), field_type_ids));
                 },
-                ast::VariantKind::Simple => variants.push((variant.ident.name.clone(), Vec::new())),
+                ast::VariantKind::Simple(_) => variants.push((variant.ident.name.clone(), Vec::new())),
             }
         }
         // insert or update type
