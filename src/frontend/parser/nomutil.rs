@@ -140,7 +140,7 @@ impl<'a> Slice<RangeFull> for Input<'a> {
 
 /// Utility combinator to debug nom functions.
 #[allow(dead_code)]
-pub fn trace<'a, I, F, O, E>(context: &'static str, mut f: F) -> impl FnMut(I) -> IResult<I, O, E>
+pub(super) fn trace<'a, I, F, O, E>(context: &'static str, mut f: F) -> impl FnMut(I) -> IResult<I, O, E>
 where
     F: FnMut(I) -> IResult<I, O, E>,
     I: Debug,
@@ -166,7 +166,7 @@ macro_rules! trace {
 }
 
 /// fold_many0 implementation that doesn't suck.
-pub fn fold_many0<I, O, E, F, G, R>(mut f: F, init: R, mut g: G) -> impl FnOnce(I) -> IResult<I, R, E>
+pub(super) fn fold_many0<I, O, E, F, G, R>(mut f: F, init: R, mut g: G) -> impl FnOnce(I) -> IResult<I, R, E>
 where
     I: Clone + PartialEq,
     F: Parser<I, O, E>,
@@ -196,6 +196,24 @@ where
                     return Err(e);
                 }
             }
+        }
+    }
+}
+
+/// Fixes nom-provided map_res function to return Err::Failure instead of Err::Err, remove need for some additional trait
+pub(super) fn map_res<'a, I: Clone, O1, O2, P, F>(
+    mut parser: P,
+    mut f: F,
+) -> impl FnMut(I) -> IResult<I, O2, Error<'a>>
+where
+    P: Parser<I, O1, Error<'a>>,
+    F: FnMut(O1) -> Result<O2, Error<'a>>,
+{
+    move |input: I| {
+        let (input, o1) = parser.parse(input)?;
+        match f(o1) {
+            Ok(o2) => Ok((input, o2)),
+            Err(e) => Err(Err::Failure(e)),
         }
     }
 }
@@ -251,7 +269,7 @@ where
     move |input| terminated(take_until(tag.clone()), take(tag.input_len()))(input)
 }
 
-pub fn space0<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
+pub(super) fn space0<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
 where
     E: nom::error::ParseError<I> + Debug,
     I: nom::InputTake
@@ -275,7 +293,7 @@ where
     ))))(input)
 }
 
-pub fn space1<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
+pub(super) fn space1<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> IResult<I, I, E>
 where
     E: nom::error::ParseError<I> + Debug,
     I: nom::InputTake

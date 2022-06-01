@@ -755,18 +755,34 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         )(i)
     }
     let position = i.position();
-    ws(map(
+    let the_cloned_clone = i.clone();
+    ws(map_res(
         pair(
             terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
             tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
         ),
-        move |pair| EnumDef {
-            position: position,
-            ident   : pair.1.0,
-            variants: pair.1.2,
-            type_id : None,
-            scope_id: None,
-            vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+        move |pair| {
+            let mut have_data = false;
+            let mut have_value = false;
+            for variant in &pair.1.2 {
+                match &variant.kind {
+                    VariantKind::Data(_, _) => have_data = true,
+                    VariantKind::Simple(d) if d.is_some() => have_value = true,
+                    _ => {}
+                }
+            }
+            if have_data && have_value {
+                Err(Error { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalEnumDef })
+            } else {
+                Ok(EnumDef {
+                    position: position,
+                    ident   : pair.1.0,
+                    variants: pair.1.2,
+                    type_id : None,
+                    scope_id: None,
+                    vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+                })
+            }
         }
     ))(i)
 }
