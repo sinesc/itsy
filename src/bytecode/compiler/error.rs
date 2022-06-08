@@ -47,4 +47,4 @@ impl Display for CompileError {
     }
 }
 
-pub type CompileResult = Result<(), CompileError>;
+pub type CompileResult<T = ()> = Result<T, CompileError>;

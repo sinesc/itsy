@@ -45,7 +45,7 @@ struct Compiler<T> {
 }
 
 /// Compiles a resolved program into bytecode.
-pub fn compile<T>(program: ResolvedProgram<T>) -> Result<Program<T>, CompileError> where T: VMFunc<T> {
+pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> where T: VMFunc<T> {
 
     let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;
 
@@ -1278,7 +1278,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to assemble a prototype.
-    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> Result<StackAddress, CompileError> {
+    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> CompileResult<StackAddress> {
         use crate::frontend::ast::LiteralValue;
         let ty = self.item_type(item);
         Ok(match &item.value {
