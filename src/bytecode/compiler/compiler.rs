@@ -1142,10 +1142,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // write variants, remember offsets
                     let mut variant_offsets = Vec::with_capacity(enumeration.variants.len());
                     for (_, fields) in &enumeration.variants {
-                        let variant_offset = self.writer.store_const(fields.len() as ItemIndex);
+                        let num_fields = fields.as_data().map_or(0, |f| f.len());
+                        let variant_offset = self.writer.store_const(num_fields as ItemIndex);
                         variant_offsets.push(variant_offset);
-                        for field in fields {
-                            self.store_constructor(field.expect("Unresolved enum field type"));
+                        if num_fields > 0 {
+                            for field in fields.as_data().unwrap() {
+                                self.store_constructor(field.expect("Unresolved enum field type"));
+                            }
                         }
                     }
                     // write variant offsets
@@ -1233,7 +1236,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected float literal type: {:?}", ty)
                 }
             },
-            Numeric::Overflow => panic!("Literal computation overflow")
+            //Numeric::Overflow => panic!("Literal computation overflow")
         }
     }
 }

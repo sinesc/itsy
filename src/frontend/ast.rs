@@ -506,8 +506,14 @@ impl_positioned!(EnumDef);
 impl_typeable!(EnumDef);
 
 impl EnumDef {
-    pub fn only_simple_variants(self: &Self) -> bool {
+    pub fn is_primitive(self: &Self) -> bool {
         self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_) => true, _ => false })
+    }
+    pub fn named_type(self: &Self) -> Option<&TypeName> {
+        self.variants.iter().find_map(|v| match &v.kind {
+            VariantKind::Simple(Some(Literal { type_name: Some(type_name), .. })) => Some(type_name),
+            _ => None,
+        })
     }
 }
 

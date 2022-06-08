@@ -14,7 +14,7 @@ use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, Resolv
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, Trait, ImplTrait, Type, FunctionKind, Intrinsic, Binding};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Intrinsic, Binding};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 
@@ -412,13 +412,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     // Resolves an inline type definition.
     fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType) -> Result<Option<TypeId>, Error> {
         match item {
-            ast::InlineType::TypeName(type_name) => self.resolve_type(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
+            ast::InlineType::TypeName(type_name) => self.resolve_type_name(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
             ast::InlineType::Array(array) => self.resolve_array(array),
         }
     }
 
     /// Resolves a type (name) to a type_id.
-    fn resolve_type(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
+    fn resolve_type_name(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> Result<Option<TypeId>, Error> {
         if item.type_id.is_none() {
             if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&item.path.name)) {
                 item.type_id = Some(new_type_id);
@@ -477,6 +477,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.is_resolved() {
             return Ok(());
         }
+
+        // check if enum is primitive or holds data
+        let simple_type_id = if let Some(named_type) = item.named_type() {
+            // at least one variant specifies an explicit value type
+            named_type.type_id.or(self.scopes.lookup_type_id(self.scope_id, &self.make_path(&named_type.path.name)))
+        } else if item.is_primitive() {
+            // primitive enum but no explicit value type specified, default to i32
+            Some(self.primitive_type_id(Type::i32)?)
+        } else {
+            // data enum
+            None
+        };
+
         // resolve enum variant fields, assemble variant field lists
         let mut variants = Vec::new();
         for variant in &mut item.variants {
@@ -487,18 +500,34 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         self.resolve_inline_type(field)?;
                         field_type_ids.push(field.type_id(self));
                     }
-                    variants.push((variant.ident.name.clone(), field_type_ids));
+                    variants.push((variant.ident.name.clone(), EnumVariant::Data(field_type_ids)));
                 },
-                ast::VariantKind::Simple(_) => variants.push((variant.ident.name.clone(), Vec::new())),
+                ast::VariantKind::Simple(value_literal) => {
+                    if let Some(value_literal) = value_literal {
+                        self.resolve_literal(value_literal, simple_type_id)?;
+                        if let Some(numeric) = value_literal.value.as_numeric() {
+                            if numeric.is_integer() {
+                                variants.push((variant.ident.name.clone(), EnumVariant::Simple(Some(numeric))));
+                            } else {
+                                return Err(Error::new(variant, ErrorKind::InvalidVariantValue(numeric), self.module_path));
+                            }
+                        } else {
+                            return Err(Error::new(variant, ErrorKind::InvalidVariantLiteral, self.module_path))
+                        }
+                    } else {
+                        variants.push((variant.ident.name.clone(), EnumVariant::Simple(None)));
+                    }
+                },
             }
         }
+
         // insert or update type
         if let Some(type_id) = item.type_id {
             self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
         } else {
             let qualified = self.abs_path(&[ &item.ident.name ]);
-            let primitive = item.only_simple_variants();
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
+            let primitive = item.is_primitive();
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, simple_type_id, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
                 self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
@@ -530,7 +559,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         let trait_type_id = match &mut item.trt {
             Some(trt) => {
-                self.resolve_type(trt, None)?;
+                self.resolve_type_name(trt, None)?;
                 Some(trt.type_id)
             },
             None => None,
@@ -934,7 +963,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an assignment expression.
     fn resolve_cast(self: &mut Self, item: &mut ast::Cast, expected_result: Option<TypeId>) -> ResolveResult {
-        self.resolve_type(&mut item.ty/*, 0*/, expected_result)?; // FIXME hardcoded ref arg
+        self.resolve_type_name(&mut item.ty/*, 0*/, expected_result)?; // FIXME hardcoded ref arg
         self.resolve_expression(&mut item.expr, None)?;
         if let Some(type_id) = item.ty.type_id {
             *item.type_id_mut(self) = Some(type_id);
@@ -1114,7 +1143,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_variant_literal(item, expected_type)?; // handles simple variants only. data variants are parsed as calls.
         } else if let Some(type_name) = &mut item.type_name {
             // literal has explicit type, use it
-            if let Some(explicit_type_id) = self.resolve_type(type_name, expected_type)? {
+            if let Some(explicit_type_id) = self.resolve_type_name(type_name, expected_type)? {
                 self.set_type_id(item, explicit_type_id)?;
                 if let Some(expected_type_id) = expected_type {
                     self.check_type_accepted_for(item, explicit_type_id, expected_type_id)?;
@@ -1143,7 +1172,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // resolve type from name
 
         let type_name = item.type_name.as_mut().unwrap_or_ice(ICE)?;
-        let type_id = self.resolve_type(type_name, None)?;
+        let type_id = self.resolve_type_name(type_name, None)?;
 
         // resolve fields from field definition
 

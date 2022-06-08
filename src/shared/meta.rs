@@ -9,12 +9,28 @@ pub struct Binding {
     pub type_id: Option<TypeId>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EnumVariant {
+    Simple(Option<Numeric>),
+    Data(Vec<Option<TypeId>>),
+}
+
+impl EnumVariant {
+    pub fn as_data(self: &Self) -> Option<&Vec<Option<TypeId>>> {
+        match self {
+            Self::Data(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Enum {
     pub primitive: bool,
-    pub variants: Vec<(String, Vec<Option<TypeId>>)>,
+    pub variants: Vec<(String, EnumVariant)>,
     pub impl_traits: Map<TypeId, ImplTrait>,
+    pub simple_type_id: Option<TypeId>,
 }
 
 impl Enum {

@@ -22,6 +22,10 @@ pub enum ResolveErrorKind {
     UndefinedFunction(String),
     UndefinedType(String),
     UndefinedItem(String),
+    /// Enum variant value is not an integer.
+    InvalidVariantValue(Numeric),
+    /// Enum variant literal is not numeric.
+    InvalidVariantLiteral,
     InvalidOperation(String),
     NotATraitMethod(String, String),
     Internal(String),

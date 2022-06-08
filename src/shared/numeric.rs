@@ -1,6 +1,6 @@
 //! A type that can represent a signed or unsigned integer value.
 
-use crate::prelude::*;
+use crate::{prelude::*, config::StackAddress};
 
 /// Signed integer value.
 pub(crate) type Signed = i64;
@@ -17,7 +17,23 @@ pub enum Numeric {
     Signed(Signed),
     Unsigned(Unsigned),
     Float(Float),
-    Overflow,
+    //Overflow,
+}
+
+impl Hash for Numeric {
+    fn hash<H: Hasher>(self: &Self, state: &mut H) {
+        match self {
+            Self::Signed(s) => s.hash(state),
+            Self::Unsigned(u) => u.hash(state),
+            Self::Float(f) => {
+                if f.is_nan() {
+                    f64::NAN.to_ne_bytes().hash(state)
+                } else {
+                    f.to_ne_bytes().hash(state)
+                }
+            },
+        }
+    }
 }
 
 impl Numeric {
@@ -46,6 +62,14 @@ impl Numeric {
             _ => false,
         }
     }
+    pub const fn as_unsigned(self: &Self) -> Option<StackAddress> {
+        match self {
+            &Numeric::Signed(v) if v >= 0 => Some(v as StackAddress),
+            &Numeric::Unsigned(v) => Some(v as StackAddress),
+            _ => None,
+        }
+    }
+
     /*pub const fn as_signed(self: &Self) -> Option<i64> {
         match self {
             Numeric::Signed(v) => Some(*v as i64),
@@ -134,7 +158,7 @@ impl PartialOrd for Numeric {
                     _ => None,
                 }
             },
-            Numeric::Overflow => None
+            //Numeric::Overflow => None
         }
     }
 }
@@ -250,7 +274,7 @@ impl Display for Numeric {
             Numeric::Signed(v) => write!(f, "{} (signed)", v),
             Numeric::Unsigned(v) => write!(f, "{} (unsigned)", v),
             Numeric::Float(v) => write!(f, "{} (float)", v),
-            Numeric::Overflow => write!(f, "/ (numeric value too large)"),
+            //Numeric::Overflow => write!(f, "/ (numeric value too large)"),
         }
     }
 }
