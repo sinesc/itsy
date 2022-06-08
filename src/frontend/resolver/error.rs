@@ -83,7 +83,7 @@ impl Display for ResolveError {
     }
 }
 
-pub type ResolveResult = Result<(), ResolveError>;
+pub type ResolveResult<T = ()> = Result<T, ResolveError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
 pub(crate) trait SomeOrResolveError<T> {
