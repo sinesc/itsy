@@ -72,16 +72,19 @@ struct Resolver<'ctx> {
 
 /// Resolves types within the given program AST structure.
 ///
+/// # Examples
+///
 /// The following example parses a string into a module, constructs a program with it and resolves the program.
 /// If the program were to be compiled and run, execution would start at the "main" function.
 /// ```
 /// use itsy::{itsy_api, parser, resolver};
 ///
-/// itsy_api!(MyFns, (), {
-///     // A Rust function that prints given string.
+/// // Define an API of Rust functions that are callable from the Itsy script.
+/// itsy_api!(MyAPI, (), {
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }
+///     // ... more functions ...
 /// });
 ///
 /// fn main() {
@@ -93,7 +96,7 @@ struct Resolver<'ctx> {
 ///     ", "").unwrap();
 ///     let mut parsed = parser::ParsedProgram::new();
 ///     parsed.add_module(module);
-///     let resolved = resolver::resolve::<MyFns>(parsed, "main").unwrap();
+///     let resolved = resolver::resolve::<MyAPI>(parsed, "main").unwrap();
 /// }
 /// ```
 ///

@@ -24,6 +24,8 @@ pub enum CopyTarget {
 }
 
 /// A virtual machine for running Itsy bytecode.
+///
+/// See [itsy_api](crate::itsy_api) for an example that runs an Itsy program using [VM::run].
 #[derive(Debug)]
 pub struct VM<T, U> {
     context_type            : PhantomData<U>,

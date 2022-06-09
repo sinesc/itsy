@@ -46,15 +46,18 @@ struct Compiler<T> {
 
 /// Compiles a resolved program into bytecode.
 ///
+/// # Examples
+///
 /// The following example based on the resolve-example additionally compiles the program.
 /// ```
 /// use itsy::{itsy_api, parser, resolver, compiler};
 ///
-/// itsy_api!(MyFns, (), {
-///     // A Rust function that prints given string.
+/// // Define an API of Rust functions that are callable from the Itsy script.
+/// itsy_api!(MyAPI, (), {
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }
+///     // ... more functions ...
 /// });
 ///
 /// fn main() {
@@ -66,8 +69,8 @@ struct Compiler<T> {
 ///     ", "").unwrap();
 ///     let mut parsed = parser::ParsedProgram::new();
 ///     parsed.add_module(module);
-///     let resolved = resolver::resolve::<MyFns>(parsed, "main").unwrap();
-///     let compiled = compiler::compile::<MyFns>(resolved).unwrap();
+///     let resolved = resolver::resolve::<MyAPI>(parsed, "main").unwrap();
+///     let compiled = compiler::compile(resolved).unwrap();
 /// }
 /// ```
 ///

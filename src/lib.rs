@@ -3,7 +3,7 @@
 
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
-//! Look at the [build_str] example to get started.
+//! Look at the [build_str] or [itsy_api] example to get started.
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
@@ -41,46 +41,48 @@ use bytecode::compiler::compile;
 #[cfg(feature="compiler")]
 use frontend::{parser::parse_module, resolver::resolve};
 
-/// Used to make Rust functions and data available to Itsy code by generating a type for compilation and runtime to be generic over.
+/// Creates an opaque type defining an API of Itsy-callable Rust functions.
 ///
-/// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
-/// The VM is generic over `VMFunc` and `VMData`. Parser and Resolver are generic over `VMFunc`.
+/// The resolver, compiler and VM are generic over this type to ensure that the generated
+/// Itsy API-bindings match the given Rust API.
 ///
 /// `itsy_api!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
-/// Currently supported parameter types are rust primitives as well as String and &str.
+/// Currently supported parameter types are Rust primitives as well as String and &str.
 ///
 /// # Examples
 ///
-/// The following example defines a few Rust function and calls them from itsy code.
+/// The following example defines a few Rust functions and calls them from itsy code.
 ///
 /// ```
 /// use itsy::{itsy_api, build_str, runtime::VM};
 ///
+/// // A custom context accessible to the functions defined below.
 /// struct MyContext {
 ///     // ...
 /// }
 ///
-/// itsy_api!(MyFns, MyContext, {
-///     // Rust function that does something
+/// // Define an API of Rust functions that are callable from the Itsy script.
+/// itsy_api!(MyAPI, MyContext, {
 ///     fn intense_computation(&mut context, a: i16, b: i16) -> i16 {
 ///         a * b
 ///     }
 ///     fn print(&mut context, val: i16) {
 ///         println!("{}", val);
 ///     }
-///     //... more functions ...
 /// });
 ///
 /// fn main() {
 ///     let mut context = MyContext { /* ... */ };
 ///
-///     let program = build_str::<MyFns>("
+///     // Compile a short Itsy program and bind it to our MyAPI.
+///     let program = build_str::<MyAPI>("
 ///         fn main() {
 ///             print(intense_computation(4, 5));
 ///         }
 ///     ").unwrap();
 ///
+///     // Create a new VM and run the program.
 ///     let mut vm = VM::new(&program);
 ///     vm.run(&mut context);
 /// }
@@ -250,27 +252,30 @@ macro_rules! itsy_api {
     };
 }
 
-/// Parses, resolves and compiles given Itsy source code. The name of the
-/// entry function must be `main`. This utility-function does not support
+/// Parses, resolves and compiles given Itsy source code.
+///
+/// The name of the entry function must be `main`. This utility-function does not support
 /// external Itsy modules. For more control, see either [build] or
 /// [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM::run] to execute the given program.
+///
+/// # Examples
 ///
 /// The following example builds and runs a program:
 /// ```
 /// use itsy::{itsy_api, build_str, run};
 ///
-/// // Create an API between the Rust and Itsy program.
-/// itsy_api!(MyFns, (), {
-///     // A Rust function that prints given string.
+/// // Define an API of Rust functions that are callable from the Itsy script.
+/// itsy_api!(MyAPI, (), {
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }
+///     // ... more functions ...
 /// });
 ///
 /// fn main() {
-///     // Build the itsy program and link it to the MyFns API we created above.
-///     let program = build_str::<MyFns>("
+///     // Build the itsy program and link it to the MyAPI API we created above.
+///     let program = build_str::<MyAPI>("
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
@@ -297,8 +302,9 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F
     Ok(compile(resolved)?)
 }
 
-/// Parses, resolves and compiles given Itsy source file. The name of the
-/// entry function must be `main`. Modules are loaded from disk relative to the
+/// Parses, resolves and compiles given Itsy source file.
+///
+/// The name of the entry function must be `main`. Modules are loaded from disk relative to the
 /// given source file. For more control about how the files are loaded and processed,
 /// see [parser::parse], [resolver::resolve] and [compiler::compile].
 /// Use [run] or [VM::run] to execute the given program.
@@ -328,9 +334,10 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
     Ok(compile(resolved)?)
 }
 
-/// Runs the given compiled program. The name of the entry function must be `main`.
-/// See [VM] for more control about running a program or [build_str] for an example
-/// that uses the `run` function.
+/// Runs the given compiled program.
+///
+/// The name of the entry function must be `main`. See [VM] for more control
+/// about running a program or [build_str] for an example that uses the `run` function.
 pub fn run<F, D>(program: &Program<F>, context: &mut D) -> Result<VM<F, D>, Error> where F: VMFunc<F> + VMData<F, D> {
     let mut vm = VM::new(program);
     match vm.run(context) {

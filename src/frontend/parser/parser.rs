@@ -1092,6 +1092,8 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 /// Parses Itsy source files into a program AST structure. The loader receives the fully qualified module name and is
 /// expected to return the parsed module.
 ///
+/// # Examples
+///
 /// The following example parses a module with its dependencies.
 /// ```
 /// use itsy::parser;

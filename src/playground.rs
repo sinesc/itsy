@@ -7,7 +7,7 @@ use std::{path::PathBuf, collections::HashMap};
     Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
 */
 
-itsy_api!(MyFns, (), {
+itsy_api!(MyAPI, (), {
     fn printi8(&mut context, value: i8) {
         println!("{}i8", value);
     }
@@ -94,7 +94,7 @@ fn log(filename: &str, append: bool, data: &str) {
     }
 }
 
-fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<compiler::Program<MyFns>, Error> {
+fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<compiler::Program<MyAPI>, Error> {
     let source_file = source_file.as_ref();
     let parsed = parser::parse(|module_path| {
         let filename = parser::module_filename(source_file, module_path);
@@ -103,7 +103,7 @@ fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, 
         files.insert(module_path.to_string(), (filename, file));
         module
     })?;
-    let resolved = resolver::resolve::<MyFns>(parsed, "main")?;
+    let resolved = resolver::resolve::<MyAPI>(parsed, "main")?;
     if write_logs {
         log("logs/ast.c", false, &format!("{:?}", resolved.modules));
     }
