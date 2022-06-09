@@ -78,23 +78,26 @@ struct Resolver<'ctx> {
 /// use itsy::{itsy_api, parser, resolver};
 ///
 /// itsy_api!(MyFns, (), {
-///     /// a rust function that prints given string
+///     // A Rust function that prints given string.
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }
 /// });
 ///
 /// fn main() {
-///     let parsed = parser::parse_module("
-///         /// an itsy function that calls a rust function
+///     let module = parser::parse_module("
+///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
 ///         }
 ///     ", "").unwrap();
-///     let mut program = parser::ParsedProgram::new();
-///     program.add_module(parsed);
-///     let resolved = resolver::resolve::<MyFns>(program, "main").unwrap();
+///     let mut parsed = parser::ParsedProgram::new();
+///     parsed.add_module(module);
+///     let resolved = resolver::resolve::<MyFns>(parsed, "main").unwrap();
 /// }
+/// ```
+///
+/// The returned [ResolvedProgram] is now ready for compilation by [compile](crate::compiler::compile).
 #[allow(invalid_type_param_default)]
 pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveResult<ResolvedProgram<T>> where T: VMFunc<T> {
 

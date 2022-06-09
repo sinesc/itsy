@@ -1105,6 +1105,9 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 ///         parser::parse_module(&file, module_path)
 ///     }).unwrap();
 /// }
+/// ```
+///
+/// The returned [ParsedProgram] is now ready for type resolution by [resolve](crate::resolver::resolve).
 pub fn parse(mut loader: impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult<ParsedProgram> {
     let mut program = ParsedProgram::new();
     parse_recurse("", &mut program, &mut loader)?;

@@ -6,6 +6,8 @@ pub use crate::shared::error::BuildError;
 #[cfg(feature="compiler")]
 pub mod parser {
     //! Sourcecode parsing.
+    //!
+    //! See [parse] for an example that loads and parses multiple files into a [ParsedProgram], ready for type resolution by [resolve](crate::resolver::resolve).
     pub use crate::frontend::parser::{parse, parse_module, module_filename, types::ParsedModule, types::ParsedProgram, error::{ParseError, ParseErrorKind}};
 }
 
@@ -18,6 +20,8 @@ pub mod ast {
 #[cfg(feature="compiler")]
 pub mod resolver {
     //! Type resolution.
+    //!
+    //! See [resolve] for an example that resolves a [ParsedProgram](crate::parser::ParsedProgram) into a [ResolvedProgram], ready for compilation by [compile](crate::compiler::compile).
     pub use crate::frontend::resolver::{resolve, resolved::ResolvedProgram, error::{ResolveError, ResolveErrorKind}};
     pub mod resolved {
         //! Resolved information to be used by the bytecode generator.
@@ -37,6 +41,8 @@ pub mod resolver {
 #[cfg(feature="compiler")]
 pub mod compiler {
     //! Bytecode generation.
+    //!
+    //! See [compile] for an example that compiles a [ResolvedProgram](crate::resolver::ResolvedProgram) into a [Program], ready to be run by [run](crate::run) or [VM::run](crate::VM::run).
     pub use crate::bytecode::Program;
     pub use crate::bytecode::compiler::{compile, error::{CompileError, CompileErrorKind}};
     pub use crate::bytecode::writer::{Writer, StoreConst};

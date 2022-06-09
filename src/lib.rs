@@ -3,7 +3,7 @@
 
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
-//! Look at the [build_str] or [run] examples to get started.
+//! Look at the [build_str] example to get started.
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
@@ -254,22 +254,24 @@ macro_rules! itsy_api {
 /// entry function must be `main`. This utility-function does not support
 /// external Itsy modules. For more control, see either [build] or
 /// [parser::parse], [resolver::resolve] and [compiler::compile].
-/// Use [run] or [VM] to execute the given program.
+/// Use [run] or [VM::run] to execute the given program.
 ///
 /// The following example builds and runs a program:
 /// ```
 /// use itsy::{itsy_api, build_str, run};
 ///
+/// // Create an API between the Rust and Itsy program.
 /// itsy_api!(MyFns, (), {
-///     /// a rust function that prints given string
+///     // A Rust function that prints given string.
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }
 /// });
 ///
 /// fn main() {
+///     // Build the itsy program and link it to the MyFns API we created above.
 ///     let program = build_str::<MyFns>("
-///         /// an itsy function that calls a rust function
+///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
 ///             print(\"Hello from Itsy!\");
 ///         }
@@ -299,7 +301,7 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: VMFunc<F
 /// entry function must be `main`. Modules are loaded from disk relative to the
 /// given source file. For more control about how the files are loaded and processed,
 /// see [parser::parse], [resolver::resolve] and [compiler::compile].
-/// Use [run] or [VM] to execute the given program.
+/// Use [run] or [VM::run] to execute the given program.
 #[cfg(feature="compiler")]
 pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: VMFunc<F>, P: AsRef<std::path::Path> {
     let source_file = source_file.as_ref();
@@ -327,30 +329,8 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
 }
 
 /// Runs the given compiled program. The name of the entry function must be `main`.
-/// See [VM] for more control about running a program.
-///
-/// The following example builds and runs a program:
-/// ```
-/// use itsy::{itsy_api, build_str, run};
-///
-/// itsy_api!(MyFns, (), {
-///     /// a rust function that prints given string
-///     fn print(&mut context, value: &str) {
-///         println!("print: {}", value);
-///     }
-/// });
-///
-/// fn main() {
-///     let program = build_str::<MyFns>("
-///         /// an itsy function that calls a rust function
-///         fn main() {
-///             print(\"Hello from Itsy!\");
-///         }
-///     ").unwrap();
-///
-///     run(&program, &mut ()).unwrap();
-/// }
-/// ```
+/// See [VM] for more control about running a program or [build_str] for an example
+/// that uses the `run` function.
 pub fn run<F, D>(program: &Program<F>, context: &mut D) -> Result<VM<F, D>, Error> where F: VMFunc<F> + VMData<F, D> {
     let mut vm = VM::new(program);
     match vm.run(context) {

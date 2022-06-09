@@ -42,7 +42,8 @@ pub trait VMData<T: VMFunc<T>, U> {
     fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
 }
 
-/// An Itsy bytecode program. Programs can be created using the bytecode [`Writer`](struct.Writer.html).
+/// An Itsy bytecode program. Programs can be created using the [compile](compiler::compile) function or the bytecode [Writer] and can
+/// be executed by [run](crate::run) or [VM::run](crate::VM::run).
 #[derive(Clone, Debug)]
 pub struct Program<T> {
     rust_fn: PhantomData<T>,

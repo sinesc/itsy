@@ -45,6 +45,33 @@ struct Compiler<T> {
 }
 
 /// Compiles a resolved program into bytecode.
+///
+/// The following example based on the resolve-example additionally compiles the program.
+/// ```
+/// use itsy::{itsy_api, parser, resolver, compiler};
+///
+/// itsy_api!(MyFns, (), {
+///     // A Rust function that prints given string.
+///     fn print(&mut context, value: &str) {
+///         println!("print: {}", value);
+///     }
+/// });
+///
+/// fn main() {
+///     let module = parser::parse_module("
+///         // An Itsy program that calls the Rust 'print' function.
+///         fn main() {
+///             print(\"Hello from Itsy!\");
+///         }
+///     ", "").unwrap();
+///     let mut parsed = parser::ParsedProgram::new();
+///     parsed.add_module(module);
+///     let resolved = resolver::resolve::<MyFns>(parsed, "main").unwrap();
+///     let compiled = compiler::compile::<MyFns>(resolved).unwrap();
+/// }
+/// ```
+///
+/// The returned [Program] is now ready to be run by [run](crate::run) or [VM::run](crate::VM::run).
 pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> where T: VMFunc<T> {
 
     let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;
