@@ -52,6 +52,18 @@ pub struct Program<T> {
     pub(crate) const_descriptors: Vec<ConstDescriptor>,
 }
 
+/// Consume bytes from the front of a slice and return them.
+// TODO: once stabilized, nightly take() could replace this
+fn read<'a>(slice: &mut &'a[ u8 ], num_bytes: usize) -> Option<&'a[ u8 ]> {
+    if slice.len() < num_bytes {
+        None
+    } else {
+        let result = &slice[0..num_bytes];
+        *slice = &slice[num_bytes..];
+        Some(result)
+    }
+}
+
 impl<T> Program<T> where T: VMFunc<T> {
     #[cfg(feature="compiler")]
     pub(crate) fn new() -> Self {
@@ -61,6 +73,49 @@ impl<T> Program<T> where T: VMFunc<T> {
             consts              : Vec::new(),
             const_descriptors   : Vec::new(),
         }
+    }
+    /// Serializes the program to a byte vector, e.g. to be saved to a file.
+    pub fn to_bytes(self: &Self) -> Vec<u8> {
+        let mut result = Vec::new();
+        result.extend_from_slice("itsy".as_bytes());
+        // save instructions
+        result.extend_from_slice(&self.instructions.len().to_le_bytes()[..]);
+        result.extend_from_slice(&self.instructions[..]);
+        // save constants
+        result.extend_from_slice(&self.consts.len().to_le_bytes()[..]);
+        result.extend_from_slice(&self.consts[..]);
+        // save constant descriptors
+        result.extend_from_slice(&self.const_descriptors.len().to_le_bytes()[..]);
+        for descriptor in &self.const_descriptors {
+            result.extend_from_slice(&descriptor.to_bytes()[..]);
+        }
+        result
+    }
+    /// Deserializes a program from a byte vector, returning the programm on succcess or None if the input data is not a valid program.
+    pub fn from_bytes(mut program: &[ u8 ]) -> Option<Program<T>> {
+        const USIZE: usize = size_of::<usize>();
+        // verify header
+        if read(&mut program, 4)? != "itsy".as_bytes() {
+            return None;
+        }
+        // read instructions
+        let instructions_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let instructions: Vec<u8> = read(&mut program, instructions_size)?.into();
+        // read constants
+        let consts_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let consts: Vec<u8> = read(&mut program, consts_size)?.into();
+        // read descriptors
+        let const_descriptors_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let mut const_descriptors: Vec<ConstDescriptor> = Vec::new();
+        for _ in 0..const_descriptors_size {
+            const_descriptors.push(ConstDescriptor::from_bytes(read(&mut program, ConstDescriptor::SERIALIZED_SIZE)?)?);
+        }
+        Some(Self {
+            rust_fn: PhantomData,
+            instructions,
+            consts,
+            const_descriptors,
+        })
     }
 }
 
@@ -74,11 +129,49 @@ pub(crate) enum ConstEndianness {
     Float   = 2,
 }
 
+impl ConstEndianness {
+    pub(crate) fn from_u8(index: u8) -> Option<Self> {
+        match index {
+            x if x == Self::None as u8 => Some(Self::None),
+            x if x == Self::Integer as u8 => Some(Self::Integer),
+            x if x == Self::Float as u8 => Some(Self::Float),
+            _ => None
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ConstDescriptor { // todo: order serially, remove position, reduce size to u8 (requires reserve_const_data removal)
     pub(crate) position    : StackAddress,
     pub(crate) size        : StackAddress,
     pub(crate) endianness  : ConstEndianness,
+}
+
+impl ConstDescriptor {
+    const SERIALIZED_SIZE: usize = 9;
+    fn to_bytes(self: &Self) -> [ u8; Self::SERIALIZED_SIZE ] {
+        let mut result = [ 0u8; Self::SERIALIZED_SIZE ];
+        let position = (self.position as u32).to_le_bytes();
+        let size = (self.size as u32).to_le_bytes();
+        // whoa clunky, can't copy to specific position into an array?
+        let position_slice = &mut result[0..4];
+        position_slice.copy_from_slice(&position);
+        let size_slice = &mut result[4..8];
+        size_slice.copy_from_slice(&size);
+        result[8] = self.endianness as u8;
+        result
+    }
+    fn from_bytes(mut descriptor: &[ u8 ]) -> Option<Self> {
+        const U32: usize = size_of::<u32>();
+        let position = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as usize;
+        let size = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as usize;
+        let endianness = ConstEndianness::from_u8(read(&mut descriptor, 1)?[0])?;
+        Some(Self {
+            position,
+            size,
+            endianness,
+        })
+    }
 }
 
 #[repr(u8)]
