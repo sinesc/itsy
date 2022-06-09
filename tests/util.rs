@@ -5,7 +5,7 @@ pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 pub type ContextElement = Box<dyn Any>;
 pub type Context = Vec<ContextElement>;
 
-use itsy::vm_func;
+use itsy::itsy_api;
 
 /// Compare a ContextElement with given value.
 #[allow(dead_code)]
@@ -42,7 +42,7 @@ pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
 }
 
 // Implement some VM methods to write values of specific types to the VM context.
-vm_func!(TestFns, Context, {
+itsy_api!(TestFns, Context, {
     fn ret_u8(&mut context, value: u8) {
         context.push(Box::new(value));
     }

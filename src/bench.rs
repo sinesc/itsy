@@ -5,7 +5,7 @@ struct Bench {
     time: Option<Instant>,
 }
 
-vm_func!(BenchFn, Bench, {
+itsy_api!(BenchFn, Bench, {
     fn start_time(&mut context) {
         context.time = Some(Instant::now());
     }

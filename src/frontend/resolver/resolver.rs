@@ -75,9 +75,9 @@ struct Resolver<'ctx> {
 /// The following example parses a string into a module, constructs a program with it and resolves the program.
 /// If the program were to be compiled and run, execution would start at the "main" function.
 /// ```
-/// use itsy::{vm_func, parser, resolver};
+/// use itsy::{itsy_api, parser, resolver};
 ///
-/// vm_func!(MyFns, (), {
+/// itsy_api!(MyFns, (), {
 ///     /// a rust function that prints given string
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);

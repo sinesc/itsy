@@ -7,7 +7,7 @@ use std::{path::PathBuf, collections::HashMap};
     Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
 */
 
-vm_func!(MyFns, (), {
+itsy_api!(MyFns, (), {
     fn printi8(&mut context, value: i8) {
         println!("{}i8", value);
     }

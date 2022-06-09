@@ -46,7 +46,7 @@ use frontend::{parser::parse_module, resolver::resolve};
 /// Generates a type implementing [`VMFunc`](trait.VMFunc.html) and [`VMData`](trait.VMData.html).
 /// The VM is generic over `VMFunc` and `VMData`. Parser and Resolver are generic over `VMFunc`.
 ///
-/// `vm_func!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
+/// `itsy_api!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
 /// Currently supported parameter types are rust primitives as well as String and &str.
 ///
@@ -55,13 +55,13 @@ use frontend::{parser::parse_module, resolver::resolve};
 /// The following example defines a few Rust function and calls them from itsy code.
 ///
 /// ```
-/// use itsy::{vm_func, build_str, runtime::VM};
+/// use itsy::{itsy_api, build_str, runtime::VM};
 ///
 /// struct MyContext {
 ///     // ...
 /// }
 ///
-/// vm_func!(MyFns, MyContext, {
+/// itsy_api!(MyFns, MyContext, {
 ///     // Rust function that does something
 ///     fn intense_computation(&mut context, a: i16, b: i16) -> i16 {
 ///         a * b
@@ -92,7 +92,7 @@ use frontend::{parser::parse_module, resolver::resolve};
 /// ```
 #[cfg(doc)]
 #[macro_export]
-macro_rules! vm_func {
+macro_rules! itsy_api {
     ($vis:vis $type_name:ident, $context_type:ty, {
         $(
             fn $name:tt(&mut $context:ident $(, $arg_name:ident: $($arg_type:tt)+)*) $(-> $ret_type:ident)? $code:block
@@ -102,7 +102,7 @@ macro_rules! vm_func {
 
 #[cfg(not(doc))]
 #[macro_export]
-macro_rules! vm_func {
+macro_rules! itsy_api {
     // enum: generate rustfn enum
     (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
@@ -169,11 +169,11 @@ macro_rules! vm_func {
     // trait: reverse argument load order
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
         $(
-            let $arg_name: vm_func!(@handle_param_type $arg_type) = vm_func!(@handle_param $vm, $arg_type);
+            let $arg_name: itsy_api!(@handle_param_type $arg_type) = itsy_api!(@handle_param $vm, $arg_type);
         )*
     };
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
-        vm_func!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
+        itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
     };
     // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
@@ -209,23 +209,23 @@ macro_rules! vm_func {
                         $type_name::$name => {
                             let $context = context;
                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                            vm_func!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
+                            itsy_api!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
                             // Run code.
                             let ret = {
                                 // Shadow HeapRef arguments with actual argument value.
                                 $(
-                                    let $arg_name: vm_func!(@handle_ref_param_type $arg_type) = vm_func!(@handle_ref_param vm, $arg_type, $arg_name);
+                                    let $arg_name: itsy_api!(@handle_ref_param_type $arg_type) = itsy_api!(@handle_ref_param vm, $arg_type, $arg_name);
                                 )*
                                 $code
                             };
                             // Handle refcounting.
                             $(
-                                vm_func!(@handle_ref_param_free vm, $arg_type, $arg_name);
+                                itsy_api!(@handle_ref_param_free vm, $arg_type, $arg_name);
                             )*
                             // Set return value, if any.
                             $(
                                 let ret_typed: $ret_type = ret;
-                                vm_func!(@handle_ret vm, $ret_type, ret_typed);
+                                itsy_api!(@handle_ret vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -244,9 +244,9 @@ macro_rules! vm_func {
             fn $name:tt ( & mut $context:ident $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
         )* }
     ) => {
-        /// Rust function mapping. Generated from function signatures defined via the `vm_func!` macro.
-        vm_func!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
-        vm_func!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
+        /// Rust function mapping. Generated from function signatures defined via the `itsy_api!` macro.
+        itsy_api!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
+        itsy_api!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
@@ -258,9 +258,9 @@ macro_rules! vm_func {
 ///
 /// The following example builds and runs a program:
 /// ```
-/// use itsy::{vm_func, build_str, run};
+/// use itsy::{itsy_api, build_str, run};
 ///
-/// vm_func!(MyFns, (), {
+/// itsy_api!(MyFns, (), {
 ///     /// a rust function that prints given string
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
@@ -331,9 +331,9 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
 ///
 /// The following example builds and runs a program:
 /// ```
-/// use itsy::{vm_func, build_str, run};
+/// use itsy::{itsy_api, build_str, run};
 ///
-/// vm_func!(MyFns, (), {
+/// itsy_api!(MyFns, (), {
 ///     /// a rust function that prints given string
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);

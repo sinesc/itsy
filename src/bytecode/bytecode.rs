@@ -25,7 +25,7 @@ const ARG2: StackOffset = 4;
 const ARG3: StackOffset = 8;
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
-/// Use the `vm_func!` macro to generate a type implementing `VMData` and `VMFunc`.
+/// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn from_index(index: RustFnIndex) -> Self;
@@ -36,7 +36,7 @@ pub trait VMFunc<T>: Debug {
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.
-/// Use the `vm_func!` macro to generate a type implementing `VMData` and `VMFunc`.
+/// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMData<T: VMFunc<T>, U> {
     #[doc(hidden)]
     fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
