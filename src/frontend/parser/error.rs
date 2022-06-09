@@ -56,3 +56,5 @@ impl Display for ParseError {
         }
     }
 }
+
+pub type ParseResult<T = ()> = Result<T, ParseError>;

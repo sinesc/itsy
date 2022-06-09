@@ -16,7 +16,7 @@ use crate::prelude::UnorderedMap;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Error, ParserState, ParsedModule, ParsedProgram};
-use error::{ParseError, ParseErrorKind};
+use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
 fn check_state<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
@@ -1065,7 +1065,7 @@ fn root(i: Input<'_>) -> Output<Vec<Statement>> {
 }
 
 /// Parses Itsy source code into a program AST structure.
-pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseError> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
+pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
     let input = Input::new(src);
     let result = root(input.clone());
     match result {
@@ -1105,14 +1105,14 @@ pub fn parse_module(src: &str, module_path: &str) -> Result<ParsedModule, ParseE
 ///         parser::parse_module(&file, module_path)
 ///     }).unwrap();
 /// }
-pub fn parse(mut loader: impl FnMut(&str) -> Result<ParsedModule, ParseError>) -> Result<ParsedProgram, ParseError> {
+pub fn parse(mut loader: impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult<ParsedProgram> {
     let mut program = ParsedProgram::new();
     parse_recurse("", &mut program, &mut loader)?;
     Ok(program)
 }
 
 /// Recursively parse all submodules.
-fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut impl FnMut(&str) -> Result<ParsedModule, ParseError>) -> Result<(), ParseError> {
+fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult {
     let module = loader(module_path)?;
     for submodule_ast in module.modules() {
         let submodule_path = if module_path != "" { module_path.to_string() + "::" + submodule_ast.name() } else { submodule_ast.name().to_string() } ;

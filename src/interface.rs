@@ -18,7 +18,7 @@ pub mod ast {
 #[cfg(feature="compiler")]
 pub mod resolver {
     //! Type resolution.
-    pub use crate::frontend::resolver::{resolve, resolved::ResolvedProgram, error::ResolveError, error::ResolveErrorKind};
+    pub use crate::frontend::resolver::{resolve, resolved::ResolvedProgram, error::{ResolveError, ResolveErrorKind}};
     pub mod resolved {
         //! Resolved information to be used by the bytecode generator.
         pub use crate::frontend::resolver::resolved::{ResolvedProgram, IdMappings};

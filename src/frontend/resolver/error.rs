@@ -87,14 +87,14 @@ pub type ResolveResult<T = ()> = Result<T, ResolveError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
 pub(crate) trait SomeOrResolveError<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<T, ResolveError>;
-    fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError>;
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<Option<T>, ResolveError>;
-    fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError>;
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<T>;
+    fn unwrap_or_ice(self: Self, message: &str) -> ResolveResult<T>;
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<Option<T>>;
+    fn some_or_ice(self: Self, message: &str) -> ResolveResult<Option<T>>;
 }
 
 impl<T> SomeOrResolveError<T> for Option<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<T, ResolveError> {
+    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<T> {
         if let Some(result) = self {
             Ok(result)
         } else {
@@ -105,10 +105,10 @@ impl<T> SomeOrResolveError<T> for Option<T> {
             })
         }
     }
-    fn unwrap_or_ice(self: Self, message: &str) -> Result<T, ResolveError> {
+    fn unwrap_or_ice(self: Self, message: &str) -> ResolveResult<T> {
         self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> Result<Option<T>, ResolveError> {
+    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<Option<T>> {
         if self.is_some() {
             Ok(self)
         } else {
@@ -119,13 +119,13 @@ impl<T> SomeOrResolveError<T> for Option<T> {
             })
         }
     }
-    fn some_or_ice(self: Self, message: &str) -> Result<Option<T>, ResolveError> {
+    fn some_or_ice(self: Self, message: &str) -> ResolveResult<Option<T>> {
         self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
 }
 
 /// Returns an internal compiler error with positional information.
-pub(crate) fn ice<T>(message: &str) -> Result<T, ResolveError> {
+pub(crate) fn ice<T>(message: &str) -> ResolveResult<T> {
     Err(ResolveError {
         kind: ResolveErrorKind::Internal(message.to_string()),
         position: Position(0),
