@@ -484,20 +484,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             return Ok(());
         }
 
-        // check if enum is primitive or holds data
+        // check whether at least one enum variant specifies a type, default to i32 if none do
         let simple_type_id = if let Some(named_type) = item.named_type() {
-            // at least one variant specifies an explicit value type
-            named_type.type_id.or(self.scopes.lookup_type_id(self.scope_id, &self.make_path(&named_type.path.name)))
-        } else if item.is_primitive() {
-            // primitive enum but no explicit value type specified, default to i32
-            Some(self.primitive_type_id(Type::i32)?)
+            named_type.type_id.or(self.scopes.lookup_type_id(self.scope_id, &self.make_path(&named_type.path.name))).unwrap_or_ice("Invalid variant type")?
         } else {
-            // data enum
-            None
+            self.primitive_type_id(Type::i32)?
         };
 
-        // resolve enum variant fields, assemble variant field lists
+        // resolve enum variant fields, assemble variant field lists. TODO: fix ugly mess. should add a const stage and handle discriminant values there
         let mut variants = Vec::new();
+        let mut next_discriminant = Numeric::Unsigned(0);
+        let mut seen_discriminants = Vec::new();
         for variant in &mut item.variants {
             match &mut variant.kind {
                 ast::VariantKind::Data(_, fields) => {
@@ -510,9 +507,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 },
                 ast::VariantKind::Simple(value_literal) => {
                     if let Some(value_literal) = value_literal {
-                        self.resolve_literal(value_literal, simple_type_id)?;
+                        self.resolve_literal(value_literal, Some(simple_type_id))?;
                         if let Some(numeric) = value_literal.value.as_numeric() {
                             if numeric.is_integer() {
+                                if seen_discriminants.contains(&numeric) {
+                                    return Err(ResolveError::new(variant, ResolveErrorKind::DuplicateVariantValue(numeric), self.module_path));
+                                }
+                                seen_discriminants.push(numeric);
+                                next_discriminant = numeric.inc();
                                 variants.push((variant.ident.name.clone(), EnumVariant::Simple(Some(numeric))));
                             } else {
                                 return Err(ResolveError::new(variant, ResolveErrorKind::InvalidVariantValue(numeric), self.module_path));
@@ -521,7 +523,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             return Err(ResolveError::new(variant, ResolveErrorKind::InvalidVariantLiteral, self.module_path))
                         }
                     } else {
-                        variants.push((variant.ident.name.clone(), EnumVariant::Simple(None)));
+                        if seen_discriminants.contains(&next_discriminant) {
+                            return Err(ResolveError::new(variant, ResolveErrorKind::DuplicateVariantValue(next_discriminant), self.module_path));
+                        }
+                        seen_discriminants.push(next_discriminant);
+                        variants.push((variant.ident.name.clone(), EnumVariant::Simple(Some(next_discriminant))));
+                        next_discriminant = next_discriminant.inc();
                     }
                 },
             }
@@ -533,7 +540,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else {
             let qualified = self.abs_path(&[ &item.ident.name ]);
             let primitive = item.is_primitive();
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, simple_type_id, impl_traits: Map::new() }));
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, simple_type_id: Some(simple_type_id), impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
                 self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);

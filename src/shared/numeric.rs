@@ -69,6 +69,13 @@ impl Numeric {
             _ => None,
         }
     }
+    pub fn inc(self: Self) -> Self {
+        match self {
+            Self::Signed(v) => Self::Signed(v + 1),
+            Self::Unsigned(v) => Self::Unsigned(v + 1),
+            Self::Float(v) => Self::Float(v + 1.0),
+        }
+    }
 
     /*pub const fn as_signed(self: &Self) -> Option<i64> {
         match self {
@@ -264,16 +271,21 @@ impl Rem for Numeric {
 */
 impl Debug for Numeric {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(self, f)
+        match self {
+            Numeric::Signed(v) => write!(f, "{v} (signed)"),
+            Numeric::Unsigned(v) => write!(f, "{v} (unsigned)"),
+            Numeric::Float(v) => write!(f, "{v} (float)"),
+            //Numeric::Overflow => write!(f, "/ (numeric value too large)"),
+        }
     }
 }
 
 impl Display for Numeric {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Numeric::Signed(v) => write!(f, "{} (signed)", v),
-            Numeric::Unsigned(v) => write!(f, "{} (unsigned)", v),
-            Numeric::Float(v) => write!(f, "{} (float)", v),
+            Numeric::Signed(v) => write!(f, "{v}"),
+            Numeric::Unsigned(v) => write!(f, "{v}"),
+            Numeric::Float(v) => write!(f, "{v}"),
             //Numeric::Overflow => write!(f, "/ (numeric value too large)"),
         }
     }

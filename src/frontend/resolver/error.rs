@@ -24,7 +24,9 @@ pub enum ResolveErrorKind {
     UndefinedItem(String),
     /// Enum variant value is not an integer.
     InvalidVariantValue(Numeric),
-    /// Enum variant literal is not numeric.
+    /// Duplicate discriminant.
+    DuplicateVariantValue(Numeric),
+    /// Enum variant literal is not numeric. TODO: non-numeric currently intercepted by the parser. eventually consts should be allowed here which the parser wouldn't catch
     InvalidVariantLiteral,
     InvalidOperation(String),
     NotATraitMethod(String, String),
@@ -78,6 +80,8 @@ impl Display for ResolveError {
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
             ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
+            ResolveErrorKind::DuplicateVariantValue(numeric) => write!(f, "Duplicate enum variant discriminant {numeric}"),
+            ResolveErrorKind::InvalidVariantValue(numeric) => write!(f, "Invalid enum variant discriminant {numeric}. Discriminants must be integer types"),
             _ => write!(f, "{:?}", self.kind),
         }
     }

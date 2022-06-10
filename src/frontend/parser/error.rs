@@ -51,6 +51,7 @@ impl Display for ParseError {
         match &self.kind {
             ParseErrorKind::SyntaxError => write!(f, "Syntax error"),
             ParseErrorKind::InvalidNumerical => write!(f, "Invalid numeric value"),
+            ParseErrorKind::IllegalEnumDef => write!(f, "Illegal mix of enum data and value variants."),
             // Todo: handle the others
             _ => write!(f, "{:?}", self.kind),
         }
