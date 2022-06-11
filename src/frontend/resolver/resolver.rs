@@ -539,8 +539,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
         } else {
             let qualified = self.abs_path(&[ &item.ident.name ]);
-            let primitive = item.is_primitive();
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, simple_type_id: Some(simple_type_id), impl_traits: Map::new() }));
+            let primitive = if item.is_primitive() {
+                Some((simple_type_id, self.type_by_id(simple_type_id).primitive_size()))
+            } else {
+                None
+            };
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
                 self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);

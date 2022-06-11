@@ -22,21 +22,30 @@ impl EnumVariant {
             _ => None,
         }
     }
+    pub fn as_simple(self: &Self) -> Option<Numeric> {
+        match self {
+            Self::Simple(s) => *s,
+            _ => None,
+        }
+    }
 }
 
 /// Information about an enum in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Enum {
-    pub primitive: bool,
     pub variants: Vec<(String, EnumVariant)>,
     pub impl_traits: Map<TypeId, ImplTrait>,
-    pub simple_type_id: Option<TypeId>,
+    pub primitive: Option<(TypeId, u8)>,
 }
 
 impl Enum {
     /// Returns the numeric variant index of given named variant.
     pub fn variant_index(self: &Self, variant: &str) -> Option<VariantIndex> {
         self.variants.iter().position(|(name, _)| name == variant).map(|i| i as VariantIndex)
+    }
+    /// Returns the numeric variant discriminant of given named variant.
+    pub fn variant_value(self: &Self, variant: &str) -> Option<Numeric> {
+        self.variants.iter().find(|(n, v)| n == variant && v.as_simple().is_some()).map(|(_, v)| v.as_simple().unwrap())
     }
 }
 
@@ -191,7 +200,7 @@ impl Type {
             Type::u16 | Type::i16               => 2,
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
-            Type::Enum(e) if e.primitive => size_of::<VariantIndex>() as u8,
+            Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
             Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
         }
     }
@@ -240,7 +249,7 @@ impl Type {
     /// Whether the type is a reference type.
     pub const fn is_ref(self: &Self) -> bool {
         match self {
-            Type::Enum(e) if e.primitive => false,
+            Type::Enum(Enum { primitive: Some(_), .. }) => false,
             Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) => true,
             _ => false,
         }

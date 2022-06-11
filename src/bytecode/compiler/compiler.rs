@@ -746,12 +746,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
-            LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive) => {
+            LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
                 // primitive enums don't need to be heap allocated
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::unsigned(size_of::<VariantIndex>());
-                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
-                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                let enum_ty = self.type_by_id(enum_def.primitive.unwrap().0);
+                let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
+                self.write_literal_numeric(variant_value, enum_ty);
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) | LiteralValue::Variant(_) => {
                 if item.value.is_const() {
