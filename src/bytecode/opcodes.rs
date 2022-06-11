@@ -649,7 +649,12 @@ impl_opcodes!{
 
     /// Calls the given builtin function.
     fn builtincall(&mut self, builtin: Builtin) {
-        builtin.exec(self);
+        builtin.exec(self, 0);
+    }
+
+    /// Calls the given builtin function.
+    fn builtincallx(&mut self, builtin: Builtin, constructor: StackAddress) {
+        builtin.exec(self, constructor);
     }
 
     /// Function call. Creates a new stack frame at SP - arg_size and sets programm counter to given addr.

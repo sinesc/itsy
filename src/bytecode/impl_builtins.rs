@@ -50,7 +50,7 @@ macro_rules! impl_builtins {
     // refcount handling for ref-params
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
+    //(@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
     // reverse argument load order
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -71,7 +71,7 @@ macro_rules! impl_builtins {
                 ( & mut $variant_vm:ident)
             )?
             $(
-                $name:ident ( & mut $vm:ident $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )?
+                $name:ident ( & mut $vm:ident $( + $constructor:ident )? $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )?
             )?
             $code:block
         )*
@@ -126,7 +126,7 @@ macro_rules! impl_builtins {
                 map
             }*/
             #[allow(unused_variables, unused_assignments, unused_imports)]
-            pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>) {
+            pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress) {
                 use $crate::runtime::stack::StackOp;
                 match self {
                     $(
@@ -179,6 +179,7 @@ macro_rules! impl_builtins {
                                         let $arg_name: impl_builtins!(@handle_ref_param_type $arg_type) = impl_builtins!(@handle_ref_param vm, $arg_type, $arg_name);
                                     )*
                                     let $vm = &mut *vm;
+                                    $( let $constructor = constructor; )?
                                     $code
                                 };
                                 // Handle refcounting.

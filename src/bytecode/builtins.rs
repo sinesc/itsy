@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress};
-use crate::bytecode::{HeapRef, runtime::heap::HeapOp};
+use crate::bytecode::{HeapRef, runtime::heap::{HeapOp, HeapRefOp}};
 
 impl_builtins! {
 
@@ -15,9 +15,9 @@ impl_builtins! {
         vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
     }
 
-    fn array_pushx(&mut vm, this: HeapRef, value: HeapRef) {
+    fn array_pushx(&mut vm + constructor, this: HeapRef, value: HeapRef) {
         vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
-        // TODO refcount
+        vm.refcount_value(value, constructor, HeapRefOp::Inc);
     }
 
     fn <
@@ -33,13 +33,13 @@ impl_builtins! {
         result
     }
 
-    fn array_popx(&mut vm, this: HeapRef) -> HeapRef {
+    fn array_popx(&mut vm + constructor, this: HeapRef) -> HeapRef { // FIXME: once data enums are usable this needs to return an Option
         let index = this.index();
         let offset = vm.heap.item(index).data.len() - size_of::<HeapRef>();
         let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
         vm.heap.item_mut(index).data.truncate(offset);
+        vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
         result
-        // TODO refcount
     }
 
     fn <
@@ -56,14 +56,19 @@ impl_builtins! {
         }
     }
 
-    fn array_truncatex(&mut vm, this: HeapRef, size: StackAddress) {
+    fn array_truncatex(&mut vm + constructor, this: HeapRef, size: StackAddress) {
         let index = this.index();
         let current_size = vm.heap.item(index).data.len();
         let new_size = size_of::<HeapRef>() * size as usize;
         if new_size < current_size {
+            let mut cursor = HeapRef::new(index, new_size as StackAddress);
+            let end = HeapRef::new(index, current_size as StackAddress);
+            while cursor < end {
+                let item: HeapRef = vm.heap.read_seq(&mut cursor);
+                vm.refcount_value(item, constructor, HeapRefOp::Dec);
+            }
             vm.heap.item_mut(index).data.truncate(new_size);
         }
-        // TODO refcount
     }
 
     fn <
@@ -72,25 +77,25 @@ impl_builtins! {
         array_remove32<T: u32>(this: HeapRef, element: StackAddress) -> u32,
         array_remove64<T: u64>(this: HeapRef, element: StackAddress) -> u64,
     >(&mut vm) {
-        let element_size = size_of::<T>();
-        let offset = element as usize * element_size;
+        const ELEMENT_SIZE: usize = size_of::<T>();
+        let offset = element as usize * ELEMENT_SIZE;
         let index = this.index();
         let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
         let data = &mut vm.heap.item_mut(index).data;
-        data.copy_within(offset + element_size .., offset);
-        data.truncate(data.len() - element_size);
+        data.copy_within(offset + ELEMENT_SIZE .., offset);
+        data.truncate(data.len() - ELEMENT_SIZE);
         result
     }
 
-    fn array_removex(&mut vm, this: HeapRef, element: StackAddress) -> HeapRef {
-        let element_size = size_of::<HeapRef>();
-        let offset = element as usize * element_size;
+    fn array_removex(&mut vm + constructor, this: HeapRef, element: StackAddress) -> HeapRef {
+        const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+        let offset = element as usize * ELEMENT_SIZE;
         let index = this.index();
         let result: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
         let data = &mut vm.heap.item_mut(index).data;
-        data.copy_within(offset + element_size .., offset);
-        data.truncate(data.len() - element_size);
+        data.copy_within(offset + ELEMENT_SIZE .., offset);
+        data.truncate(data.len() - ELEMENT_SIZE);
+        vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
         result
-        // TODO refcount
     }
 }

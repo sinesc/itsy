@@ -38,7 +38,8 @@ macro_rules! select_unsigned_opcode {
 macro_rules! select_builtin {
     ($self:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => {
         if $ty.is_ref() {
-            $self.writer.builtincall(Builtin::$variant_x);
+            let constructor = $self.get_constructor($ty);
+            $self.writer.builtincallx(Builtin::$variant_x, constructor);
         } else {
             match $ty.primitive_size() {
                 8 => $self.writer.builtincall(Builtin::$variant_64),

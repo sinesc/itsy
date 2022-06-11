@@ -271,7 +271,7 @@ impl Constructor {
 }
 
 /// A heap reference as it would appear on the stack
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialOrd)]
 pub struct HeapRef {
     address: HeapAddress,
 }

@@ -230,7 +230,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 "push"      => insert(Intrinsic::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
                 "pop"       => insert(Intrinsic::ArrayPop, element_type_id, vec![ Some(type_id) ]),
                 "truncate"  => insert(Intrinsic::ArrayTruncate, void_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
-                "remove"    => insert(Intrinsic::ArrayRemove, void_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
+                "remove"    => insert(Intrinsic::ArrayRemove, element_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
                 _ => None,
             })
         } else {
