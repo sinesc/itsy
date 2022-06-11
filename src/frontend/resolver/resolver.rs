@@ -1198,7 +1198,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let struct_def = self.type_by_id(type_id).as_struct().unwrap_or_err(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()), self.module_path)?.clone();
             let struct_ = item.value.as_struct_mut().unwrap_or_ice(ICE)?;
             for (name, field) in &mut struct_.fields {
-                self.resolve_expression(field, struct_def.type_id(name))?;
+                self.resolve_expression(field, struct_def.type_id(name))?; // FIXME: panics if field doesn't exist
                 self.resolved_or_err(field, None)?;
             }
         }
