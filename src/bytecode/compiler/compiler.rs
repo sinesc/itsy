@@ -8,7 +8,7 @@ mod binding_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Function, FunctionKind, Intrinsic, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Intrinsic, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
@@ -924,50 +924,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_cast(self: &mut Self, item: &ast::Cast) -> CompileResult {
 
         self.compile_expression(&item.expr)?;
-
         let from = self.item_type(&item.expr);
-        let to = self.type_by_id(item.ty.type_id.unwrap());
-
-        if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
-            self.write_zclamp(from);
-        }
-
-        if from.is_integer() && to.is_integer() {
-            self.write_integer_cast(from, to);
-        } else if from.is_float() && to.is_float() {
-            self.write_float_integer_cast(from, to);
-        } else if from.is_float() && to.is_integer() {
-            let temp_to = if to.is_signed() { &Type::i64 } else { &Type::u64 };
-            self.write_float_integer_cast(from, temp_to);
-            if to.primitive_size() != 8 {
-                self.write_integer_cast(temp_to, to);
-            }
-        } else if from.is_integer() && to.is_float() {
-            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
-            if from.primitive_size() != 8 {
-                self.write_integer_cast(from, temp_from);
-            }
-            self.write_float_integer_cast(temp_from, to);
-        } else if from.is_integer() && to.is_string() {
-            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
-            if from.primitive_size() != 8 {
-                self.write_integer_cast(from, temp_from);
-            }
-            match temp_from {
-                Type::i64 => self.writer.i64_to_string(),
-                Type::u64 => self.writer.u64_to_string(), // TODO: refcounting, this creates a heap ref
-                _ => unreachable!(),
-            };
-        } else if from == &Type::f32 && to.is_string() {
-            self.writer.f32_to_string();
-        } else if from == &Type::f64 && to.is_string() {
-            self.writer.f64_to_string();
-        } else {
-            unreachable!("Invalid cast {:?} to {:?}", from, to);
-        }
-
+        let to = self.item_type(&item.ty);
+        self.write_cast(from, to);
         Ok(())
     }
+
 }
 
 impl<T> Compiler<T> where T: VMFunc<T> {
@@ -1347,6 +1309,49 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 index_type.primitive_size() as StackAddress
             },
         })
+    }
+
+    /// Writes a primitive cast.
+    fn write_cast(self: &Self, from: &Type, to: &Type) {
+        if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
+            self.write_zclamp(from);
+        }
+        if from.is_integer() && to.is_integer() {
+            self.write_integer_cast(from, to);
+        } else if from.is_float() && to.is_float() {
+            self.write_float_integer_cast(from, to);
+        } else if from.is_float() && to.is_integer() {
+            let temp_to = if to.is_signed() { &Type::i64 } else { &Type::u64 };
+            self.write_float_integer_cast(from, temp_to);
+            if to.primitive_size() != 8 {
+                self.write_integer_cast(temp_to, to);
+            }
+        } else if from.is_integer() && to.is_float() {
+            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
+            if from.primitive_size() != 8 {
+                self.write_integer_cast(from, temp_from);
+            }
+            self.write_float_integer_cast(temp_from, to);
+        } else if from.is_integer() && to.is_string() {
+            let temp_from = if from.is_signed() { &Type::i64 } else { &Type::u64 };
+            if from.primitive_size() != 8 {
+                self.write_integer_cast(from, temp_from);
+            }
+            match temp_from {
+                Type::i64 => self.writer.i64_to_string(),
+                Type::u64 => self.writer.u64_to_string(),
+                _ => unreachable!(),
+            };
+        } else if from == &Type::f32 && to.is_string() {
+            self.writer.f32_to_string();
+        } else if from == &Type::f64 && to.is_string() {
+            self.writer.f64_to_string();
+        } else if let Some(Enum { primitive: Some((primitive, _)), .. }) = from.as_enum() {
+            let from = self.type_by_id(*primitive);
+            self.write_cast(from, to);
+        } else {
+            unreachable!("Invalid cast {:?} to {:?}", from, to);
+        }
     }
 
     /// Writes a cast from one float to another or from/to a 64 bit integer.

@@ -985,7 +985,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(type_id) = item.ty.type_id {
             *item.type_id_mut(self) = Some(type_id);
             let ty = self.type_by_id(type_id);
-            if !ty.is_primitive() && !ty.is_string() {
+            if (!ty.is_primitive() && !ty.is_string()) || ty.as_enum().is_some() {
                 let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.type_by_id(type_id))).clone();
                 return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(name), self.module_path));
             }
