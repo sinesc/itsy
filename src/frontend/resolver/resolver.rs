@@ -14,7 +14,7 @@ use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, Resolv
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Intrinsic, Binding};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, BuiltinGroup, Binding};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
 
@@ -218,19 +218,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         parent_scope_id
     }
 
-    /// Try to create array intrinsic function signature for the given array type
-    fn try_create_array_intrinsic(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
+    /// Try to create concrete array builtin function signature for the given array type
+    fn try_create_array_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
         let array_ty = self.type_by_id(type_id).as_array().unwrap_or_ice(ICE)?;
         let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
         let void_type_id = self.primitive_type_id(Type::void)?;
         if let &Array { type_id: Some(element_type_id) } = array_ty {
-            let mut insert = |i, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Intrinsic(type_id, i))));
+            let mut insert = |i, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Builtin(type_id, i))));
             Ok(match name {
-                "len"       => insert(Intrinsic::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
-                "push"      => insert(Intrinsic::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
-                "pop"       => insert(Intrinsic::ArrayPop, element_type_id, vec![ Some(type_id) ]),
-                "truncate"  => insert(Intrinsic::ArrayTruncate, void_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
-                "remove"    => insert(Intrinsic::ArrayRemove, element_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
+                "len"       => insert(BuiltinGroup::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
+                "push"      => insert(BuiltinGroup::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
+                "pop"       => insert(BuiltinGroup::ArrayPop, element_type_id, vec![ Some(type_id) ]),
+                "truncate"  => insert(BuiltinGroup::ArrayTruncate, void_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
+                "remove"    => insert(BuiltinGroup::ArrayRemove, element_type_id, vec![ Some(type_id), Some(sa_type_id) ]),
                 _ => None,
             })
         } else {
@@ -740,7 +740,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                         if item.function_id.is_none() {
-                            item.function_id = self.try_create_array_intrinsic(&item.ident.name, type_id)?;
+                            item.function_id = self.try_create_array_builtin(&item.ident.name, type_id)?;
                         }
                     } else {
                         // try method on type

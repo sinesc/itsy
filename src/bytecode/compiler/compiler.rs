@@ -8,9 +8,9 @@ mod binding_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Intrinsic, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, builtins::Builtin, runtime::heap::HeapRefOp};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
@@ -343,10 +343,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 comment!(self, "call {}()", item.ident.name);
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
-            FunctionKind::Intrinsic(type_id, intrinsic) => {
+            FunctionKind::Builtin(type_id, builtin_group) => {
                 self.compile_call_args(&function, item)?;
                 comment!(self, "call {}()", item.ident.name);
-                self.write_intrinsic(intrinsic, self.type_by_id(type_id));
+                self.write_builtin(builtin_group, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(&function, item)?;
@@ -566,7 +566,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_cnt_nc(array_constructor, HeapRefOp::Inc);
         self.write_clone_ref();
         let array_ty = self.item_type(&item.expr);
-        self.write_intrinsic(Intrinsic::ArrayLen, array_ty);             // stack &array len
+        self.write_builtin(BuiltinGroup::ArrayLen, array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index
 
@@ -1629,28 +1629,28 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions for build-in len method.
-    fn write_intrinsic(self: &Self, intrinsic: Intrinsic, ty: &Type) {
+    fn write_builtin(self: &Self, builtin: BuiltinGroup, ty: &Type) {
         let constructor = self.get_constructor(ty);
         #[allow(unreachable_patterns)]
         match ty {
             &Type::Array(Array { type_id }) => {
                 let inner_ty = self.type_by_id(type_id.unwrap());
-                match intrinsic {
-                    Intrinsic::ArrayLen => {
+                match builtin {
+                    BuiltinGroup::ArrayLen => {
                         self.writer.heap_size(constructor);
                         self.writer.shrsa(match inner_ty.primitive_size() {
                             1 => 0,
                             2 => 1,
                             4 => 2,
                             8 => 3,
-                            _ => unreachable!("Unsupported inner size for type {} for intrinsic {:?}", ty, intrinsic),
+                            _ => unreachable!("Unsupported inner size for type {} for builtin group {:?}", ty, builtin),
                         });
                     }
-                    Intrinsic::ArrayPush => select_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
-                    Intrinsic::ArrayPop => select_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
-                    Intrinsic::ArrayTruncate => select_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
-                    Intrinsic::ArrayRemove => select_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
-                    _ => unreachable!("Unsupported type {} for intrinsic {:?}", ty, intrinsic),
+                    BuiltinGroup::ArrayPush => select_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
+                    BuiltinGroup::ArrayPop => select_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
+                    BuiltinGroup::ArrayTruncate => select_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
+                    BuiltinGroup::ArrayRemove => select_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
+                    _ => unreachable!("Unsupported type {} for builtin group {:?}", ty, builtin),
                 }
             }
             _ => unreachable!("Unsupported type {}", ty),

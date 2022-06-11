@@ -1,7 +1,7 @@
 //! Built-in functions. These will be implemented on the Builtin enum and exec'd via vm::builtincall()
 
 use crate::prelude::*;
-use crate::{StackAddress};
+use crate::StackAddress;
 use crate::bytecode::{HeapRef, runtime::heap::{HeapOp, HeapRefOp}};
 
 impl_builtins! {

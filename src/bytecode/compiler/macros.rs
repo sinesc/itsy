@@ -36,7 +36,8 @@ macro_rules! select_unsigned_opcode {
 }
 
 macro_rules! select_builtin {
-    ($self:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => {
+    ($self:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
+        use crate::bytecode::builtins::Builtin;
         if $ty.is_ref() {
             let constructor = $self.get_constructor($ty);
             $self.writer.builtincallx(Builtin::$variant_x, constructor);
@@ -49,5 +50,5 @@ macro_rules! select_builtin {
                 _ => unreachable!("Invalid type size for builtin call"),
             };
         }
-    }
+    } }
 }

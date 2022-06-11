@@ -114,12 +114,13 @@ pub enum FunctionKind {
     Function,
     Method(TypeId),
     Rust(RustFnIndex),
-    Intrinsic(TypeId, Intrinsic),
+    Builtin(TypeId, BuiltinGroup),
     Variant(TypeId, VariantIndex),
 }
 
+/// Builtin function groups. Together with a type id these are used to select a concrete, type-specific builtin function implementation.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Intrinsic {
+pub enum BuiltinGroup {
     ArrayLen,
     ArrayPush,
     ArrayPop,

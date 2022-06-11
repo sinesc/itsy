@@ -116,7 +116,7 @@ impl Scopes {
     pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &str, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> FunctionId {
         let type_id = match kind {
             Some(FunctionKind::Method(type_id)) => type_id,
-            Some(FunctionKind::Intrinsic(type_id, _)) => type_id,
+            Some(FunctionKind::Builtin(type_id, _)) => type_id,
             _ => TypeId::void(),
         };
         self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
