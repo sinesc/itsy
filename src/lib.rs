@@ -3,7 +3,7 @@
 
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
-//! Look at the [build_str] or [itsy_api] example to get started.
+//! Look at the [build_str] or [itsy_api!] example to get started.
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
