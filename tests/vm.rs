@@ -651,6 +651,42 @@ fn array_push() {
 }
 
 #[test]
+fn array_ref_elements() {
+    let result = run("
+        struct Struct {
+            value: u8,
+        }
+        fn main() {
+            let a: [ Struct ] = [ ];
+            a.push(Struct { value: 1 });
+            a.push(Struct { value: 2 });
+            a.push(Struct { value: 3 });
+            a.push(Struct { value: 4 });
+            a.push(Struct { value: 5 });
+            a.push(Struct { value: 6 });
+
+            let b = a.pop(); // 6
+            ret_u8(b.value);
+
+            a.truncate(4);
+
+            let c = a.pop(); // 4
+            ret_u8(c.value);
+
+            let d = a.remove(0); // 1
+            ret_u8(d.value);
+
+            for x in a { // 2, 3
+                ret_u8(x.value);
+            }
+
+            ret_u8(a.len() as u8); // 2
+        }
+    ");
+    assert_all(&result, &[ 6u8, 4, 1, 2, 3, 2 ]);
+}
+
+#[test]
 fn struct_access() {
     let result = run("
         struct Test {
