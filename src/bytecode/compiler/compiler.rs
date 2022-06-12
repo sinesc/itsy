@@ -524,7 +524,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_store(iter_local, iter_ty);
         // push upper range bound
         self.compile_expression(&binary_op.right)?;
-        // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order) // TODO: tmp stack now?
+        // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
         let iter_ty = self.type_by_id(iter_type_id);
         self.write_load(iter_local.index as StackOffset, iter_ty);
         //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
@@ -552,6 +552,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // exit position
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        self.write_discard(iter_ty);
         Ok(())
     }
 
