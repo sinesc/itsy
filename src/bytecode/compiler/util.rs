@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
 
 use crate::StackAddress;
 use crate::frontend::ast::Pattern;
