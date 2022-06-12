@@ -1,6 +1,6 @@
 [package]
 name = "itsy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
 description = "Strongly typed scripting language with a rusty syntax and nice Rust integration."
