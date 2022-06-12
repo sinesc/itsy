@@ -61,6 +61,9 @@ impl Struct {
     pub fn type_id(self: &Self, field: &str) -> Option<TypeId> {
         *self.fields.get(field).expect("Field not found")
     }
+    pub fn has_field(self: &Self, field: &str) -> bool {
+        self.fields.contains_key(field)
+    }
 }
 
 /// Information about an array in a resolved program.
