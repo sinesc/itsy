@@ -1350,7 +1350,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if let Some(Enum { primitive: Some((primitive, _)), .. }) = from.as_enum() {
             let from = self.type_by_id(*primitive);
             self.write_cast(from, to);
-        } else {
+        } else if from != to {
             unreachable!("Invalid cast {:?} to {:?}", from, to);
         }
     }
