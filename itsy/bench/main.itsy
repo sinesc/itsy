@@ -25,12 +25,12 @@ fn main() {
     ratio(t_fib_r, t_rust_fib_r);
 
     start_time();
-    let rust_stringcat = rust_stringcat(10000);
+    let rust_stringcat = rust_stringcat(5000);
     let t_rust_stringcat = stop_time();
     result("rust_stringcat", 0, t_rust_stringcat);
 
     start_time();
-    let stringcat = itsy_stringcat(10000);
+    let stringcat = itsy_stringcat(5000);
     let t_stringcat = stop_time();
     result("itsy_stringcat", 0, t_stringcat);
     ratio(t_stringcat, t_rust_stringcat);
