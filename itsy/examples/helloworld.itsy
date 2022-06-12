@@ -1,0 +1,11 @@
+/*
+ * Hello World example.
+ *
+ * run.rs/debug-run.rs provided functions:
+ *    print(s: String)
+ *    println(s: String)
+ */
+
+fn main() {
+    println("Hello World!");
+}

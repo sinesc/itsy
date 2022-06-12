@@ -1,0 +1,43 @@
+/**
+ * Mandelbrot fractal example.
+ *
+ * run.rs/debug-run.rs provided functions:
+ *    print(s: String)
+ *    println(s: String)
+ */
+
+fn mandelbrot(columns: u32, rows: u32) -> [ String ] {
+
+    let chars = [ ".", ",", "`", "´", "'", "~", "^", "°", "$", ";", "=", "o", "O", "%", "&", ":" ];
+    let lines: [ String ] = [ ]; // FIXME: type annotation should not be required
+    let max_x = columns as f32;
+    let max_y = rows as f32;
+    let y = -1.4f32;
+
+    for _ in 0..rows {
+        let x = -2.0f32;
+        let line = "";
+        for _ in 0..columns {
+            let r = 0f32;
+            let i = 0f32;
+            let n = 0;
+            while n < 16 && r * r + i * i <= 4.0 {
+                r = r * r - i * i + x;
+                i = 2.0 * r * i + y;
+                n += 1;
+            }
+            line += chars[n-1];
+            x += 3.6 / max_x;
+        }
+        lines.push(line);
+        y += 2.81 / max_y;
+    }
+
+    lines
+}
+
+fn main() {
+    for line in mandelbrot(80, 25) {
+        println(line);
+    }
+}
