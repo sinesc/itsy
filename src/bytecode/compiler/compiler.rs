@@ -385,9 +385,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.init_state.activate(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
-            self.compile_expression(expr)?;
-            let local = self.locals.lookup(binding_id);
-            self.write_storex(local, item, binding_id);
+            // optimization: write literal unless it is zero and we're in the root block of a function (stackframe is already zero-initialized)
+            if !(expr.is_zero_literal() && self.init_state.len() == 2) {
+                self.compile_expression(expr)?;
+                let local = self.locals.lookup(binding_id);
+                self.write_storex(local, item, binding_id);
+            }
             self.init_state.initialize(binding_id);
         }
         Ok(())

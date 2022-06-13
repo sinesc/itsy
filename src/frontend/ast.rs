@@ -801,6 +801,21 @@ impl Expression {
             _ => false,
         }
     }
+    pub fn is_zero_literal(self: &Self) -> bool {
+        match self {
+            Self::Literal(l) => match l.value {
+                LiteralValue::Numeric(n) => match n {
+                    Numeric::Float(f) if f == 0.0 => true,
+                    Numeric::Signed(0) => true,
+                    Numeric::Unsigned(0) => true,
+                    _ => false,
+                },
+                LiteralValue::Bool(false) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
     pub fn as_variable(self: &Self) -> Option<&Variable> {
         match self {
             Self::Variable(variable) => Some(variable),

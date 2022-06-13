@@ -82,6 +82,11 @@ impl BindingState {
         self.current_mut(binding_id).activated = true;
     }
 
+    /// Returns current branching depth.
+    pub fn len(self: &Self) -> usize {
+        self.branchings.len()
+    }
+
     /// Whether the binding was activated in exactly this branching (will be a Single block).
     pub fn activated(self: &Self, binding_id: BindingId) -> bool {
         let branching = self.branchings.last().unwrap();
