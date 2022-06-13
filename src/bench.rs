@@ -6,6 +6,12 @@ struct Bench {
 }
 
 itsy_api!(BenchFn, Bench, {
+    fn print(&mut context, value: &str) {
+        print!("{}", value);
+    }
+    fn println(&mut context, value: &str) {
+        println!("{}", value);
+    }
     fn start_time(&mut context) {
         context.time = Some(Instant::now());
     }
@@ -13,14 +19,11 @@ itsy_api!(BenchFn, Bench, {
         let elapsed = context.time.expect("time started").elapsed();
         elapsed.as_secs_f64()
     }
-    fn print(&mut context, value: &str) {
-        println!("{}", value);
-    }
     fn rust_fib_r(&mut context, n: i32) -> i32 {
         fib_r(n)
     }
-    fn rust_fib_i(&mut context, n: i32) -> i32 {
-        fib_i(n)
+    fn rust_mandelbrot(&mut context, columns: u32, rows: u32) -> String {
+        mandelbrot(columns, rows)
     }
     fn rust_stringcat(&mut context, n: i32) -> String {
         stringcat(n)
@@ -59,21 +62,34 @@ fn fib_r(n: i32) -> i32 {
     }
 }
 
-fn fib_i(n: i32) -> i32 {
-    let mut i = 0;
-    let mut j = 1;
-    let mut k = 1;
-    let mut t;
-    if n == 0 {
-       return 0;
+fn mandelbrot(columns: u32, rows: u32) -> String {
+
+    let chars = [ ".", ",", "`", "´", "'", "~", "^", "°", "$", ";", "=", "o", "O", "%", "&", ":" ];
+    let mut result = "".to_string();
+    let max_x = columns as f32;
+    let max_y = rows as f32;
+    let mut y = -1.4f32;
+
+    for _ in 0..rows {
+        let mut x = -2.0f32;
+        let mut line = "".to_string();
+        for _ in 0..columns {
+            let mut r = 0f32;
+            let mut i = 0f32;
+            let mut n = 0;
+            while n < 16 && r * r + i * i <= 4.0 {
+                r = r * r - i * i + x;
+                i = 2.0 * r * i + y;
+                n += 1;
+            }
+            line += chars[n-1];
+            x += 3.6 / max_x;
+        }
+        result += &(line + "\n");
+        y += 2.81 / max_y;
     }
-    while k < n {
-        t = i + j;
-        i = j;
-        j = t;
-        k += 1;
-    }
-    return j;
+
+    result
 }
 
 fn stringcat(n: i32) -> String {

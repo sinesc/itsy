@@ -1,47 +1,118 @@
+/*
+ * Basic ballpark benchmarking. TODO: super clunky due to lack of closures, hashmaps and string interpolation.
+ */
 
+struct Test {
+    name: String,
+    itsy_time: f64,
+    rust_time: f64,
+}
+
+fn bench_mandelbrot(results: [ Test ]) {
+
+    start_time();
+    let rust_result = rust_mandelbrot(800, 600);
+    let rust_time = stop_time();
+
+    start_time();
+    let itsy_result = itsy_mandelbrot(800, 600);
+    let itsy_time = stop_time();
+
+    if itsy_result != rust_result {
+        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+    }
+
+    results.push(Test { name: "mandelbrot", rust_time: rust_time, itsy_time: itsy_time });
+}
+
+fn bench_fib_r(results: [ Test ]) {
+
+    start_time();
+    let rust_result = rust_fib_r(36);
+    let rust_time = stop_time();
+
+    start_time();
+    let itsy_result = itsy_fib_r(36);
+    let itsy_time = stop_time();
+
+    if itsy_result != rust_result {
+        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+    }
+
+    results.push(Test { name: "fib_r", rust_time: rust_time, itsy_time: itsy_time });
+}
+
+fn bench_stringcat(results: [ Test ]) {
+
+    start_time();
+    let rust_result = rust_stringcat(5000);
+    let rust_time = stop_time();
+
+    start_time();
+    let itsy_result = itsy_stringcat(5000);
+    let itsy_time = stop_time();
+
+    if itsy_result != rust_result {
+        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+    }
+
+    results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
+}
 
 fn main() {
 
-    start_time();
-    let rust_fib_i = rust_fib_i(46);
-    let t_rust_fib_i = stop_time();
-    result("rust_fib_i", rust_fib_i, t_rust_fib_i);
+    let passes: [ [ Test ] ] = [ ];
 
-    start_time();
-    let fib_i = itsy_fib_i(46);
-    let t_fib_i = stop_time();
-    result("fib_i", fib_i, t_fib_i);
-    ratio(t_fib_i, t_rust_fib_i);
+    for pass in 0..10 {
 
-    start_time();
-    let rust_fib_r = rust_fib_r(36);
-    let t_rust_fib_r = stop_time();
-    result("rust_fib_r", rust_fib_r, t_rust_fib_r);
+        println("pass " + pass as String + "...");
+        let pass_results: [ Test ] = [ ];
 
-    start_time();
-    let fib_r = itsy_fib_r(36);
-    let t_fib_r = stop_time();
-    result("fib_r", fib_r, t_fib_r);
-    ratio(t_fib_r, t_rust_fib_r);
+        bench_mandelbrot(pass_results);
+        bench_fib_r(pass_results);
+        bench_stringcat(pass_results);
 
-    start_time();
-    let rust_stringcat = rust_stringcat(5000);
-    let t_rust_stringcat = stop_time();
-    result("rust_stringcat", 0, t_rust_stringcat);
+        passes.push(pass_results);
+    }
 
-    start_time();
-    let stringcat = itsy_stringcat(5000);
-    let t_stringcat = stop_time();
-    result("itsy_stringcat", 0, t_stringcat);
-    ratio(t_stringcat, t_rust_stringcat);
-}
+    println("");
 
-fn result(label: String, value: i32, elapsed: f64) {
-    print(label + ": " + (value as String) + " in " + (elapsed as String) + "s");
-}
+    for t in 0..passes[0].len() {
 
-fn ratio(itsy: f64, rust: f64) {
-    print("ratio: " + ((itsy / rust) as String));
+        let itsy_avg = 0.0;
+        let rust_avg = 0.0;
+        println(passes[0][t].name);
+
+        for source in [ "itsy", "rust" ] {
+
+            let min = 0.0;
+            let max = 0.0;
+            let sum = 0.0;
+
+            for p in 0..passes.len() {
+                let time = if source == "itsy" { passes[p][t].itsy_time } else { passes[p][t].rust_time };
+                sum += time;
+                if (min == 0.0 || min > time) {
+                    min = time;
+                }
+                if (max < time) {
+                    max = time;
+                }
+            }
+
+            let avg = sum / passes.len() as f64;
+
+            if source == "itsy" {
+                itsy_avg = avg
+            } else {
+                rust_avg = avg
+            }
+
+            println("  " + source + " min: " + (min as String) + " max: " + (max as String) + " dif: " + ((max-min) as String) + " avg: " + avg as String);
+        }
+
+        println("  factor " + (itsy_avg / rust_avg) as String);
+    }
 }
 
 fn itsy_fib_r(n: i32) -> i32 {
@@ -52,21 +123,35 @@ fn itsy_fib_r(n: i32) -> i32 {
     }
 }
 
-fn itsy_fib_i(n: i32) -> i32 {
-    let mut i = 0;
-    let mut j = 1;
-    let mut k = 1;
-    let mut t;
-    if n == 0 {
-       return 0;
+fn itsy_mandelbrot(columns: u32, rows: u32) -> String {
+
+    let chars = [ ".", ",", "`", "´", "'", "~", "^", "°", "$", ";", "=", "o", "O", "%", "&", ":" ];
+    let result = "";
+    let max_x = columns as f32;
+    let max_y = rows as f32;
+    let y = -1.4f32;
+
+    for _ in 0..rows {
+        let x = -2.0f32;
+        let line = "";
+        for _ in 0..columns {
+            let r = 0f32;
+            let i = 0f32;
+            let n = 0;
+            while n < 16 && r * r + i * i <= 4.0 {
+                r = r * r - i * i + x;
+                i = 2.0 * r * i + y;
+                n += 1;
+            }
+            line += chars[n-1];
+            x += 3.6 / max_x;
+        }
+        result += line + "
+";
+        y += 2.81 / max_y;
     }
-    while k < n {
-        t = i + j;
-        i = j;
-        j = t;
-        k += 1;
-    }
-    return j;
+
+    result
 }
 
 fn itsy_stringcat(n: i32) -> String {
@@ -75,4 +160,21 @@ fn itsy_stringcat(n: i32) -> String {
         s += itsy_stringcat(n - 1);
     }
     s
+}
+
+struct Struct {
+    a: i32,
+}
+
+fn itsy_structs(n: i32) -> i32 {
+    let result = 0;
+    for j in 0..100i32 {
+        let x = Struct { a: 1 };
+        for i in 0..n {
+            let y = Struct { a: x.a  };
+            x.a += y.a;
+        }
+        result += x.a;
+    }
+    result
 }
