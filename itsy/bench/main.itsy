@@ -59,23 +59,7 @@ fn bench_stringcat(results: [ Test ]) {
     results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
 }
 
-fn main() {
-
-    let passes: [ [ Test ] ] = [ ];
-
-    for pass in 0..10 {
-
-        println("pass " + pass as String + "...");
-        let pass_results: [ Test ] = [ ];
-
-        bench_mandelbrot(pass_results);
-        bench_fib_r(pass_results);
-        bench_stringcat(pass_results);
-
-        passes.push(pass_results);
-    }
-
-    println("");
+fn print_results(passes: [ [ Test ] ]) {
 
     for t in 0..passes[0].len() {
 
@@ -113,6 +97,25 @@ fn main() {
 
         println("  factor " + (itsy_avg / rust_avg) as String);
     }
+}
+
+fn main() {
+
+    let num_passes = 10;
+    let passes: [ [ Test ] ] = [ ];
+    print("running " + (num_passes as String) + " passes, pass ");
+
+    for pass in 0..num_passes {
+        print((pass + 1) as String + "...");
+        let pass_results: [ Test ] = [ ];
+        bench_mandelbrot(pass_results);
+        bench_fib_r(pass_results);
+        bench_stringcat(pass_results);
+        passes.push(pass_results);
+    }
+
+    println("");
+    print_results(passes);
 }
 
 fn itsy_fib_r(n: i32) -> i32 {
@@ -160,21 +163,4 @@ fn itsy_stringcat(n: i32) -> String {
         s += itsy_stringcat(n - 1);
     }
     s
-}
-
-struct Struct {
-    a: i32,
-}
-
-fn itsy_structs(n: i32) -> i32 {
-    let result = 0;
-    for j in 0..100i32 {
-        let x = Struct { a: 1 };
-        for i in 0..n {
-            let y = Struct { a: x.a  };
-            x.a += y.a;
-        }
-        result += x.a;
-    }
-    result
 }
