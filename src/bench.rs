@@ -1,5 +1,5 @@
 use itsy::*;
-use std::time::Instant;
+use std::{io::{self, Write}, time::Instant};
 
 struct Bench {
     time: Option<Instant>,
@@ -8,6 +8,7 @@ struct Bench {
 itsy_api!(BenchFn, Bench, {
     fn print(&mut context, value: &str) {
         print!("{}", value);
+        io::stdout().flush().unwrap();
     }
     fn println(&mut context, value: &str) {
         println!("{}", value);

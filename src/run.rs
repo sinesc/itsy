@@ -1,5 +1,5 @@
 use itsy::*;
-use std::env;
+use std::{env, io::{self, Write}};
 
 /*
  * Demo script runner
@@ -10,6 +10,7 @@ use std::env;
 itsy_api!(MyAPI, (), {
     fn print(&mut context, value: String) {
         print!("{}", value);
+        io::stdout().flush().unwrap();
     }
     fn println(&mut context, value: String) {
         println!("{}", value);

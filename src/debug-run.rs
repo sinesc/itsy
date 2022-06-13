@@ -1,5 +1,5 @@
 use itsy::*;
-use std::{env, path::PathBuf, collections::HashMap};
+use std::{env, path::PathBuf, collections::HashMap, io::{self, Write}};
 
 /*
  * This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM.
@@ -10,6 +10,7 @@ use std::{env, path::PathBuf, collections::HashMap};
 itsy_api!(MyAPI, (), {
     fn print(&mut context, value: String) {
         print!("{}", value);
+        io::stdout().flush().unwrap();
     }
     fn println(&mut context, value: String) {
         println!("{}", value);
