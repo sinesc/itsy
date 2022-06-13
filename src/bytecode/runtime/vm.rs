@@ -164,7 +164,7 @@ impl<T, U> VM<T, U> {
                 let src = self.stack.data();
                 self.heap.item_mut(target_heap_ref.index()).data.extend_from_slice(&src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
             },
-            CopyTarget::Stack => self.stack.extend(prototype_offset, num_bytes),
+            CopyTarget::Stack => unreachable!(), //self.stack.extend(prototype_offset, num_bytes),
         }
     }
 

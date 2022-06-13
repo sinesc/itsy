@@ -65,12 +65,12 @@ impl Stack {
         self.data.copy_within(from..from+num_bytes, to);
     }
     /// Extends stack with data from stack.
-    pub fn extend(self: &mut Self, from: StackAddress, num_bytes: StackAddress) { // TODO: check that this isn't as slow as it looks, used quite a lot in construction
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub fn extend(self: &mut Self, from: StackAddress, num_bytes: StackAddress) {
         debug_assert!(from + num_bytes <= self.data.len() as StackAddress);
         let from = from as usize;
         let num_bytes = num_bytes as usize;
-        let mut data: Vec<_> = self.data[from..from+num_bytes].into();
-        self.data.append(&mut data);
+        self.data.extend_from_within(from..from+num_bytes)
     }
     /// Extends stack with given data.
     pub fn extend_from(self: &mut Self, slice: &[u8]) {
