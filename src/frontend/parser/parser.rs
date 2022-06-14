@@ -277,7 +277,7 @@ fn string(i: Input<'_>) -> Output<Expression> {
             }
         }
 
-        ast.unwrap()
+        ast.unwrap_or_else(|| lit("".to_string()))
 
     })(i)
 }
