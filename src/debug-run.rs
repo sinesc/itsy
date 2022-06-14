@@ -21,7 +21,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        println!("usage: run <filename>");
+        println!("usage: debug-run <filename>");
     } else {
         let mut files: HashMap<String, (PathBuf, String)> = HashMap::new();
         let write_logs = std::path::Path::new("./logs/").is_dir();
