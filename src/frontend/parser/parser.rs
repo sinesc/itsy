@@ -5,7 +5,6 @@ pub mod error;
 mod nomutil;
 pub mod types;
 
-use nom::Parser;
 use nom::character::{is_alphanumeric, is_alphabetic, complete::{none_of, one_of, digit0, char, digit1}};
 use nom::bytes::complete::{take_while, take_while1, tag, escaped};
 use nom::combinator::{recognize, opt, all_consuming, map, not};
@@ -15,13 +14,13 @@ use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::UnorderedMap;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
-use types::{Input, Output, Error, ParserState, ParsedModule, ParsedProgram};
+use types::{Input, Output, Failure, ParserState, ParsedModule, ParsedProgram};
 use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
 fn check_state<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
 where
-    P: Parser<Input<'a>, O, Error<'a>>,
+    P: nom::Parser<Input<'a>, O, Failure<'a>>,
     C: Fn(ParserState) -> Option<ParseErrorKind>
 {
     move |input: Input<'_>| {
@@ -29,7 +28,7 @@ where
         let inner_result = parser.parse(input)?;
 
         if let Some(kind) = checker(before.state()) {
-            Err(nom::Err::Failure(Error { input: before, kind: kind }))
+            Err(nom::Err::Failure(Failure { input: before, kind: kind }))
         } else {
             Ok(inner_result)
         }
@@ -38,6 +37,7 @@ where
 
 fn with_state<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserState), mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
     move |input: Input<'_>| {
+        use nom::Parser;
         let i = input.clone();
         let state = i.state();
         i.state_mut(s);
@@ -80,6 +80,7 @@ fn path(i: Input<'_>) -> Output<Path> {
 // literal numerical (-3.14f32)
 
 fn numerical(i: Input<'_>) -> Output<Literal> {
+    use nom::Parser;
 
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
@@ -173,7 +174,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
         }
     }
 
-    Err(nom::Err::Failure(Error { input: i, kind: ParseErrorKind::InvalidNumerical }))
+    Err(nom::Err::Failure(Failure { input: i, kind: ParseErrorKind::InvalidNumerical }))
 }
 
 // literal boolean (true, false)
@@ -205,7 +206,7 @@ fn string(i: Input<'_>) -> Output<Literal> {
             }
         }),
         // non-empty string
-        map(delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"n\\")), char('"')), move |m: Input<'_>| {
+        map(delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"rnt\\")), char('"')), move |m: Input<'_>| {
             Literal {
                 position    : position,
                 value       : LiteralValue::String(m.to_string()),
@@ -294,7 +295,7 @@ fn assignable(i: Input<'_>) -> Output<Expression> {
     let var_position = i.position();
     let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
     let op_position = init.0.position();
-    fold_many0(
+    fold_many0_mut(
         alt((
             map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, e)),
             map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, type_id: None })))
@@ -546,7 +547,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec7(i: Input<'_>) -> Output<Expression> {
         let init = operand(i.clone())?;
         let position = i.position();
-        fold_many0(
+        fold_many0_mut(
             alt((
                 map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, e)),
                 map(preceded(ws(tag(".")), ws(call_ident)), |i| (BinaryOperator::Access, Expression::Call(i))),
@@ -587,7 +588,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec5(i: Input<'_>) -> Output<Expression> {
         let init = prec6(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(alt((tag("*"), tag("/"), tag("%"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec6),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -596,7 +597,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec4(i: Input<'_>) -> Output<Expression> {
         let init = prec5(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(alt((tag("+"), tag("-"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec5),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -605,7 +606,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec3(i: Input<'_>) -> Output<Expression> {
         let init = prec4(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec4),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -614,7 +615,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec2(i: Input<'_>) -> Output<Expression> {
         let init = prec3(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(alt((tag("!="), tag("=="))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec3),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -623,7 +624,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec1(i: Input<'_>) -> Output<Expression> {
         let init = prec2(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(tag("&&"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec2),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -632,7 +633,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn prec0(i: Input<'_>) -> Output<Expression> {
         let init = prec1(i)?;
         let position = init.0.position();
-        fold_many0(
+        fold_many0_mut(
             pair(map(tag("||"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec1),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
@@ -756,7 +757,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     }
     let position = i.position();
     let the_cloned_clone = i.clone();
-    ws(map_res(
+    ws(map_result(
         pair(
             terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
             tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
@@ -772,7 +773,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
                 }
             }
             if have_data && have_value {
-                Err(Error { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalEnumDef })
+                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalEnumDef })
             } else {
                 Ok(EnumDef {
                     position: position,

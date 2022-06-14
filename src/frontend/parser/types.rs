@@ -129,11 +129,11 @@ impl<'a> PartialEq for Input<'a> {
 }
 
 /// Parser output
-pub(super) type Output<'a, O> = nom::IResult<Input<'a>, O, Error<'a>>;
+pub(super) type Output<'a, O> = nom::IResult<Input<'a>, O, Failure<'a>>;
 
-/// Parser error
+/// Parser failure. Converted to ParseError on return of the parse() function to remove the lifetime bound.
 #[derive(Debug)]
-pub(super) struct Error<'a> {
+pub(super) struct Failure<'a> {
     pub input: Input<'a>,
     pub kind: ParseErrorKind,
 }
