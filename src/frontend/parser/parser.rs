@@ -5,8 +5,8 @@ pub mod error;
 mod nomutil;
 pub mod types;
 
-use nom::character::{is_alphanumeric, is_alphabetic, complete::{none_of, one_of, digit0, char, digit1}};
-use nom::bytes::complete::{take_while, take_while1, tag, escaped};
+use nom::character::{is_alphanumeric, is_alphabetic, complete::{one_of, digit0, char, digit1}};
+use nom::bytes::complete::{take_while, take_while1, tag};
 use nom::combinator::{recognize, opt, all_consuming, map, not};
 use nom::multi::{separated_list0, separated_list1, many0};
 use nom::branch::alt;
@@ -206,10 +206,10 @@ fn string(i: Input<'_>) -> Output<Literal> {
             }
         }),
         // non-empty string
-        map(delimited(char('"'), escaped(none_of("\\\""), '\\', one_of("\"rnt\\")), char('"')), move |m: Input<'_>| {
+        map(parse_string, move |m: String| {
             Literal {
                 position    : position,
-                value       : LiteralValue::String(m.to_string()),
+                value       : LiteralValue::String(m),
                 type_name   : None,
                 type_id     : None,
             }
