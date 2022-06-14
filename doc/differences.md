@@ -3,9 +3,19 @@
 Itsy is designed to be used as a scripting language within Rust applications. Its syntax closely resembles what the Rust language could look like without generics or lifetimes.
 This document lists some of the differences between the languages.
 
+## String interpolation
+
+String literals support interpolation. Currently this requires that the type of the interpolated value can be cast to a String via `as`. Future: Type must implement Display trait.
+
+
+```rust
+let pi = 3.14159265359;
+print("\u{03C0} equals {pi}!"); // -> π equals 3.14159265359!!
+```
+
 ## Arrays
 
-Itsy arrays are dynamically sized.
+Arrays are dynamically sized.
 
 ```rust
 let x = [ 1, 2, 3 ];
@@ -30,7 +40,7 @@ Array operations are documented [here](builtin.array.md).
 
 ## References
 
-All non-primitive types in Itsy are reference types. There is no support for explicit references. (Note: currently this does not require the use of `mut x` in arguments/binding. This will likely change in the future.)
+All non-primitive types are reference types. There is no support for explicit references. (Note: currently this does not require the use of `mut x` in arguments/binding. This will likely change in the future.)
 
 ```rust
 struct Struct {
