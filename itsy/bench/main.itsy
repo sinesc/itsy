@@ -1,5 +1,5 @@
 /*
- * Basic ballpark benchmarking. TODO: super clunky due to lack of closures, hashmaps and string interpolation.
+ * Basic ballpark benchmarking. TODO: super clunky due to lack of closures and hashmaps.
  */
 
 struct Test {
@@ -19,7 +19,7 @@ fn bench_mandelbrot(results: [ Test ]) {
     let itsy_time = stop_time();
 
     if itsy_result != rust_result {
-        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+        print("ERROR: {itsy_result} != {rust_result}");
     }
 
     results.push(Test { name: "mandelbrot", rust_time: rust_time, itsy_time: itsy_time });
@@ -36,7 +36,7 @@ fn bench_fib_r(results: [ Test ]) {
     let itsy_time = stop_time();
 
     if itsy_result != rust_result {
-        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+        print("ERROR: {itsy_result} != {rust_result}");
     }
 
     results.push(Test { name: "fib_r", rust_time: rust_time, itsy_time: itsy_time });
@@ -53,7 +53,7 @@ fn bench_stringcat(results: [ Test ]) {
     let itsy_time = stop_time();
 
     if itsy_result != rust_result {
-        print("ERROR: " + (itsy_result as String) + " != " + (rust_result as String));
+        print("ERROR: {itsy_result} != {rust_result}");
     }
 
     results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
@@ -92,10 +92,10 @@ fn print_results(passes: [ [ Test ] ]) {
                 rust_avg = avg
             }
 
-            println("  " + source + " min: " + (min as String) + " max: " + (max as String) + " dif: " + ((max-min) as String) + " avg: " + avg as String);
+            println("  {source} min: {min} max: {max} dif: {max-min} avg: {avg}");
         }
 
-        println("  factor " + (itsy_avg / rust_avg) as String);
+        println("  factor {itsy_avg / rust_avg}x");
     }
 }
 
@@ -103,7 +103,7 @@ fn main() {
 
     let num_passes = 10;
     let passes: [ [ Test ] ] = [ ];
-    print("running " + (num_passes as String) + " passes, pass ");
+    print("running {num_passes} passes, pass ");
 
     for pass in 0..num_passes {
         print((pass + 1) as String + "...");
@@ -149,8 +149,7 @@ fn itsy_mandelbrot(columns: u32, rows: u32) -> String {
             line += chars[n-1];
             x += 3.6 / max_x;
         }
-        result += line + "
-";
+        result += line + "\n";
         y += 2.81 / max_y;
     }
 
