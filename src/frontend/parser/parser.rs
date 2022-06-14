@@ -8,10 +8,10 @@ pub mod types;
 use nom::character::{is_alphanumeric, is_alphabetic, complete::{one_of, digit0, char, digit1}};
 use nom::bytes::complete::{take_while, take_while1, tag};
 use nom::combinator::{recognize, opt, all_consuming, map, not};
-use nom::multi::{separated_list0, separated_list1, many0};
+use nom::multi::{separated_list0, separated_list1, many0, fold_many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
-use crate::prelude::UnorderedMap;
+use crate::prelude::*;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Failure, ParserState, ParsedModule, ParsedProgram};
@@ -193,28 +193,93 @@ fn boolean(i: Input<'_>) -> Output<Literal> {
 
 // literal string ("hello world")
 
-fn string(i: Input<'_>) -> Output<Literal> {
+fn string(i: Input<'_>) -> Output<Expression> {
+
     let position = i.position();
-    alt((
-        // empty string (TODO this should be possible without a second mapping)
-        map(tag("\"\""), move |_: Input<'_>| {
-            Literal {
-                position    : position,
-                value       : LiteralValue::String("".to_string()),
-                type_name   : None,
-                type_id     : None,
+
+    enum StringFragment<'a> {
+        Literal(&'a str),
+        EscapedChar(char),
+        Interpolation(Expression),
+    }
+
+    fn fragments(i: Input<'_>) -> Output<Vec<StringFragment<'_>>> {
+        // gather fragments into a vector
+        fold_many0(
+            alt((
+                map(parse_literal, |l| StringFragment::Literal(&l.data)),
+                map(parse_escaped_char, |e| StringFragment::EscapedChar(e)),
+                map(delimited(char('{'), expression, char('}')), |i| StringFragment::Interpolation(i)),
+            )),
+            Vec::new,
+            |mut vec, fragment| {
+                vec.push(fragment);
+                vec
+            },
+        )(i)
+    }
+
+    map(delimited(char('"'), fragments, char('"')), move |mut fragments| {
+
+        let add = |left, right| Expression::BinaryOp(Box::new(BinaryOp {
+            position,
+            op: BinaryOperator::Add,
+            left,
+            right,
+            type_id: None,
+        }));
+
+        let lit = |string| Expression::Literal(Literal {
+            position,
+            value: LiteralValue::String(string),
+            type_name: None,
+            type_id: None,
+        });
+
+        let cast = |expr| Expression::Cast(Box::new(Cast {
+            position,
+            expr,
+            ty: TypeName::from_str("String", position),
+            type_id: None,
+        }));
+
+        let mut current_string = "".to_string();
+        let mut ast = None;
+
+        // construct AST from fragments
+        for fragment in fragments.drain(..) {
+            match fragment {
+                StringFragment::Literal(l) => current_string.push_str(l),
+                StringFragment::EscapedChar(c) => current_string.push(c),
+                StringFragment::Interpolation(interpolation) => {
+                    let current = if current_string.len() == 0 {
+                        cast(interpolation)
+                    } else {
+                        add(
+                            lit(replace(&mut current_string, "".to_string())),
+                            cast(interpolation)
+                        )
+                    };
+                    if let Some(prev) = ast {
+                        ast = Some(add(prev, current));
+                    } else {
+                        ast = Some(current);
+                    }
+                },
             }
-        }),
-        // non-empty string
-        map(parse_string, move |m: String| {
-            Literal {
-                position    : position,
-                value       : LiteralValue::String(m),
-                type_name   : None,
-                type_id     : None,
+        }
+
+        if current_string.len() > 0 {
+            if let Some(prev) = ast {
+                ast = Some(add(prev, lit(current_string)));
+            } else {
+                ast = Some(lit(current_string));
             }
-        })
-    ))(i)
+        }
+
+        ast.unwrap()
+
+    })(i)
 }
 
 // literal array ([ 1, 2, 3 ])
@@ -285,8 +350,14 @@ fn variant_literal(i: Input<'_>) -> Output<Literal> {
 
 // literal
 
-fn literal(i: Input<'_>) -> Output<Literal> {
-    ws(alt((boolean, string, array_literal, struct_literal, numerical)))(i)
+fn literal(i: Input<'_>) -> Output<Expression> {
+    ws(alt((
+        map(boolean, |l| Expression::Literal(l)),
+        string,
+        map(array_literal, |l| Expression::Literal(l)), // TODO: can contain expressions
+        map(struct_literal, |l| Expression::Literal(l)),
+        map(numerical, |l| Expression::Literal(l)),
+    )))(i)
 }
 
 // assignment
@@ -517,7 +588,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn operand(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         ws(alt((
-            map(literal, |m| Expression::Literal(m)),
+            literal,
             map(if_block, |m| Expression::IfBlock(Box::new(m))),
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
