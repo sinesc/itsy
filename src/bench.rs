@@ -40,9 +40,7 @@ fn main() {
             vm.run(&mut context);
         }
         Err(err) => {
-            let module_path = err.module_path();
-            let loc =  err.loc();
-            println!("{} in line {}, column {} in file {}.", err, loc.0, loc.1, module_path);
+            println!("{}", err);
         }
     }
 }

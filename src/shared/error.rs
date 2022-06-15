@@ -108,12 +108,7 @@ impl BuildError {
     }
     /// Path to the module where the error occured.
     pub fn module_path(self: &Self) -> &str {
-        match &self.error {
-            Error::ParseError(e) => e.module_path(),
-            Error::ResolveError(e) => e.module_path(),
-            Error::CompileError(e) => e.module_path(),
-            Error::RuntimeError => unreachable!(),
-        }
+        self.error.module_path()
     }
 }
 
@@ -121,6 +116,6 @@ impl BuildError {
 impl Display for BuildError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.loc();
-        write!(f, "{} in line {}, column {} in file {:#?}", self.error, loc.0, loc.1, self.filename)
+        write!(f, "{} in line {}, column {} in file {}", self.error, loc.0, loc.1, self.filename.to_string_lossy())
     }
 }

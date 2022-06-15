@@ -52,7 +52,7 @@ fn main() {
             Err(err) => {
                 let module_path = err.module_path();
                 let loc =  err.loc(&files[module_path].1);
-                println!("{} in line {}, column {} in file {}.", err, loc.0, loc.1, files[module_path].0.to_str().unwrap());
+                println!("{} in line {}, column {} in file {}", err, loc.0, loc.1, files[module_path].0.to_string_lossy());
             }
         }
     }
