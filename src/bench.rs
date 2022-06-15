@@ -1,11 +1,11 @@
 use itsy::*;
 use std::{io::{self, Write}, time::Instant};
 
-struct Bench {
+struct BenchContext {
     time: Option<Instant>,
 }
 
-itsy_api!(BenchFn, Bench, {
+itsy_api!(BenchAPI, BenchContext, {
     fn print(&mut context, value: &str) {
         print!("{}", value);
         io::stdout().flush().unwrap();
@@ -33,26 +33,18 @@ itsy_api!(BenchFn, Bench, {
 
 fn main() {
     println!("Ballpark Bench™ - Measuring in approximate baseball fields");
-    let source = std::fs::read_to_string("itsy/bench/main.itsy").unwrap();
-    let mut context = Bench { time: None };
-    match build(&source) {
+    let mut context = BenchContext { time: None };
+    match build::<BenchAPI, _>("itsy/bench/main.itsy") {
         Ok(program) => {
             let mut vm = runtime::VM::new(&program);
             vm.run(&mut context);
         }
         Err(err) => {
-            let loc =  err.loc(&source);
-            println!("{} in line {}, column {}.", err, loc.0, loc.1);
+            let module_path = err.module_path();
+            let loc =  err.loc();
+            println!("{} in line {}, column {} in file {}.", err, loc.0, loc.1, module_path);
         }
     }
-}
-
-fn build(source: &str) -> Result<compiler::Program<BenchFn>, Error> {
-    let parsed = parser::parse_module(source, "")?;
-    let mut program = parser::ParsedProgram::new();
-    program.add_module(parsed);
-    let resolved = resolver::resolve::<BenchFn>(program, "main")?;
-    Ok(compiler::compile(resolved)?)
 }
 
 fn fib_r(n: i32) -> i32 {
