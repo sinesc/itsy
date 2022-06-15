@@ -1808,3 +1808,32 @@ fn temporary_traitobject() {
     ");
     assert_all(&result, &[ 123u8, 123, 246 ]);
 }
+
+#[test]
+fn return_void() {
+    let result = run("
+        fn main() {
+            ret_u8(1);
+            return;
+        }
+    ");
+    assert_all(&result, &[ 1u8 ]);
+}
+
+#[test]
+fn maybe_return_with_refs() {
+    let result = run("
+        fn test() -> String {
+            let x = \"Heapref\";
+            if x == \"Heapref\" {
+                return x;
+            }
+            x
+        }
+
+        fn main() {
+            ret_string(test());
+        }
+    ");
+    assert_all(&result, &[ "Heapref".to_string() ]);
+}
