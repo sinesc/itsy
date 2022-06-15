@@ -111,7 +111,7 @@ impl Function {
     }
 }
 
-/// The kind of a function described by a FunctionInfo.
+/// The kind of a function described by a Function.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FunctionKind {
     Function,

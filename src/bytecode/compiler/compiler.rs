@@ -2022,7 +2022,7 @@ impl<T> TypeContainer for Compiler<T> {
     }
 }
 
-/// A container holding binding id to BindingInfo mappings
+/// A container holding binding id to Binding mappings
 #[cfg(feature="compiler")]
 impl<T> BindingContainer for Compiler<T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {

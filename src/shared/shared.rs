@@ -66,7 +66,7 @@ pub(crate) trait TypeContainer {
     }
 }
 
-/// A container holding binding id to BindingInfo mappings
+/// A container holding binding id to Binding mappings
 #[cfg(feature="compiler")]
 pub(crate) trait BindingContainer {
     /// Returns a reference to the type id.

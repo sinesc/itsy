@@ -1286,7 +1286,7 @@ impl<'ctx> TypeContainer for Resolver<'ctx> {
     }
 }
 
-/// A container holding binding id to BindingInfo mappings
+/// A container holding binding id to Binding mappings
 impl<'ctx> BindingContainer for Resolver<'ctx> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         self.scopes.binding_ref(binding_id)
