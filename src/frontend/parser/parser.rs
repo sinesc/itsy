@@ -844,7 +844,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
                 }
             }
             if have_data && have_value {
-                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalEnumDef })
+                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalVariantMix })
             } else {
                 Ok(EnumDef {
                     position: position,
@@ -1041,7 +1041,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     ws(map(
         preceded(
             check_state(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((sepl(ident), sepl(tag("in")), sepl(alt((loop_range, expression))), block))
+            tuple((sepl(ident), sepl(tag("in")), sepl(alt((loop_range, expression))), with_state(&|state: &mut ParserState| state.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
@@ -1067,7 +1067,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     ws(map(
         preceded(
             check_state(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
-            pair(sepl(expression), block)
+            pair(sepl(expression), with_state(&|state: &mut ParserState| state.in_loop = true, block))
         ),
         move |m| WhileLoop {
             position: position,
@@ -1094,6 +1094,30 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
     )(i)
 }
 
+// loop control (break/continue)
+
+fn break_statement(i: Input<'_>) -> Output<Break> {
+    let position = i.position();
+    map(
+        preceded(
+            check_state(tag("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
+            ws(char(';'))
+        ),
+        move |_| Break { position }
+    )(i)
+}
+
+fn continue_statement(i: Input<'_>) -> Output<Continue> {
+    let position = i.position();
+    map(
+        preceded(
+            check_state(tag("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
+            ws(char(';'))
+        ),
+        move |_| Continue { position }
+    )(i)
+}
+
 // statement
 
 fn statement(i: Input<'_>) -> Output<Statement> {
@@ -1112,7 +1136,10 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
+        map(break_statement, |m| Statement::Break(m)),
+        map(continue_statement, |m| Statement::Continue(m)),
         map(block, |m| Statement::Block(m)),
+
         map(terminated(expression, char(';')), |m| Statement::Expression(m)),
     )))(i)
 }

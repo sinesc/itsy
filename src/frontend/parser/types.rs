@@ -60,12 +60,14 @@ impl ParsedProgram {
 #[derive(Clone, Copy, Debug)]
 pub(super)struct ParserState {
     pub in_function: bool,
+    pub in_loop: bool,
 }
 
 impl ParserState {
     fn new() -> Self {
         ParserState {
             in_function: false,
+            in_loop: false,
         }
     }
 }

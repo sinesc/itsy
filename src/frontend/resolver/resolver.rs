@@ -367,9 +367,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::Block(block)             => self.resolve_block(block, None),
             S::Return(ret)              => self.resolve_return(ret),
             S::Expression(expression)   => self.resolve_expression(expression, None),
-            S::Module(_)                => { Ok(()) /* nothing to do here */ },
             S::Use(use_declaration)                => self.resolve_use_declaration(use_declaration),
             S::EnumDef(enum_def)        => self.resolve_enum_def(enum_def),
+            S::Module(_) | S::Break(_) | S::Continue(_) => { Ok(()) /* nothing to do here */ },
         }
     }
 

@@ -105,7 +105,7 @@ macro_rules! impl_matchall {
         impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock, MatchBlock)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Expression, Module, Use, EnumDef)
+        impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
     };
     ($self:ident, $enum_name:ident, $val_name:ident, $code:tt $(, $variant_name:ident)+) => {
         match $self {
@@ -188,6 +188,8 @@ pub enum Statement {
     IfBlock(IfBlock),
     Block(Block),
     Return(Return),
+    Break(Break),
+    Continue(Continue),
     Expression(Expression),
     Module(Module),
     Use(Use),
@@ -639,6 +641,34 @@ impl_positioned!(Return);
 impl Resolvable for Return {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.as_ref().map_or(Progress::zero(), |e| e.num_resolved())
+    }
+}
+
+/// A break statement.
+#[derive(Debug)]
+pub struct Break {
+    pub position: Position,
+}
+
+impl_positioned!(Break);
+
+impl Resolvable for Break {
+    fn num_resolved(self: &Self) -> Progress {
+        Progress::new(1, 1)
+    }
+}
+
+/// A continue statement.
+#[derive(Debug)]
+pub struct Continue {
+    pub position: Position,
+}
+
+impl_positioned!(Continue);
+
+impl Resolvable for Continue {
+    fn num_resolved(self: &Self) -> Progress {
+        Progress::new(1, 1)
     }
 }
 

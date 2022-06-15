@@ -183,7 +183,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     }
                 }
                 Ok(())
-            }
+            },
             S::TraitDef(trait_def) => {
                 for function in &trait_def.functions {
                     if function.block.is_some() {
@@ -200,7 +200,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.write_discard(result_type);
                 }
                 Ok(())
-            }
+            },
             S::ForLoop(for_loop) => self.compile_for_loop(for_loop),
             S::WhileLoop(while_loop) => self.compile_while_loop(while_loop),
             S::Block(block) => {
@@ -210,11 +210,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.write_discard(result_type);
                 }
                 Ok(())
-            }
+            },
             S::Expression(expression) => {
                 self.compile_expression(expression)?;
                 let result_type = self.item_type(expression);
                 self.write_discard(result_type);
+                Ok(())
+            },
+            S::Break(_) => {
+                Ok(())
+            },
+            S::Continue(_) => {
                 Ok(())
             }
         }
