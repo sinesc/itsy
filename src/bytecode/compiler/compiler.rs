@@ -4,7 +4,7 @@ mod stack_frame;
 #[macro_use] mod macros;
 pub mod error;
 mod util;
-mod binding_state;
+mod init_state;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
@@ -14,7 +14,7 @@ use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, AR
 use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-use binding_state::{BindingState, BranchingKind, BranchingPath};
+use init_state::{InitState, BranchingKind, BranchingPath};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 struct Compiler<T> {
@@ -31,7 +31,7 @@ struct Compiler<T> {
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
     call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
     /// Tracks variable initialization state.
-    init_state: BindingState,
+    init_state: InitState,
     /// Module base path. For error reporting only.
     module_path: String,
     /// Contiguous trait function enumeration/mapping.
@@ -93,7 +93,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         functions                   : UnorderedMap::new(),
         call_placeholder            : UnorderedMap::new(),
         constructors                : UnorderedMap::new(),
-        init_state                  : BindingState::new(),
+        init_state                  : InitState::new(),
         module_path                 : "".to_string(),
         trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),

@@ -46,11 +46,11 @@ impl Branching {
 }
 
 /// Binding activation and initialization tracking.
-pub struct BindingState {
+pub struct InitState {
     branchings: Vec<Branching>,
 }
 
-impl BindingState {
+impl InitState {
     /// Returns a new empty instance.
     pub fn new() -> Self {
         Self { branchings: Vec::new() }
