@@ -8,6 +8,16 @@ pub enum BranchingKind {
     Double,
 }
 
+/// Scope type of this branching. break/continue/return need to recursively consider branches
+/// until they hit the appropriate exit scope, e.g. break needs to drop all initialized references
+/// of all branches up to the closest Loop branch
+#[derive(Copy, Clone, PartialEq)]
+pub enum BranchingScope {
+    Function,
+    Block,
+    Loop,
+}
+
 /// Path within a branching, either A (if or block) or B (else)
 #[derive(Copy, Clone, PartialEq)]
 pub enum BranchingPath {
@@ -18,7 +28,7 @@ pub enum BranchingPath {
 /// State of a binding within a Branching.
 struct BranchingBinding {
     /// Whether the binding was activated exactly in this Branching.
-    activated: bool,
+    declared: bool,
     /// Whether path a (if or block) is initialized.
     path_a: bool,
     /// Whether path b (else) is initialized.
@@ -29,23 +39,28 @@ struct BranchingBinding {
 struct Branching {
     /// Bindings activated or initialized in this branching.
     bindings: UnorderedMap<BindingId, BranchingBinding>,
-    /// Type of this branching.
+    /// Single/Double branching
     kind: BranchingKind,
     /// The current path within a double branching.
     current_path: BranchingPath,
+    /// The type of the branching scope.
+    scope: BranchingScope,
 }
 
 impl Branching {
-    fn new(kind: BranchingKind) -> Self {
+    fn new(kind: BranchingKind, scope: BranchingScope) -> Self {
         Self {
             bindings: UnorderedMap::new(),
             kind,
             current_path: BranchingPath::A,
+            scope,
         }
     }
 }
 
-/// Binding activation and initialization tracking.
+/// Binding declaration and initialization tracking.
+/// Reminder: This data is ephemeral and represents only the current state during compilation
+/// as pop() merges the state of ended scopes into the now current scope.
 pub struct InitState {
     branchings: Vec<Branching>,
 }
@@ -57,8 +72,8 @@ impl InitState {
     }
 
     /// Pushes a branching. A branching represents either a single unconditional scope or (up to) two conditional scopes (i.e. if/else).
-    pub fn push(self: &mut Self, kind: BranchingKind) {
-        self.branchings.push(Branching::new(kind));
+    pub fn push(self: &mut Self, kind: BranchingKind, scope: BranchingScope) {
+        self.branchings.push(Branching::new(kind, scope));
     }
 
     /// Sets the current branching path for subsequent inits.
@@ -66,7 +81,7 @@ impl InitState {
         self.branchings.last_mut().unwrap().current_path = path;
     }
 
-    /// Pops branching and propagates unconditionally initialized bindings to parent.
+    /// Pops branching and propagates unconditionally initialized bindings to parent. // TODO: add state for 'maybe initialized', those refs may have to be decref'd
     pub fn pop(self: &mut Self) {
         let branch = self.branchings.pop().unwrap();
         for (binding_id, binding_state) in branch.bindings {
@@ -77,23 +92,29 @@ impl InitState {
         }
     }
 
-    /// Activates (declares the binding) a binding in this (Single) branching.
-    pub fn activate(self: &mut Self, binding_id: BindingId) {
-        self.current_mut(binding_id).activated = true;
-    }
-
     /// Returns current branching depth.
     pub fn len(self: &Self) -> usize {
         self.branchings.len()
     }
 
-    /// Whether the binding was activated in exactly this branching (will be a Single block).
-    pub fn activated(self: &Self, binding_id: BindingId) -> bool {
-        let branching = self.branchings.last().unwrap();
-        match branching.bindings.get(&binding_id) {
-            Some(binding) => binding.activated,
-            _ => false
+    /// Declares a binding in this (Single) branching.
+    pub fn declare(self: &mut Self, binding_id: BindingId) {
+        self.current_mut(binding_id).declared = true;
+    }
+
+    /// Whether the binding was declared in exactly this scope or recursively up to the given type of scope (required when returning/breaking out of multiple scopes)
+    pub fn declared(self: &Self, binding_id: BindingId, scope: Option<BranchingScope>) -> bool {
+        for branching in self.branchings.iter().rev() {
+            match branching.bindings.get(&binding_id) {
+                Some(binding) if binding.declared => return true,
+                _ => { },
+            }
+            // don't recursively scan outer scopes unless a search scope type is specified and not yet found.
+            if scope.is_none() || branching.scope == scope.unwrap() {
+                break;
+            }
         }
+        false
     }
 
     /// Initializes a binding in the current branching path.
@@ -104,14 +125,15 @@ impl InitState {
         }
     }
 
-    /// Whether a binding is initialized in the current branching path at the current code position (ephemeral data)
+    /// Whether a binding is initialized in the current branching path at the current code position.
     pub fn initialized(self: &Self, binding_id: BindingId) -> bool {
         for branching in self.branchings.iter().rev() {
             if let Some(binding) = branching.bindings.get(&binding_id) {
-                if match branching.current_path {
+                // this used to continue looping if both branches were false, now immediately returns. this should be fine since there is no way to uninitialize a binding after it was already initialized
+                return match branching.current_path {
                     BranchingPath::A => binding.path_a,
                     BranchingPath::B => binding.path_b,
-                } { return true; } // woah, ugly
+                };
             }
         }
         return false;
@@ -119,6 +141,6 @@ impl InitState {
 
     /// Returns a mutable reference to the state of a binding.
     fn current_mut(self: &mut Self, binding_id: BindingId) -> &mut BranchingBinding {
-        self.branchings.last_mut().unwrap().bindings.entry(binding_id).or_insert(BranchingBinding { activated: false, path_a: false, path_b: false })
+        self.branchings.last_mut().unwrap().bindings.entry(binding_id).or_insert(BranchingBinding { declared: false, path_a: false, path_b: false })
     }
 }

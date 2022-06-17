@@ -11,10 +11,10 @@ use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TY
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
-use stack_frame::{Local, StackFrame, StackFrames, LocalOrigin};
+use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-use init_state::{InitState, BranchingKind, BranchingPath};
+use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 struct Compiler<T> {
@@ -272,7 +272,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized(variable.ident.name.clone()), &self.module_path));
                 }
                 let ty = self.item_type(&item.left);
-                self.write_load(local.index as StackOffset, ty); // stack: left
+                self.write_load(local as StackOffset, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.item_type(&item.left);
                 match item.op { // stack: result
@@ -388,7 +388,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &mut Self, item: &ast::Binding) -> CompileResult {
         let binding_id = item.binding_id.expect("Unresolved binding encountered");
-        self.init_state.activate(binding_id);
+        self.init_state.declare(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
             // optimization: write literal unless it is zero and we're in the root block of a function (stackframe is already zero-initialized)
@@ -411,7 +411,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if !self.init_state.initialized(binding_id) {
                 return Err(CompileError::new(item, CompileErrorKind::Uninitialized(item.ident.name.clone()), &self.module_path));
             }
-            local.index
+            local
         };
         self.write_load(load_index as StackOffset, self.item_type(item));
         Ok(())
@@ -421,7 +421,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock) -> CompileResult {
         comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
-        self.init_state.push(BranchingKind::Double);
+        self.init_state.push(BranchingKind::Double, BranchingScope::Block);
         let result = self.compile_block(&item.if_block);
         self.init_state.pop();
         let exit_target = self.writer.position();
@@ -433,7 +433,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_if_else_block(self: &mut Self, if_block: &ast::Block, else_block: &ast::Block) -> CompileResult {
 
         let else_jump = self.writer.j0(123);
-        self.init_state.push(BranchingKind::Double);
+        self.init_state.push(BranchingKind::Double, BranchingScope::Block);
         self.init_state.set_path(BranchingPath::A);
         let result = self.compile_block(if_block);
         let exit_jump = if !if_block.returns() {
@@ -483,11 +483,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Split match block into recursive tree of A/B branches.
     fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
         if remaining_branches.len() == 1 {
-            self.init_state.push(BranchingKind::Single); // patterns are required to be exhaustive
+            self.init_state.push(BranchingKind::Single, BranchingScope::Block); // patterns are required to be exhaustive
             self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
             self.init_state.pop();
         } else if remaining_branches.len() > 1 {
-            self.init_state.push(BranchingKind::Double);
+            self.init_state.push(BranchingKind::Double, BranchingScope::Block);
             self.init_state.set_path(BranchingPath::A);
             self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
             self.init_state.set_path(BranchingPath::B);
@@ -524,7 +524,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_local: Local, iter_type_id: TypeId) -> CompileResult {
+    fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_local: StackAddress, iter_type_id: TypeId) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
@@ -535,7 +535,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_expression(&binary_op.right)?;
         // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_load(iter_local.index as StackOffset, iter_ty);
+        self.write_load(iter_local as StackOffset, iter_ty);
         //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
@@ -549,7 +549,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_block(&item.block)?;
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_preinc(iter_local.index as StackOffset, iter_ty);
+        self.write_preinc(iter_local as StackOffset, iter_ty);
         //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
@@ -565,7 +565,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_local: Local, element_type_id: TypeId) -> CompileResult {
+    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_local: StackAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
         let element_ty = self.type_by_id(element_type_id);
         let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
@@ -615,7 +615,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use ast::{Expression, BinaryOperator as Op};
         // initialize iter variable
         let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
-        self.init_state.push(BranchingKind::Single);
+        self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
         let iter_type_id = item.iter.type_id(self).unwrap();
@@ -641,11 +641,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "\nfn {}", item.sig.ident.name);
 
         // create arguments in local environment
-        self.init_state.push(BranchingKind::Single);
+        self.init_state.push(BranchingKind::Single, BranchingScope::Function);
         let mut frame = StackFrame::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.insert(arg.binding_id.unwrap(), frame.arg_pos, LocalOrigin::Argument);
+            frame.insert(arg.binding_id.unwrap(), frame.arg_pos);
             self.init_state.initialize(arg.binding_id.unwrap());
             frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
         }
@@ -689,8 +689,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let ty = self.item_type(arg);
             if ty.is_ref() {
                 let local = frame.lookup(arg.binding_id.unwrap());
-                comment!(self, "freeing argument {}", local.index);
-                self.write_load(local.index as StackOffset, ty);
+                comment!(self, "freeing argument {}", local);
+                self.write_load(local as StackOffset, ty);
                 self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
             }
         }
@@ -713,7 +713,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given block.
     fn compile_block(self: &mut Self, item: &ast::Block) -> CompileResult {
-        self.init_state.push(BranchingKind::Single);
+        self.init_state.push(BranchingKind::Single, BranchingScope::Block);
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
         }
@@ -722,7 +722,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(returns)?;
             // inc result, then dec everything
             self.item_cnt(returns, true, HeapRefOp::Inc);
-            self.decref_block_locals();
+            self.write_scope_destructor(BranchingScope::Function);
             self.item_cnt(returns, true, HeapRefOp::DecNoFree);
             let exit_jump = self.writer.jmp(123);
             self.locals.add_exit_placeholder(exit_jump);
@@ -731,11 +731,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(result)?;
             // inc result, then dec everything
             self.item_cnt(result, true, HeapRefOp::Inc);
-            self.decref_block_locals();
+            self.write_scope_destructor(BranchingScope::Block);
             self.item_cnt(result, true, HeapRefOp::DecNoFree);
         } else {
             comment!(self, "block ending");
-            self.decref_block_locals();
+            self.write_scope_destructor(BranchingScope::Block);
         }
 
         // decrease local variable ref-count
@@ -796,7 +796,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     comment!(self, "{}", item);
                     let load_index = {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
-                        self.locals.lookup(binding_id).index
+                        self.locals.lookup(binding_id)
                     };
                     let exp_type = self.item_type(&item.expr);
                     match item.op {
@@ -1041,13 +1041,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                frame.insert(binding.binding_id.unwrap(), frame.var_pos, LocalOrigin::Binding);
+                frame.insert(binding.binding_id.unwrap(), frame.var_pos);
                 frame.var_pos += self.item_type(binding).primitive_size() as StackAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos, LocalOrigin::Binding);
+                frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos);
                 frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as StackAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -1077,23 +1077,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 false => self.write_cnt(self.get_constructor(ty), op),
             };
         }
-    }
-
-    // FIXME: to handle ret instruction this may need to run recursively
-    fn decref_block_locals(self: &mut Self) {
-        let frame = self.locals.pop();
-        for (&binding_id, local) in frame.map.iter() {
-            if self.init_state.activated(binding_id) && self.init_state.initialized(binding_id) /*&& local.origin == LocalOrigin::Binding*/ {
-                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
-                let ty = self.type_by_id(type_id);
-                if ty.is_ref() {
-                    comment!(self, "freeing local {}", local.index);
-                    self.write_load(local.index as StackOffset, ty);
-                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
-                }
-            }
-        }
-        self.locals.push(frame);
     }
 }
 
@@ -1245,6 +1228,23 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
 /// Opcode writer functions.
 impl<T> Compiler<T> where T: VMFunc<T> {
+
+    /// Writes instructions to decreases reference counts for block locals.
+    fn write_scope_destructor(self: &mut Self, target_scope: BranchingScope) {
+        let frame = self.locals.pop();
+        for (&binding_id, &local) in frame.map.iter() {
+            if self.init_state.declared(binding_id, Some(target_scope)) && self.init_state.initialized(binding_id) {
+                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
+                let ty = self.type_by_id(type_id);
+                if ty.is_ref() {
+                    comment!(self, "freeing local {}", local);
+                    self.write_load(local as StackOffset, ty);
+                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+                }
+            }
+        }
+        self.locals.push(frame);
+    }
 
     /// Writes given numeric, using const pool if necessary.
     fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) {
@@ -1529,12 +1529,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, local: Local, ty: &Type) -> StackAddress {
+    fn write_store(self: &Self, local: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local.index as StackOffset),
-            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local.index as StackOffset),
-            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local.index as StackOffset),
-            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local.index as StackOffset),
+            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local as StackOffset),
+            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local as StackOffset),
+            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local as StackOffset),
+            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local as StackOffset),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1542,14 +1542,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
-    fn write_storex(self: &Self, local: Local, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
+    fn write_storex(self: &Self, local: StackAddress, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
         let ty = self.item_type(item);
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             if self.init_state.initialized(binding_id) {
-                self.writer.storex_replace(local.index as StackOffset, constructor)
+                self.writer.storex_replace(local as StackOffset, constructor)
             } else {
-                self.writer.storex_new(local.index as StackOffset, constructor)
+                self.writer.storex_new(local as StackOffset, constructor)
             }
         } else {
             self.write_store(local, ty)

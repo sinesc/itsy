@@ -2,25 +2,10 @@ use crate::prelude::*;
 use crate::StackAddress;
 use crate::shared::typed_ids::BindingId;
 
-#[derive(Copy, Clone, PartialEq)]
-pub enum LocalOrigin {
-    Binding,
-    Argument,
-}
-
-/// Describes a single local variable of a stack frame
-#[derive(Copy, Clone)]
-pub struct Local {
-    /// The load-index for this variable.
-    pub index: StackAddress,
-    /// Whether this is an argument passed into a function or a binding.
-    pub origin: LocalOrigin,
-}
-
 /// Maps bindings and arguments to indices relative to the stack frame.
 pub struct StackFrame {
     /// Maps a binding ID to a variable or argument position on the stack.
-    pub map     : Map<BindingId, Local>,
+    pub map     : Map<BindingId, StackAddress>,
     /// Index for the NEXT argument to be inserted.
     pub arg_pos : StackAddress,
     /// Index for the NEXT variable to be inserted.
@@ -43,11 +28,11 @@ impl StackFrame {
         }
     }
     /// Add new local variable.
-    pub fn insert(self: &mut Self, binding_id: BindingId, index: StackAddress, origin: LocalOrigin) {
-        self.map.insert(binding_id, Local { index, origin });
+    pub fn insert(self: &mut Self, binding_id: BindingId, index: StackAddress) {
+        self.map.insert(binding_id, index);
     }
     /// Look up local variable descriptor for the given BindingId.
-    pub fn lookup(self: &Self, binding_id: BindingId) -> Local {
+    pub fn lookup(self: &Self, binding_id: BindingId) -> StackAddress {
         *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
 }
@@ -78,7 +63,7 @@ impl StackFrames {
     //    self.0.borrow().last().expect(Self::NO_STACK).ret_size
     //}
     /// Look up local variable descriptor for the given BindingId.
-    pub fn lookup(self: &mut Self, binding_id: BindingId) -> Local {
+    pub fn lookup(self: &mut Self, binding_id: BindingId) -> StackAddress {
         self.0.last().expect(Self::NO_STACK).lookup(binding_id)
     }
     /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
