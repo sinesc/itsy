@@ -161,7 +161,7 @@ macro_rules! impl_opcodes {
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::rustcall => {
-                            let mut result = format!("{:?} {} ", position, stringify!(rustcall));
+                            let mut result = format!("{:?} {} ", position - 1, stringify!(rustcall));
                             result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, position)));
                             Some((result, position))
                         }
@@ -174,7 +174,7 @@ macro_rules! impl_opcodes {
                             // handle opcode
                             $(
                                 opcodes::$name => {
-                                    let mut result = format!("{:?} {} ", position, stringify!($name));
+                                    let mut result = format!("{:?} {} ", position - 1, stringify!($name));
                                     $(
                                         result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, position) ));
                                     )*
@@ -185,7 +185,7 @@ macro_rules! impl_opcodes {
                             $(
                                 $(
                                     opcodes::$variant_name => {
-                                        let mut result = format!("{:?} {} ", position, stringify!($variant_name));
+                                        let mut result = format!("{:?} {} ", position - 1, stringify!($variant_name));
                                         $(
                                             result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, position) ));
                                         )*
