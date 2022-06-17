@@ -764,6 +764,34 @@ pub struct Block {
 impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
 
+impl Block {
+    pub fn new(position: Position, statements: Vec<Statement>, result: Option<Expression>) -> Self {
+        let mut block = Block {
+            position,
+            statements,
+            result,
+            returns : None,
+            scope_id: None,
+        };
+        // move last block item into result if it is an expression (e.g. an if block with a result) and no result was matched
+        if block.result.is_none() && block.statements.last().map_or(false, |l| l.is_expression()) {
+            block.result = block.statements.pop().map(|s| s.into_expression().unwrap());
+        }
+        // move return value or result into the appropriate field
+        if let Some(return_index) = block.statements.iter().position(|s| s.returns()) {
+            // remove code after return, move return to returns
+            block.statements.truncate(return_index + 1);
+            let returns = block.statements.pop().unwrap();
+            block.returns = Some(returns.into_expression().unwrap());
+            block.result = None;
+        } else if block.result.as_ref().map_or(false, |r| r.returns()) {
+            // check if the result returns, if so move to returns
+            block.returns = block.result.take();
+        }
+        block
+    }
+}
+
 impl Resolvable for Block {
     fn num_resolved(self: &Self) -> Progress {
         self.statements.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved())
@@ -796,7 +824,7 @@ pub enum Expression {
     Literal(Literal),
     Variable(Variable),
     Call(Call),
-    Member(Member), //FIXME this shouldn't be here. either implement an Operand enum for BinaryOp that contains it or change to MemberAccess and store left+right (more in line with Cast)
+    Member(Member),
     Assignment(Box<Assignment>),
     BinaryOp(Box<BinaryOp>),
     UnaryOp(Box<UnaryOp>),
@@ -950,6 +978,7 @@ impl Resolvable for Literal {
 impl Display for Literal {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.value {
+            LiteralValue::Void => write!(f, "void"),
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
             LiteralValue::Numeric(v) => write!(f, "{:?}", v),
             LiteralValue::String(v) => write!(f, "{:?}", v),
@@ -962,6 +991,7 @@ impl Display for Literal {
 
 /// Value-storage for literals.
 pub enum LiteralValue {
+    Void,
     Bool(bool),
     Numeric(Numeric),
     String(String),
@@ -1029,6 +1059,7 @@ impl Resolvable for LiteralValue {
 impl Debug for LiteralValue {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            LiteralValue::Void => write!(f, "void"),
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
             LiteralValue::Numeric(v) => write!(f, "{:?}", v),
             LiteralValue::String(v) => write!(f, "String({:?})", v),

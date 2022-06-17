@@ -12,7 +12,7 @@ use nom::multi::{separated_list0, separated_list1, many0, fold_many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
-use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
+use crate::shared::{numeric::Numeric, typed_ids::TypeId, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Failure, ParserState, ParsedModule, ParsedProgram};
 use error::{ParseResult, ParseError, ParseErrorKind};
@@ -459,19 +459,7 @@ fn block(i: Input<'_>) -> Output<Block> {
             pair(many0(statement), opt(expression)),
             ws(char('}'))
         ),
-        move |mut m| {
-            // move last block item into result if it is an expression and no result was matched
-            if m.1.is_none() && m.0.last().map_or(false, |l| l.is_expression()) {
-                m.1 = m.0.pop().map(|s| s.into_expression().unwrap());
-            }
-            Block {
-                position        : position,
-                statements      : m.0,
-                result          : m.1,
-                returns         : None,
-                scope_id        : None,
-            }
-        }
+        move |m| Block::new(position, m.0, m.1)
     ))(i)
 }
 
@@ -483,13 +471,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
         ws(preceded(
             tag("else"),
             alt((
-                sepl(map(if_block, move |m| Block {
-                    position        : position,
-                    statements      : Vec::new(),
-                    result          : Some(Expression::IfBlock(Box::new(m))),
-                    returns         : None,
-                    scope_id        : None,
-                })),
+                sepl(map(if_block, move |m| Block::new(position, Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
                 block
             ))
         ))(i)
@@ -525,13 +507,7 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
         let position = i.position();
         ws(alt((
             block,
-            map(expression, move |e| Block {
-                position        : position,
-                statements      : Vec::new(),
-                result          : Some(e),
-                returns         : None,
-                scope_id        : None,
-            }),
+            map(expression, move |e| Block::new(position, Vec::new(), Some(e))),
         )))(i)
     }
     fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
@@ -1011,12 +987,27 @@ fn function(i: Input<'_>) -> Output<Function> {
             map(block, |b| Some(b)),
             map(ws(char(';')), |_| None)
         ))))),
-        move |func| Function {
-            position    : position,
-            sig         : func.0,
-            block       : func.1,
-            function_id : None,
-            scope_id    : None,
+        move |mut func| {
+            // move function-block 'result' to 'returns' so that compiling the block generates a scope return destructor, not block destructor (this would leave the function arguments intact).
+            if let Some(Block { result: result @ Some(_), returns: returns @ None, .. }) = &mut func.1 {
+                swap(result, returns);
+            }
+            // if the function does not have a return value we need to generate a void value so that the correct destructor is generated, as mentioned above
+            if let Some(Block { returns: returns @ None, .. }) = &mut func.1 {
+                *returns = Some(Expression::Literal(Literal {
+                    position, // TODO: wrong position
+                    value       : LiteralValue::Void,
+                    type_name   : None,
+                    type_id     : Some(TypeId::void()),
+                }));
+            }
+            Function {
+                position    : position,
+                sig         : func.0,
+                block       : func.1,
+                function_id : None,
+                scope_id    : None,
+            }
         }
     ))(i.clone())
 }

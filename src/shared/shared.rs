@@ -54,6 +54,7 @@ pub(crate) trait TypeContainer {
             type_name.to_string()
         } else {
             match ty {
+                Type::void => "void".to_string(), // void is explicitly not a named type so we have to manually give it a name here
                 &Type::Array(Array { type_id: Some(type_id) }) => {
                     format!("[ {} ]", self.type_name(type_id))
                 }

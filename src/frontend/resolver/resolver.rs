@@ -9,7 +9,7 @@ use crate::{prelude::*, VariantIndex};
 use crate::ast::{Visibility, LiteralValue};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
-use crate::frontend::ast::{self, Positioned, Returns, Typeable, Resolvable, CallSyntax};
+use crate::frontend::ast::{self, Positioned, Typeable, Resolvable, CallSyntax};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
@@ -920,27 +920,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-
-        // check for unconditional returns, code below those is unreachable, remove
-        let mut return_index = None;
-        for (index, statement) in item.statements.iter_mut().enumerate() {
-            if statement.returns() {
-                return_index = Some(index);
-                break;
-            }
-        }
-        // remove code after return, move return to returns
-        if let Some(return_index) = return_index {
-            item.statements.truncate(return_index + 1);
-            let returns = item.statements.pop().unwrap_or_ice(ICE)?;
-            item.returns = Some(returns.into_expression().unwrap_or_ice(ICE)?);
-            item.result = None;
-        }
-        // check if the result returns, if so move to returns
-        if item.result.as_ref().map_or(false, |r| r.returns()) {
-            item.returns = item.result.take();
-        }
-
         // resolve statments, result and returns
         for statement in item.statements.iter_mut() {
             self.resolve_statement(statement)?;
@@ -953,7 +932,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let ret_type_id = self.scopes.function_ref(function_id).ret_type;
             self.resolve_expression(returns, ret_type_id)?;
         }
-
         // check result type matches expected type unless block is returned from before ever resulting
         if let (Some(expected_result), None) = (expected_result, &item.returns) {
             if item.result.is_none() { // no result = void
