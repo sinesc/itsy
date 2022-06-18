@@ -630,7 +630,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given function.
     fn compile_function(self: &mut Self, item: &ast::Function) -> CompileResult {
 
-        // register function bytecode index, check if any bytecode needs fixing
+        // register function bytecode index
         let position = self.writer.position();
         comment!(self, "\nfn {}", item.sig.ident.name);
 
@@ -647,8 +647,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         // create variables in local environment and reserve space on the stack
         frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
-        let arg_size = frame.arg_pos;
-        let ret_size = frame.ret_size;
         self.create_stack_frame_block(item.block.as_ref().unwrap(), &mut frame);
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
         if var_size > 0 {
@@ -664,25 +662,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
         self.compile_block(item.block.as_ref().unwrap())?;
-        let mut frame = self.locals.pop();
+        self.locals.pop();
         self.init_state.pop();
-
-        // fix forward-to-exit jmps within the function
-        let exit_address = self.writer.position();
-        while let Some(jmp_address) = frame.exit_placeholder.pop() {
-            self.writer.overwrite(jmp_address, |w| w.jmp(exit_address));
-        }
-
-        comment!(self, "exiting fn {}", item.sig.ident.name);
-        match ret_size {
-            0 => self.writer.ret0(arg_size),
-            1 => self.writer.ret8(arg_size),
-            2 => self.writer.ret16(arg_size),
-            4 => self.writer.ret32(arg_size),
-            8 => self.writer.ret64(arg_size),
-            _ => unreachable!(),
-        };
-
         Ok(())
     }
 
@@ -699,8 +680,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.item_cnt(returns, true, HeapRefOp::Inc);
             self.write_scope_destructor(BranchingScope::Function);
             self.item_cnt(returns, true, HeapRefOp::DecNoFree);
-            let exit_jump = self.writer.jmp(123);
-            self.locals.add_exit_placeholder(exit_jump); // TODO: instead just write a ret instruction here
+            self.write_ret();
         } else if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
@@ -1217,6 +1197,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
 /// Opcode writer functions.
 impl<T> Compiler<T> where T: VMFunc<T> {
+
+    /// Writes a return instruction for the current function being compiled.
+    fn write_ret(self: &Self) {
+        let arg_size = self.locals.arg_size();
+        match self.locals.ret_size() {
+            0 => self.writer.ret0(arg_size),
+            1 => self.writer.ret8(arg_size),
+            2 => self.writer.ret16(arg_size),
+            4 => self.writer.ret32(arg_size),
+            8 => self.writer.ret64(arg_size),
+            _ => unreachable!(),
+        };
+    }
 
     /// Writes instructions to decreases reference counts for block locals.
     fn write_scope_destructor(self: &mut Self, target_scope: BranchingScope) {

@@ -12,8 +12,6 @@ pub struct StackFrame {
     pub var_pos : StackAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
-    /// Addresses of forward jumps within the function that need to be replaced with the return location.
-    pub exit_placeholder: Vec<StackAddress>,
 }
 
 impl StackFrame {
@@ -24,7 +22,6 @@ impl StackFrame {
             arg_pos : 0,
             var_pos : 0,
             ret_size: 0,
-            exit_placeholder: Vec::new(),
         }
     }
     /// Add new local variable.
@@ -54,20 +51,16 @@ impl StackFrames {
     pub fn pop(self: &mut Self) -> StackFrame {
         self.0.pop().expect(Self::NO_STACK)
     }
-    // /// Returns the argument size in bytes for the top stack frame descriptor.
-    //pub fn arg_size(self: &Self) -> StackAddress {
-    //    self.0.borrow().last().expect(Self::NO_STACK).arg_pos
-    //}
-    // /// Returns the return value size in bytes for the top stack frame descriptor.
-    //pub fn ret_size(self: &Self) -> u8 {
-    //    self.0.borrow().last().expect(Self::NO_STACK).ret_size
-    //}
+    /// Returns the argument size in bytes for the top stack frame descriptor.
+    pub fn arg_size(self: &Self) -> StackAddress {
+        self.0.last().expect(Self::NO_STACK).arg_pos
+    }
+    /// Returns the return value size in bytes for the top stack frame descriptor.
+    pub fn ret_size(self: &Self) -> u8 {
+        self.0.last().expect(Self::NO_STACK).ret_size
+    }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &mut Self, binding_id: BindingId) -> StackAddress {
         self.0.last().expect(Self::NO_STACK).lookup(binding_id)
-    }
-    /// Adds a forward jump to the function exit to the list of jumps that need to be fixed (exit address not known at time of adding yet)
-    pub fn add_exit_placeholder(self: &mut Self, address: StackAddress) {
-        self.0.last_mut().expect(Self::NO_STACK).exit_placeholder.push(address);
     }
 }
