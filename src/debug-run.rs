@@ -7,13 +7,25 @@ use std::{env, path::PathBuf, collections::HashMap, io::{self, Write}};
  * Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
  */
 
-itsy_api!(MyAPI, (), {
+struct Context {
+    seed: f64,
+}
+
+itsy_api!(MyAPI, Context, {
+    /// Prints the given string to standard output.
     fn print(&mut context, value: String) {
         print!("{}", value);
         io::stdout().flush().unwrap();
     }
+    /// Prints the given string followed by a newline to standard output.
     fn println(&mut context, value: String) {
         println!("{}", value);
+    }
+    /// Returns a random number between 0.0 and non-inclusive 1.0
+    fn random(&mut context) -> f64 {
+        context.seed += 1.0;
+        let large = context.seed.sin() * 100000000.0;
+        large - large.floor()
     }
 });
 
@@ -27,6 +39,7 @@ fn main() {
         let write_logs = std::path::Path::new("./logs/").is_dir();
         match build(&args[1], &mut files, write_logs) {
             Ok(program) => {
+                let mut context = Context { seed: 1.2345 };
                 let mut vm = runtime::VM::new(&program);
                 if write_logs {
                     log("logs/bytecode.ini", false, &vm.format_program());
@@ -38,7 +51,7 @@ fn main() {
                         instruction = Some(vm.format_instruction().unwrap_or("-".to_string()));
                         log("logs/run.ini", true, &format!("{}", instruction.as_ref().unwrap()));
                     }
-                    let vmstate = vm.step(&mut ());
+                    let vmstate = vm.step(&mut context);
                     if let Some(instruction) = instruction {
                         if instruction.starts_with("[") == false && instruction.starts_with("\n") == false {
                             log("logs/run.ini", true, &format!(";    stack {:?}\n;    heap  {:?}", vm.stack.frame(), vm.heap.data()));
