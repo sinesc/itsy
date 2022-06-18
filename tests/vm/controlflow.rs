@@ -249,3 +249,22 @@ fn maybe_return_with_refs() {
     ");
     assert_all(&result, &[ "Heapref".to_string() ]);
 }
+
+#[test]
+fn assign_to_maybe_uninitialized() {
+    let result = run("
+        let t: String;
+        let i = 0;
+        if (i == 1) {
+            t = \"Initialized\";
+            ret_string(t);
+        } else {
+            //t = \"The road not taken\";
+        }
+        // t is now maybe uninitialized
+        t = \"Overruling\";
+        ret_string(t);
+    ");
+    assert_all(&result, &[ "Overruling".to_string() ]);
+
+}

@@ -43,6 +43,9 @@ impl<T, U> VM<T, U> {
     pub fn new(program: &Program<T>) -> Self where T: VMFunc<T> + VMData<T, U> {
         let Program { instructions, consts, const_descriptors, .. } = program;
         let stack = Self::init_consts(consts, const_descriptors);
+        // occupy heap element 0 so we can identify intialized heap objects their address != 0
+        let mut heap = Heap::new();
+        heap.alloc(Vec::new(), 0);
         VM {
             context_type: PhantomData,
             func_type   : PhantomData,
@@ -50,7 +53,7 @@ impl<T, U> VM<T, U> {
             pc          : 0,
             state       : VMState::Ready,
             stack       : stack,
-            heap        : Heap::new(),
+            heap        : heap,
         }
     }
 
@@ -60,7 +63,7 @@ impl<T, U> VM<T, U> {
             panic!("Attempted to run in non-ready state");
         }
         self.exec(context);
-        if self.state == VMState::Terminated && self.heap.len() > 0 {
+        if self.state == VMState::Terminated && self.heap.len() > 1 {
             panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
         }
         self.state
@@ -73,7 +76,7 @@ impl<T, U> VM<T, U> {
             panic!("Attempted to run in non-ready state");
         }
         self.exec_step(context);
-        if self.state == VMState::Terminated && self.heap.len() > 0 {
+        if self.state == VMState::Terminated && self.heap.len() > 1 {
             panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
         }
         self.state
@@ -83,6 +86,7 @@ impl<T, U> VM<T, U> {
     pub fn reset(self: &mut Self) {
         self.stack.reset();
         self.heap.reset();
+        self.heap.alloc(Vec::new(), 0);
         self.pc = 0;
         self.state = VMState::Ready;
     }

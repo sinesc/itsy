@@ -267,10 +267,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.init_state.initialize(binding_id);
             },
             _ => {
-                if self.init_state.initialized(binding_id) != BranchingState::Initialized {
-                    let variable = item.left.as_variable().unwrap();
-                    return Err(CompileError::new(item, CompileErrorKind::Uninitialized(variable.ident.name.clone()), &self.module_path));
-                }
+                self.check_initialized(&item.left.as_variable().unwrap())?;
                 let ty = self.item_type(&item.left);
                 self.write_load(local as StackOffset, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
@@ -406,12 +403,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_variable(self: &mut Self, item: &ast::Variable) -> CompileResult {
         comment!(self, "variable {}", item);
         let load_index = {
+            self.check_initialized(item)?;
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
-            let local = self.locals.lookup(binding_id);
-            if self.init_state.initialized(binding_id) != BranchingState::Initialized {
-                return Err(CompileError::new(item, CompileErrorKind::Uninitialized(item.ident.name.clone()), &self.module_path));
-            }
-            local
+            self.locals.lookup(binding_id)
         };
         self.write_load(load_index as StackOffset, self.item_type(item));
         Ok(())
@@ -1060,6 +1054,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         }
     }
+
+    /// Checks whether the given variable is initialized
+    fn check_initialized(self: &Self, item: &ast::Variable) -> CompileResult {
+        let binding_id = item.binding_id.expect("Unresolved binding encountered");
+        let state = self.init_state.initialized(binding_id);
+        if state == BranchingState::Uninitialized || state == BranchingState::MaybeInitialized {
+            let variable = item.ident.name.clone();
+            Err(CompileError::new(item, if state == BranchingState::Uninitialized { CompileErrorKind::Uninitialized(variable) } else { CompileErrorKind::MaybeInitialized(variable) }, &self.module_path))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Const pool writer functions.
@@ -1531,10 +1537,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.item_type(item);
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
-            if self.init_state.initialized(binding_id) == BranchingState::Initialized {
-                self.writer.storex_replace(local as StackOffset, constructor)
-            } else {
-                self.writer.storex_new(local as StackOffset, constructor)
+            match self.init_state.initialized(binding_id) {
+                BranchingState::Initialized => self.writer.storex_replace(local as StackOffset, constructor),
+                BranchingState::Uninitialized => self.writer.storex_new(local as StackOffset, constructor),
+                BranchingState::MaybeInitialized => self.writer.storex_maybe(local as StackOffset, constructor),
             }
         } else {
             self.write_store(local, ty)

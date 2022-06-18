@@ -160,6 +160,21 @@ impl_opcodes!{
         }
     }
 
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Decreses refcount of the previous contents, if any and increases refcount of the new value.
+    fn storex_maybe(&mut self, index: StackOffset, constructor: StackAddress) {
+        let prev: HeapRef = self.stack.load_fp(index);
+        let next: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            // prev might be 0 if it was statically impossible to determine whether a variable is initialized (e.g. 'let x; if y { x = 0 } x' cannot be known)
+            if prev.address != 0 {
+                self.refcount_value(prev, constructor, HeapRefOp::Dec);
+            }
+        }
+    }
+
     /// Clones the topmost stack value.
     fn <
         clone8<T: Data8>(),
