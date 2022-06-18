@@ -101,8 +101,9 @@ fn print_results(passes: [ [ Test ] ]) {
 
 fn main() {
 
-    let num_passes = 10;
+    let num_passes = 5;
     let passes: [ [ Test ] ] = [ ];
+    println("Ballpark Bench™ - Measuring in approximate baseball fields");
     print("running {num_passes} passes, pass ");
 
     for pass in 0..num_passes {

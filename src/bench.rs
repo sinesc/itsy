@@ -32,7 +32,6 @@ itsy_api!(BenchAPI, BenchContext, {
 });
 
 fn main() {
-    println!("Ballpark Bench™ - Measuring in approximate baseball fields");
     let mut context = BenchContext { time: None };
     match build::<BenchAPI, _>("itsy/bench/main.itsy") {
         Ok(program) => {
