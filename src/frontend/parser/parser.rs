@@ -12,7 +12,7 @@ use nom::multi::{separated_list0, separated_list1, many0, fold_many0};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
-use crate::shared::{numeric::Numeric, typed_ids::TypeId, path_to_parts, parts_to_path};
+use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
 use types::{Input, Output, Failure, ParserState, ParsedModule, ParsedProgram};
 use error::{ParseResult, ParseError, ParseErrorKind};
@@ -994,12 +994,7 @@ fn function(i: Input<'_>) -> Output<Function> {
             }
             // if the function does not have a return value we need to generate a void value so that the correct destructor is generated, as mentioned above
             if let Some(Block { returns: returns @ None, .. }) = &mut func.1 {
-                *returns = Some(Expression::Literal(Literal {
-                    position, // TODO: wrong position
-                    value       : LiteralValue::Void,
-                    type_name   : None,
-                    type_id     : Some(TypeId::void()),
-                }));
+                *returns = Some(Expression::void(position)); // TODO: wrong position
             }
             Function {
                 position    : position,
@@ -1080,7 +1075,7 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
         ),
         move |m| Return {
             position    : position,
-            expr        : m,
+            expr        : m.unwrap_or_else(|| Expression::void(position)),
         }
     )(i)
 }

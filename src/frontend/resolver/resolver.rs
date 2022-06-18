@@ -714,15 +714,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type;
-        if let Some(expr) = &mut item.expr {
-            self.resolved_or_err(expr, None)?;
-            self.resolve_expression(expr, ret_type_id)?;
-            // check return type matches function result type
-            self.resolved_or_err(expr, ret_type_id)
-        } else {
-            // no return expression, function result type must be void
-            self.check_type_accepted_for(item, ret_type_id.unwrap(), TypeId::void()) // TODO check this unwrap
-        }
+        self.resolved_or_err(&mut item.expr, None)?;
+        self.resolve_expression(&mut item.expr, ret_type_id)?;
+        // check return type matches function result type
+        self.resolved_or_err(&mut item.expr, ret_type_id)
     }
 
     /// Resolves an occurance of a function call.

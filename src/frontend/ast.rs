@@ -211,7 +211,7 @@ impl Statement {
             Statement::IfBlock(if_block)        => Some(Expression::IfBlock(Box::new(if_block))),
             Statement::Block(block)             => Some(Expression::Block(Box::new(block))),
             Statement::Expression(expression)   => Some(expression),
-            Statement::Return(ret)              => Some(ret.expr.unwrap()),
+            Statement::Return(ret)              => Some(ret.expr),
             _                                   => None,
         }
     }
@@ -633,14 +633,14 @@ impl Resolvable for WhileLoop {
 #[derive(Debug)]
 pub struct Return {
     pub position        : Position,
-    pub expr            : Option<Expression>,
+    pub expr            : Expression,
 }
 
 impl_positioned!(Return);
 
 impl Resolvable for Return {
     fn num_resolved(self: &Self) -> Progress {
-        self.expr.as_ref().map_or(Progress::zero(), |e| e.num_resolved())
+        self.expr.num_resolved()
     }
 }
 
@@ -835,6 +835,15 @@ pub enum Expression {
 }
 
 impl Expression {
+    // Creates a void expression used when 'nothing' is returned
+    pub fn void(position: Position) -> Self {
+        Expression::Literal(Literal {
+            position,
+            value       : LiteralValue::Void,
+            type_name   : None,
+            type_id     : Some(TypeId::void()),
+        })
+    }
     pub fn is_literal(self: &Self) -> bool {
         match self {
             Self::Literal(_) => true,
