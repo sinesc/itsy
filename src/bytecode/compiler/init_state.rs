@@ -8,9 +8,11 @@ pub enum BranchingKind {
     Double,
 }
 
-/// Scope type of this branching. break/continue/return need to recursively consider branches
-/// until they hit the appropriate exit scope, e.g. break needs to drop all initialized references
-/// of all branches up to the closest Loop branch
+/// Scope type of this branching.
+///
+/// break/continue/return need to recursively consider branches until they hit the
+/// appropriate exit scope, e.g. break needs to drop all initialized references
+/// of all branches up to the closest Loop branch.
 #[derive(Copy, Clone, PartialEq)]
 pub enum BranchingScope {
     Function,
@@ -25,14 +27,22 @@ pub enum BranchingPath {
     B,
 }
 
+/// Initialization state of a binding within a specific branch.
+#[derive(Clone, Copy, PartialEq)]
+pub enum BranchingState {
+    Uninitialized = 0,
+    MaybeInitialized = 1,
+    Initialized = 2,
+}
+
 /// State of a binding within a Branching.
 struct BranchingBinding {
     /// Whether the binding was activated exactly in this Branching.
     declared: bool,
     /// Whether path a (if or block) is initialized.
-    path_a: bool,
+    path_a: BranchingState,
     /// Whether path b (else) is initialized.
-    path_b: bool,
+    path_b: BranchingState,
 }
 
 /// One block or two mutually exclusive blocks.
@@ -83,11 +93,30 @@ impl InitState {
 
     /// Pops branching and propagates unconditionally initialized bindings to parent. // TODO: add state for 'maybe initialized', those refs may have to be decref'd
     pub fn pop(self: &mut Self) {
+        use BranchingState as BS;
         let branch = self.branchings.pop().unwrap();
-        for (binding_id, binding_state) in branch.bindings {
-            let init_parent = binding_state.path_a && (branch.kind == BranchingKind::Single || (branch.kind == BranchingKind::Double && binding_state.path_b));
-            if init_parent && self.branchings.len() > 0 {
-                self.initialize(binding_id);
+        if self.branchings.len() > 0 {
+            for (binding_id, binding) in branch.bindings {
+                let branching_state = match branch.kind {
+                    BranchingKind::Single => binding.path_a,
+                    BranchingKind::Double if binding.path_a == BS::Initialized && binding.path_b == BS::Initialized => BS::Initialized,
+                    BranchingKind::Double if binding.path_a == BS::Uninitialized && binding.path_b == BS::Uninitialized => BS::Uninitialized,
+                    BranchingKind::Double => BS::MaybeInitialized,
+                };
+                match self.branchings.last().unwrap().current_path {
+                    BranchingPath::A => {
+                        let current_state = &mut self.current_mut(binding_id).path_a;
+                        if branching_state as usize > *current_state as usize {
+                            *current_state = branching_state;
+                        }
+                    },
+                    BranchingPath::B => {
+                        let current_state = &mut self.current_mut(binding_id).path_b;
+                        if branching_state as usize > *current_state as usize {
+                            *current_state = branching_state;
+                        }
+                    },
+                }
             }
         }
     }
@@ -120,13 +149,13 @@ impl InitState {
     /// Initializes a binding in the current branching path.
     pub fn initialize(self: &mut Self, binding_id: BindingId) {
         match self.branchings.last().unwrap().current_path {
-            BranchingPath::A => self.current_mut(binding_id).path_a = true,
-            BranchingPath::B => self.current_mut(binding_id).path_b = true,
+            BranchingPath::A => self.current_mut(binding_id).path_a = BranchingState::Initialized,
+            BranchingPath::B => self.current_mut(binding_id).path_b = BranchingState::Initialized,
         }
     }
 
     /// Whether a binding is initialized in the current branching path at the current code position.
-    pub fn initialized(self: &Self, binding_id: BindingId) -> bool {
+    pub fn initialized(self: &Self, binding_id: BindingId) -> BranchingState {
         for branching in self.branchings.iter().rev() {
             if let Some(binding) = branching.bindings.get(&binding_id) {
                 // this used to continue looping if both branches were false, now immediately returns. this should be fine since there is no way to uninitialize a binding after it was already initialized
@@ -136,11 +165,13 @@ impl InitState {
                 };
             }
         }
-        return false;
+        return BranchingState::Uninitialized;
     }
 
     /// Returns a mutable reference to the state of a binding.
     fn current_mut(self: &mut Self, binding_id: BindingId) -> &mut BranchingBinding {
-        self.branchings.last_mut().unwrap().bindings.entry(binding_id).or_insert(BranchingBinding { declared: false, path_a: false, path_b: false })
+        self.branchings.last_mut().unwrap()
+            .bindings.entry(binding_id)
+            .or_insert(BranchingBinding { declared: false, path_a: BranchingState::Uninitialized, path_b: BranchingState::Uninitialized })
     }
 }

@@ -14,7 +14,7 @@ use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, AR
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
-use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope};
+use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 struct Compiler<T> {
@@ -267,7 +267,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.init_state.initialize(binding_id);
             },
             _ => {
-                if !self.init_state.initialized(binding_id) {
+                if self.init_state.initialized(binding_id) != BranchingState::Initialized {
                     let variable = item.left.as_variable().unwrap();
                     return Err(CompileError::new(item, CompileErrorKind::Uninitialized(variable.ident.name.clone()), &self.module_path));
                 }
@@ -408,7 +408,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let load_index = {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             let local = self.locals.lookup(binding_id);
-            if !self.init_state.initialized(binding_id) {
+            if self.init_state.initialized(binding_id) != BranchingState::Initialized {
                 return Err(CompileError::new(item, CompileErrorKind::Uninitialized(item.ident.name.clone()), &self.module_path));
             }
             local
@@ -1217,7 +1217,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let frame = self.locals.pop();
         comment!(self, "scope destructor start");
         for (&binding_id, &local) in frame.map.iter() {
-            if self.init_state.declared(binding_id, Some(target_scope)) && self.init_state.initialized(binding_id) {
+            if self.init_state.declared(binding_id, Some(target_scope)) && self.init_state.initialized(binding_id) == BranchingState::Initialized {
                 let type_id = self.binding_by_id(binding_id).type_id.unwrap();
                 let ty = self.type_by_id(type_id);
                 if ty.is_ref() {
@@ -1531,7 +1531,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.item_type(item);
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
-            if self.init_state.initialized(binding_id) {
+            if self.init_state.initialized(binding_id) == BranchingState::Initialized {
                 self.writer.storex_replace(local as StackOffset, constructor)
             } else {
                 self.writer.storex_new(local as StackOffset, constructor)
