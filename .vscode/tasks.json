@@ -39,11 +39,6 @@
                 "--",
                 "${relativeFile}"
             ],
-            "options": {
-                "env": {
-                    "RUST_BACKTRACE": "1"
-                }
-            },
             "group": "build",
             "problemMatcher": []
         },
@@ -58,11 +53,6 @@
                 "--bin",
                 "bench"
             ],
-            "options": {
-                "env": {
-                    "RUST_BACKTRACE": "1"
-                }
-            },
             "group": "build",
             "problemMatcher": []
         },
@@ -74,6 +64,11 @@
                 "test"/*,
                 "--no-fail-fast"*/
             ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
             "group": "test",
             "problemMatcher": []
         },
