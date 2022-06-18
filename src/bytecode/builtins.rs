@@ -98,4 +98,173 @@ impl_builtins! {
         vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
         result
     }
+
+    fn <
+        float_floor32<T: u32>(this: f32) -> f32,
+        float_floor64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.floor()
+    }
+
+    fn <
+        float_ceil32<T: u32>(this: f32) -> f32,
+        float_ceil64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.ceil()
+    }
+
+    fn <
+        float_round32<T: u32>(this: f32) -> f32,
+        float_round64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.round()
+    }
+
+    fn <
+        float_trunc32<T: u32>(this: f32) -> f32,
+        float_trunc64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.trunc()
+    }
+
+    fn <
+        float_fract32<T: u32>(this: f32) -> f32,
+        float_fract64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.fract()
+    }
+
+    fn <
+        float_signum32<T: u32>(this: f32) -> f32,
+        float_signum64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.signum()
+    }
+
+    fn <
+        float_powi32<T: u32>(this: f32, n: i32) -> f32,
+        float_powi64<T: u64>(this: f64, n: i32) -> f64,
+    >(&mut vm) {
+        this.powi(n)
+    }
+
+    fn <
+        float_powf32<T: u32>(this: f32, n: f32) -> f32,
+        float_powf64<T: u64>(this: f64, n: f64) -> f64,
+    >(&mut vm) {
+        this.powf(n)
+    }
+
+    fn <
+        float_sqrt32<T: u32>(this: f32) -> f32,
+        float_sqrt64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.sqrt()
+    }
+
+    fn <
+        float_exp32<T: u32>(this: f32) -> f32,
+        float_exp64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.exp()
+    }
+
+    fn <
+        float_exp2_32<T: u32>(this: f32) -> f32,
+        float_exp2_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.exp2()
+    }
+
+    fn <
+        float_ln32<T: u32>(this: f32) -> f32,
+        float_ln64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.ln()
+    }
+
+    fn <
+        float_log32<T: u32>(this: f32, base: f32) -> f32,
+        float_log64<T: u64>(this: f64, base: f64) -> f64,
+    >(&mut vm) {
+        this.log(base)
+    }
+
+    fn <
+        float_log2_32<T: u32>(this: f32) -> f32,
+        float_log2_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.log2()
+    }
+
+    fn <
+        float_log10_32<T: u32>(this: f32) -> f32,
+        float_log10_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.log10()
+    }
+
+    fn <
+        float_cbrt32<T: u32>(this: f32) -> f32,
+        float_cbrt64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.cbrt()
+    }
+
+    fn <
+        float_hypot32<T: u32>(this: f32, other: f32) -> f32,
+        float_hypot64<T: u64>(this: f64, other: f64) -> f64,
+    >(&mut vm) {
+        this.hypot(other)
+    }
+
+    fn <
+        float_sin32<T: u32>(this: f32) -> f32,
+        float_sin64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.sin()
+    }
+
+    fn <
+        float_cos32<T: u32>(this: f32) -> f32,
+        float_cos64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.cos()
+    }
+
+    fn <
+        float_tan32<T: u32>(this: f32) -> f32,
+        float_tan64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.tan()
+    }
+
+    fn <
+        float_asin32<T: u32>(this: f32) -> f32,
+        float_asin64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.asin()
+    }
+
+    fn <
+        float_acos32<T: u32>(this: f32) -> f32,
+        float_acos64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.acos()
+    }
+
+    fn <
+        float_atan32<T: u32>(this: f32) -> f32,
+        float_atan64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.atan()
+    }
+
+    fn <
+        float_atan2_32<T: u32>(this: f32, other: f32) -> f32,
+        float_atan2_64<T: u64>(this: f64, other: f64) -> f64,
+    >(&mut vm) {
+        this.atan2(other)
+    }
+
 }

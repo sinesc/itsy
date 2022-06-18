@@ -224,7 +224,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
         let void_type_id = self.primitive_type_id(Type::void)?;
         if let &Array { type_id: Some(element_type_id) } = array_ty {
-            let mut insert = |i, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Builtin(type_id, i))));
+            let mut insert = |g, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Builtin(type_id, g))));
             Ok(match name {
                 "len"       => insert(BuiltinGroup::ArrayLen, sa_type_id, vec![ Some(type_id) ]),
                 "push"      => insert(BuiltinGroup::ArrayPush, void_type_id, vec![ Some(type_id), Some(element_type_id) ]),
@@ -236,6 +236,39 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else {
             Ok(None)
         }
+    }
+
+    /// Try to create concrete array builtin function signature for the given array type
+    fn try_create_float_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
+        let i32_type_id = self.primitive_type_id(Type::i32)?;
+        let mut insert = |g, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Builtin(type_id, g))));
+        Ok(match name {
+            "floor"     => insert(BuiltinGroup::FloatFloor, type_id, vec![ Some(type_id) ]),
+            "ceil"      => insert(BuiltinGroup::FloatCeil, type_id, vec![ Some(type_id) ]),
+            "round"     => insert(BuiltinGroup::FloatRound, type_id, vec![ Some(type_id) ]),
+            "trunc"     => insert(BuiltinGroup::FloatTrunc, type_id, vec![ Some(type_id) ]),
+            "fract"     => insert(BuiltinGroup::FloatFract, type_id, vec![ Some(type_id) ]),
+            "signum"    => insert(BuiltinGroup::FloatSignum, type_id, vec![ Some(type_id) ]),
+            "powi"      => insert(BuiltinGroup::FloatPowi, type_id, vec![ Some(type_id), Some(i32_type_id) ]),
+            "powf"      => insert(BuiltinGroup::FloatPowf, type_id, vec![ Some(type_id), Some(type_id) ]),
+            "sqrt"      => insert(BuiltinGroup::FloatSqrt, type_id, vec![ Some(type_id) ]),
+            "exp"       => insert(BuiltinGroup::FloatExp, type_id, vec![ Some(type_id) ]),
+            "exp2"      => insert(BuiltinGroup::FloatExp2, type_id, vec![ Some(type_id) ]),
+            "ln"        => insert(BuiltinGroup::FloatLn, type_id, vec![ Some(type_id) ]),
+            "log"       => insert(BuiltinGroup::FloatLog, type_id, vec![ Some(type_id), Some(type_id) ]),
+            "log2"      => insert(BuiltinGroup::FloatLog2, type_id, vec![ Some(type_id) ]),
+            "log10"     => insert(BuiltinGroup::FloatLog10, type_id, vec![ Some(type_id) ]),
+            "cbrt"      => insert(BuiltinGroup::FloatCbrt, type_id, vec![ Some(type_id) ]),
+            "hypot"     => insert(BuiltinGroup::FloatHypot, type_id, vec![ Some(type_id), Some(type_id) ]),
+            "sin"       => insert(BuiltinGroup::FloatSin, type_id, vec![ Some(type_id) ]),
+            "cos"       => insert(BuiltinGroup::FloatCos, type_id, vec![ Some(type_id) ]),
+            "tan"       => insert(BuiltinGroup::FloatTan, type_id, vec![ Some(type_id) ]),
+            "asin"      => insert(BuiltinGroup::FloatAsin, type_id, vec![ Some(type_id) ]),
+            "acos"      => insert(BuiltinGroup::FloatAcos, type_id, vec![ Some(type_id) ]),
+            "atan"      => insert(BuiltinGroup::FloatAtan, type_id, vec![ Some(type_id) ]),
+            "atan2"     => insert(BuiltinGroup::FloatAtan2, type_id, vec![ Some(type_id), Some(type_id) ]),
+            _ => None,
+        })
     }
 
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.
@@ -736,6 +769,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                         if item.function_id.is_none() {
                             item.function_id = self.try_create_array_builtin(&item.ident.name, type_id)?;
+                        }
+                    } else if self.type_by_id(type_id).is_float() {
+                        path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
+                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
+                        if item.function_id.is_none() {
+                            item.function_id = self.try_create_float_builtin(&item.ident.name, type_id)?;
                         }
                     } else {
                         // try method on type

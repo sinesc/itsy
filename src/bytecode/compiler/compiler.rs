@@ -1640,14 +1640,43 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                             _ => unreachable!("Unsupported inner size for type {} for builtin group {:?}", ty, builtin),
                         });
                     }
-                    BuiltinGroup::ArrayPush => select_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
-                    BuiltinGroup::ArrayPop => select_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
-                    BuiltinGroup::ArrayTruncate => select_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
-                    BuiltinGroup::ArrayRemove => select_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
-                    _ => unreachable!("Unsupported type {} for builtin group {:?}", ty, builtin),
+                    BuiltinGroup::ArrayPush => select_array_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
+                    BuiltinGroup::ArrayPop => select_array_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
+                    BuiltinGroup::ArrayTruncate => select_array_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
+                    BuiltinGroup::ArrayRemove => select_array_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
+                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
                 }
-            }
-            _ => unreachable!("Unsupported type {}", ty),
+            },
+            Type::f32 | Type::f64 => {
+                match builtin {
+                    BuiltinGroup::FloatFloor => select_float_builtin!(self, ty, float_floor32, float_floor64),
+                    BuiltinGroup::FloatCeil => select_float_builtin!(self, ty, float_ceil32, float_ceil64),
+                    BuiltinGroup::FloatRound => select_float_builtin!(self, ty, float_round32, float_round64),
+                    BuiltinGroup::FloatTrunc => select_float_builtin!(self, ty, float_trunc32, float_trunc64),
+                    BuiltinGroup::FloatFract => select_float_builtin!(self, ty, float_fract32, float_fract64),
+                    BuiltinGroup::FloatSignum => select_float_builtin!(self, ty, float_signum32, float_signum64),
+                    BuiltinGroup::FloatPowi => select_float_builtin!(self, ty, float_powi32, float_powi64),
+                    BuiltinGroup::FloatPowf => select_float_builtin!(self, ty, float_powf32, float_powf64),
+                    BuiltinGroup::FloatSqrt => select_float_builtin!(self, ty, float_sqrt32, float_sqrt64),
+                    BuiltinGroup::FloatExp => select_float_builtin!(self, ty, float_exp32, float_exp64),
+                    BuiltinGroup::FloatExp2 => select_float_builtin!(self, ty, float_exp2_32, float_exp2_64),
+                    BuiltinGroup::FloatLn => select_float_builtin!(self, ty, float_ln32, float_ln64),
+                    BuiltinGroup::FloatLog => select_float_builtin!(self, ty, float_log32, float_log64),
+                    BuiltinGroup::FloatLog2 => select_float_builtin!(self, ty, float_log2_32, float_log2_64),
+                    BuiltinGroup::FloatLog10 => select_float_builtin!(self, ty, float_log10_32, float_log10_64),
+                    BuiltinGroup::FloatCbrt => select_float_builtin!(self, ty, float_cbrt32, float_cbrt64),
+                    BuiltinGroup::FloatHypot => select_float_builtin!(self, ty, float_hypot32, float_hypot64),
+                    BuiltinGroup::FloatSin => select_float_builtin!(self, ty, float_sin32, float_sin64),
+                    BuiltinGroup::FloatCos => select_float_builtin!(self, ty, float_cos32, float_cos64),
+                    BuiltinGroup::FloatTan => select_float_builtin!(self, ty, float_tan32, float_tan64),
+                    BuiltinGroup::FloatAsin => select_float_builtin!(self, ty, float_asin32, float_asin64),
+                    BuiltinGroup::FloatAcos => select_float_builtin!(self, ty, float_acos32, float_acos64),
+                    BuiltinGroup::FloatAtan => select_float_builtin!(self, ty, float_atan32, float_atan64),
+                    BuiltinGroup::FloatAtan2 => select_float_builtin!(self, ty, float_atan2_32, float_atan2_64),
+                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
+                }
+            },
+            _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
         }
     }
 
