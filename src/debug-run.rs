@@ -77,6 +77,9 @@ fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, 
         files.insert(module_path.to_string(), (filename, file));
         module
     })?;
+    if write_logs {
+        log("logs/ast.c", false, &format!("{:?}", parsed.modules().collect::<Vec<_>>()));
+    }
     let resolved = resolver::resolve::<MyAPI>(parsed, "main")?;
     if write_logs {
         log("logs/ast.c", false, &format!("{:?}", resolved.modules));
