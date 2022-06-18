@@ -135,6 +135,7 @@ pub enum BuiltinGroup {
     FloatRound,
     FloatTrunc,
     FloatFract,
+    FloatAbs,
     FloatSignum,
     FloatPowi,
     FloatPowf,
@@ -154,6 +155,17 @@ pub enum BuiltinGroup {
     FloatAcos,
     FloatAtan,
     FloatAtan2,
+    FloatIsNaN,
+    FloatIsInfinite,
+    FloatIsFinite,
+    FloatIsSubnormal,
+    FloatIsNormal,
+    FloatRecip,
+    FloatToDegrees,
+    FloatToRadians,
+    FloatMin,
+    FloatMax,
+    FloatClamp,
 }
 
 /// Information about a data type in a resolved program.

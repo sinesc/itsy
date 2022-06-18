@@ -135,6 +135,13 @@ impl_builtins! {
     }
 
     fn <
+        float_abs32<T: u32>(this: f32) -> f32,
+        float_abs64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.abs()
+    }
+
+    fn <
         float_signum32<T: u32>(this: f32) -> f32,
         float_signum64<T: u64>(this: f64) -> f64,
     >(&mut vm) {
@@ -267,4 +274,80 @@ impl_builtins! {
         this.atan2(other)
     }
 
+    fn <
+        float_is_nan_32<T: u32>(this: f32) -> bool,
+        float_is_nan_64<T: u64>(this: f64) -> bool,
+    >(&mut vm) {
+        this.is_nan()
+    }
+
+    fn <
+        float_is_infinite_32<T: u32>(this: f32) -> bool,
+        float_is_infinite_64<T: u64>(this: f64) -> bool,
+    >(&mut vm) {
+        this.is_infinite()
+    }
+
+    fn <
+        float_is_finite_32<T: u32>(this: f32) -> bool,
+        float_is_finite_64<T: u64>(this: f64) -> bool,
+    >(&mut vm) {
+        this.is_finite()
+    }
+
+    fn <
+        float_is_subnormal_32<T: u32>(this: f32) -> bool,
+        float_is_subnormal_64<T: u64>(this: f64) -> bool,
+    >(&mut vm) {
+        this.is_subnormal()
+    }
+
+    fn <
+        float_is_normal_32<T: u32>(this: f32) -> bool,
+        float_is_normal_64<T: u64>(this: f64) -> bool,
+    >(&mut vm) {
+        this.is_normal()
+    }
+
+    fn <
+        float_recip_32<T: u32>(this: f32) -> f32,
+        float_recip_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.recip()
+    }
+
+    fn <
+        float_to_degrees_32<T: u32>(this: f32) -> f32,
+        float_to_degrees_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.to_degrees()
+    }
+
+    fn <
+        float_to_radians_32<T: u32>(this: f32) -> f32,
+        float_to_radians_64<T: u64>(this: f64) -> f64,
+    >(&mut vm) {
+        this.to_radians()
+    }
+
+    fn <
+        float_min_32<T: u32>(this: f32, other: f32) -> f32,
+        float_min_64<T: u64>(this: f64, other: f64) -> f64,
+    >(&mut vm) {
+        this.min(other)
+    }
+
+    fn <
+        float_max_32<T: u32>(this: f32, other: f32) -> f32,
+        float_max_64<T: u64>(this: f64, other: f64) -> f64,
+    >(&mut vm) {
+        this.max(other)
+    }
+
+    fn <
+        float_clamp_32<T: u32>(this: f32, min: f32, max: f32) -> f32,
+        float_clamp_64<T: u64>(this: f64, min: f64, max: f64) -> f64,
+    >(&mut vm) {
+        this.clamp(min, max)
+    }
 }

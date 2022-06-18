@@ -241,6 +241,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Try to create concrete array builtin function signature for the given array type
     fn try_create_float_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
         let i32_type_id = self.primitive_type_id(Type::i32)?;
+        let bool_type_id = self.primitive_type_id(Type::bool)?;
         let mut insert = |g, r, a| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a, Some(FunctionKind::Builtin(type_id, g))));
         Ok(match name {
             "floor"     => insert(BuiltinGroup::FloatFloor, type_id, vec![ Some(type_id) ]),
@@ -249,6 +250,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             "trunc"     => insert(BuiltinGroup::FloatTrunc, type_id, vec![ Some(type_id) ]),
             "fract"     => insert(BuiltinGroup::FloatFract, type_id, vec![ Some(type_id) ]),
             "signum"    => insert(BuiltinGroup::FloatSignum, type_id, vec![ Some(type_id) ]),
+            "abs"       => insert(BuiltinGroup::FloatAbs, type_id, vec![ Some(type_id) ]),
             "powi"      => insert(BuiltinGroup::FloatPowi, type_id, vec![ Some(type_id), Some(i32_type_id) ]),
             "powf"      => insert(BuiltinGroup::FloatPowf, type_id, vec![ Some(type_id), Some(type_id) ]),
             "sqrt"      => insert(BuiltinGroup::FloatSqrt, type_id, vec![ Some(type_id) ]),
@@ -267,6 +269,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             "acos"      => insert(BuiltinGroup::FloatAcos, type_id, vec![ Some(type_id) ]),
             "atan"      => insert(BuiltinGroup::FloatAtan, type_id, vec![ Some(type_id) ]),
             "atan2"     => insert(BuiltinGroup::FloatAtan2, type_id, vec![ Some(type_id), Some(type_id) ]),
+
+            "is_nan"    => insert(BuiltinGroup::FloatIsNaN, bool_type_id, vec![ Some(type_id) ]),
+            "is_infinite"=> insert(BuiltinGroup::FloatIsInfinite, bool_type_id, vec![ Some(type_id) ]),
+            "is_finite" => insert(BuiltinGroup::FloatIsFinite, bool_type_id, vec![ Some(type_id) ]),
+            "is_subnormal"=> insert(BuiltinGroup::FloatIsSubnormal, bool_type_id, vec![ Some(type_id) ]),
+            "is_normal" => insert(BuiltinGroup::FloatIsNormal, bool_type_id, vec![ Some(type_id) ]),
+            "recip"     => insert(BuiltinGroup::FloatRecip, type_id, vec![ Some(type_id) ]),
+            "to_degrees"=> insert(BuiltinGroup::FloatToDegrees, type_id, vec![ Some(type_id) ]),
+            "to_radians"=> insert(BuiltinGroup::FloatToRadians, type_id, vec![ Some(type_id) ]),
+            "min"       => insert(BuiltinGroup::FloatMin, type_id, vec![ Some(type_id), Some(type_id) ]),
+            "max"       => insert(BuiltinGroup::FloatMax, type_id, vec![ Some(type_id), Some(type_id) ]),
+            "clamp"     => insert(BuiltinGroup::FloatClamp, type_id, vec![ Some(type_id), Some(type_id), Some(type_id) ]),
             _ => None,
         })
     }
