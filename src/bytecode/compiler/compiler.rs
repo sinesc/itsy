@@ -1515,10 +1515,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, local: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local as StackOffset),
-            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local as StackOffset),
-            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local as StackOffset),
-            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local as StackOffset),
+            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local),
+            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local),
+            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local),
+            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }

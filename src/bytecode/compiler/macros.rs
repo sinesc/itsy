@@ -11,12 +11,12 @@ macro_rules! comment {
 macro_rules! select_signed_opcode {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{i8, i16};
-        if $value >= i8::MIN as StackOffset && $value <= i8::MAX as StackOffset {
+        if $value as StackOffset >= i8::MIN as StackOffset && $value as StackOffset <= i8::MAX as StackOffset {
             $self.writer.$variant_8($value as i8 $(, $more)*)
-        } else if $value >= i16::MIN as StackOffset && $value <= i16::MAX as StackOffset {
+        } else if $value as StackOffset >= i16::MIN as StackOffset && $value as StackOffset <= i16::MAX as StackOffset {
             $self.writer.$variant_16($value as i16 $(, $more)*)
         } else {
-            $self.writer.$variant_sa($value $(, $more)*)
+            $self.writer.$variant_sa($value as StackOffset $(, $more)*)
         }
     }}
 }
@@ -25,12 +25,12 @@ macro_rules! select_signed_opcode {
 macro_rules! select_unsigned_opcode {
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{u8, u16};
-        if $value <= u8::MAX as StackAddress {
+        if $value as StackAddress <= u8::MAX as StackAddress {
             $self.writer.$variant_8($value as u8 $(, $more)*)
-        } else if $value <= u16::MAX as StackAddress {
+        } else if $value as StackAddress <= u16::MAX as StackAddress {
             $self.writer.$variant_16($value as u16 $(, $more)*)
         } else {
-            $self.writer.$variant_sa($value $(, $more)*)
+            $self.writer.$variant_sa($value as StackAddress $(, $more)*)
         }
     }}
 }
