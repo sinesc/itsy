@@ -5,57 +5,51 @@ This document lists some of the differences between the languages.
 
 ## String interpolation
 
-String literals support interpolation. Currently this requires that the type of the interpolated value can be cast to a String via `as`. Future: Type must implement Display trait.
+String literals support interpolation.
 
 
 ```rust
-let pi = 3.14159265359;
-print("\u{03C0} equals {pi}!"); // -> π equals 3.14159265359!!
+fn main() {
+    let pi = 3.14159265359;
+    print("\u{03C0} equals {pi}!\n"); // -> π equals 3.14159265359!!
+}
 ```
+
+The literal is parsed into the AST equivalent of `("π equals " + (pi as String) + "!\n")` and requires that the type of the interpolated value can be cast to `String` via `as`. (In the future custom types can also implement a Display trait to become compatible).
 
 ## Arrays
 
 Arrays are dynamically sized.
 
 ```rust
-let x = [ 1, 2, 3 ];
-printu8(x[0]); // -> 1
-```
+fn main() {
+    let x = [ 1u8, 2, 3 ];
 
-The above code is inferred as an array of `u8` elements (assuming a `printu8` function exists and accepts a `u8` as first argument).
+    x.pop();
+    x.push(4);
+    x.push(8);
 
-Arrays support operations like `push` and `pop`.
-
-```rust
-x.pop();
-x.push(4);
-x.push(8);
-
-for i in x {
-    printu8(i); // -> 1 2 4 8
+    for i in x {
+        print("{i}\n"); // -> 1 -> 2 -> 4 -> 8
+    }
 }
 ```
 
-Array operations are documented [here](builtin.array.md).
-
 ## References
 
-All non-primitive types are reference types. There is no support for explicit references. (Note: currently this does not require the use of `mut x` in arguments/binding. This will likely change in the future.)
+All non-primitive types are reference types. There is no support for explicit references.
 
 ```rust
 struct Struct {
     value: u8,
 }
 
-fn modify(x: Struct) {
-    x.value *= 2;
-}
-
 fn main() {
-    let x = Struct { value: 10 };
-    printu8(x.value); // -> 10
-    modify(x);
-    printu8(x.value); // -> 20
+    let x = Struct { value: 1 };
+    let y = x;
+    print("x: {x.value}, y: {y.value}\n");  // -> x: 1, y: 1
+    x.value *= 2;                           // (currently works without "mut", will likely change)
+    print("x: {x.value}, y: {y.value}\n");  // -> x: 2, y: 2
 }
 ```
 
@@ -68,7 +62,7 @@ Implementors of a trait are accepted wherever the trait is accepted. The `dyn` o
 pub trait Math {
     fn mathificate(self: Self, value: u8) -> u8;
     fn print(self: Self, value: u8) {
-        printu8(self.mathificate(value));
+        print("{self.mathificate(value)}\n"); // interpolated expression
     }
 }
 
@@ -100,8 +94,8 @@ fn compute(value: u8, test: Math) {
 }
 
 fn main() {
-    compute(11, Multiply { with: 2 });  // 2*11=22
-    compute(9, Add { to: 7 });          // 7+9=16
-    Add { to: 3 }.print(3);             // 3+3=6
+    compute(11, Multiply { with: 2 });  // performs 2 * 11 -> 22
+    compute(9, Add { to: 7 });          // performs 7 + 9 -> 16
+    Add { to: 3 }.print(3);             // performs 3 + 3 -> 6
 }
 ```
