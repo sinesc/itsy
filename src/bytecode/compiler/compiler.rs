@@ -1310,7 +1310,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if from.is_signed() && !to.is_signed() && !to.is_float() && !to.is_string() {
             self.write_zclamp(from);
         }
-        if from.is_integer() && to.is_integer() {
+        if (from.is_integer() || from.is_bool()) && to.is_integer() {
             self.write_integer_cast(from, to);
         } else if from.is_float() && to.is_float() {
             self.write_float_integer_cast(from, to);

@@ -11,7 +11,7 @@ pub const ICE: &'static str = "Internal compiler error";
 #[derive(Clone, Debug)]
 pub enum ResolveErrorKind {
     TypeMismatch(String, String),
-    NonPrimitiveCast(String),
+    InvalidCast(String, String),
     IncompatibleNumeric(Type, Numeric),
     UndefinedVariable(String),
     UndefinedMember(String),
@@ -65,7 +65,7 @@ impl Display for ResolveError {
         #[allow(unreachable_patterns)]
         match &self.kind {
             ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {}, got {}", e, g),
-            ResolveErrorKind::NonPrimitiveCast(t1) => write!(f, "Non-primitive cast of type {}", t1),
+            ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {} to {}", t1, t2),
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {} for expected type {}", n, t),
             ResolveErrorKind::UndefinedVariable(v) => write!(f, "Undefined variable '{}'", v),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{}'", m),

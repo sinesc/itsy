@@ -306,6 +306,13 @@ impl Type {
     pub const fn is_primitive(self: &Self) -> bool {
         !self.is_ref()
     }
+    /// Whether the type is a reference type.
+    pub const fn is_simple_enum(self: &Self) -> bool {
+        match self {
+            Type::Enum(Enum { primitive: Some(_), .. }) => true,
+            _ => false,
+        }
+    }
     /// Whether the type is void.
     pub const fn is_void(self: &Self) -> bool {
         match self {
@@ -338,10 +345,21 @@ impl Type {
             _ => false
         }
     }
+    /// Whether the type is either a float or integer.
+    pub const fn is_numeric(self: &Self) -> bool {
+        self.is_float() || self.is_integer()
+    }
     /// Whether the type is a string.
     pub const fn is_string(self: &Self) -> bool {
         match self {
             Type::String => true,
+            _ => false
+        }
+    }
+    /// Whether the type is a boolean.
+    pub const fn is_bool(self: &Self) -> bool {
+        match self {
+            Type::bool => true,
             _ => false
         }
     }

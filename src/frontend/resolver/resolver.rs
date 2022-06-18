@@ -1010,19 +1010,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.expr, None)?;
         if let Some(type_id) = item.ty.type_id {
             *item.type_id_mut(self) = Some(type_id);
-            let ty = self.type_by_id(type_id);
-            if (!ty.is_primitive() && !ty.is_string()) || ty.as_enum().is_some() {
-                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.type_by_id(type_id))).clone();
-                return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(name), self.module_path));
+        }
+        if let (Some(from_type_id), Some(to_type_id)) = (item.expr.type_id(self), item.ty.type_id) {
+            if from_type_id != to_type_id {
+                let from_type = self.type_by_id(from_type_id);
+                let to_type = self.type_by_id(to_type_id);
+                if
+                    (to_type.is_string() && !(from_type.is_numeric())) ||
+                    (to_type.is_integer() && !(from_type.is_numeric() || from_type.is_bool() || from_type.is_simple_enum())) ||
+                    (to_type.is_float() && !from_type.is_numeric()) ||
+                    (to_type.is_bool() && !from_type.is_integer()) ||
+                    !(to_type.is_string() || to_type.is_integer() || to_type.is_float() || to_type.is_bool())
+                {
+                    let from_name = self.scopes.type_name(from_type_id).unwrap_or(&format!("<{}>", from_type)).clone();
+                    let to_name = self.scopes.type_name(to_type_id).unwrap_or(&format!("<{}>", to_type)).clone();
+                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidCast(from_name, to_name), self.module_path));
+                }
             }
         }
-        if let Some(ty) = self.item_type(&item.expr) {
-            if !ty.is_primitive() && !ty.is_string() {
-                let type_id = item.expr.type_id(self).unwrap();
-                let name = self.scopes.type_name(type_id).unwrap_or(&format!("<{}>", self.type_by_id(type_id))).clone();
-                return Err(ResolveError::new(item, ResolveErrorKind::NonPrimitiveCast(name), self.module_path));
-            }
-        }
+
         Ok(())
     }
 
