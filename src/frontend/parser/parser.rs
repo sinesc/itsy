@@ -310,7 +310,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
     }
     fn fields(i: Input<'_>) -> Output<UnorderedMap<String, Expression>> {
         map(
-            separated_list0(char(','), field),
+            separated_list1(char(','), field),
             |list| {
                 list.into_iter().map(|item| (item.0, item.1)).collect()
             }
