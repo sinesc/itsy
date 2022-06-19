@@ -975,21 +975,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(ref mut result) = item.result {
             self.resolve_expression(result, expected_result)?;
         }
-        if let Some(ref mut returns) = item.returns {
-            let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(returns), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
-            let ret_type_id = self.scopes.function_ref(function_id).ret_type;
-            self.resolve_expression(returns, ret_type_id)?;
-        }
-        // check result type matches expected type unless block is returned from before ever resulting
-        if let (Some(expected_result), None) = (expected_result, &item.returns) {
-            if item.result.is_none() { // no result = void
-                self.check_type_accepted_for(item, self.primitive_type_id(Type::void)?, expected_result)?;
-            } else if let Some(result_expression) = &item.result {
-                if let Some(result_type_id) = result_expression.type_id(self) {
-                    self.check_type_accepted_for(item, result_type_id, expected_result)?;
-                }
-            }
-        }
         self.scope_id = parent_scope_id;
         Ok(())
     }

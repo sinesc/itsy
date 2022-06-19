@@ -988,13 +988,21 @@ fn function(i: Input<'_>) -> Output<Function> {
             map(ws(char(';')), |_| None)
         ))))),
         move |mut func| {
-            // move function-block 'result' to 'returns' so that compiling the block generates a scope return destructor, not block destructor (this would leave the function arguments intact).
-            if let Some(Block { result: result @ Some(_), returns: returns @ None, .. }) = &mut func.1 {
-                swap(result, returns);
-            }
-            // if the function does not have a return value we need to generate a void value so that the correct destructor is generated, as mentioned above
-            if let Some(Block { returns: returns @ None, .. }) = &mut func.1 {
-                *returns = Some(Expression::void(position)); // TODO: wrong position
+            if let Some(block) = &mut func.1 {
+                // transform block result to return statement
+                if let Some(returns) = block.result.take() {
+                    block.statements.push(Statement::Return(Return {
+                        position: returns.position(),
+                        expr: returns,
+                    }));
+                }
+                // if the last block statement is still not a return statement, return void
+                if block.control_flow() != Some(ControlFlowType::Return) {
+                    block.statements.push(Statement::Return(Return {
+                        expr: Expression::void(position),// TODO: wrong position
+                        position: position,// TODO: wrong position
+                    }));
+                }
             }
             Function {
                 position    : position,

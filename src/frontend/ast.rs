@@ -116,10 +116,20 @@ macro_rules! impl_matchall {
     };
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ControlFlowType {
+    Break,
+    Return,
+    Continue,
+}
+
 /// Provides information whether this AST structure causes an unconditional function return.
-pub(crate) trait Returns {
+pub(crate) trait ControlFlow {
     /// Returns true if this structure unconditionally causes the parent function to return.
-    fn returns(self: &Self) -> bool;
+    fn control_flow(self: &Self) -> Option<ControlFlowType> {
+        self.identify_control_flow(false)
+    }
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType>;
 }
 
 /// Visibility of types and functions.
@@ -205,7 +215,7 @@ impl Statement {
             _ => false,
         }
     }
-    /// Converts the statement into an expression or panics if the conversion would be invalid.
+    /// Converts the statement into an expression or return None
     pub fn into_expression(self: Self) -> Option<Expression> {
         match self {
             Statement::IfBlock(if_block)        => Some(Expression::IfBlock(Box::new(if_block))),
@@ -217,18 +227,19 @@ impl Statement {
     }
 }
 
-impl Returns for Statement {
-    fn returns(self: &Self) -> bool {
+impl ControlFlow for Statement {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         match self {
-            Statement::Return(_)    => true,
-            Statement::IfBlock(v)   => v.returns(),
-            Statement::Block(v)     => v.returns(),
-            Statement::Expression(v)=> v.returns(),
-            _                       => false,
+            Statement::Return(_)    => Some(ControlFlowType::Return),
+            Statement::IfBlock(v)   => v.identify_control_flow(scan_blocks),
+            Statement::Block(v)     => v.identify_control_flow(scan_blocks),
+            Statement::ForLoop(v)     => v.identify_control_flow(scan_blocks),
+            Statement::WhileLoop(v)     => v.identify_control_flow(scan_blocks),
+            Statement::Expression(v)=> v.identify_control_flow(scan_blocks),
+            _                       => None,
         }
     }
 }
-
 impl Positioned for Statement {
     fn position(self: &Self) -> Position {
         impl_matchall!(self, Statement, item, { item.position() })
@@ -602,6 +613,16 @@ pub struct ForLoop {
 
 impl_positioned!(ForLoop);
 
+impl ControlFlow for ForLoop {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        // don't propagate break/continue control flow changes to parent blocks
+        match self.expr.identify_control_flow(scan_blocks) {
+            Some(ControlFlowType::Break) | Some(ControlFlowType::Continue) => None,
+            control_flow_type @ _ => control_flow_type,
+        }
+    }
+}
+
 impl Resolvable for ForLoop {
     fn num_resolved(self: &Self) -> Progress {
         self.iter.num_resolved()
@@ -621,6 +642,16 @@ pub struct WhileLoop {
 
 impl_positioned!(WhileLoop);
 impl_display!(WhileLoop, "while {} {{ ... }}", expr);
+
+impl ControlFlow for WhileLoop {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        // don't propagate break/continue control flow changes to parent blocks
+        match self.expr.identify_control_flow(scan_blocks) {
+            Some(ControlFlowType::Break) | Some(ControlFlowType::Continue) => None,
+            control_flow_type @ _ => control_flow_type,
+        }
+    }
+}
 
 impl Resolvable for WhileLoop {
     fn num_resolved(self: &Self) -> Progress {
@@ -726,14 +757,22 @@ impl Resolvable for IfBlock {
     }
 }
 
-impl Returns for IfBlock {
-    fn returns(self: &Self) -> bool {
-        if self.cond.returns() {
-            true
+impl ControlFlow for IfBlock {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        if let cond_cf @ Some(_) = self.cond.identify_control_flow(scan_blocks) {
+            // if-condition alters control flow
+            cond_cf
         } else if let Some(else_block) = &self.else_block {
-            self.if_block.returns() && else_block.returns()
+            // check whether both branches unconditionally alter the control flow in the same way.
+            let if_cf = self.if_block.identify_control_flow(scan_blocks);
+            if if_cf == else_block.identify_control_flow(scan_blocks) {
+                if_cf
+            } else {
+                None
+            }
         } else {
-            false
+            // no else block so control flow could only ever be conditionally altered. (unless 'if true', but that should probably be optimized at a different stage)
+            None
         }
     }
 }
@@ -757,7 +796,6 @@ pub struct Block {
     pub position    : Position,
     pub statements  : Vec<Statement>,
     pub result      : Option<Expression>,
-    pub returns     : Option<Expression>,
     pub scope_id    : Option<ScopeId>,
 }
 
@@ -765,38 +803,30 @@ impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
 
 impl Block {
-    pub fn new(position: Position, statements: Vec<Statement>, result: Option<Expression>) -> Self {
-        let mut block = Block {
+    pub fn new(position: Position, mut statements: Vec<Statement>, mut result: Option<Expression>) -> Self {
+        // truncate dead code
+        if let Some(control_flow_position) = statements.iter().position(|s| s.identify_control_flow(true).is_some()) {
+            // TODO: implement warning support and attach a warning to the block ast node
+            statements.truncate(control_flow_position + 1);
+            result = None; // result would have followed the dead code and also be dead
+        }
+        if statements.last().map_or(false, |s| s.is_expression()) {
+            result = statements.pop().unwrap().into_expression();
+        }
+        Block {
             position,
             statements,
             result,
-            returns : None,
             scope_id: None,
-        };
-        // move last block item into result if it is an expression (e.g. an if block with a result) and no result was matched
-        if block.result.is_none() && block.statements.last().map_or(false, |l| l.is_expression()) {
-            block.result = block.statements.pop().map(|s| s.into_expression().unwrap());
         }
-        // move return value or result into the appropriate field
-        if let Some(return_index) = block.statements.iter().position(|s| s.returns()) {
-            // remove code after return, move return to returns
-            block.statements.truncate(return_index + 1);
-            let returns = block.statements.pop().unwrap();
-            block.returns = Some(returns.into_expression().unwrap());
-            block.result = None;
-        } else if block.result.as_ref().map_or(false, |r| r.returns()) {
-            // check if the result returns, if so move to returns
-            block.returns = block.result.take();
-        }
-        block
     }
+
 }
 
 impl Resolvable for Block {
     fn num_resolved(self: &Self) -> Progress {
         self.statements.iter().fold(Progress::zero(), |acc, statement| acc + statement.num_resolved())
         + self.result.as_ref().map_or(Progress::zero(), |result| result.num_resolved())
-        + self.result.as_ref().map_or(Progress::zero(), |returns| returns.num_resolved())
     }
 }
 
@@ -813,9 +843,19 @@ impl Typeable for Block {
     }
 }
 
-impl Returns for Block {
-    fn returns(self: &Self) -> bool {
-        self.returns.is_some() || self.result.as_ref().map_or(false, |result| result.returns()) || self.statements.iter().any(|statement| statement.returns())
+impl ControlFlow for Block {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        // if dead code was already eliminated we know that any control flow change will happen in the result or last statement
+        if let Some(result) = &self.result {
+            if let Some(control_flow) = result.identify_control_flow(scan_blocks) {
+                return Some(control_flow);
+            }
+        }
+        if scan_blocks {
+            self.statements.iter().find_map(|s| s.identify_control_flow(scan_blocks))
+        } else {
+            self.statements.last()?.identify_control_flow(scan_blocks)
+        }
     }
 }
 
@@ -933,16 +973,16 @@ impl Resolvable for Expression {
     }
 }
 
-impl Returns for Expression {
-    fn returns(self: &Self) -> bool {
+impl ControlFlow for Expression {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         match self {
-            Expression::Assignment(v)   => v.returns(),
-            Expression::BinaryOp(v)     => v.returns(),
-            Expression::UnaryOp(v)      => v.returns(),
-            Expression::Cast(v)         => v.returns(),
-            Expression::Block(v)        => v.returns(),
-            Expression::IfBlock(v)      => v.returns(),
-            _                           => false,
+            Expression::Assignment(v)   => v.identify_control_flow(scan_blocks),
+            Expression::BinaryOp(v)     => v.identify_control_flow(scan_blocks),
+            Expression::UnaryOp(v)      => v.identify_control_flow(scan_blocks),
+            Expression::Cast(v)         => v.identify_control_flow(scan_blocks),
+            Expression::Block(v)        => v.identify_control_flow(scan_blocks),
+            Expression::IfBlock(v)      => v.identify_control_flow(scan_blocks),
+            _                           => None,
         }
     }
 }
@@ -1215,9 +1255,10 @@ impl Resolvable for Assignment {
     }
 }
 
-impl Returns for Assignment {
-    fn returns(self: &Self) -> bool {
-        self.left.returns() || self.right.returns()
+impl ControlFlow for Assignment {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        // We priorize left over right control flow as that is the order of evaluation for assignments.
+        self.left.identify_control_flow(scan_blocks).or(self.right.identify_control_flow(scan_blocks))
     }
 }
 
@@ -1241,9 +1282,9 @@ impl Resolvable for Cast {
     }
 }
 
-impl Returns for Cast {
-    fn returns(self: &Self) -> bool {
-        self.expr.returns()
+impl ControlFlow for Cast {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        self.expr.identify_control_flow(scan_blocks)
     }
 }
 
@@ -1269,9 +1310,10 @@ impl Resolvable for BinaryOp {
     }
 }
 
-impl Returns for BinaryOp {
-    fn returns(self: &Self) -> bool {
-        self.left.returns() || self.right.returns()
+impl ControlFlow for BinaryOp {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        // We priorize left over right control flow as that is the order of evaluation for binary operations.
+        self.left.identify_control_flow(scan_blocks).or(self.right.identify_control_flow(scan_blocks))
     }
 }
 
@@ -1303,9 +1345,9 @@ impl Display for UnaryOp {
     }
 }
 
-impl Returns for UnaryOp {
-    fn returns(self: &Self) -> bool {
-        self.expr.returns()
+impl ControlFlow for UnaryOp {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        self.expr.identify_control_flow(scan_blocks)
     }
 }
 

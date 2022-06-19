@@ -9,7 +9,7 @@ mod init_state;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, Returns}, resolver::resolved::{ResolvedProgram, IdMappings}};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
@@ -162,7 +162,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::Module(_) => Ok(()),
             S::Use(_) => Ok(()),
             S::EnumDef(_) => Ok(()),
-            S::Return(_) => unreachable!("Return AST nodes should have been rewritten"),
             S::Function(function) => self.compile_function(function),
             S::ImplBlock(impl_block) => {
                 for function in &impl_block.functions {
@@ -225,7 +224,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             S::Continue(_) => {
                 Ok(())
-            }
+            },
+            S::Return(ast::Return { expr, .. }) => {
+                comment!(self, "block returning");
+                self.compile_expression(expr)?;
+                // inc result, then dec everything
+                self.item_cnt(expr, true, HeapRefOp::Inc);
+                self.write_scope_destructor(BranchingScope::Function);
+                self.item_cnt(expr, true, HeapRefOp::DecNoFree);
+                self.write_ret();
+                Ok(())
+            },
         }
     }
 
@@ -432,7 +441,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.init_state.push(BranchingKind::Double, BranchingScope::Block);
         self.init_state.set_path(BranchingPath::A);
         let result = self.compile_block(if_block);
-        let exit_jump = if !if_block.returns() {
+        let exit_jump = if if_block.control_flow() != Some(ast::ControlFlowType::Return) {
             Some(self.writer.jmp(123))
         } else {
             None
@@ -472,7 +481,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write match arm block code.
     fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, block: &ast::Block) -> CompileResult {
         self.compile_block(block)?;
-        if !block.returns() {
+        if block.control_flow() != Some(ast::ControlFlowType::Return) {
             exit_jumps.push(self.writer.jmp(123));
         }
         Ok(())
@@ -677,15 +686,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             self.compile_statement(statement)?;
         }
-        if let Some(returns) = &item.returns {
-            comment!(self, "block returning");
-            self.compile_expression(returns)?;
-            // inc result, then dec everything
-            self.item_cnt(returns, true, HeapRefOp::Inc);
-            self.write_scope_destructor(BranchingScope::Function);
-            self.item_cnt(returns, true, HeapRefOp::DecNoFree);
-            self.write_ret();
-        } else if let Some(result) = &item.result {
+        if let Some(result) = &item.result {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
             // inc result, then dec everything
