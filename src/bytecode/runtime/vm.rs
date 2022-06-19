@@ -3,6 +3,8 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
 use crate::bytecode::{HeapRef, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapRefOp}}};
+#[cfg(feature="debugging")]
+use crate::compiler::OpCode;
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -108,6 +110,12 @@ impl<T, U> VM<T, U> {
     #[cfg(feature="debugging")]
     pub fn format_instruction(self: &Self) -> Option<String> where T: VMFunc<T> + VMData<T, U> {
         self.describe_instruction(self.pc).map(|result| result.0)
+    }
+
+    /// Returns the current instruction
+    #[cfg(feature="debugging")]
+    pub fn get_instruction(self: &Self) -> Option<OpCode> where T: VMFunc<T> + VMData<T, U> {
+        self.read_instruction(self.pc)
     }
 
     /// Returns the current stack as a string.

@@ -37,6 +37,7 @@ fn main() {
     } else {
         let mut files: HashMap<String, (PathBuf, String)> = HashMap::new();
         let write_logs = std::path::Path::new("./logs/").is_dir();
+        let mut instruction_counts = HashMap::new();
         match build(&args[1], &mut files, write_logs) {
             Ok(program) => {
                 let mut context = Context { seed: 1.2345 };
@@ -47,6 +48,8 @@ fn main() {
                 }
                 loop {
                     let mut instruction = None;
+                    let count = instruction_counts.entry(vm.get_instruction()).or_insert(0);
+                    *count += 1;
                     if write_logs {
                         instruction = Some(vm.format_instruction().unwrap_or("-".to_string()));
                         log("logs/run.ini", true, &format!("{}", instruction.as_ref().unwrap()));
@@ -58,6 +61,13 @@ fn main() {
                         }
                     }
                     if vmstate != runtime::VMState::Ready {
+                        let mut counts: Vec<(_, _)> = instruction_counts.into_iter().collect();
+                        counts.sort_by(|a, b| a.1.cmp(&b.1));
+                        println!("OpCode counts");
+                        for (opcode, v) in &counts {
+                            let opcode = format!("{:?}", opcode.unwrap());
+                            println!("{: >22} {}", opcode, v);
+                        }
                         break;
                     }
                 }

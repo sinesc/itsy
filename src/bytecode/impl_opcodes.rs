@@ -82,7 +82,7 @@ macro_rules! impl_opcodes {
         /// `const64_8` load 64 bit from constpool at given 8 bit address
         #[allow(non_camel_case_types)]
         #[repr(u8)]
-        #[derive(PartialEq)]
+        #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub enum OpCode {
             $(
                 $( #[ $attr ] )*
@@ -147,6 +147,29 @@ macro_rules! impl_opcodes {
 
         /// Bytecode execution/output/debug.
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
+
+            #[cfg(feature="debugging")]
+            #[allow(unused_assignments)]
+            pub(crate) fn read_instruction(self: &Self, mut position: StackAddress) -> Option<OpCode> {
+                if position >= self.instructions.len() as StackAddress {
+                    None
+                } else {
+                    let instruction = impl_opcodes!(read u8, self, position);
+                    match instruction {
+                        $(
+                            $(
+                                opcodes::$name => Some(OpCode::$name),
+                            )?
+                            $(
+                                $(
+                                    opcodes::$variant_name => Some(OpCode::$variant_name),
+                                )+
+                            )?
+                        )+
+                        _ => None,
+                    }
+                }
+            }
 
             /// Returns disassembled opcode as string at given position along with the next opcode position.
             //#[allow(unused_imports)]
