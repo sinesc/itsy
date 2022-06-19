@@ -268,3 +268,29 @@ fn assign_to_maybe_uninitialized() {
     assert_all(&result, &[ "Overruling".to_string() ]);
 
 }
+
+#[test]
+fn block_exit_with_maybe_unitialized() {
+    let result = run("
+        fn test(i: u8) {
+            let x;
+            if i == 1 {
+                x = \"Hello\";
+                ret_u8(1);
+            } else if i == 2 {
+                x = \"World\";
+                ret_u8(2);
+                return;
+            } else if i == 3 {
+                ret_u8(3);
+                return;
+            }
+        }
+        fn main() {
+            test(1);
+            test(2);
+            test(3);
+        }
+    ");
+    assert_all(&result, &[ 1u8, 2u8, 3u8 ]);
+}

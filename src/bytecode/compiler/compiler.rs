@@ -197,6 +197,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
                     let result_type = self.item_type(result);
+                    comment!(self, "discarding result");
                     self.write_discard(result_type);
                 }
                 Ok(())
@@ -207,6 +208,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
                     let result_type = self.item_type(result);
+                    comment!(self, "discarding result");
                     self.write_discard(result_type);
                 }
                 Ok(())
@@ -214,6 +216,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::Expression(expression) => {
                 self.compile_expression(expression)?;
                 let result_type = self.item_type(expression);
+                comment!(self, "discarding result");
                 self.write_discard(result_type);
                 Ok(())
             },
@@ -413,7 +416,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles an if block without else part.
     fn compile_if_only_block(self: &mut Self, item: &ast::IfBlock) -> CompileResult {
-        comment!(self, "{}", item);
         let exit_jump = self.writer.j0(123);
         self.init_state.push(BranchingKind::Double, BranchingScope::Block);
         let result = self.compile_block(&item.if_block);
@@ -436,6 +438,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             None
         };
 
+        comment!(self, "else");
         let else_target = self.writer.position();
         self.init_state.set_path(BranchingPath::B);
         self.compile_block(else_block)?;
@@ -456,6 +459,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_if_block(self: &mut Self, item: &ast::IfBlock) -> CompileResult {
 
         // compile condition and jump placeholder
+        comment!(self, "{}", item);
         self.compile_expression(&item.cond)?;
 
         if item.else_block.is_none() {
@@ -1214,19 +1218,31 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes instructions to decreases reference counts for block locals.
     fn write_scope_destructor(self: &mut Self, target_scope: BranchingScope) {
         let frame = self.locals.pop();
-        comment!(self, "scope destructor start");
         for (&binding_id, &local) in frame.map.iter() {
-            if self.init_state.declared(binding_id, Some(target_scope)) && self.init_state.initialized(binding_id) == BranchingState::Initialized {
-                let type_id = self.binding_by_id(binding_id).type_id.unwrap();
-                let ty = self.type_by_id(type_id);
-                if ty.is_ref() {
-                    comment!(self, "freeing local {}", local);
-                    self.write_load(local as StackOffset, ty);
-                    self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+            if self.init_state.declared(binding_id, Some(target_scope)) {
+                let state = self.init_state.initialized(binding_id);
+                if state != BranchingState::Uninitialized {
+                    let type_id = self.binding_by_id(binding_id).type_id.unwrap();
+                    let ty = self.type_by_id(type_id);
+                    if ty.is_ref() {
+                        comment!(self, "freeing local {}", local);
+                        if state == BranchingState::Initialized {
+                            self.write_load(local as StackOffset, ty);
+                            self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+                        } else if state == BranchingState::MaybeInitialized {
+                            self.write_load(local as StackOffset, ty);
+                            let init_jump = self.writer.jn0_sa_nc(123);
+                            self.write_discard(ty);
+                            let uninit_jump = self.writer.jmp(123);
+                            let init_target = self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+                            self.writer.overwrite(init_jump, |w| w.jn0_sa_nc(init_target));
+                            let done_target = self.writer.position();
+                            self.writer.overwrite(uninit_jump, |w| w.jmp(done_target));
+                        }
+                    }
                 }
             }
         }
-        comment!(self, "scope destructor done");
         self.locals.push(frame);
     }
 
@@ -1408,13 +1424,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the cnt_nc instruction.
-    fn write_cnt_nc(self: &Self, constructor: StackAddress, op: HeapRefOp) {
-        select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op);
+    fn write_cnt_nc(self: &Self, constructor: StackAddress, op: HeapRefOp) -> StackAddress {
+        select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op)
     }
 
     /// Writes an appropriate variant of the cnt instruction.
-    fn write_cnt(self: &Self, constructor: StackAddress, op: HeapRefOp) {
-        select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op);
+    fn write_cnt(self: &Self, constructor: StackAddress, op: HeapRefOp) -> StackAddress {
+        select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op)
     }
 
     /// Writes instructions to compute member offset for access on a struct.
@@ -1559,7 +1575,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Discard topmost stack value and drop temporaries for reference types.
     fn write_discard(self: &Self, ty: &Type) {
-        comment!(self, "discarding result");
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             self.write_cnt_nc(constructor, HeapRefOp::Free);
