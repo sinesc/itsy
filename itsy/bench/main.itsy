@@ -59,6 +59,10 @@ fn bench_stringcat(results: [ Test ]) {
     results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
 }
 
+fn fmt(value: f64) -> f64 {
+    (value * 10000.0).round() / 10000.0
+}
+
 fn print_results(passes: [ [ Test ] ]) {
 
     for t in 0..passes[0].len() {
@@ -92,10 +96,10 @@ fn print_results(passes: [ [ Test ] ]) {
                 rust_avg = avg
             }
 
-            println("  {source} min: {min} max: {max} dif: {max-min} avg: {avg}");
+            println("  {source} min: {fmt(min)} max: {fmt(max)} avg: {fmt(avg)} range: {fmt(max-min)}");
         }
 
-        println("  factor {itsy_avg / rust_avg}x");
+        println("  factor {fmt(itsy_avg / rust_avg)}x");
     }
 }
 
