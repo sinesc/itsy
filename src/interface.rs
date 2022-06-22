@@ -49,6 +49,9 @@ pub mod compiler {
     pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
 }
 
+#[cfg(doc)]
+pub use crate::bytecode::builtins::documentation;
+
 pub mod runtime {
     //! Bytecode execution.
     pub use crate::bytecode::{runtime::vm::{VM, VMState}, VMFunc, VMData};

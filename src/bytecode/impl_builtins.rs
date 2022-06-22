@@ -67,16 +67,21 @@ macro_rules! impl_builtins {
     // main definition block
     (
         $(
-            $( #[ $attr:meta ] )*
-            fn
-            $( /* either multiple function variants */
-                < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
-                ( & mut $variant_vm:ident )
-            )?
-            $(
-                $name:ident ( $( & mut $vm:ident $( + $constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
-            )?
-            $code:block
+            $doc_group:ident {
+                $(
+                    $( #[ $attr:meta ] )*
+                    $( # $doc_name:ident ( $( $doc_arg:ident : $doc_type:ident ),* ) $( -> $doc_result_type:ident )? )?
+                    fn $( ( $deprecated:ident ) )?
+                    $( /* either multiple function variants */
+                        < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
+                        ( & mut $variant_vm:ident )
+                    )?
+                    $(
+                        $name:ident ( $( & mut $vm:ident $( + $constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
+                    )?
+                    $code:block
+                )*
+            }
         )*
     ) => {
 
@@ -85,15 +90,43 @@ macro_rules! impl_builtins {
         #[derive(Copy, Clone, Debug)]
         pub enum Builtin {
             $(
-                $( #[ $attr ] )*
-                // builtin variants
                 $(
+                    //$( #[ $attr ] )*
+                    // builtin variants
                     $(
-                        $variant_name,
+                        $(
+                            $variant_name,
+                        )+
+                    )?
+                    // single builtin
+                    $( $name, )?
+                )+
+            )+
+        }
+
+        #[cfg(doc)]
+        pub mod documentation {
+            //! Builtin Itsy types
+            //!
+            //! This module is only built with cargo doc and not generally available to Rust code. It is used as a place to document the builtin
+            //! types available from within Itsy code. Due to limitations in the generation the following simplifications were made:
+            //!
+            //! - `Array` documents the builtin `[ ]` type. `Any` here refers to the type the array was specialized with.
+            //! - `Float` documents the builtin `f32` and `f64` types. There is no actual `Float` type in Itsy.
+            //! - `String` documents the builtin `String`-type.
+            //!
+            //! Most of the builtins are thin wrappers over Rust `std` methods. The `Float` documentation is mostly copied from the standard library documentation.
+            $( pub struct $doc_group { } )+
+            struct Any { }
+            $(
+                impl $doc_group {
+                    $(
+                        $( #[ $attr ] )*
+                        $(
+                                pub fn $doc_name( $( $doc_arg : $doc_type ),* ) $( -> $doc_result_type )? { }
+                        )?
                     )+
-                )?
-                // single builtin
-                $( $name, )?
+                }
             )+
         }
 
@@ -105,17 +138,19 @@ macro_rules! impl_builtins {
                 //un safe { ::std::mem::trans mute(index) }
                 match index {
                     $(
-                        // builtin variants
                         $(
-
+                            // builtin variants
                             $(
-                                x if x == Self::$variant_name as $crate::BuiltinIndex => Self::$variant_name,
-                            )+
-                        )?
-                        // builtin opcode
-                        $(
-                            x if x == Self::$name as $crate::BuiltinIndex => Self::$name,
-                        )?
+
+                                $(
+                                    x if x == Self::$variant_name as $crate::BuiltinIndex => Self::$variant_name,
+                                )+
+                            )?
+                            // builtin opcode
+                            $(
+                                x if x == Self::$name as $crate::BuiltinIndex => Self::$name,
+                            )?
+                        )+
                     )+
                     _ => panic!("Invalid Builtin index {}", index),
                 }
@@ -132,6 +167,7 @@ macro_rules! impl_builtins {
             pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress) {
                 use $crate::runtime::stack::StackOp;
                 match self {
+                    $(
                     $(
                         // multiple variants
                         $(
@@ -199,6 +235,7 @@ macro_rules! impl_builtins {
                             },
                         )?
                     )*
+                )+
                 }
             }
         }

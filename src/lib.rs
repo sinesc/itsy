@@ -4,6 +4,8 @@
 //! Strongly typed scripting language with a rusty syntax and nice Rust integration.
 //!
 //! Look at the [build_str] or [itsy_api!] example to get started.
+//!
+//! Documentation for the builtin Itsy-types is available [here](crate::documentation). These types and methods are available from Itsy (not Rust).
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
