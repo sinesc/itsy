@@ -166,6 +166,20 @@ pub enum BuiltinGroup {
     FloatMin,
     FloatMax,
     FloatClamp,
+
+    StringInsert,
+    StringSlice,
+    StringStartsWith,
+    StringEndsWith,
+    StringTrim,
+    StringTrimStart,
+    StringTrimEnd,
+    StringContains,
+    StringReplace,
+    StringToLowercase,
+    StringToUppercase,
+    StringRepeat,
+    StringFind,
 }
 
 /// Information about a data type in a resolved program.

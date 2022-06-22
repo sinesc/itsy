@@ -32,6 +32,7 @@ mod config_derived {
     pub type VariantIndex = crate::ItemIndex;
     /// Itsy type used to store stack addresses and vector indices.
     pub const STACK_ADDRESS_TYPE: Type = Type::unsigned(size_of::<StackAddress>());
+    pub const STACK_OFFSET_TYPE: Type = Type::signed(size_of::<StackAddress>());
 }
 use config_derived::*;
 

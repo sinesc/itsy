@@ -1704,6 +1704,25 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
                 }
             },
+            Type::String => {
+                use crate::bytecode::builtins::Builtin;
+                match builtin {
+                    BuiltinGroup::StringInsert => { self.writer.builtincall(Builtin::string_insert); },
+                    BuiltinGroup::StringSlice => { self.writer.builtincall(Builtin::string_slice); },
+                    BuiltinGroup::StringStartsWith => { self.writer.builtincall(Builtin::string_starts_with); },
+                    BuiltinGroup::StringEndsWith => { self.writer.builtincall(Builtin::string_ends_with); },
+                    BuiltinGroup::StringTrim => { self.writer.builtincall(Builtin::string_trim); },
+                    BuiltinGroup::StringTrimStart => { self.writer.builtincall(Builtin::string_trim_start); },
+                    BuiltinGroup::StringTrimEnd => { self.writer.builtincall(Builtin::string_trim_end); },
+                    BuiltinGroup::StringContains => { self.writer.builtincall(Builtin::string_contains); },
+                    BuiltinGroup::StringReplace => { self.writer.builtincall(Builtin::string_replace); },
+                    BuiltinGroup::StringToLowercase => { self.writer.builtincall(Builtin::string_to_lowercase); },
+                    BuiltinGroup::StringToUppercase => { self.writer.builtincall(Builtin::string_to_uppercase); },
+                    BuiltinGroup::StringRepeat => { self.writer.builtincall(Builtin::string_repeat); },
+                    BuiltinGroup::StringFind => { self.writer.builtincall(Builtin::string_find); },
+                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
+                }
+            },
             _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
         }
     }

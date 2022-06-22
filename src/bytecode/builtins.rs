@@ -1,10 +1,49 @@
 //! Built-in functions. These will be implemented on the Builtin enum and exec'd via vm::builtincall()
 
+use std::str::Chars;
 use crate::prelude::*;
-use crate::StackAddress;
+use crate::{StackAddress, StackOffset};
 use crate::bytecode::{HeapRef, runtime::heap::{HeapOp, HeapRefOp}};
 
+/// Appends len chars from source starting at start to target. If len is None the entire remaining source will be copied.
+fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut String) -> Chars<'a> {
+
+    let mut iter = source.chars();
+    let mut index = 0;
+    // skip over start
+    while index < start {
+        if let Some(_) = iter.next() {
+            index += 1;
+        } else {
+            return iter;
+        }
+    }
+    // copy given number of chars
+    if let Some(len) = len {
+        let end = start + len;
+        while index < end {
+            if let Some(c) = iter.next() {
+                target.push(c);
+                index += 1;
+            } else {
+                return iter;
+            }
+        }
+    } else {
+        loop {
+            if let Some(c) = iter.next() {
+                target.push(c);
+            } else {
+                return iter;
+            }
+        }
+    }
+    iter
+}
+
 impl_builtins! {
+
+    // array builtins
 
     fn <
         array_push8<T: u8>(this: HeapRef, value: u8),
@@ -98,6 +137,8 @@ impl_builtins! {
         vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
         result
     }
+
+    // float builtins
 
     fn <
         float_floor32<T: u32>(this: f32) -> f32,
@@ -349,5 +390,89 @@ impl_builtins! {
         float_clamp_64<T: u64>(this: f64, min: f64, max: f64) -> f64,
     >(&mut vm) {
         this.clamp(min, max)
+    }
+
+    // string builtins
+
+    fn string_insert(this: &str, position: StackAddress, other: &str) -> String {
+        let mut result = String::with_capacity(this.len() + other.len());
+        let mut remainder = append(0, Some(position), &this, &mut result);
+        let _ = append(0, None, &other, &mut result);
+        loop {
+            if let Some(c) = remainder.next() {
+                result.push(c);
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    fn string_slice(this: &str, position: StackAddress, len: StackAddress) -> String {
+        let mut result = String::with_capacity(len as usize); // todo: probably want to over-allocate here since our len is in chars an capacity in bytes
+        let _ = append(position, if len > 0 { Some(len) } else { None }, &this, &mut result);
+        result
+    }
+
+    fn string_starts_with(this: &str, other: &str) -> bool {
+        this.starts_with(other)
+    }
+
+    fn string_ends_with(this: &str, other: &str) -> bool {
+        this.ends_with(other)
+    }
+
+    fn string_trim(this: &str) -> String {
+        this.trim().to_string()
+    }
+
+    fn string_trim_start(this: &str) -> String {
+        this.trim_start().to_string()
+    }
+
+    fn string_trim_end(this: &str) -> String {
+        this.trim_end().to_string()
+    }
+
+    fn string_contains(this: &str, other: &str) -> bool {
+        this.contains(other)
+    }
+
+    fn string_replace(this: &str, from: &str, to: &str) -> String {
+        this.replace(from, to)
+    }
+
+    fn string_to_lowercase(this: &str) -> String {
+        this.to_lowercase()
+    }
+
+    fn string_to_uppercase(this: &str) -> String {
+        this.to_uppercase()
+    }
+
+    fn string_repeat(this: &str, n: StackAddress) -> String {
+        if this.len().checked_mul(n as usize).is_some() {
+            this.repeat(n as usize)
+        } else {
+            "".to_string() // FIXME: need error reporting mechanism
+        }
+    }
+
+    fn string_find(this: &str, other: &str) -> StackOffset { // Todo: something like Option<StackAddress>
+        let mut this_iter = this.char_indices();
+        let mut index = 0;
+        loop {
+            if let Some((i, c)) = this_iter.next() {
+                if this[i..].starts_with(other) {
+                    break;
+                } else {
+                    index += 1;
+                }
+            } else {
+                index = -1;
+                break;
+            }
+        }
+        index
     }
 }

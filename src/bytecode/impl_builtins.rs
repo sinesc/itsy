@@ -18,6 +18,8 @@ macro_rules! impl_builtins {
         $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, HeapRef, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, StackAddress, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret $vm:ident, StackOffset, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, $_:tt, $value:ident) => { compile_error!("Unsupported return type"); };
     // handle parameters
     (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
@@ -35,6 +37,7 @@ macro_rules! impl_builtins {
     (@handle_param $vm:ident, str) => { $vm.stack.pop() };
     (@handle_param $vm:ident, HeapRef) => { $vm.stack.pop() };
     (@handle_param $vm:ident, StackAddress) => { $vm.stack.pop() };
+    (@handle_param $vm:ident, StackOffset) => { $vm.stack.pop() };
     (@handle_param $vm:ident, $_:tt) => { compile_error!("Unsupported parameter type") };
     // translate parameter types
     (@handle_param_type String) => { $crate::runtime::heap::HeapRef };
@@ -68,10 +71,10 @@ macro_rules! impl_builtins {
             fn
             $( /* either multiple function variants */
                 < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
-                ( & mut $variant_vm:ident)
+                ( & mut $variant_vm:ident )
             )?
             $(
-                $name:ident ( & mut $vm:ident $( + $constructor:ident )? $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )?
+                $name:ident ( $( & mut $vm:ident $( + $constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
             )?
             $code:block
         )*
@@ -178,8 +181,10 @@ macro_rules! impl_builtins {
                                     $(
                                         let $arg_name: impl_builtins!(@handle_ref_param_type $arg_type) = impl_builtins!(@handle_ref_param vm, $arg_type, $arg_name);
                                     )*
-                                    let $vm = &mut *vm;
-                                    $( let $constructor = constructor; )?
+                                    $(
+                                        let $vm = &mut *vm;
+                                        $( let $constructor = constructor; )?
+                                    )?
                                     $code
                                 };
                                 // Handle refcounting.
