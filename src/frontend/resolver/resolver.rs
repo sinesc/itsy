@@ -484,6 +484,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             E::Block(block)             => self.resolve_block(block, expected_result),
             E::IfBlock(if_block)        => self.resolve_if_block(if_block, expected_result),
             E::MatchBlock(match_block)        => self.resolve_match_block(match_block, expected_result),
+            E::Closure(_closure)        => unimplemented!("Closure resolution todo"),
         }
     }
 

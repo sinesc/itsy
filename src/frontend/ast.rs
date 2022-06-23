@@ -102,7 +102,7 @@ macro_rules! impl_display {
 /// Implements a match block with cases for all variants of Expression or Statement
 macro_rules! impl_matchall {
     ($self:ident, Expression, $val_name:ident, $code:tt) => {
-        impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock, MatchBlock)
+        impl_matchall!($self, Expression, $val_name, $code, Literal, Variable, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock, MatchBlock, Closure)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!($self, Statement, $val_name, $code, Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
@@ -331,6 +331,37 @@ impl Resolvable for Binding {
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
         ResolveErrorKind::CannotResolve(self.ident.name.clone())
+    }
+}
+
+/// A closure, e.g. `|a: u8, b: String| -> u16 { ... }`.
+#[derive(Debug)]
+pub struct Closure {
+    pub position    : Position,
+    pub args        : Vec<Binding>,
+    pub ret         : Option<InlineType>,
+    pub expr        : Expression,
+    pub type_id     : Option<TypeId>,
+    pub function_id : Option<FunctionId>,
+    pub scope_id    : Option<ScopeId>,
+}
+
+impl_typeable!(Closure);
+impl_positioned!(Closure);
+
+impl Resolvable for Closure {
+    fn num_resolved(self: &Self) -> Progress {
+        self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
+        + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
+        + self.expr.num_resolved()
+        + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+}
+
+impl Display for Closure {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "|...|{}", self.expr) // todo: not super helpful
     }
 }
 
@@ -872,6 +903,7 @@ pub enum Expression {
     Block(Box<Block>),
     IfBlock(Box<IfBlock>),
     MatchBlock(Box<MatchBlock>),
+    Closure(Box<Closure>),
 }
 
 impl Expression {

@@ -20,6 +20,7 @@ pub enum ParseErrorKind {
     IllegalWhileLoop,
     IllegalBreak,
     IllegalContinue,
+    IllegalClosure,
     DisabledFeature(&'static str),
 }
 

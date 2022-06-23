@@ -574,7 +574,8 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(call_ident, |m| Expression::Call(m)),
             map(call_path, |m| Expression::Call(m)),
             map(variant_literal, |m| Expression::Literal(m)),
-            map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None }))
+            map(ident, move |m| Expression::Variable(Variable { position: position, ident: m, binding_id: None })),
+            map(closure, move |m| Expression::Closure(Box::new(m))),
         )))(i)
     }
     fn unary(i: Input<'_>) -> Output<Expression> {
@@ -1015,6 +1016,62 @@ fn function(i: Input<'_>) -> Output<Function> {
     ))(i.clone())
 }
 
+// closure
+
+fn closure(i: Input<'_>) -> Output<Closure> {
+    fn signature(i: Input<'_>) -> Output<(Vec<Binding>, Option<InlineType>)> {
+        fn argument(i: Input<'_>) -> Output<Binding> {
+            let position = i.position();
+            ws(map(
+                tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
+                move |tuple| Binding {
+                    position    : position,
+                    ident       : tuple.1,
+                    expr        : None,
+                    mutable     : tuple.0.is_some(),
+                    ty          : Some(tuple.3),
+                    binding_id  : None,
+                }
+            ))(i)
+        }
+        ws(preceded(
+            check_state(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+            pair(terminated(separated_list0(ws(char(',')), ws(argument)), char('|')), opt(preceded(ws(tag("->")), inline_type)))
+        ))(i)
+    }
+    let position = i.position();
+    ws(map(
+        pair(signature, expression),
+        move |(sig, mut expr)| {
+            if let Expression::Block(block) = &mut expr {
+                // transform block result to return statement
+                if let Some(returns) = block.result.take() {
+                    block.statements.push(Statement::Return(Return {
+                        position: returns.position(),
+                        expr: returns,
+                    }));
+                }
+                // if the last block statement is still not a return statement, return void
+                if block.control_flow() != Some(ControlFlowType::Return) {
+                    block.statements.push(Statement::Return(Return {
+                        expr: Expression::void(position),// TODO: wrong position
+                        position: position,// TODO: wrong position
+                    }));
+                }
+            }
+            Closure {
+                position    : position,
+                args        : sig.0,
+                ret         : sig.1,
+                expr        : expr,
+                function_id : None,
+                scope_id    : None,
+                type_id     : None,
+            }
+        }
+    ))(i.clone())
+}
+
 // for
 
 fn for_loop(i: Input<'_>) -> Output<ForLoop> {
@@ -1116,15 +1173,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 
 fn statement(i: Input<'_>) -> Output<Statement> {
     ws(alt((
-        map(use_declaration, |m| Statement::Use(m)),
-        map(module, |m| Statement::Module(m)),
-        map(function, |m| Statement::Function(m)),
-        map(struct_def, |m| Statement::StructDef(m)),
-        map(enum_def, |m| Statement::EnumDef(m)),
-        map(trait_impl_block,|m| Statement::ImplBlock(m)),
-        map(impl_block,|m| Statement::ImplBlock(m)),
-        map(trait_def, |m| Statement::TraitDef(m)),
-
+        root_items,
         map(binding,|m| Statement::Binding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
@@ -1133,7 +1182,6 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(break_statement, |m| Statement::Break(m)),
         map(continue_statement, |m| Statement::Continue(m)),
         map(block, |m| Statement::Block(m)),
-
         map(terminated(expression, char(';')), |m| Statement::Expression(m)),
     )))(i)
 }

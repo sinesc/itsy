@@ -253,6 +253,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             E::Block(block)             => self.compile_block(block),
             E::IfBlock(if_block)        => self.compile_if_block(if_block),
             E::MatchBlock(match_block)        => self.compile_match_block(match_block),
+            E::Closure(_closure) => unimplemented!("Closure compilation todo")
         }
     }
 
