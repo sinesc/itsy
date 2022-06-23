@@ -91,7 +91,6 @@ macro_rules! impl_builtins {
         pub enum Builtin {
             $(
                 $(
-                    //$( #[ $attr ] )*
                     // builtin variants
                     $(
                         $(
@@ -100,8 +99,8 @@ macro_rules! impl_builtins {
                     )?
                     // single builtin
                     $( $name, )?
-                )+
-            )+
+                )*
+            )*
         }
 
         #[cfg(doc)]
@@ -125,9 +124,9 @@ macro_rules! impl_builtins {
                         $(
                                 pub fn $doc_name( $( $doc_arg : $doc_type ),* ) $( -> $doc_result_type )? { }
                         )?
-                    )+
+                    )*
                 }
-            )+
+            )*
         }
 
         impl Builtin {
@@ -150,8 +149,8 @@ macro_rules! impl_builtins {
                             $(
                                 x if x == Self::$name as $crate::BuiltinIndex => Self::$name,
                             )?
-                        )+
-                    )+
+                        )*
+                    )*
                     _ => panic!("Invalid Builtin index {}", index),
                 }
             }
