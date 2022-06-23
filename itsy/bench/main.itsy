@@ -8,6 +8,16 @@ struct Test {
     rust_time: f64,
 }
 
+struct ConstructTestInner {
+    c: i32,
+    d: u64,
+}
+
+struct ConstructTest {
+    a: ConstructTestInner,
+    b: [ u64 ],
+}
+
 fn bench_mandelbrot(results: [ Test ]) {
 
     start_time();
@@ -59,8 +69,69 @@ fn bench_stringcat(results: [ Test ]) {
     results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
 }
 
+fn bench_upload(results: [ Test ]) {
+
+    start_time();
+
+    for i in 0..1000000 {
+        // partially dynamic contents -> upload opcode
+        let item = ConstructTest { a: ConstructTestInner { c: 14, d: i }, b: [ 1, 2, i, 8, 131231 ] };
+    }
+
+    let itsy_time = stop_time();
+
+    results.push(Test { name: "upload", rust_time: 0.0, itsy_time: itsy_time });
+}
+
+fn bench_construct(results: [ Test ]) {
+
+    start_time();
+
+    for i in 0..1000000 {
+        // static contents -> construct opcode
+        let item = ConstructTest { a: ConstructTestInner { c: 14, d: 894839483 }, b: [ 1, 2, 4, 8, 131231 ] };
+    }
+
+    let itsy_time = stop_time();
+
+    results.push(Test { name: "construct", rust_time: 0.0, itsy_time: itsy_time });
+}
+
+fn bench_string_return(results: [ Test ]) {
+
+    start_time();
+
+    let result: [ String ] = [ ];
+
+    for i in 0..1500 {
+        let item = "Hello".repeat(50000);
+        result.push(item);
+    }
+
+    let itsy_time = stop_time();
+
+    results.push(Test { name: "string_return", rust_time: 0.0, itsy_time: itsy_time });
+}
+
+fn bench_heap_reuse(results: [ Test ]) {
+
+    start_time();
+
+    for i in 0..9000 {
+        let item = "Hello".repeat(50000);
+    }
+
+    let itsy_time = stop_time();
+
+    results.push(Test { name: "heap_reuse", rust_time: 0.0, itsy_time: itsy_time });
+}
+
 fn fmt(value: f64) -> f64 {
     (value * 10000.0).round() / 10000.0
+}
+
+fn fmtperc(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn print_results(passes: [ [ Test ] ]) {
@@ -96,10 +167,14 @@ fn print_results(passes: [ [ Test ] ]) {
                 rust_avg = avg
             }
 
-            println("  {source} min: {fmt(min)} max: {fmt(max)} avg: {fmt(avg)} range: {fmt(max-min)}");
+            if sum > 0.0 {
+                println("  {source} min: {fmt(min)} max: {fmt(max)} avg: {fmt(avg)} var: {fmtperc((max-min)/min*100.0)}%");
+            }
         }
 
-        println("  factor {fmt(itsy_avg / rust_avg)}x");
+        if rust_avg > 0.0 {
+            println("  factor {fmt(itsy_avg / rust_avg)}x");
+        }
     }
 }
 
@@ -116,6 +191,10 @@ fn main() {
         bench_mandelbrot(pass_results);
         bench_fib_r(pass_results);
         bench_stringcat(pass_results);
+        bench_upload(pass_results);
+        bench_construct(pass_results);
+        bench_string_return(pass_results);
+        bench_heap_reuse(pass_results);
         passes.push(pass_results);
     }
 
