@@ -16,6 +16,32 @@ use error::{CompileError, CompileErrorKind, CompileResult};
 use util::CallInfo;
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 
+enum LoopControl {
+    Continue(StackAddress),
+    Break(StackAddress),
+}
+
+struct LoopControlStack {
+    stack: Vec<Vec<LoopControl>>,
+}
+
+impl LoopControlStack {
+    fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+        }
+    }
+    fn push(self: &mut Self) {
+        self.stack.push(Vec::new());
+    }
+    fn pop(self: &mut Self) -> Vec<LoopControl> {
+        self.stack.pop().unwrap()
+    }
+    fn add_jump(self: &mut Self, item: LoopControl) {
+        self.stack.last_mut().unwrap().push(item);
+    }
+}
+
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 struct Compiler<T> {
     /// Bytecode writer used to output to.
@@ -32,6 +58,7 @@ struct Compiler<T> {
     call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
     /// Tracks variable initialization state.
     init_state: InitState,
+    loop_control: LoopControlStack,
     /// Module base path. For error reporting only.
     module_path: String,
     /// Contiguous trait function enumeration/mapping.
@@ -94,6 +121,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         call_placeholder            : UnorderedMap::new(),
         constructors                : UnorderedMap::new(),
         init_state                  : InitState::new(),
+        loop_control                : LoopControlStack::new(),
         module_path                 : "".to_string(),
         trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
@@ -220,9 +248,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             S::Break(_) => {
+                // write break-jump placeholder and record the opcode-position in loop control so it can be fixed later
+                comment!(self, "break");
+                self.write_scope_destructor(BranchingScope::Loop);
+                let break_jump = self.writer.jmp(123);
+                self.loop_control.add_jump(LoopControl::Break(break_jump));
                 Ok(())
             },
             S::Continue(_) => {
+                // write continue-jump placeholder and record the opcode-position in loop control so it can be fixed later
+                comment!(self, "continue");
+                self.write_scope_destructor(BranchingScope::Loop);
+                let continue_jump = self.writer.jmp(123);
+                self.loop_control.add_jump(LoopControl::Continue(continue_jump));
                 Ok(())
             },
             S::Return(ast::Return { expr, .. }) => {
@@ -525,10 +563,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let start_target = self.writer.position();
         self.compile_expression(&item.expr)?;
         let exit_jump = self.writer.j0(123);
+        self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
+        self.loop_control.push();
         self.compile_block(&item.block)?;
+        let loop_controls = self.loop_control.pop();
+        self.init_state.pop();
         self.writer.jmp(start_target);
+        // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        for loop_control in &loop_controls {
+            match loop_control {
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(start_target)),
+            };
+        }
         Ok(())
     }
 
@@ -554,10 +603,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let exit_jump = self.writer.j0(123);
         // compile block
         let start_target = self.writer.position();
+        self.loop_control.push();
         self.compile_block(&item.block)?;
+        let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_preinc(iter_local as StackOffset, iter_ty);
+        let increment_target = self.write_preinc(iter_local as StackOffset, iter_ty);
         //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
@@ -566,9 +617,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_lte(iter_ty);
         }
         self.writer.jn0(start_target);
-        // exit position
+        // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        for loop_control in &loop_controls {
+            match loop_control {
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(increment_target)),
+            };
+        }
+        // discard counter
         self.write_discard(iter_ty);
         Ok(())
     }
@@ -580,39 +638,59 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let array_ty = self.item_type(&item.expr);
         let array_constructor = self.get_constructor(array_ty);
 
-        self.compile_expression(&item.expr)?;   // stack &array
+        self.compile_expression(&item.expr)?;                       // stack &array
         self.write_cnt_nc(array_constructor, HeapRefOp::Inc);
-        self.write_clone_ref();
+        self.write_clone_ref();                                         // stack &array &array
         let array_ty = self.item_type(&item.expr);
         self.write_builtin(BuiltinGroup::ArrayLen, array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
-        let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index
-
-        // TODO: consuming heap fetch would need this too
-        //self.write_clone(array_ty, STACK_ADDRESS_TYPE.primitive_size());    // stack &array index &array
-        //self.write_clone(&STACK_ADDRESS_TYPE, array_ty.primitive_size());    // stack &array index &array index
+        let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index (indexing from the end to be able to count downwards from len)
 
         let element_ty = self.type_by_id(element_type_id);
         self.write_heap_tail_element_nc(array_ty, element_ty);   // stack &array index element
 
         if element_ty.is_ref() {
-            self.write_clone(element_ty);       // stack &array index element element
+            self.write_clone(element_ty);                                   // stack &array index element element
             self.write_cnt_nc(element_constructor, HeapRefOp::Inc);
         }
 
-        self.write_store(element_local, element_ty);      // stack &array index <is_ref ? element>
-        self.compile_block(&item.block)?;       // stack &array index <is_ref ? element>
+        self.write_store(element_local, element_ty);                        // stack &array index <is_ref ? element>
+        self.loop_control.push();
+        self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
+        let loop_controls = self.loop_control.pop();
 
         let element_ty = self.type_by_id(element_type_id);
-        if element_ty.is_ref() {
-            self.write_cnt(element_constructor, HeapRefOp::Dec);         // stack &array index
-        }
 
-        self.writer.jn0_sa_nc(loop_start);
+        let cnt_target = if element_ty.is_ref() {
+            Some(self.write_cnt(element_constructor, HeapRefOp::Dec))
+        } else {                                                          // stack &array index
+            None
+        };
 
-        // exit position
+        let cond_target = self.writer.jn0_sa_nc(loop_start);
+
+        // if the loop contains a break we need a target for the break jump that decrefs the potential element
+        // reference but doesn't jump back to the start of the loop. the normal loop exit has to jump over this.
+        let break_target = if element_ty.is_ref() && loop_controls.iter().find(|&lc| matches!(lc, LoopControl::Break(_))).is_some() {
+            let exit_skip_target = self.writer.jmp(123);
+            let break_target = self.write_cnt(element_constructor, HeapRefOp::Dec);
+            let exit_target = self.writer.position();
+            self.writer.overwrite(exit_skip_target, |w| w.jmp(exit_target));
+            Some(break_target)
+        } else {
+            None
+        };
+
+        // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0_sa_nc(exit_target));
+        for loop_control in &loop_controls {
+            match loop_control {
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(break_target.unwrap_or(exit_target))),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(cnt_target.unwrap_or(cond_target))),
+            };
+        }
+        // discard counter
         self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
         self.write_cnt(array_constructor, HeapRefOp::Dec);         // stack --
         Ok(())
@@ -694,7 +772,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.item_cnt(result, true, HeapRefOp::Inc);
             self.write_scope_destructor(BranchingScope::Block);
             self.item_cnt(result, true, HeapRefOp::DecNoFree);
-        } else {
+        } else if item.control_flow() == None {
             comment!(self, "block ending");
             self.write_scope_destructor(BranchingScope::Block);
         }
@@ -1753,47 +1831,47 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, index: StackOffset, ty: &Type) {
+    fn write_preinc(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index, -1),
             Type::i32 | Type::u32 => self.writer.predeci32(index, -1),
             Type::i16 | Type::u16 => self.writer.predeci16(index, -1),
             Type::i8 | Type::u8 => self.writer.predeci8(index, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write pre-decrement instruction.
-    fn write_predec(self: &Self, index: StackOffset, ty: &Type) {
+    fn write_predec(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index, 1),
             Type::i32 | Type::u32 => self.writer.predeci32(index, 1),
             Type::i16 | Type::u16 => self.writer.predeci16(index, 1),
             Type::i8 | Type::u8 => self.writer.predeci8(index, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write post-increment instruction.
-    fn write_postinc(self: &Self, index: StackOffset, ty: &Type) {
+    fn write_postinc(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index, -1),
             Type::i32 | Type::u32 => self.writer.postdeci32(index, -1),
             Type::i16 | Type::u16 => self.writer.postdeci16(index, -1),
             Type::i8 | Type::u8 => self.writer.postdeci8(index, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write post-decrement instruction.
-    fn write_postdec(self: &Self, index: StackOffset, ty: &Type) {
+    fn write_postdec(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index, 1),
             Type::i32 | Type::u32 => self.writer.postdeci32(index, 1),
             Type::i16 | Type::u16 => self.writer.postdeci16(index, 1),
             Type::i8 | Type::u8 => self.writer.postdeci8(index, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
-        };
+        }
     }
 
     /// Write heap pre-increment instruction.
