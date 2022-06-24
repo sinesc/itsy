@@ -79,11 +79,11 @@ use frontend::{parser::parse_module, resolver::resolve};
 ///     let mut context = MyContext { /* ... */ };
 ///
 ///     // Compile a short Itsy program and bind it to our MyAPI.
-///     let program = build_str::<MyAPI>("
+///     let program = build_str::<MyAPI>(stringify!(
 ///         fn main() {
 ///             print(intense_computation(4, 5));
 ///         }
-///     ").unwrap();
+///     )).unwrap();
 ///
 ///     // Create a new VM and run the program.
 ///     let mut vm = VM::new(&program);
@@ -278,12 +278,12 @@ macro_rules! itsy_api {
 ///
 /// fn main() {
 ///     // Build the itsy program and link it to the MyAPI API we created above.
-///     let program = build_str::<MyAPI>("
+///     let program = build_str::<MyAPI>(stringify!(
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
-///             print(\"Hello from Itsy!\");
+///             print("Hello from Itsy!");
 ///         }
-///     ").unwrap();
+///     )).unwrap();
 ///
 ///     run(&program, &mut ()).unwrap();
 /// }
