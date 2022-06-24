@@ -428,6 +428,12 @@ pub struct TypeName {
 
 impl_typeable!(TypeName);
 
+impl Display for TypeName {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path)
+    }
+}
+
 impl Resolvable for TypeName {
     fn num_resolved(self: &Self) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -1305,7 +1311,7 @@ pub struct Cast {
 
 impl_typeable!(Cast);
 impl_positioned!(Cast);
-impl_display!(Cast, "{} as {:?}", expr, ty);
+impl_display!(Cast, "{} as {}", expr, ty);
 
 impl Resolvable for Cast {
     fn num_resolved(self: &Self) -> Progress {
