@@ -13,34 +13,8 @@ use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::re
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
-use util::CallInfo;
+use util::{LoopControlStack, LoopControl, CallInfo};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
-
-enum LoopControl {
-    Continue(StackAddress),
-    Break(StackAddress),
-}
-
-struct LoopControlStack {
-    stack: Vec<Vec<LoopControl>>,
-}
-
-impl LoopControlStack {
-    fn new() -> Self {
-        Self {
-            stack: Vec::new(),
-        }
-    }
-    fn push(self: &mut Self) {
-        self.stack.push(Vec::new());
-    }
-    fn pop(self: &mut Self) -> Vec<LoopControl> {
-        self.stack.pop().unwrap()
-    }
-    fn add_jump(self: &mut Self, item: LoopControl) {
-        self.stack.last_mut().unwrap().push(item);
-    }
-}
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 struct Compiler<T> {
@@ -58,6 +32,7 @@ struct Compiler<T> {
     call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
     /// Tracks variable initialization state.
     init_state: InitState,
+    /// Tracks loop break/continue exit jump targets.
     loop_control: LoopControlStack,
     /// Module base path. For error reporting only.
     module_path: String,

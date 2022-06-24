@@ -16,6 +16,38 @@ impl CallInfo {
     pub const PLACEHOLDER: Self = Self { addr: 123, arg_size: 0 };
 }
 
+/// Loop break/continue jump instruction position.
+pub(crate) enum LoopControl {
+    Continue(StackAddress),
+    Break(StackAddress),
+}
+
+/// Tracks loop break/continue jump instruction placeholders for later replacement (once addresses are known)
+pub(crate) struct LoopControlStack {
+    stack: Vec<Vec<LoopControl>>,
+}
+
+impl LoopControlStack {
+    /// Creates a new loop control stack.
+    pub fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+        }
+    }
+    /// Push another loop structure onto the loopcontrol stack
+    pub fn push(self: &mut Self) {
+        self.stack.push(Vec::new());
+    }
+    /// Pop the top loop structure off the loopcontrol stack
+    pub fn pop(self: &mut Self) -> Vec<LoopControl> {
+        self.stack.pop().unwrap()
+    }
+    /// Register a loop control instruction placceholder.
+    pub fn add_jump(self: &mut Self, item: LoopControl) {
+        self.stack.last_mut().unwrap().push(item);
+    }
+}
+
 #[derive(Debug)]
 pub enum CoverageRangeType<'p> {
     Unsigned(CoverageRange<'p, u64>),
