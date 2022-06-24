@@ -294,3 +294,145 @@ fn block_exit_with_maybe_unitialized() {
     ");
     assert_all(&result, &[ 1u8, 2u8, 3u8 ]);
 }
+
+#[test]
+fn while_break() {
+    let result = run(stringify!(
+        let i = 3;
+        let x = "Test";
+        while i > 0 {
+            i -= 1;
+            let y = "y"; // testing correct refcount handling for broken-out-of parent scopes
+            if i < 2 {
+                let z = "z";
+                x += y + z;
+                break;
+            }
+        }
+        ret_string("{i} {x}");
+    ));
+    assert_all(&result, &[ "1 Testyz".to_string() ]);
+}
+
+#[test]
+fn while_continue() {
+    let result = run(stringify!(
+        let i = 100;
+        let j = 5;
+        let x = "Test";
+        while i > 0 {
+            let y = "y";            // testing correct refcount handling for continued-over parent scopes
+            if i == 50 && j > 0 {
+                j -= 1;
+                let z = "z";
+                x += y + z;
+                continue;
+            }
+            i -= 1;
+        }
+        ret_string("{i} {x}");
+    ));
+    assert_all(&result, &[ "0 Testyzyzyzyzyz".to_string() ]);
+}
+
+#[test]
+fn for_range_break() {
+    let result = run(stringify!(
+        let x = "Test";
+        let max_i = 0;
+        for i in 0..10 {
+            max_i = i;
+            let y = "y";
+            if i > 5 {
+                let z = "z";
+                x += y + z;
+                break;
+            }
+        }
+        ret_string("{max_i} {x}");
+    ));
+    assert_all(&result, &[ "6 Testyz".to_string() ]);
+}
+
+#[test]
+fn for_range_continue() {
+    let result = run(stringify!(
+        let x = "Test";
+        let max_i = 0;
+        for i in 0..10 {
+            max_i = i;
+            let y = "y";
+            if i > 5 {
+                let z = "z";
+                x += y + z;
+                continue;
+            }
+            x += "-";
+        }
+        ret_string("{max_i} {x}");
+    ));
+    assert_all(&result, &[ "9 Test------yzyzyzyz".to_string() ]);
+}
+
+#[test]
+fn for_in_continue() {
+    let result = run(stringify!(
+        let array = [ "a", "b", "c", "d", "e", "f" ];
+        let x = "Test";
+        let i = 0;
+        for e in array {
+            let y = "y";
+            if i > 2 {
+                let z = "z";
+                x += e + y + z;
+                continue;
+            }
+            x += "-";
+            i += 1;
+        }
+        ret_string("{i} {x}");
+    ));
+    assert_all(&result, &[ "3 Test---dyzeyzfyz".to_string() ]);
+}
+
+#[test]
+fn for_in_break() {
+    let result = run(stringify!(
+        let array = [ "a", "b", "c" ];
+        let x = "Test";
+        let i = 0;
+        for e in array {
+            let y = "y";
+            if i > 1 {
+                let z = "z";
+                x += e + y + z;
+                break;
+            }
+            x += "-";
+            i += 1;
+        }
+        ret_string("{i} {x}");
+    ));
+    assert_all(&result, &[ "2 Test--cyz".to_string() ]);
+}
+
+#[test]
+fn for_in_break_noref() {
+    let result = run(stringify!(
+        let array = [ 1, 2, 3 ];
+        let x = "Test";
+        let i = 0;
+        for e in array {
+            let y = "y";
+            if i > 1 {
+                let z = "z";
+                x += (e as String) + y + z;
+                break;
+            }
+            x += "-";
+            i += 1;
+        }
+        ret_string("{i} {x}");
+    ));
+    assert_all(&result, &[ "2 Test--3yz".to_string() ]);
+}
