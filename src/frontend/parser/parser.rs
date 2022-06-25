@@ -8,7 +8,7 @@ pub mod types;
 use nom::character::{is_alphanumeric, is_alphabetic, complete::{one_of, digit0, char, digit1}};
 use nom::bytes::complete::{take_while, take_while1, tag};
 use nom::combinator::{recognize, opt, all_consuming, map, not};
-use nom::multi::{separated_list0, separated_list1, many0, fold_many0};
+use nom::multi::{separated_list0, separated_list1, many0, fold_many0, fold_many1};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
@@ -133,7 +133,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
 
     let (remaining, numerical) = recognize(tuple((
-        opt(recognize(one_of("+-"))),
+        opt(recognize(ws(one_of("+-")))),
         digit1,
         opt(recognize(tuple((tag("."), not(char('.')), digit0)))), // not(.) to avoid matching ranges
         opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
@@ -142,7 +142,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     let (value, type_name) = splits_numerical_suffix(*numerical);
 
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
-        if let Ok(float) = str::parse::<f64>(value) {
+        if let Ok(float) = str::parse::<f64>(&value.replace(" ", "")) {
             return Ok((remaining, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
@@ -151,7 +151,7 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
             }));
         }
     } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
-        if let Ok(integer) = str::parse::<i64>(value) {
+        if let Ok(integer) = str::parse::<i64>(&value.replace(" ", "")) {
             if check_signed_range(integer, type_name) {
                 return Ok((remaining, Literal {
                     position    : position,
@@ -478,6 +478,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
     }
     let position = i.position();
     ws(preceded(
+        // TODO: sepr(tag("if")) causes if(true to be a syntax error. sepr is required to prevent parsing if_ident as if
         check_state(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
             tuple((expression, block, opt(else_block))),
@@ -578,25 +579,6 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(closure, move |m| Expression::Closure(Box::new(m))),
         )))(i)
     }
-    fn unary(i: Input<'_>) -> Output<Expression> {
-        let position = i.position();
-        map(
-            pair(ws(alt((char('!'), char('+'), char('-')))), ws(prec6)),
-            move |m| {
-                Expression::UnaryOp(Box::new(UnaryOp {
-                    position: position,
-                    op      : match m.0 {
-                        '!' => UnaryOperator::Not,
-                        '+' => UnaryOperator::Plus,
-                        '-' => UnaryOperator::Minus,
-                        _ => unreachable!("invalid unary operator"),
-                    },
-                    expr    : m.1,
-                    type_id : None,
-                }))
-            }
-        )(i)
-    }
     fn prec7(i: Input<'_>) -> Output<Expression> {
         let init = operand(i.clone())?;
         let position = i.position();
@@ -618,11 +600,55 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             }
         )(init.0)
     }
+    fn unary(i: Input<'_>) -> Output<Expression> {
+        let position = i.position();
+        map(
+            pair(
+                opt(alt((
+                    // count number of ! to handle them all here
+                    ws(fold_many1(char('!'), || ('!', 0usize), |mut acc, _| { acc.1 += 1; acc })),
+                    // allow only one +/-, ensure not followed by numeric to avoid parsing e.g -128i8 (valid) as unary(-, 128i8) which would
+                    // be an overflowing numeric literal
+                    map(
+                        ws(alt((
+                            terminated(char('+'), not(ws(one_of("+.0123456789")))),
+                            terminated(char('-'), not(ws(one_of("-.0123456789"))))
+                        ))),
+                        |c| (c, 1)
+                    )
+                ))),
+                ws(prec7)
+            ),
+            move |m| {
+                if let Some(unary) = m.0 {
+                    let op = match unary.0 {
+                        '!' => UnaryOperator::Not,
+                        '+' => UnaryOperator::Plus,
+                        '-' => UnaryOperator::Minus,
+                        _ => unreachable!("invalid unary operator"),
+                    };
+                    // nest required number of unary repetitons
+                    let mut acc = m.1;
+                    for _ in 0..unary.1 {
+                        acc = Expression::UnaryOp(Box::new(UnaryOp {
+                            position: position,
+                            op      : op,
+                            expr    : acc,
+                            type_id : None,
+                        }))
+                    }
+                    acc
+                } else {
+                    m.1
+                }
+            }
+        )(i)
+    }
     fn prec6(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         ws(map(
             pair(
-                alt((prec7, unary)), opt(preceded(ws(sepr(tag("as"))), path))
+                unary, opt(preceded(ws(sepr(tag("as"))), path))
             ),
             move |(expr, path)| {
                 if let Some(path) = path {
