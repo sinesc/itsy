@@ -13,7 +13,7 @@ use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::re
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
-use util::{LoopControlStack, LoopControl, CallInfo};
+use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
@@ -26,10 +26,8 @@ struct Compiler<T> {
     locals: StackFrames,
     /// Non-primitive type constructors.
     constructors: UnorderedMap<TypeId, StackAddress>,
-    // Maps functions to their call index.
-    functions: UnorderedMap<FunctionId, CallInfo>,
-    /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
+    /// Tracks call and function addresses so that calls made before the function address was known can be fixed.
+    functions: Functions,
     /// Tracks variable initialization state.
     init_state: InitState,
     /// Tracks loop break/continue exit jump targets.
@@ -92,8 +90,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let mut compiler = Compiler {
         writer                      : Writer::new(),
         locals                      : StackFrames::new(),
-        functions                   : UnorderedMap::new(),
-        call_placeholder            : UnorderedMap::new(),
+        functions                   : Functions::new(),
         constructors                : UnorderedMap::new(),
         init_state                  : InitState::new(),
         loop_control                : LoopControlStack::new(),
@@ -140,14 +137,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     // write actual function offsets to vtable
     for (implementor_index, selected_function_id) in trait_function_implementations {
         if let Some(selected_function_id) = selected_function_id {
-            let selected_function_offset = compiler.functions.get(&selected_function_id).expect("Missing function callinfo").addr;
+            let selected_function_offset = compiler.functions.get(selected_function_id).expect("Missing function callinfo").addr;
             let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
             compiler.writer.update_const(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
     // overwrite placeholder with actual entry position
-    let &entry_call = compiler.functions.get(&entry_fn).expect("Failed to locate entry function in generated code.");
+    let &entry_call = compiler.functions.get(entry_fn).expect("Failed to locate entry function in generated code.");
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
 
     // return generated program
@@ -720,11 +717,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.reserve(var_size as u8);
         }
 
-        // store call info required to compile calls to this function
+        // store call info required to compile calls to this function and fix calls that were made before the function address was known
         let function_id = item.function_id.unwrap();
-        let call_info = CallInfo { addr: position, arg_size: frame.arg_pos };
-        self.functions.insert(function_id, call_info);
-        self.fix_targets(function_id, call_info);
+        let arg_size = frame.arg_pos;
+        if let Some(calls) = self.functions.register_function(function_id, arg_size, position) {
+            let backup_position = self.writer.position();
+            for &call_address in calls.iter() {
+                self.writer.set_position(call_address);
+                self.writer.call(position, arg_size);
+            }
+            self.writer.set_position(backup_position);
+        }
 
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
@@ -1004,18 +1007,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             offset += field_type.primitive_size() as StackAddress;
         }
         offset
-    }
-
-    /// Fixes function call targets for previously not generated functions.
-    fn fix_targets(self: &mut Self, function_id: FunctionId, info: CallInfo) {
-        if let Some(targets) = self.call_placeholder.remove(&function_id) {
-            let backup_position = self.writer.position();
-            for &target in targets.iter() {
-                self.writer.set_position(target);
-                self.writer.call(info.addr, info.arg_size);
-            }
-            self.writer.set_position(backup_position);
-        }
     }
 
     /// Creates stack frame variables for expressions. // FIXME move this into AST
@@ -1682,13 +1673,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
     fn write_call(self: &mut Self, function_id: FunctionId) -> StackAddress {
-        let target = if let Some(&target) = self.functions.get(&function_id) {
-            target
-        } else {
-            let call_position = self.writer.position();
-            self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(call_position);
-            CallInfo::PLACEHOLDER
-        };
+        let target = self.functions.register_call(function_id, self.writer.position());
         self.writer.call(target.addr, target.arg_size)
     }
 
