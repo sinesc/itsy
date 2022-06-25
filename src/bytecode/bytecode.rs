@@ -163,8 +163,8 @@ impl ConstDescriptor {
     }
     fn from_bytes(mut descriptor: &[ u8 ]) -> Option<Self> {
         const U32: usize = size_of::<u32>();
-        let position = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as usize;
-        let size = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as usize;
+        let position = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
+        let size = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
         let endianness = ConstEndianness::from_u8(read(&mut descriptor, 1)?[0])?;
         Some(Self {
             position,

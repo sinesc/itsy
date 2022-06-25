@@ -478,7 +478,7 @@ impl_builtins! {
         # insert(self: Self, position: u64, other: Self)
         fn string_insert(this: &str, position: StackAddress, other: &str) -> String {
             let mut result = String::with_capacity(this.len() + other.len());
-            let mut remainder = append(0, Some(position), &this, &mut result);
+            let mut remainder = append(0, Some(position as usize), &this, &mut result);
             let _ = append(0, None, &other, &mut result);
             loop {
                 if let Some(c) = remainder.next() {
@@ -494,7 +494,7 @@ impl_builtins! {
         # slice(self: Self, position: u64, len: u64)
         fn string_slice(this: &str, position: StackAddress, len: StackAddress) -> String {
             let mut result = String::with_capacity(len as usize); // todo: probably want to over-allocate here since our len is in chars an capacity in bytes
-            let _ = append(position, if len > 0 { Some(len) } else { None }, &this, &mut result);
+            let _ = append(position as usize, if len > 0 { Some(len as usize) } else { None }, &this, &mut result);
             result
         }
 
