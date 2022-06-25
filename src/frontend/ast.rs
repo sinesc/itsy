@@ -1394,6 +1394,9 @@ impl ControlFlow for UnaryOp {
 pub enum UnaryOperator {
     // boolean
     Not,
+    // positive/negavtive
+    Plus,
+    Minus,
     // inc/dec
     IncBefore, DecBefore,
     IncAfter, DecAfter,
@@ -1421,6 +1424,8 @@ impl Display for UnaryOperator {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", match self {
             UnaryOperator::Not => "!",
+            UnaryOperator::Plus => "+",
+            UnaryOperator::Minus => "-",
             UnaryOperator::IncBefore | UnaryOperator::IncAfter => "++",
             UnaryOperator::DecBefore | UnaryOperator::DecAfter => "--",
         })

@@ -467,6 +467,19 @@ impl_opcodes!{
         self.stack.push(T::wrapping_div(a, b));
     }
 
+    /// Pops a value off the stack and pushes its negative.
+    fn <
+        negs8<T: i8>(),
+        negs16<T: i16>(),
+        negs32<T: i32>(),
+        negs64<T: i64>(),
+        negf32<T: f32>(),
+        negf64<T: f64>(),
+    >(&mut self) {
+        let v: T = self.stack.pop();
+        self.stack.push(-v);
+    }
+
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
         divf32<T: f32>(),

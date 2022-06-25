@@ -581,12 +581,17 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn unary(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         map(
-            preceded(ws(tag("!")), ws(prec6)),
+            pair(ws(alt((char('!'), char('+'), char('-')))), ws(prec6)),
             move |m| {
                 Expression::UnaryOp(Box::new(UnaryOp {
                     position: position,
-                    op      : UnaryOperator::Not,
-                    expr    : m,
+                    op      : match m.0 {
+                        '!' => UnaryOperator::Not,
+                        '+' => UnaryOperator::Plus,
+                        '-' => UnaryOperator::Minus,
+                        _ => unreachable!("invalid unary operator"),
+                    },
+                    expr    : m.1,
                     type_id : None,
                 }))
             }

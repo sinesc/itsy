@@ -809,6 +809,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.writer.not();
             }
             // arithmetic
+            UO::Plus => { /* nothing to do */ }
+            UO::Minus => {
+                self.compile_expression(&item.expr)?;
+                comment!(self, "negate");
+                let item_type = self.item_type(&item.expr);
+                self.write_neg(item_type);
+            }
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
                 if let ast::Expression::Variable(var) = &item.expr {
                     comment!(self, "{}", item);
@@ -1948,6 +1955,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.remu64(),
             Type::f32 => self.writer.remf32(),
             Type::f64 => self.writer.remf64(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        };
+    }
+
+    /// Write negation instruction.
+    fn write_neg(self: &Self, ty: &Type) {
+        match ty {
+            Type::i8 => self.writer.negs8(),
+            Type::i16 => self.writer.negs16(),
+            Type::i32 => self.writer.negs32(),
+            Type::i64 => self.writer.negs64(),
+            Type::f32 => self.writer.negf32(),
+            Type::f64 => self.writer.negf64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }
