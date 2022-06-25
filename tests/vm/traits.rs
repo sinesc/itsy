@@ -2,24 +2,24 @@ use crate::util::*;
 
 #[test]
 fn dynamic_constructor() {
-    let result = run("
+    let result = run(stringify!(
         struct Test {
             a: u32,
             b: String,
         }
         fn main() {
-            let x = Test { a: 1100101, b: \"Hello\" + \"World\" };
+            let x = Test { a: 1100101, b: "Hello" + "World" };
             ret_string(x.b);
             ret_u32(x.a);
         }
-    ");
+    ));
     assert(&result[0], "HelloWorld".to_string());
     assert(&result[1], 1100101u32);
 }
 
 #[test]
 fn trait_resolution() {
-    let result = run("
+    let result = run(stringify!(
         struct StructA {
             a: u8,
         }
@@ -29,17 +29,17 @@ fn trait_resolution() {
         pub trait TestTrait {
             fn required(self: Self, value: u8) -> String;
             fn provided(self: Self, value: u8) -> String {
-                self.required(value) + \" provided\"
+                self.required(value) + " provided"
             }
         }
         impl TestTrait for StructA {
             fn required(self: Self, value: u8) -> String {
-                \"A S:\" + self.a as String + \" P:\" + value as String
+                "A S:" + self.a as String + " P:" + value as String
             }
         }
         impl TestTrait for StructB {
             fn required(self: Self, value: u8) -> String {
-                \"B S:\" + self.b as String + \" P:\" + value as String
+                "B S:" + self.b as String + " P:" + value as String
             }
         }
         fn indirect(stuff: TestTrait, first: u8, second: u8) {
@@ -56,7 +56,7 @@ fn trait_resolution() {
             ret_string(b.provided(7));
             ret_string(b.required(8));
         }
-    ");
+    ));
     assert_all(&result, &[
         "A S:111 P:1 provided".to_string(),
         "A S:111 P:2".to_string(),
@@ -71,7 +71,7 @@ fn trait_resolution() {
 
 #[test]
 fn temporary_traitobject() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             x: u8,
         }
@@ -102,6 +102,6 @@ fn temporary_traitobject() {
             ret_u8(get(o));
             ret_u8(erase(o).double());
         }
-    ");
+    ));
     assert_all(&result, &[ 123u8, 123, 246 ]);
 }

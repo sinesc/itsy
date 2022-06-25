@@ -2,19 +2,19 @@ use crate::util::*;
 
 #[test]
 fn array_literal() {
-    let result = run("
+    let result = run(stringify!(
         let x = [ 1, 2, 3, 4 ];
         ret_i32(x[0]);
         ret_i32(x[1]);
         ret_i32(x[2]);
         ret_i32(x[3]);
-    ");
+    ));
     assert_all(&result, &[ 1i32, 2, 3, 4 ]);
 }
 
 #[test]
 fn array_nesting() {
-    let result = run("
+    let result = run(stringify!(
         let x = [ [ 1, 2, 3 ], [ 4, 5, 6 ] ];
         ret_i32(x[0][0]);
         ret_i32(x[0][1]);
@@ -22,13 +22,13 @@ fn array_nesting() {
         ret_i32(x[1][0]);
         ret_i32(x[1][1]);
         ret_i32(x[1][2]);
-    ");
+    ));
     assert_all(&result, &[ 1i32, 2, 3, 4, 5, 6 ]);
 }
 
 #[test]
 fn array_subindex() {
-    let result = run("
+    let result = run(stringify!(
         let x = [ [ 1, 2, 3 ], [ 4, 5, 6 ] ];
         let y = x[0];
         let z = x[1];
@@ -38,103 +38,103 @@ fn array_subindex() {
         ret_i32(z[0]);
         ret_i32(z[1]);
         ret_i32(z[2]);
-    ");
+    ));
     assert_all(&result, &[ 1i32, 2, 3, 4, 5, 6 ]);
 }
 
 #[test]
 fn array_inference1() {
-    let result = run("
+    let result = run(stringify!(
         let x = [ [ [ 1, 2, 3, 4 ] ] ];
         let y = x[0];
         let z = y[0];
         let u = z[1];
         ret_i8(u);
-    ");
+    ));
     assert_all(&result, &[ 2i8 ]);
 }
 
 #[test]
 fn array_inference2() {
-    let result = run("
+    let result = run(stringify!(
         let x = [ [ [ 1, 2, 3, 4 ] ] ];
         let y = x[0];
         let z = y[0];
         ret_i8(z[0]);
         ret_i8(z[1]);
         ret_i8(z[2]);
-    ");
+    ));
     assert_all(&result, &[ 1i8, 2, 3 ]);
 }
 
 #[test]
 fn array_mixed_construction() {
-    let result = run("
-        let x = \"Hello\";
-        for w in [ x, \"World\" ] {
+    let result = run(stringify!(
+        let x = "Hello";
+        for w in [ x, "World" ] {
             ret_str(w);
         }
-    ");
+    ));
     assert_all(&result, &[ "Hello".to_string(), "World".to_string() ]);
 }
 
 #[test]
 fn array_simple_dynamic_constructor() {
-    let result = run("
-        let abc = \"abc\";
-        let cba = \"cba\";
+    let result = run(stringify!(
+        let abc = "abc";
+        let cba = "cba";
         let x = [ abc, cba ];
         ret_str(x[0]);
         ret_str(x[1]);
-    ");
+    ));
     assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
 }
 
 #[test]
 fn array_flattened_dynamic_constructor() {
-    let result = run("
-        let ghj = \"ghj\";
-        let abc = \"abc\";
-        let cba = \"cba\";
-        let jhg = \"jhg\";
+    let result = run(stringify!(
+        let ghj = "ghj";
+        let abc = "abc";
+        let cba = "cba";
+        let jhg = "jhg";
         let x = [ [ ghj, abc ], [ cba, jhg ] ];
         ret_str(x[0][1]);
         ret_str(x[1][0]);
-    ");
+    ));
     assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
 }
 
 #[test]
 fn array_nested_dynamic_constructor() {
-    let result = run("
-        let ghj_abc = [ \"ghj\", \"abc\" ];
-        let cba_jhg = [ \"cba\", \"jhg\" ];
+    let result = run(stringify!(
+        let ghj_abc = [ "ghj", "abc" ];
+        let cba_jhg = [ "cba", "jhg" ];
         let x = [ ghj_abc, cba_jhg ];
         ret_str(x[0][1]);
         ret_str(x[1][0]);
-    ");
+    ));
     assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
 }
 
 #[test]
 fn array_nested_var_dynamic_constructor() {
-    let result = run("
-        let ghj = \"ghj\";
-        let abc = \"abc\";
-        let cba = \"cba\";
-        let jhg = \"jhg\";
+    let result = run(stringify!(
+        let ghj = "ghj";
+        let abc = "abc";
+        let cba = "cba";
+        let jhg = "jhg";
         let ghj_abc = [ ghj, abc ];
         let cba_jhg = [ cba, jhg ];
         let x = [ ghj_abc, cba_jhg ];
         ret_str(x[0][1]);
         ret_str(x[1][0]);
-    ");
+    ));
     assert_all(&result, &[ "abc".to_string(), "cba".to_string() ]);
 }
 
 #[test]
 fn array_casting() {
-    let result = run("
+    let result = run(stringify!(
         fn accept(x: [ u8 ], y: [ u16 ]) {
             ret_u16((x[0] as u16) + y[0]);
             ret_u16((x[1] as u16) + y[1]);
@@ -146,7 +146,7 @@ fn array_casting() {
             let y: [ u16 ] = [ 4, 3, 2, 1, 0 ];
             accept(x, y);
         }
-    ");
+    ));
     assert_all(&result, &[ 5u16, 5, 5, 5 ]);
 }
 
@@ -173,7 +173,7 @@ fn array_len() {
         ret_{sa_type:?}(array_u16.len());
         ret_{sa_type:?}(array_u8.len());
         ret_{sa_type:?}([ 5, 4, 3, 2, 1, 0 ].len());
-    ", ));
+    "));
     assert_all_sa(&result, &[ 4, 5, 6 ]);
 }
 
@@ -191,7 +191,7 @@ fn array_push() {
 
 #[test]
 fn array_ref_elements() {
-    let result = run("
+    let result = run(stringify!(
         struct Struct {
             value: u8,
         }
@@ -221,6 +221,6 @@ fn array_ref_elements() {
 
             ret_u8(a.len() as u8); // 2
         }
-    ");
+    ));
     assert_all(&result, &[ 6u8, 4, 1, 2, 3, 2 ]);
 }

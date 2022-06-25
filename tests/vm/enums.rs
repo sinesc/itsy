@@ -2,7 +2,7 @@ use crate::util::*;
 
 #[test]
 fn primitive_enum() {
-    let result = run("
+    let result = run(stringify!(
         enum Simple {
             A, B, C
         }
@@ -26,13 +26,13 @@ fn primitive_enum() {
                 ret_u8(4);
             }
         }
-    ");
+    ));
     assert_all(&result, &[ 1u8, 2, 3, 4 ]);
 }
 
 #[test]
 fn primitive_enum_cast() {
-    let result = run("
+    let result = run(stringify!(
         enum Simple {
             A = 3, B, C
         }
@@ -46,7 +46,7 @@ fn primitive_enum_cast() {
                 ret_u8(0);
             }
         }
-    ");
+    ));
     assert_all(&result, &[ 3u8, 4, 1 ]);
 }
 

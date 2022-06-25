@@ -2,7 +2,7 @@ use crate::util::*;
 
 #[test]
 fn struct_access() {
-    let result = run("
+    let result = run(stringify!(
         struct Test {
             ba: bool,
             bb: bool,
@@ -37,7 +37,7 @@ fn struct_access() {
             ret_bool(x.ba);
             ret_bool(x.bb);
         }
-    ");
+    ));
     assert(&result[0], -1i8);
     assert(&result[1], 2i16);
     assert(&result[2], -3i32);
@@ -54,7 +54,7 @@ fn struct_access() {
 
 #[test]
 fn struct_nesting() {
-    let result = run("
+    let result = run(stringify!(
         struct MoreInner {
             one: i8,
             two: i16,
@@ -80,7 +80,7 @@ fn struct_nesting() {
             ret_i16(x.third.c.two);
             ret_i32(x.third.c.three);
         }
-    ");
+    ));
     assert(&result[0], 3u8);
     assert(&result[1], 345u16);
     assert(&result[2], 3.1415f32);
@@ -92,7 +92,7 @@ fn struct_nesting() {
 
 #[test]
 fn struct_array() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             ia: u8,
             ib: [ u64 ],
@@ -115,7 +115,7 @@ fn struct_array() {
             ret_u64(x.ob.ib[1]);
             ret_u64(x.ob.ib[2]);
         }
-    ");
+    ));
     assert(&result[0], -369i16);
     assert(&result[1], 8u8);
     assert(&result[2], 3u64);
@@ -125,7 +125,7 @@ fn struct_array() {
 
 #[test]
 fn member_assign_primitive() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             ia: u8,
             ib: [ u64 ],
@@ -147,14 +147,14 @@ fn member_assign_primitive() {
             ret_i16(x.oa);
             ret_u8(x.ob.ia);
         }
-    ");
+    ));
     assert(&result[0], -369i16);
     assert(&result[1], 8u8);
 }
 
 #[test]
 fn index_assign_primitive() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             ia: u8,
             ib: [ u64 ],
@@ -184,7 +184,7 @@ fn index_assign_primitive() {
             ret_u64(x.ob.ib[1]);
             ret_u64(x.ob.ib[2]);
         }
-    ");
+    ));
     assert(&result[0], 13u8);
     assert(&result[1], 133u8);
     assert(&result[2], 255u8);

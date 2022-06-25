@@ -2,7 +2,7 @@ use crate::util::*;
 
 #[test]
 fn recursion() {
-    let result = run("
+    let result = run(stringify!(
         fn fib(n: i32) -> i32 {
             if n < 2 {
                 n
@@ -16,13 +16,13 @@ fn recursion() {
             ret_i32(fib(5));
             ret_i32(fib(7));
         }
-    ");
+    ));
     assert_all(&result, &[ 1i32, 1, 5, 13 ]);
 }
 
 #[test]
 fn branching() {
-    let result = run("
+    let result = run(stringify!(
         let mut x = 1;
         let y = 2;
         while x <= 3 {
@@ -35,28 +35,28 @@ fn branching() {
             }
             x = x + 1;
         }
-    ");
+    ));
     assert_all(&result, &[ 1i32, 4, 2 ]);
 }
 
 #[test]
 fn branching_ref_cleanup() {
-    let result = run("
+    let result = run(stringify!(
         if true {
-            let a = \"Hello\";
+            let a = "Hello";
             ret_string(a);
         } else {
-            let b = \"World\";
+            let b = "World";
             ret_string(b);
         }
-    ");
+    ));
     assert_all(&result, &[ "Hello".to_string() ]);
 }
 
 #[test]
 fn explicit_return() {
     // todo: add bytecode test, check dead code was removed
-    let result = run("
+    let result = run(stringify!(
         fn test(x: i32) -> i32 {
             ret_i32(x);
             if x == 1 {
@@ -95,7 +95,7 @@ fn explicit_return() {
             ret_i32(test(5));
             ret_i32(test(6));
         }
-    ");
+    ));
     assert_all(&result, &[
         1i32,   1, 1,
         2,      2, 2,
@@ -108,7 +108,7 @@ fn explicit_return() {
 
 #[test]
 fn block_result() {
-    let result = run("
+    let result = run(stringify!(
         fn test(x: i32) -> i32 {
             ret_i32(x);
             if x == 1 {
@@ -141,7 +141,7 @@ fn block_result() {
             ret_i32(test(5));
             ret_i32(test(6));
         }
-    ");
+    ));
     assert_all(&result, &[
         1i32,   1, 1,
         2,      2, 2,
@@ -154,7 +154,7 @@ fn block_result() {
 
 #[test]
 fn unused_result() {
-    let result = run("
+    let result = run(stringify!(
         fn test1(x: i32) -> i64 {
             ret_i32(x);
             return x as i64;
@@ -174,7 +174,7 @@ fn unused_result() {
                 test3(i);
             }
         }
-    ");
+    ));
     assert_all(&result, &[
         0i32, 0, 0,
         1, 1, 1,
@@ -188,7 +188,7 @@ fn unused_result() {
 
 #[test]
 fn dead_code_result() {
-    let result = run("
+    let result = run(stringify!(
         fn result() -> u32 {
             if true {
                 return 1;
@@ -215,7 +215,7 @@ fn dead_code_result() {
             ret_u32(result());
             ret_u32(return_());
         }
-    ");
+    ));
     assert_all(&result, &[
         1u32, 2u32
     ]);
@@ -223,21 +223,21 @@ fn dead_code_result() {
 
 #[test]
 fn return_void() {
-    let result = run("
+    let result = run(stringify!(
         fn main() {
             ret_u8(1);
             return;
         }
-    ");
+    ));
     assert_all(&result, &[ 1u8 ]);
 }
 
 #[test]
 fn maybe_return_with_refs() {
-    let result = run("
+    let result = run(stringify!(
         fn test() -> String {
-            let x = \"Heapref\";
-            if x == \"Heapref\" {
+            let x = "Heapref";
+            if x == "Heapref" {
                 return x;
             }
             x
@@ -246,39 +246,38 @@ fn maybe_return_with_refs() {
         fn main() {
             ret_string(test());
         }
-    ");
+    ));
     assert_all(&result, &[ "Heapref".to_string() ]);
 }
 
 #[test]
 fn assign_to_maybe_uninitialized() {
-    let result = run("
+    let result = run(stringify!(
         let t: String;
         let i = 0;
-        if (i == 1) {
-            t = \"Initialized\";
+        if i == 1 {
+            t = "Initialized";
             ret_string(t);
         } else {
-            //t = \"The road not taken\";
+            //t = "The road not taken";
         }
         // t is now maybe uninitialized
-        t = \"Overruling\";
+        t = "Overruling";
         ret_string(t);
-    ");
+    ));
     assert_all(&result, &[ "Overruling".to_string() ]);
-
 }
 
 #[test]
 fn block_exit_with_maybe_unitialized() {
-    let result = run("
+    let result = run(stringify!(
         fn test(i: u8) {
             let x;
             if i == 1 {
-                x = \"Hello\";
+                x = "Hello";
                 ret_u8(1);
             } else if i == 2 {
-                x = \"World\";
+                x = "World";
                 ret_u8(2);
                 return;
             } else if i == 3 {
@@ -291,7 +290,7 @@ fn block_exit_with_maybe_unitialized() {
             test(2);
             test(3);
         }
-    ");
+    ));
     assert_all(&result, &[ 1u8, 2u8, 3u8 ]);
 }
 

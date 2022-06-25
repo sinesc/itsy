@@ -2,7 +2,7 @@ use crate::util::*;
 
 #[test]
 fn precedence() {
-    let result = run("
+    let result = run(stringify!(
         let a = true;
         let b = false;
         let c = true;
@@ -14,13 +14,13 @@ fn precedence() {
         ret_bool((!a && b || c) == (((!a) && b) || c));
 
         ret_bool((!a && b || c) == !(a && b || c));
-    ");
+    ));
     assert_all(&result, &[ true, true, true, true, false ]);
 }
 
 #[test]
 fn expression_eval_order() {
-    let result = run("
+    let result = run(stringify!(
         fn one() -> i32 { ret_i32(1); 1 }
         fn two() -> i32 { ret_i32(2); 2 }
         fn main() {
@@ -30,7 +30,7 @@ fn expression_eval_order() {
             ret_i32(one() - two() * two());
             ret_i32((two() + two()) / two());
         }
-    ");
+    ));
     assert_all(&result, &[
         1i32, 2,    3,
         1, 2, 1,    0,
@@ -42,7 +42,7 @@ fn expression_eval_order() {
 
 #[test]
 fn expression_short_circuit() {
-    let result = run("
+    let result = run(stringify!(
         fn t() -> bool { ret_bool(true); true }
         fn f() -> bool { ret_bool(false); false }
         fn main() {
@@ -53,7 +53,7 @@ fn expression_short_circuit() {
             ret_bool(t() && f() || t() && f());
             ret_bool(f() && t() || f() && t());
         }
-    ");
+    ));
     assert_all(&result, &[
         true, false,                false,
         true, false, true,          true,
@@ -65,7 +65,7 @@ fn expression_short_circuit() {
 }
 #[test]
 fn stack_value_expressions() {
-    let result = run("
+    let result = run(stringify!(
         ret_i32(1 + 4);
         ret_i32(1 + 4 * 2);
         ret_i32((1 + 4) * 2);
@@ -77,7 +77,7 @@ fn stack_value_expressions() {
         ret_i32(9 % 9 * 2);
         ret_i32(5 % 7 -2 * 2);
         ret_i32(1 + -5 % 7 -2 * 2);
-    ");
+    ));
     assert_all(&result, &[
         1i32 + 4,
         1 + 4 * 2,
@@ -95,7 +95,7 @@ fn stack_value_expressions() {
 
 #[test]
 fn numerics() {
-    let result = run("
+    let result = run(stringify!(
         ret_u8( 255 - 1 );
         ret_u16( 65535 - 2 );
         ret_u32( 4294967295 - 3 );
@@ -108,7 +108,7 @@ fn numerics() {
 
         ret_f32( 1234567.0 * 7654321.0 );
         ret_f64( 123456789.0 * 987654321.0 );
-    ");
+    ));
 
     assert(&result[0], 255u8 - 1);
     assert(&result[1], 65535u16 - 2);
@@ -146,19 +146,19 @@ fn op_order_lt() {
 
 #[test]
 fn unary_op() {
-    let result = run("
+    let result = run(stringify!(
         let val = true;
         ret_bool(val);
         ret_bool(!val);
         ret_bool(!!val);
         ret_bool(!!!val);
-    ");
+    ));
     assert_all(&result, &[ true, false, true, false ]);
 }
 
 #[test]
 fn assign_stack_target() {
-    let result = run("
+    let result = run(stringify!(
         let mut value = 1u8;
         let values = [ 0u8, 10 ];
         value = 2;
@@ -169,7 +169,7 @@ fn assign_stack_target() {
         ret_u8(value);
         value += values[1];
         ret_u8(value);
-    ");
+    ));
     assert_all(&result, &[ 2u8, 10, 12, 22 ]);
 }
 

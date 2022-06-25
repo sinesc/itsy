@@ -88,7 +88,7 @@ itsy_api!(TestFns, Context, {
 #[allow(dead_code)]
 pub fn run(code: &str) -> Context {
     let tmp;
-    let input = if code.find("fn main()").is_some() { code } else { tmp = format!("fn main() {{ {} }}", code); &tmp };
+    let input = if code.find("main()").is_some() { code } else { tmp = format!("fn main() {{ {} }}", code); &tmp };
     let program = match build_str::<TestFns>(input) {
         Ok(program) => program,
         Err(err) => {

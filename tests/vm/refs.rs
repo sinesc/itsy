@@ -50,7 +50,7 @@ fn heap_compound_assign64() {
 
 #[test]
 fn assign_heap_index_target() {
-    let result = run("
+    let result = run(stringify!(
         let array = [ [ 0u8, 1 ] ];
         array[0] = [ 2u8, 3 ];
         ret_u8(array[0][1]);
@@ -60,13 +60,13 @@ fn assign_heap_index_target() {
         ret_u8(array[0][1]);
         array[0][1] -= 1;
         ret_u8(array[0][1]);
-    ");
+    ));
     assert_all(&result, &[ 3u8, 4, 8, 7 ]);
 }
 
 #[test]
 fn assign_heap_var_target() {
-    let result = run("
+    let result = run(stringify!(
         let mut values = [ 5u8, 6 ];
         let morevalues = [ [ 15u8, 16 ], [ 12, 13 ] ];
         values = [ 7u8, 8 ];
@@ -74,7 +74,7 @@ fn assign_heap_var_target() {
         values = morevalues[1];
         ret_u8(values[0]);
         // compound ops not defined for arrays
-    ");
+    ));
     assert_all(&result, &[ 8u8, 12 ]);
 }
 
@@ -112,7 +112,7 @@ fn heap_postfix_suffix() {
 
 #[test]
 fn heap_return() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             c: u32,
         }
@@ -135,7 +135,7 @@ fn heap_return() {
             y.c += 1;
             ret_u32(y.c);
         }
-    ");
+    ));
     assert_all(&result, &[
         13u32, 14
     ]);
@@ -143,7 +143,7 @@ fn heap_return() {
 
 #[test]
 fn heap_result() {
-    let result = run("
+    let result = run(stringify!(
         struct Inner {
             c: u32,
         }
@@ -165,7 +165,7 @@ fn heap_result() {
             y.c += 1;
             ret_u32(y.c);
         }
-    ");
+    ));
     assert_all(&result, &[
         13u32, 14
     ]);
@@ -174,7 +174,7 @@ fn heap_result() {
 #[test]
 #[ignore]
 fn heap_compare() {
-    let result = run("
+    let result = run(stringify!(
         let array = [ 7u8, 7 ];
 
         ret_bool(array != [ 7u8, 7 ]);
@@ -185,7 +185,7 @@ fn heap_compare() {
 
         ret_bool(array != [ 7u8, 8 ]);
         ret_bool(array == [ 7u8, 8 ]);
-    ");
+    ));
     assert_all(&result, &[
         false, true,
         true, false,
@@ -195,19 +195,19 @@ fn heap_compare() {
 
 #[test]
 fn temporary_heap_objects() {
-    let result = run("
+    let result = run(stringify!(
         fn main() {
-            ret_string(\"Temporary\");
-            ret_string(\"Heap\");
-            ret_string(\"Objects\");
+            ret_string("Temporary");
+            ret_string("Heap");
+            ret_string("Objects");
         }
-    ");
+    ));
     assert_all(&result, &[ "Temporary".to_string(), "Heap".to_string(), "Objects".to_string() ]);
 }
 
 #[test]
 fn tempory_access() {
-    let result = run("
+    let result = run(stringify!(
         struct Test {
             val: u8,
         }
@@ -220,6 +220,6 @@ fn tempory_access() {
             ret_u8(test(2).val);
             ret_u8(test(3).val);
         }
-    ");
+    ));
     assert_all(&result, &[ 1u8, 2, 3 ]);
 }
