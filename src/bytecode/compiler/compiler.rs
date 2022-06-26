@@ -580,7 +580,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_preinc(iter_local as StackOffset, iter_ty);
+        let increment_target = self.write_preinc(iter_local, iter_ty);
         //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
         self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
         if binary_op.op == ast::BinaryOperator::Range {
@@ -825,10 +825,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     };
                     let exp_type = self.item_type(&item.expr);
                     match item.op {
-                        UO::IncBefore => self.write_preinc(load_index as StackOffset, &exp_type),
-                        UO::DecBefore => self.write_predec(load_index as StackOffset, &exp_type),
-                        UO::IncAfter => self.write_postinc(load_index as StackOffset, &exp_type),
-                        UO::DecAfter => self.write_postdec(load_index as StackOffset, &exp_type),
+                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
+                        UO::DecBefore => self.write_predec(load_index, &exp_type),
+                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
+                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
@@ -1600,9 +1600,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             match self.init_state.initialized(binding_id) {
-                BranchingState::Initialized => self.writer.storex_replace(local as StackOffset, constructor),
-                BranchingState::Uninitialized => self.writer.storex_new(local as StackOffset, constructor),
-                BranchingState::MaybeInitialized => self.writer.storex_maybe(local as StackOffset, constructor),
+                BranchingState::Initialized => self.writer.storex_replace(local, constructor),
+                BranchingState::Uninitialized => self.writer.storex_new(local, constructor),
+                BranchingState::MaybeInitialized => self.writer.storex_maybe(local, constructor),
             }
         } else {
             self.write_store(local, ty)
@@ -1611,13 +1611,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, index: StackOffset, ty: &Type) {
+        const A1: StackOffset = ARG1 as StackOffset;
+        const A2: StackOffset = ARG2 as StackOffset;
+        const A3: StackOffset = ARG3 as StackOffset;
         match ty.primitive_size() {
             1 => select_signed_opcode!(self, load8_8, load8_16, load8_sa, index),
             2 => select_signed_opcode!(self, load16_8, load16_16, load16_sa, index),
             4 => match index {
-                ARG1 => self.writer.load_arg1(),
-                ARG2 => self.writer.load_arg2(),
-                ARG3 => self.writer.load_arg3(),
+                A1 => self.writer.load_arg1(),
+                A2 => self.writer.load_arg2(),
+                A3 => self.writer.load_arg3(),
                 _ => select_signed_opcode!(self, load32_8, load32_16, load32_sa, index),
             },
             8 => select_signed_opcode!(self, load64_8, load64_16, load64_sa, index),
@@ -1658,22 +1661,20 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Clone stack value at (negative of) given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => self.writer.clone8(),
-            2 => self.writer.clone16(),
-            4 => self.writer.clone32(),
-            8 => self.writer.clone64(),
-            //16 => self.writer.clone128(offset),
+            1 => self.writer.load8_8(-1),
+            2 => self.writer.load16_8(-2),
+            4 => self.writer.load32_8(-4),
+            8 => self.writer.load64_8(-8),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
 
     fn write_clone_ref(self: &Self) -> StackAddress {
         match size_of::<crate::HeapAddress>() {
-            1 => self.writer.clone8(),
-            2 => self.writer.clone16(),
-            4 => self.writer.clone32(),
-            8 => self.writer.clone64(),
-            //16 => self.writer.clone128(offset),
+            1 => self.writer.load8_8(-1),
+            2 => self.writer.load16_8(-2),
+            4 => self.writer.load32_8(-4),
+            8 => self.writer.load64_8(-8),
             size @ _ => unreachable!("Unsupported size {} for heap address", size),
         }
     }
@@ -1798,7 +1799,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
+    fn write_preinc(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index, -1),
             Type::i32 | Type::u32 => self.writer.predeci32(index, -1),
@@ -1809,7 +1810,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-decrement instruction.
-    fn write_predec(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
+    fn write_predec(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(index, 1),
             Type::i32 | Type::u32 => self.writer.predeci32(index, 1),
@@ -1820,7 +1821,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write post-increment instruction.
-    fn write_postinc(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
+    fn write_postinc(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index, -1),
             Type::i32 | Type::u32 => self.writer.postdeci32(index, -1),
@@ -1831,7 +1832,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write post-decrement instruction.
-    fn write_postdec(self: &Self, index: StackOffset, ty: &Type) -> StackAddress {
+    fn write_postdec(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(index, 1),
             Type::i32 | Type::u32 => self.writer.postdeci32(index, 1),

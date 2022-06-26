@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset};
+use crate::StackAddress;
 use crate::bytecode::HeapRef;
 
 /// A stack holding temporary bytecode operation results and inputs.
@@ -115,30 +115,30 @@ pub trait StackOp<T> {
 /// Stack offset-computations to support stack relative operations.
 pub trait StackOffsetOp<T> {
     /// Offset given value by the current frame pointer
-    fn offset_fp(self: &Self, offset: StackOffset) -> StackAddress;
+    fn offset_fp(self: &Self, offset: StackAddress) -> StackAddress;
     /// Offset given value by the current stack pointer
-    fn offset_sp(self: &Self, offset: StackOffset) -> StackAddress;
+    fn offset_sp(self: &Self, offset: StackAddress) -> StackAddress;
 }
 
 /// Generic stack operations relative to the stack or frame pointer.
 pub trait StackRelativeOp<T>: StackOffsetOp<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
-    fn store_fp(self: &mut Self, offset: StackOffset, value: T) {
+    fn store_fp(self: &mut Self, offset: StackAddress, value: T) {
         let pos = self.offset_fp(offset);
         self.store(pos, value);
     }
     /// Load a value from the stack relative to the frame pointer.
-    fn load_fp(self: &Self, offset: StackOffset) -> T {
+    fn load_fp(self: &Self, offset: StackAddress) -> T {
         let pos = self.offset_fp(offset);
         self.load(pos)
     }
-    /// Store given value in the stack relative to the stack pointer. The offset should be negative.
-    fn store_sp(self: &mut Self, offset: StackOffset, value: T) {
+    /// Store given value in the stack downwards relative to the stack pointer.
+    fn store_sp(self: &mut Self, offset: StackAddress, value: T) {
         let pos = self.offset_sp(offset);
         self.store(pos, value);
     }
-    /// Load a value from the stack relative to the stack pointer. The offset should be negative.
-    fn load_sp(self: &Self, offset: StackOffset) -> T {
+    /// Load a value from the stack downwards relative to the stack pointer.
+    fn load_sp(self: &Self, offset: StackAddress) -> T {
         let pos = self.offset_sp(offset);
         self.load(pos)
     }
@@ -146,12 +146,12 @@ pub trait StackRelativeOp<T>: StackOffsetOp<T> + StackOp<T> {
 
 impl<T> StackOffsetOp<T> for Stack {
     #[cfg_attr(not(debug_assertions), inline(always))]
-    fn offset_fp(self: &Self, offset: StackOffset) -> StackAddress {
-        (self.fp as i64 + offset as i64) as StackAddress
+    fn offset_fp(self: &Self, offset: StackAddress) -> StackAddress {
+        self.fp as StackAddress + offset
     }
     #[cfg_attr(not(debug_assertions), inline(always))]
-    fn offset_sp(self: &Self, offset: StackOffset) -> StackAddress {
-        (self.data.len() as i64 + offset as i64) as StackAddress
+    fn offset_sp(self: &Self, offset: StackAddress) -> StackAddress {
+        self.data.len() as StackAddress - offset
     }
 }
 

@@ -20,9 +20,9 @@ use writer::{Writer, StoreConst};
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, ItemIndex, RustFnIndex};
 use crate::bytecode::runtime::{vm::VM, stack::{Stack, StackOp}};
 
-const ARG1: StackOffset = 0;
-const ARG2: StackOffset = 4;
-const ARG3: StackOffset = 8;
+const ARG1: StackAddress = 0;
+const ARG2: StackAddress = 4;
+const ARG3: StackAddress = 8;
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
