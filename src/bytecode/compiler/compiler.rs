@@ -557,22 +557,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
-        self.compile_expression(&binary_op.left)?;
+        self.compile_expression(&binary_op.left)?;          // stack current=lower
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_store(iter_local, iter_ty);
+        self.write_store(iter_local, iter_ty);                      // stack -
         // push upper range bound
-        self.compile_expression(&binary_op.right)?;
+        self.compile_expression(&binary_op.right)?;             // stack upper
         // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_load(iter_local as StackOffset, iter_ty);
-        //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
-        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
+        self.write_load(iter_local as StackOffset, iter_ty);    // stack upper current
+        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty); // stack upper current upper
         if binary_op.op == ast::BinaryOperator::Range {
-            self.write_lt(iter_ty);
+            self.write_lt(iter_ty);                                     // stack upper current<upper
         } else {
-            self.write_lte(iter_ty);
+            self.write_lte(iter_ty);                                    // stack upper current<=upper
         }
-        let exit_jump = self.writer.j0(123);
+        let exit_jump = self.writer.j0(123);                // stack upper
         // compile block
         let start_target = self.writer.position();
         self.loop_control.push();
@@ -580,15 +579,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_preinc(iter_local, iter_ty);
-        //self.write_clone(iter_ty, iter_ty.primitive_size()); // clone upper bound for comparison, skip over iter inbetween
-        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);
+        let increment_target = self.write_preinc(iter_local, iter_ty);      // stack upper new_current(=current+1)
+        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);   // stack upper new_current upper
         if binary_op.op == ast::BinaryOperator::Range {
-            self.write_lt(iter_ty);
+            self.write_lt(iter_ty);                                                     // stack upper new_current<upper
         } else {
-            self.write_lte(iter_ty);
+            self.write_lte(iter_ty);                                                    // stack upper new_current<=upper
         }
-        self.writer.jn0(start_target);
+        self.writer.jn0(start_target);                                              // stack upper
         // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
