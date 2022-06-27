@@ -28,23 +28,23 @@ path = "src/lib.rs"
 [[bin]]
 doc = false
 name = "debug-run"
-path = "src/debug-run.rs"
+path = "src/bin/debug-run.rs"
 required-features = [ "compiler", "debugging" ]
 
 [[bin]]
 doc = false
 name = "profile-run"
-path = "src/profile-run.rs"
+path = "src/bin/profile-run.rs"
 required-features = [ "compiler", "debugging" ]
 
 [[bin]]
 doc = false
 name = "bench"
-path = "src/bench.rs"
+path = "src/bin/bench.rs"
 required-features = [ "compiler" ]
 
 [[bin]]
 doc = false
 name = "run"
-path = "src/run.rs"
+path = "src/bin/run.rs"
 required-features = [ "compiler" ]

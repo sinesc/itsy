@@ -1,5 +1,5 @@
 use itsy::*;
-use std::{env, path::PathBuf, collections::HashMap, io::{self, Write}};
+use std::{env, path::PathBuf, collections::HashMap};
 
 /*
  * This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM.
@@ -7,27 +7,8 @@ use std::{env, path::PathBuf, collections::HashMap, io::{self, Write}};
  * Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
  */
 
-struct Context {
-    seed: f64,
-}
-
-itsy_api!(MyAPI, Context, {
-    /// Prints the given string to standard output.
-    fn print(&mut context, value: String) {
-        print!("{}", value);
-        io::stdout().flush().unwrap();
-    }
-    /// Prints the given string followed by a newline to standard output.
-    fn println(&mut context, value: String) {
-        println!("{}", value);
-    }
-    /// Returns a random number between 0.0 and non-inclusive 1.0
-    fn random(&mut context) -> f64 {
-        context.seed += 1.0;
-        let large = context.seed.sin() * 100000000.0;
-        large - large.floor()
-    }
-});
+mod shared;
+use shared::{Context, MyAPI};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

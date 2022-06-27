@@ -109,9 +109,10 @@ macro_rules! itsy_api {
 #[macro_export]
 macro_rules! itsy_api {
     // enum: generate rustfn enum
-    (@enum $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
+    (@enum [ $( $globalmeta:meta )* ], $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
+        $(#[$globalmeta])*
         $vis enum $type_name {
             $(
                 $( #[ $attr ] )*
@@ -240,6 +241,7 @@ macro_rules! itsy_api {
         }
     };
     (
+        $(#[$globalmeta:meta])*
         $vis:vis $type_name:ident, $context_type:ty, { $(
             $( #[ $attr:meta ] )*
             // FIXME: ret_type is simple ident only (ambiguity issues)
@@ -250,7 +252,7 @@ macro_rules! itsy_api {
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `itsy_api!` macro.
-        itsy_api!(@enum $vis, $type_name $(, $name [ $( $attr ),* ] )* );
+        itsy_api!(@enum [ $( $globalmeta )* ], $vis, $type_name $(, $name [ $( $attr ),* ] )* );
         itsy_api!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
     };
 }
