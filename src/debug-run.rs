@@ -37,7 +37,7 @@ fn main() {
     } else {
         let mut files: HashMap<String, (PathBuf, String)> = HashMap::new();
         let write_logs = std::path::Path::new("./logs/").is_dir();
-        let mut instruction_counts = HashMap::new();
+        let mut opcode_stats = HashMap::new();
         match build(&args[1], &mut files, write_logs) {
             Ok(program) => {
                 let mut context = Context { seed: 1.2345 };
@@ -47,26 +47,32 @@ fn main() {
                     log("logs/run.ini", false, "");
                 }
                 loop {
-                    let mut instruction = None;
-                    let count = instruction_counts.entry(vm.get_instruction()).or_insert(0);
-                    *count += 1;
+                    let mut opcode_label = None;
                     if write_logs {
-                        instruction = Some(vm.format_instruction().unwrap_or("-".to_string()));
-                        log("logs/run.ini", true, &format!("{}", instruction.as_ref().unwrap()));
+                        opcode_label = Some(vm.format_instruction().unwrap_or("-".to_string()));
+                        log("logs/run.ini", true, &format!("{}", opcode_label.as_ref().unwrap()));
                     }
-                    let vmstate = vm.step(&mut context);
-                    if let Some(instruction) = instruction {
-                        if instruction.starts_with("[") == false && instruction.starts_with("\n") == false {
+                    let vmstate = {
+                        let start_time = std::time::Instant::now();
+                        let current_opcode = vm.get_instruction();
+                        let vmstate = vm.step(&mut context);
+                        let elapsed_time = std::time::Instant::now() - start_time;
+                        let stats = opcode_stats.entry(current_opcode).or_insert((0, std::time::Duration::ZERO));
+                        stats.0 += 1;
+                        stats.1 += elapsed_time;
+                        vmstate
+                    };
+                    if let Some(instruction_label) = opcode_label {
+                        if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {
                             log("logs/run.ini", true, &format!(";    stack {:?}\n;    heap  {:?}", vm.stack.frame(), vm.heap.data()));
                         }
                     }
                     if vmstate != runtime::VMState::Ready {
-                        let mut counts: Vec<(_, _)> = instruction_counts.into_iter().collect();
-                        counts.sort_by(|a, b| a.1.cmp(&b.1));
-                        println!("OpCode counts");
-                        for (opcode, v) in &counts {
-                            let opcode = format!("{:?}", opcode.unwrap());
-                            println!("{: >22} {}", opcode, v);
+                        let mut counts: Vec<(_, _)> = opcode_stats.into_iter().collect();
+                        counts.sort_by(|a, b| a.1.1.cmp(&b.1.1));
+                        println!("\n{: >22} {: >12}   {: >12}   {: >12}", "OpCode", "Count", "Time/Op", "Total");
+                        for (opcode, (count, time)) in counts {
+                            println!("{: >22} {: >12} {: >12.4}ns {: >12.4}ms", format!("{:?}", opcode.unwrap()), count, time.as_secs_f64() / count as f64 * 1_000_000.0, time.as_secs_f64() * 1000.0);
                         }
                         break;
                     }
