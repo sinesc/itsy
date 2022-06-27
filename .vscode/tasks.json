@@ -27,6 +27,28 @@
             "problemMatcher": []
         },
         {
+            "label": "cargo run file in profile-runner",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"compiler\"",
+                "--features=\"debugging\"",
+                "--release",
+                "--bin",
+                "profile-run",
+                "--",
+                "${relativeFile}"
+            ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
             "label": "cargo run file in runner",
             "type": "shell",
             "command": "cargo",

@@ -33,6 +33,12 @@ required-features = [ "compiler", "debugging" ]
 
 [[bin]]
 doc = false
+name = "profile-run"
+path = "src/profile-run.rs"
+required-features = [ "compiler", "debugging" ]
+
+[[bin]]
+doc = false
 name = "bench"
 path = "src/bench.rs"
 required-features = [ "compiler" ]
