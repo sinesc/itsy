@@ -4,5 +4,8 @@
     //"lldb.showDisassembly": "always",
     "rust-analyzer.files.excludeDirs": [
         "./itsy"
-    ]
+    ],
+    "rust-analyzer.cargo.features": [
+        "debugging", "compiler"
+    ],
 }
