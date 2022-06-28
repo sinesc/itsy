@@ -9,6 +9,10 @@ macro_rules! comment {
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
 macro_rules! select_signed_opcode {
+    (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { unreachable!("Unsupported sa-sized variant") };
+    (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
+        $self.writer.$variant_sa($value as StackOffset $(, $more)*)
+    };
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{i8, i16};
         if $value as StackOffset >= i8::MIN as StackOffset && $value as StackOffset <= i8::MAX as StackOffset {
@@ -16,13 +20,17 @@ macro_rules! select_signed_opcode {
         } else if $value as StackOffset >= i16::MIN as StackOffset && $value as StackOffset <= i16::MAX as StackOffset {
             $self.writer.$variant_16($value as i16 $(, $more)*)
         } else {
-            $self.writer.$variant_sa($value as StackOffset $(, $more)*)
+            select_signed_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
         }
     }}
 }
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
 macro_rules! select_unsigned_opcode {
+    (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { unreachable!("Unsupported sa-sized variant") };
+    (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
+        $self.writer.$variant_sa($value as StackAddress $(, $more)*)
+    };
     ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
         use core::{u8, u16};
         if $value as StackAddress <= u8::MAX as StackAddress {
@@ -30,7 +38,7 @@ macro_rules! select_unsigned_opcode {
         } else if $value as StackAddress <= u16::MAX as StackAddress {
             $self.writer.$variant_16($value as u16 $(, $more)*)
         } else {
-            $self.writer.$variant_sa($value as StackAddress $(, $more)*)
+            select_unsigned_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
         }
     }}
 }
