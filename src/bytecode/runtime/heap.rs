@@ -124,13 +124,48 @@ impl Heap {
         self.epoch
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
-    pub fn alloc(self: &mut Self, data: Vec<u8>, implementor_index: ItemIndex) -> StackAddress {
+    pub fn alloc(self: &mut Self, size_hint: StackAddress, implementor_index: ItemIndex) -> StackAddress {
         if let Some(index) = self.free.pop() {
-            self.objects[index as usize] = HeapObject::new(data, implementor_index, self.epoch);
+            let object = &mut self.objects[index as usize];
+            object.data.truncate(0);
+            object.implementor_index = implementor_index;
+            object.refs = 0;
+            object.epoch = self.epoch;
+            index
+        } else {
+            let index = self.objects.len();
+            self.objects.push(HeapObject::new(Vec::with_capacity(size_hint as usize), implementor_index, self.epoch));
+            index as StackAddress
+        }
+    }
+    /// Allocate a heap object with a reference count of 0 and return its index.
+    pub fn alloc_place(self: &mut Self, data: Vec<u8>, implementor_index: ItemIndex) -> StackAddress {
+        if let Some(index) = self.free.pop() {
+            let object = &mut self.objects[index as usize];
+            object.data = data;
+            object.implementor_index = implementor_index;
+            object.refs = 0;
+            object.epoch = self.epoch;
             index
         } else {
             let index = self.objects.len();
             self.objects.push(HeapObject::new(data, implementor_index, self.epoch));
+            index as StackAddress
+        }
+    }
+    /// Allocate a heap object with a reference count of 0 and return its index.
+    pub fn alloc_copy(self: &mut Self, data: &[ u8 ], implementor_index: ItemIndex) -> StackAddress {
+        if let Some(index) = self.free.pop() {
+            let object = &mut self.objects[index as usize];
+            object.data.truncate(0);
+            object.data.extend_from_slice(data);
+            object.implementor_index = implementor_index;
+            object.refs = 0;
+            object.epoch = self.epoch;
+            index
+        } else {
+            let index = self.objects.len();
+            self.objects.push(HeapObject::new(data.to_vec(), implementor_index, self.epoch));
             index as StackAddress
         }
     }

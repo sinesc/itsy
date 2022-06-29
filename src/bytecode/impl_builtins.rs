@@ -13,8 +13,7 @@ macro_rules! impl_builtins {
     (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret $vm:ident, String, $value:ident) => { {
-        let raw_bytes = &$value.as_bytes();
-        let index = $vm.heap.alloc(raw_bytes.to_vec(), $crate::ItemIndex::MAX);
+        let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::ItemIndex::MAX);
         $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, HeapRef, $value:ident) => { $vm.stack.push($value); };

@@ -204,7 +204,7 @@ impl_opcodes!{
     >(&mut self) {
         let value: T = self.stack.pop();
         let string = format!("{}", value);
-        let index: StackAddress = self.heap.alloc(string.into_bytes(), ItemIndex::MAX);
+        let index: StackAddress = self.heap.alloc_place(string.into_bytes(), ItemIndex::MAX);
         self.stack.push(HeapRef::new(index, 0));
     }
 
@@ -612,11 +612,10 @@ impl_opcodes!{
 
     /// Moves an instance that was constructed on the stack to the heap.
     fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
-        let mut data = Vec::with_capacity(size as usize);
         let data_start = self.stack.sp() as usize - size as usize;
-        data.extend_from_slice(&self.stack.data()[data_start..]);
+        let heap_ref = self.heap.alloc_copy(&self.stack.data()[data_start..], implementor_index);
         self.stack.truncate(data_start as StackAddress);
-        self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
+        self.stack.push(HeapRef::new(heap_ref, 0));
     }
 
     /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
@@ -720,7 +719,7 @@ impl_opcodes!{
         let b_len = self.heap.item(b.index()).data.len() as StackAddress;
         let a: HeapRef = self.stack.pop();
         let a_len = self.heap.item(a.index()).data.len() as StackAddress;
-        let dest_index: StackAddress = self.heap.alloc(Vec::new(), ItemIndex::MAX);
+        let dest_index = self.heap.alloc((a_len + b_len) * 3 / 2, ItemIndex::MAX);
         self.heap.copy(HeapRef::new(dest_index, 0), a, a_len);
         self.heap.copy(HeapRef::new(dest_index, a_len), b, b_len);
         self.stack.push(HeapRef::new(dest_index, 0));

@@ -47,7 +47,7 @@ impl<T, U> VM<T, U> {
         let stack = Self::init_consts(consts, const_descriptors);
         // occupy heap element 0 so we can identify intialized heap objects their address != 0
         let mut heap = Heap::new();
-        heap.alloc(Vec::new(), 0);
+        heap.alloc(0, 0);
         VM {
             context_type: PhantomData,
             func_type   : PhantomData,
@@ -88,7 +88,7 @@ impl<T, U> VM<T, U> {
     pub fn reset(self: &mut Self) {
         self.stack.reset();
         self.heap.reset();
-        self.heap.alloc(Vec::new(), 0);
+        self.heap.alloc(0, 0);
         self.pc = 0;
         self.state = VMState::Ready;
     }
@@ -197,7 +197,7 @@ impl<T, U> VM<T, U> {
                 *prototype_offset += primitive_size;
             },
             Constructor::Array => {
-                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
+                let heap_ref = HeapRef::new(self.heap.alloc(0, ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
                 self.construct_write_ref(target, heap_ref);
                 // read size from prototype instead of constructor
                 let num_elements: ItemIndex = self.stack.load(*prototype_offset);
@@ -209,7 +209,7 @@ impl<T, U> VM<T, U> {
             },
             Constructor::Struct => {
                 let (implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
-                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
+                let heap_ref = HeapRef::new(self.heap.alloc(0, implementor_index), 0);
                 self.construct_write_ref(target, heap_ref);
                 for _ in 0..num_fields {
                     field_offset = self.construct_value(field_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
@@ -225,7 +225,7 @@ impl<T, U> VM<T, U> {
                 // seek to variant offset, read it from constructor and seek to the offset
                 let (num_fields, mut variant_field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
                 // read and construct fields for the variant
-                let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), implementor_index), 0);
+                let heap_ref = HeapRef::new(self.heap.alloc(0, implementor_index), 0);
                 self.construct_write_ref(target, heap_ref);
                 self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&variant_index.to_ne_bytes());
                 for _ in 0..num_fields {
@@ -238,7 +238,7 @@ impl<T, U> VM<T, U> {
                     self.construct_copy_value(target, *prototype_offset, num_bytes);
                     *prototype_offset += num_bytes;
                 } else {
-                    let heap_ref = HeapRef::new(self.heap.alloc(Vec::new(), ItemIndex::MAX), 0);
+                    let heap_ref = HeapRef::new(self.heap.alloc(0, ItemIndex::MAX), 0);
                     self.construct_write_ref(target, heap_ref);
                     let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
                     *prototype_offset += size_of_val(&num_bytes) as StackAddress;
