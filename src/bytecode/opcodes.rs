@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
-use crate::bytecode::{ARG1, ARG2, ARG3, HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
+use crate::bytecode::{HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
 type Data16 = u16;
@@ -11,77 +11,35 @@ type Data64 = u64;
 
 impl_opcodes!{
 
-    /*/// Does nothing.
+    /// Does nothing.
     fn noop(&mut self) { }
-    */
+
     /// Moves the stack pointer by given number of bytes to make room for local variables.
-    fn reserve(&mut self, num_bytes: u8) { // FIXME u8 is not enough
+    fn reserve(&mut self, num_bytes: u16) {
         self.stack.extend_zero(num_bytes as StackAddress);
     }
 
-    /// Discards the top stack value.
-    fn <
-        discard8<T: Data8>(),
-        discard16<T: Data16>(),
-        discard32<T: Data32>(),
-        discard64<T: Data64>(),
-    >(&mut self) {
-        self.stack.truncate(self.stack.sp() - size_of::<T>() as StackAddress);
+    /// Discards the top num_bytes bytes on the stack.
+    fn discard(&mut self, num_bytes: u8) {
+        self.stack.truncate(self.stack.sp() - num_bytes as StackAddress);
     }
 
-    /// Pushes 0 onto stack.
-    fn <
-        zero8<T: Data8>(),
-        zero16<T: Data16>(),
-        zero32<T: Data32>(),
-        zero64<T: Data64>(),
-    >(&mut self) {
-        self.stack.push(0 as T);
+    /// Clones the top num_bytes bytes on the stack.
+    fn clone(&mut self, num_bytes: u8) {
+        self.stack.extend(self.stack.sp() - num_bytes as StackAddress, num_bytes as StackAddress);
     }
 
-    /// Pushes 1 onto stack.
-    fn <
-        one8<T: Data8>(),
-        one16<T: Data16>(),
-        one32<T: Data32>(),
-        one64<T: Data64>(),
-    >(&mut self) {
-        self.stack.push(1 as T);
-    }
-
-    /// Pushes -1 onto stack.
-    fn <
-        fill8<T: i8>(),
-        fill16<T: i16>(),
-        fill32<T: i32>(),
-        fill64<T: i64>(),
-    >(&mut self) {
-        self.stack.push(-1 as T);
-    }
-
-    /// Pushes 8 bit value as an 8 or 32 bit value onto stack.
+    /// Pushes given value onto the stack.
     fn <
         literali8(value: u8),
+        literalu16(value: u8 as u16),
         literalu32(value: u8 as u32),
+        literalu64(value: u8 as u64),
+        literals16(value: i8 as i16),
         literals32(value: i8 as i32),
+        literals64(value: i8 as i64),
     >(&mut self) {
         self.stack.push(value);
-    }
-
-    /// Loads 32 bit function argument 1 and pushes it onto the stack. Equals load32(ARG1).
-    fn load_arg1(&mut self) {
-        let local: Data32 = self.stack.load_fp(ARG1);
-        self.stack.push(local);
-    }
-    /// Loads 32 bit function argument 2 and pushes it onto the stack. Equals load32(ARG2).
-    fn load_arg2(&mut self) {
-        let local: Data32 = self.stack.load_fp(ARG2);
-        self.stack.push(local);
-    }
-    /// Loads 32 bit function argument 3 and pushes it onto the stack. Equals load32(ARG3).
-    fn load_arg3(&mut self) {
-        let local: Data32 = self.stack.load_fp(ARG3);
-        self.stack.push(local);
     }
 
     /// Loads data from constpool at given offset and pushes it onto the stack.
@@ -100,79 +58,58 @@ impl_opcodes!{
         self.stack.push(local);
     }
 
+    /// Loads and increments a counter variable and compares the result against the top stack value.
+    /// Jumps to given target if the counter is less than or equal to the top stack value.
+    fn <
+        whileu8<T: u8>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whileu16<T: u16>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whileu32<T: u32>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whileu64<T: u64>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whiles8<T: i8>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whiles16<T: i16>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whiles32<T: i32>(step: u8, counter_loc: u16, target_addr: StackAddress),
+        whiles64<T: i64>(step: u8, counter_loc: u16, target_addr: StackAddress),
+    >(&mut self) {
+        // load upper bound
+        let upper: T = self.stack.top();
+        // load and increment counter
+        let mut counter: T = self.stack.load_fp(counter_loc as StackAddress);
+        counter = T::wrapping_add(counter, step as T);
+        self.stack.store_fp(counter_loc as StackAddress, counter);
+        // if counter less than or equal upper bound, jump to target
+        if counter <= upper {
+            self.pc = target_addr;
+        }
+    }
+
     /// Loads data from stack at given offset (relative to the stack frame) and pushes it onto the stack.
     fn <
-        load8_8<T: Data8>(offset: i8 as StackOffset),
-        load8_16<T: Data8>(offset: i16 as StackOffset),
-        load8_sa<T: Data8>(offset: StackOffset),
-        load16_8<T: Data16>(offset: i8 as StackOffset),
-        load16_16<T: Data16>(offset: i16 as StackOffset),
-        load16_sa<T: Data16>(offset: StackOffset),
-        load32_8<T: Data32>(offset: i8 as StackOffset),
-        load32_16<T: Data32>(offset: i16 as StackOffset),
-        load32_sa<T: Data32>(offset: StackOffset),
-        load64_8<T: Data64>(offset: i8 as StackOffset),
-        load64_16<T: Data64>(offset: i16 as StackOffset),
-        load64_sa<T: Data64>(offset: StackOffset),
+        load8_8<T: Data8>(offset: u8 as StackAddress),
+        load16_8<T: Data16>(offset: u8 as StackAddress),
+        load32_8<T: Data32>(offset: u8 as StackAddress),
+        load64_8<T: Data64>(offset: u8 as StackAddress),
+        load8_16<T: Data8>(offset: u16 as StackAddress),
+        load16_16<T: Data16>(offset: u16 as StackAddress),
+        load32_16<T: Data32>(offset: u16 as StackAddress),
+        load64_16<T: Data64>(offset: u16 as StackAddress),
     >(&mut self) {
-        let abs = (offset + if offset >= 0 { self.stack.fp as StackOffset } else { self.stack.sp() as StackOffset }) as StackAddress; // fp+offset or sp-offset
-        let local: T = self.stack.load(abs);
+        let local: T = self.stack.load(self.stack.fp + offset);
         self.stack.push(local);
     }
 
     /// Pops data off the stack and stores it at the given offset (relative to the stack frame).
     fn <
-        store8_8<T: Data8>(offset: i8 as StackOffset),
-        store8_16<T: Data8>(offset: i16 as StackOffset),
-        store8_sa<T: Data8>(offset: StackOffset),
-        store16_8<T: Data16>(offset: i8 as StackOffset),
-        store16_16<T: Data16>(offset: i16 as StackOffset),
-        store16_sa<T: Data16>(offset: StackOffset),
-        store32_8<T: Data32>(offset: i8 as StackOffset),
-        store32_16<T: Data32>(offset: i16 as StackOffset),
-        store32_sa<T: Data32>(offset: StackOffset),
-        store64_8<T: Data64>(offset: i8 as StackOffset),
-        store64_16<T: Data64>(offset: i16 as StackOffset),
-        store64_sa<T: Data64>(offset: StackOffset),
+        store8_8<T: Data8>(offset: u8 as StackAddress),
+        store16_8<T: Data16>(offset: u8 as StackAddress),
+        store32_8<T: Data32>(offset: u8 as StackAddress),
+        store64_8<T: Data64>(offset: u8 as StackAddress),
+        store8_16<T: Data8>(offset: u16 as StackAddress),
+        store16_16<T: Data16>(offset: u16 as StackAddress),
+        store32_16<T: Data32>(offset: u16 as StackAddress),
+        store64_16<T: Data64>(offset: u16 as StackAddress),
     >(&mut self) {
-        let abs = (offset + if offset >= 0 { self.stack.fp as StackOffset } else { self.stack.sp() as StackOffset }) as StackAddress; // fp+offset or sp-offset
         let local: T = self.stack.pop();
-        self.stack.store(abs, local);
-    }
-
-    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
-    /// Increases refcount of the new value.
-    fn storex_new(&mut self, index: StackAddress, constructor: StackAddress) {
-        let value: HeapRef = self.stack.pop();
-        self.stack.store_fp(index, value);
-        self.refcount_value(value, constructor, HeapRefOp::Inc);
-    }
-
-    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
-    /// Decreses refcount of the previous contents and increases refcount of the new value.
-    fn storex_replace(&mut self, index: StackAddress, constructor: StackAddress) {
-        let prev: HeapRef = self.stack.load_fp(index);
-        let next: HeapRef = self.stack.pop();
-        self.stack.store_fp(index, next);
-        if next != prev {
-            self.refcount_value(next, constructor, HeapRefOp::Inc);
-            self.refcount_value(prev, constructor, HeapRefOp::Dec);
-        }
-    }
-
-    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
-    /// Decreses refcount of the previous contents, if any and increases refcount of the new value.
-    fn storex_maybe(&mut self, index: StackAddress, constructor: StackAddress) {
-        let prev: HeapRef = self.stack.load_fp(index);
-        let next: HeapRef = self.stack.pop();
-        self.stack.store_fp(index, next);
-        if next != prev {
-            self.refcount_value(next, constructor, HeapRefOp::Inc);
-            // prev might be 0 if it was statically impossible to determine whether a variable is initialized (e.g. 'let x; if y { x = 0 } x' cannot be known)
-            if prev.address != 0 {
-                self.refcount_value(prev, constructor, HeapRefOp::Dec);
-            }
-        }
+        self.stack.store_fp(offset, local);
     }
 
     /// Swap the 2 topmost stack values.
@@ -338,24 +275,6 @@ impl_opcodes!{
         };
     }
 
-/*
-    /// Pops value off the stack, truncates it to the given number of bits pushes the result.
-    fn <
-        truncate16<T: Data16>(size: u8),
-        truncate32<T: Data32>(size: u8),
-        truncate64<T: Data64>(size: u8),
-    >(&mut self) {
-        let value: T = self.stack.pop();
-        match size {
-            64 => self.stack.push((value & ((1 << size as T) - 1)) as u64),
-            32 => self.stack.push((value & ((1 << size as T) - 1)) as u32),
-            16 => self.stack.push((value & ((1 << size as T) - 1)) as u16),
-            8 => self.stack.push((value & ((1 << size as T) - 1)) as u8),
-            _ => self.state = VMState::RuntimeError,
-        };
-    }
-*/
-
     /// Pops 2 values from the stack and pushes their logical conjunction.
     fn and(&mut self) {
         let b: Data8 = self.stack.pop();
@@ -456,6 +375,16 @@ impl_opcodes!{
         self.stack.push(T::wrapping_div(a, b));
     }
 
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn <
+        divf32<T: f32>(),
+        divf64<T: f64>()
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push(a / b);
+    }
+
     /// Pops a value off the stack and pushes its negative.
     fn <
         negs8<T: i8>(),
@@ -467,16 +396,6 @@ impl_opcodes!{
     >(&mut self) {
         let v: T = self.stack.pop();
         self.stack.push(-v);
-    }
-
-    /// Pops 2 values from the stack and pushes their quotient.
-    fn <
-        divf32<T: f32>(),
-        divf64<T: f64>()
-    >(&mut self) {
-        let b: T = self.stack.pop();
-        let a: T = self.stack.pop();
-        self.stack.push(a / b);
     }
 
     /// Pops 2 values from the stack and pushes their remainder.
@@ -624,41 +543,6 @@ impl_opcodes!{
         }
     }
 
-    /// Constructs an instance of a non-primitive type.
-    fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
-        let mut prototype = prototype; // impl_opcodes macro does not allow mut arguments
-        self.construct_value(constructor, &mut prototype, CopyTarget::Stack, false);
-    }
-
-    /// Moves an instance that was constructed on the stack to the heap.
-    fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
-        let mut data = Vec::with_capacity(size as usize);
-        let data_start = self.stack.sp() as usize - size as usize;
-        data.extend_from_slice(&self.stack.data()[data_start..]);
-        self.stack.truncate(data_start as StackAddress);
-        self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
-    }
-
-    /// Pops a heap reference off the stack and performs a reference count operation.
-    fn <
-        cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
-        cnt_16(constructor: u16 as StackAddress, op: HeapRefOp),
-        cnt_sa(constructor: StackAddress, op: HeapRefOp),
-    >(&mut self) {
-        let item: HeapRef = self.stack.pop();
-        self.refcount_value(item, constructor, op);
-    }
-
-    /// Performs a non-consuming reference count operation for the top heap reference on the stack.
-    fn <
-        cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
-        cnt_16_nc(constructor: u16 as StackAddress, op: HeapRefOp),
-        cnt_sa_nc(constructor: StackAddress, op: HeapRefOp),
-    >(&mut self) {
-        let item: HeapRef = self.stack.top();
-        self.refcount_value(item, constructor, op);
-    }
-
     /// Calls the given Rust function.
     fn rustcall(&mut self, &mut context, rustfn: RustFn) {
         rustfn.exec(self, context);
@@ -718,6 +602,76 @@ impl_opcodes!{
         self.stack.truncate(self.stack.fp + size_of::<T>() as StackAddress);
         self.pc = prev_pc;
         self.stack.fp = prev_fp;
+    }
+
+    /// Constructs an instance of a non-primitive type.
+    fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
+        let mut prototype = prototype; // impl_opcodes macro does not allow mut arguments
+        self.construct_value(constructor, &mut prototype, CopyTarget::Stack, false);
+    }
+
+    /// Moves an instance that was constructed on the stack to the heap.
+    fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
+        let mut data = Vec::with_capacity(size as usize);
+        let data_start = self.stack.sp() as usize - size as usize;
+        data.extend_from_slice(&self.stack.data()[data_start..]);
+        self.stack.truncate(data_start as StackAddress);
+        self.stack.push(HeapRef::new(self.heap.alloc(data, implementor_index), 0));
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Increases refcount of the new value.
+    fn storex_new(&mut self, index: StackAddress, constructor: StackAddress) {
+        let value: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, value);
+        self.refcount_value(value, constructor, HeapRefOp::Inc);
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Decreses refcount of the previous contents and increases refcount of the new value.
+    fn storex_replace(&mut self, index: StackAddress, constructor: StackAddress) {
+        let prev: HeapRef = self.stack.load_fp(index);
+        let next: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            self.refcount_value(prev, constructor, HeapRefOp::Dec);
+        }
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given offset (relative to the stack frame).
+    /// Decreses refcount of the previous contents, if any and increases refcount of the new value.
+    fn storex_maybe(&mut self, index: StackAddress, constructor: StackAddress) {
+        let prev: HeapRef = self.stack.load_fp(index);
+        let next: HeapRef = self.stack.pop();
+        self.stack.store_fp(index, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            // prev might be 0 if it was statically impossible to determine whether a variable is initialized (e.g. 'let x; if y { x = 0 } x' cannot be known)
+            if prev.address != 0 {
+                self.refcount_value(prev, constructor, HeapRefOp::Dec);
+            }
+        }
+    }
+
+    /// Pops a heap reference off the stack and performs a reference count operation.
+    fn <
+        cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
+        cnt_16(constructor: u16 as StackAddress, op: HeapRefOp),
+        cnt_sa(constructor: StackAddress, op: HeapRefOp),
+    >(&mut self) {
+        let item: HeapRef = self.stack.pop();
+        self.refcount_value(item, constructor, op);
+    }
+
+    /// Performs a non-consuming reference count operation for the top heap reference on the stack.
+    fn <
+        cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
+        cnt_16_nc(constructor: u16 as StackAddress, op: HeapRefOp),
+        cnt_sa_nc(constructor: StackAddress, op: HeapRefOp),
+    >(&mut self) {
+        let item: HeapRef = self.stack.top();
+        self.refcount_value(item, constructor, op);
     }
 
     /// Pops 2 heap references to strings, compares the strings for equality and pushes the result. Drops temporary references.

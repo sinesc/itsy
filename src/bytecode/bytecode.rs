@@ -20,10 +20,6 @@ use writer::{Writer, StoreConst};
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, ItemIndex, RustFnIndex};
 use crate::bytecode::runtime::{vm::VM, stack::{Stack, StackOp}};
 
-const ARG1: StackAddress = 0;
-const ARG2: StackAddress = 4;
-const ARG3: StackAddress = 8;
-
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMFunc<T>: Debug {
@@ -298,7 +294,6 @@ impl HeapRef {
         (self.address & HeapRef::OFFSET_MASK) as StackAddress
     }
     /// Adds given offset to this HeapRef.
-    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn add_offset(self: &mut Self, offset: StackOffset) {
         debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
         let new_offset = self.offset() as StackOffset + offset;
@@ -306,7 +301,6 @@ impl HeapRef {
         self.address = ((index as HeapAddress) << HEAP_OFFSET_BITS) | (new_offset as HeapAddress)
     }
     /// Returns a clone of this heap reference offset by the given value.
-    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn with_offset(self: Self, offset: StackOffset) -> Self {
         debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
         HeapRef::new(self.index(), (self.offset() as StackOffset + offset) as StackAddress)

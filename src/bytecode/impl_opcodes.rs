@@ -49,14 +49,14 @@ macro_rules! impl_opcodes {
     // main definition block
     (
         $(
-            $( #[ $attr:meta ] )*
+            $( #[ $group_attr:meta ] )*
             fn
             $( /* either multiple function variants */
-                < $( $variant_name:ident $( < $( $generic_name:tt : $generic_type:tt ),+ > )? ( $( $variant_arg:ident : $variant_type:tt $( as $variant_type_as:tt )? ),* ) ),+ $(,)? >
+                < $( $( #[ $variant_attr:meta ] )* $variant_name:ident $( < $( $generic_name:tt : $generic_type:tt ),+ > )? ( $( $variant_arg:ident : $variant_type:tt $( as $variant_type_as:tt )? ),* ) ),+ $(,)? >
                 ( & mut $variant_self:ident)
             )?
             $( /* or single function */
-                $name:ident
+                $( #[ $attr:meta ] )* $name:ident
                 ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* )
                 $( $ret:ident )?
             )?
@@ -85,7 +85,7 @@ macro_rules! impl_opcodes {
         #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub enum OpCode {
             $(
-                $( #[ $attr ] )*
+                $( #[ $group_attr ] )*
                 // opcode variants
                 $(
                     $(
@@ -117,7 +117,7 @@ macro_rules! impl_opcodes {
         #[cfg(feature="compiler")]
         impl<T> crate::bytecode::Writer<T> where T: crate::bytecode::VMFunc<T> {
             $(
-                $( #[ $attr ] )*
+                $( #[ $group_attr ] )*
                 // opcode variants
                 $(
                     $(
@@ -223,7 +223,6 @@ macro_rules! impl_opcodes {
             }
 
             /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
-            #[allow(unused_imports)]
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 loop {
                     let instruction = impl_opcodes!(read u8, self, self.pc);
@@ -257,7 +256,6 @@ macro_rules! impl_opcodes {
             }
 
             /// Execute the next bytecode from the VMs code buffer.
-            #[allow(unused_imports)]
             #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 let instruction = impl_opcodes!(read u8, self, self.pc);
@@ -295,9 +293,10 @@ macro_rules! impl_opcodes {
 
             // Generate methods for executing each bytecode on VM struct.
             $(
-                $( #[ $attr ] )*
+                $( #[ $group_attr ] )*
                 $(
-                    #[cfg_attr(not(debug_assertions), inline(always))]
+                    $( #[$attr] )*
+                    #[cfg_attr(not(debug_assertions), inline)]
                     fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(map_reader_type $arg_type)),* ) {
                         #[allow(dead_code)]
                         /// Single variant opcodes don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
@@ -310,7 +309,8 @@ macro_rules! impl_opcodes {
                 )?
                 $(
                     $(
-                        #[cfg_attr(not(debug_assertions), inline(always))]
+                        $( #[$variant_attr] )*
+                        #[cfg_attr(not(debug_assertions), inline)]
                         fn $variant_name ( $variant_self: &mut Self, $( $variant_arg: impl_opcodes!(map_reader_type $variant_type) ),* ) {
                             $(
                                 $( type $generic_name = $generic_type; )+

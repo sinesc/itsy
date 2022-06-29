@@ -82,22 +82,6 @@ impl Stack {
     }
 }
 
-impl Index<StackAddress> for Stack {
-    type Output = u8;
-
-    #[cfg_attr(not(debug_assertions), inline)]
-    fn index(&self, index: StackAddress) -> &Self::Output {
-        Index::index(&*self.data, index as usize)
-    }
-}
-
-impl IndexMut<StackAddress> for Stack {
-    #[cfg_attr(not(debug_assertions), inline)]
-    fn index_mut(&mut self, index: StackAddress) -> &mut Self::Output {
-        IndexMut::index_mut(&mut *self.data, index as usize)
-    }
-}
-
 /// Generic stack operations.
 pub trait StackOp<T> {
     /// Push given value onto the stack.

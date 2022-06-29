@@ -10,7 +10,7 @@ use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, ARG1, ARG2, ARG3, runtime::heap::HeapRefOp};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::{LoopControlStack, LoopControl, Functions};
@@ -292,7 +292,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             _ => {
                 self.check_initialized(&item.left.as_variable().unwrap())?;
                 let ty = self.item_type(&item.left);
-                self.write_load(local as StackOffset, ty); // stack: left
+                self.write_load(local, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.item_type(&item.left);
                 match item.op { // stack: result
@@ -430,7 +430,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id)
         };
-        self.write_load(load_index as StackOffset, self.item_type(item));
+        self.write_load(load_index, self.item_type(item));
         Ok(())
     }
 
@@ -562,16 +562,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_store(iter_local, iter_ty);                      // stack -
         // push upper range bound
         self.compile_expression(&binary_op.right)?;             // stack upper
-        // precheck (could be avoided by moving condition to the end but not trivial due to stack top clone order)
-        let iter_ty = self.type_by_id(iter_type_id);
-        self.write_load(iter_local as StackOffset, iter_ty);    // stack upper current
-        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty); // stack upper current upper
-        if binary_op.op == ast::BinaryOperator::Range {
-            self.write_lt(iter_ty);                                     // stack upper current<upper
+        // precheck bounds
+        let skip_jump = if binary_op.op == ast::BinaryOperator::Range {
+            // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
+            let iter_ty = self.type_by_id(iter_type_id);
+            self.write_clone(iter_ty);                                   // stack: upper upper
+            self.write_load(iter_local, iter_ty);                   // stack: upper upper lower
+            self.write_lte(iter_ty);                                         // stack: upper upper_lte_lower
+            let skip_jump = self.writer.jn0(123);                // stack: upper
+            self.write_dec(iter_ty);                                        // stack: upper=upper-1
+            skip_jump
         } else {
-            self.write_lte(iter_ty);                                    // stack upper current<=upper
-        }
-        let exit_jump = self.writer.j0(123);                // stack upper
+            // inclusive range: check if lower bound greater than upper bound.
+            let iter_ty = self.type_by_id(iter_type_id);
+            self.write_clone(iter_ty);                                   // stack: upper upper
+            self.write_load(iter_local, iter_ty);                   // stack: upper upper lower
+            self.write_lt(iter_ty);                                         // stack: upper upper_lte_lower
+            self.writer.jn0(123)                                    // stack: upper
+        };
         // compile block
         let start_target = self.writer.position();
         self.loop_control.push();
@@ -579,17 +587,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_preinc(iter_local, iter_ty);      // stack upper new_current(=current+1)
-        self.write_load(-(2 * iter_ty.primitive_size() as StackOffset), iter_ty);   // stack upper new_current upper
-        if binary_op.op == ast::BinaryOperator::Range {
-            self.write_lt(iter_ty);                                                     // stack upper new_current<upper
-        } else {
-            self.write_lte(iter_ty);                                                    // stack upper new_current<=upper
-        }
-        self.writer.jn0(start_target);                                              // stack upper
+        let increment_target = self.write_clone(iter_ty);       // stack upper upper
+        self.write_preinc(iter_local, iter_ty);      // stack upper upper new_current(=current+1)
+        self.write_lt(iter_ty);                                                    // stack upper new_current>upper
+        self.writer.j0(start_target);                                              // stack upper
         // fix jump addresses
         let exit_target = self.writer.position();
-        self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
         for loop_control in &loop_controls {
             match loop_control {
                 &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
@@ -712,7 +716,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.create_stack_frame_block(item.block.as_ref().unwrap(), &mut frame);
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
         if var_size > 0 {
-            self.writer.reserve(var_size as u8);
+            self.writer.reserve(var_size as u16);
         }
 
         // store call info required to compile calls to this function and fix calls that were made before the function address was known
@@ -765,10 +769,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.item_type(item);
         match item.value {
             LiteralValue::Void => { },
-            LiteralValue::Numeric(numeric) => self.write_literal_numeric(numeric, ty),
+            LiteralValue::Numeric(numeric) => { self.write_literal_numeric(numeric, ty); }
             LiteralValue::Bool(v) =>  {
                 match ty {
-                    Type::bool => { if v { self.writer.one8(); } else { self.writer.zero8(); } },
+                    Type::bool => { if v { self.writer.literali8(1); } else { self.writer.literali8(0); } },
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
@@ -1278,10 +1282,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     if ty.is_ref() {
                         comment!(self, "freeing local {}", local);
                         if state == BranchingState::Initialized {
-                            self.write_load(local as StackOffset, ty);
+                            self.write_load(local, ty);
                             self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
                         } else if state == BranchingState::MaybeInitialized {
-                            self.write_load(local as StackOffset, ty);
+                            self.write_load(local, ty);
                             let init_jump = self.writer.jn0_sa_nc(123);
                             self.write_discard(ty);
                             let uninit_jump = self.writer.jmp(123);
@@ -1297,34 +1301,29 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
     }
 
+    /// Write correct literal variant for given type.
+    fn write_literal(self: &Self, value: u8, ty: &Type) -> StackAddress {
+        match ty.primitive_size() {
+            1 => self.writer.literali8(value),
+            2 if ty.is_signed() => self.writer.literals16(value as i8),
+            2 => self.writer.literalu16(value),
+            4 if ty.is_signed() => self.writer.literals32(value as i8),
+            4 => self.writer.literalu32(value),
+            8 if ty.is_signed() => self.writer.literals64(value as i8),
+            8 => self.writer.literalu64(value),
+            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+        }
+    }
+
     /// Writes given numeric, using const pool if necessary.
-    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) {
-        match numeric { // todo: try to refactor this mess
-
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.zero8(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.zero16(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.zero32(); }
-            Numeric::Unsigned(0) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.zero64(); }
-
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.one8(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 2 => { self.writer.one16(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 4 => { self.writer.one32(); }
-            Numeric::Unsigned(1) if ty.is_integer() && ty.primitive_size() == 8 => { self.writer.one64(); }
-
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.fill8(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 2 => { self.writer.fill16(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 4 => { self.writer.fill32(); }
-            Numeric::Signed(-1) if ty.is_signed() && ty.primitive_size() == 8 => { self.writer.fill64(); }
-
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 1 => { self.writer.literali8(val as u8); }
-            Numeric::Unsigned(val) if ty.is_integer() && ty.primitive_size() == 4 && val <= u8::MAX as u64 => { self.writer.literalu32(val as u8); }
-
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 1 => { self.writer.literali8((val as i8) as u8); }
-            Numeric::Signed(val) if ty.is_signed() && ty.primitive_size() == 4 && val >= i8::MIN as i64 && val <= i8::MAX as i64 => { self.writer.literals32(val as i8); }
-
+    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
+        match numeric {
+            Numeric::Unsigned(v) if ty.is_unsigned() && v <= u8::MAX as u64 => self.write_literal(v as u8, ty),
+            Numeric::Unsigned(v) if ty.is_signed() && v <= i8::MAX as u64 => self.write_literal(v as u8, ty),
+            Numeric::Signed(v) if ty.is_signed() && v >= i8::MIN as i64 && v <= i8::MAX as i64 => self.write_literal(i8::try_from(v).unwrap() as u8, ty),
             _ if ty.is_integer() || ty.is_float() => {
                 let address = self.store_numeric_prototype(numeric, ty);
-                self.write_const(address, ty);
+                self.write_const(address, ty)
             },
             _ => panic!("Unexpected numeric literal type: {:?}", ty),
         }
@@ -1492,14 +1491,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the const instruction.
-    fn write_const(self: &Self, index: StackAddress, ty: &Type) {
+    fn write_const(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
             2 => select_unsigned_opcode!(self, const16_8, const16_16, const16_sa, index),
             4 => select_unsigned_opcode!(self, const32_8, const32_16, const32_sa, index),
             8 => select_unsigned_opcode!(self, const64_8, const64_16, const64_sa, index),
             //16 => opcode_unsigned!(self, const128_8, const128_16, const128_sa, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        };
+        }
     }
 
     /// Writes instructions to fetch a value of the given size from the target of the top heap reference on the stack.
@@ -1582,10 +1581,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     fn write_store(self: &Self, local: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_signed_opcode!(self, store8_8, store8_16, store8_sa, local),
-            2 => select_signed_opcode!(self, store16_8, store16_16, store16_sa, local),
-            4 => select_signed_opcode!(self, store32_8, store32_16, store32_sa, local),
-            8 => select_signed_opcode!(self, store64_8, store64_16, store64_sa, local),
+            1 => select_unsigned_opcode!(self, store8_8, store8_16, none, local),
+            2 => select_unsigned_opcode!(self, store16_8, store16_16, none, local),
+            4 => select_unsigned_opcode!(self, store32_8, store32_16, none, local),
+            8 => select_unsigned_opcode!(self, store64_8, store64_16, none, local),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1608,23 +1607,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, index: StackOffset, ty: &Type) {
-        const A1: StackOffset = ARG1 as StackOffset;
-        const A2: StackOffset = ARG2 as StackOffset;
-        const A3: StackOffset = ARG3 as StackOffset;
+    fn write_load(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_signed_opcode!(self, load8_8, load8_16, load8_sa, index),
-            2 => select_signed_opcode!(self, load16_8, load16_16, load16_sa, index),
-            4 => match index {
-                A1 => self.writer.load_arg1(),
-                A2 => self.writer.load_arg2(),
-                A3 => self.writer.load_arg3(),
-                _ => select_signed_opcode!(self, load32_8, load32_16, load32_sa, index),
-            },
-            8 => select_signed_opcode!(self, load64_8, load64_16, load64_sa, index),
-            //16 => opcode_signed!(self, load128_8, load128_16, load128_sa, index),
+            1 => select_unsigned_opcode!(self, load8_8, load8_16, none, index),
+            2 => select_unsigned_opcode!(self, load16_8, load16_16, none, index),
+            4 => select_unsigned_opcode!(self, load32_8, load32_16, none, index),
+            8 => select_unsigned_opcode!(self, load64_8, load64_16, none, index),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        };
+        }
     }
 
     /// Discard topmost stack value and drop temporaries for reference types.
@@ -1633,15 +1623,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let constructor = self.get_constructor(ty);
             self.write_cnt_nc(constructor, HeapRefOp::Free);
         }
-        match ty.primitive_size() {
-            0 => 0,
-            1 => self.writer.discard8(),
-            2 => self.writer.discard16(),
-            4 => self.writer.discard32(),
-            8 => self.writer.discard64(),
-            //16 => self.writer.discard128(),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        };
+        self.writer.discard(ty.primitive_size());
     }
 
     /// Swap topmost 2 stack values.
@@ -1658,23 +1640,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Clone stack value at (negative of) given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type) -> StackAddress {
-        match ty.primitive_size() {
-            1 => self.writer.load8_8(-1),
-            2 => self.writer.load16_8(-2),
-            4 => self.writer.load32_8(-4),
-            8 => self.writer.load64_8(-8),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        }
+        self.writer.clone(ty.primitive_size())
     }
 
     fn write_clone_ref(self: &Self) -> StackAddress {
-        match size_of::<crate::HeapAddress>() {
-            1 => self.writer.load8_8(-1),
-            2 => self.writer.load16_8(-2),
-            4 => self.writer.load32_8(-4),
-            8 => self.writer.load64_8(-8),
-            size @ _ => unreachable!("Unsupported size {} for heap address", size),
-        }
+        self.writer.clone(size_of::<crate::HeapAddress>() as u8)
     }
 
     /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
@@ -2048,6 +2018,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.string_clte();
         } else {
             panic!("unsupported type")
+        }
+    }
+
+    /// Writes a while instruction.
+    fn write_while(self: &Self, index: StackAddress, target_addr: StackAddress, ty: &Type) -> StackAddress {
+        match ty.primitive_size() {
+            1 if ty.is_signed() => self.writer.whiles8(1, index as u16, target_addr),
+            1 => self.writer.whileu8(1, index as u16, target_addr),
+            2 if ty.is_signed() => self.writer.whiles16(1, index as u16, target_addr),
+            2 => self.writer.whileu16(1, index as u16, target_addr),
+            4 if ty.is_signed() => self.writer.whiles32(1, index as u16, target_addr),
+            4 => self.writer.whileu32(1, index as u16, target_addr),
+            8 if ty.is_signed() => self.writer.whiles64(1, index as u16, target_addr),
+            8 => self.writer.whileu64(1, index as u16, target_addr),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
 }

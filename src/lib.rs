@@ -206,7 +206,6 @@ macro_rules! itsy_api {
             }
         }
         impl $crate::runtime::VMData<$type_name, $context_type> for $type_name {
-            #[inline(always)]
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
                 use $crate::runtime::stack::StackOp;

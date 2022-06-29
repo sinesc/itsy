@@ -153,7 +153,6 @@ impl<T, U> VM<T, U> {
     }
 
     /// Reads a constructor opcode.
-    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_read_op(self: &Self, constructor_offset: &mut StackAddress) -> Constructor {
         let op = Constructor::from_u8(self.stack.load(*constructor_offset));
         *constructor_offset += size_of_val(&op) as StackAddress;
@@ -161,7 +160,6 @@ impl<T, U> VM<T, U> {
     }
 
     /// Reads an ItemIndex sized constructor argument.
-    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_read_index(self: &Self, constructor_offset: &mut StackAddress) -> ItemIndex {
         let arg: ItemIndex = self.stack.load(*constructor_offset);
         *constructor_offset += size_of_val(&arg) as StackAddress;
@@ -169,7 +167,6 @@ impl<T, U> VM<T, U> {
     }
 
     /// Writes prototype copy to given target (stack or heap).
-    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_copy_value(self: &mut Self, target: CopyTarget, prototype_offset: StackAddress, num_bytes: StackAddress) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
@@ -181,7 +178,6 @@ impl<T, U> VM<T, U> {
     }
 
     /// Writes a heap reference to the given target (stack or heap).
-    #[cfg_attr(not(debug_assertions), inline(always))]
     fn construct_write_ref(self: &mut Self, target: CopyTarget, heap_ref: HeapRef) {
         match target {
             CopyTarget::Heap(target_heap_ref) => {
@@ -255,7 +251,6 @@ impl<T, U> VM<T, U> {
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
-    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: StackAddress, op: HeapRefOp) {
         if constructor_offset == 0 {
             let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
