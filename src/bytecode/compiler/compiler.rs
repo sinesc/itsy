@@ -587,10 +587,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_clone(iter_ty);       // stack upper upper
-        self.write_preinc(iter_local, iter_ty);      // stack upper upper new_current(=current+1)
-        self.write_lt(iter_ty);                                                    // stack upper new_current>upper
-        self.writer.j0(start_target);                                              // stack upper
+        let increment_target = self.write_while(iter_local, start_target, iter_ty);    // stack: upper
         // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
