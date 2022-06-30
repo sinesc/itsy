@@ -31,31 +31,15 @@ impl_opcodes!{
 
     /// Pushes given value onto the stack.
     fn <
-        literali8(value: u8),
-        literalu16(value: u8 as u16),
-        literalu32(value: u8 as u32),
-        literalu64(value: u8 as u64),
-        literals16(value: i8 as i16),
-        literals32(value: i8 as i32),
-        literals64(value: i8 as i64),
+        immediate8(value: Data8),
+        immediate16_8(value: Data8 as Data16),
+        immediate16(value: Data16),
+        immediate32_8(value: Data8 as Data32),
+        immediate32(value: Data32),
+        immediate64_8(value: Data8 as Data64),
+        immediate64(value: Data64),
     >(&mut self) {
         self.stack.push(value);
-    }
-
-    /// Loads data from constpool at given offset and pushes it onto the stack.
-    fn <
-        const16_8<T: Data16>(offset: u8 as StackAddress),
-        const16_16<T: Data16>(offset: u16 as StackAddress),
-        const16_sa<T: Data16>(offset: StackAddress),
-        const32_8<T: Data32>(offset: u8 as StackAddress),
-        const32_16<T: Data32>(offset: u16 as StackAddress),
-        const32_sa<T: Data32>(offset: StackAddress),
-        const64_8<T: Data64>(offset: u8 as StackAddress),
-        const64_16<T: Data64>(offset: u16 as StackAddress),
-        const64_sa<T: Data64>(offset: StackAddress),
-    >(&mut self) {
-        let local: T = self.stack.load(offset);
-        self.stack.push(local);
     }
 
     /// Loads and increments a counter variable and compares the result against the top stack value.

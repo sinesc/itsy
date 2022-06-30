@@ -395,7 +395,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
-                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.expect("Unresolved function encountered");
                 let arg_size = self.id_mappings.function_arg_size(function_id);
@@ -766,10 +766,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.item_type(item);
         match item.value {
             LiteralValue::Void => { },
-            LiteralValue::Numeric(numeric) => { self.write_literal_numeric(numeric, ty); }
+            LiteralValue::Numeric(numeric) => { self.write_immediate(numeric, ty); }
             LiteralValue::Bool(v) =>  {
                 match ty {
-                    Type::bool => { if v { self.writer.literali8(1); } else { self.writer.literali8(0); } },
+                    Type::bool => { if v { self.writer.immediate8(1); } else { self.writer.immediate8(0); } },
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
@@ -778,7 +778,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
                 let enum_ty = self.type_by_id(enum_def.primitive.unwrap().0);
                 let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
-                self.write_literal_numeric(variant_value, enum_ty);
+                self.write_immediate(variant_value, enum_ty);
             },
             LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) | LiteralValue::Variant(_) => {
                 if item.value.is_const() {
@@ -1298,31 +1298,45 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.locals.push(frame);
     }
 
-    /// Write correct literal variant for given type.
-    fn write_literal(self: &Self, value: u8, ty: &Type) -> StackAddress {
-        match ty.primitive_size() {
-            1 => self.writer.literali8(value),
-            2 if ty.is_signed() => self.writer.literals16(value as i8),
-            2 => self.writer.literalu16(value),
-            4 if ty.is_signed() => self.writer.literals32(value as i8),
-            4 => self.writer.literalu32(value),
-            8 if ty.is_signed() => self.writer.literals64(value as i8),
-            8 => self.writer.literalu64(value),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        }
-    }
-
-    /// Writes given numeric, using const pool if necessary.
-    fn write_literal_numeric(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
+    /// Writes given numeric as an immediate value. // FIXME: this will cause endianess issues when compiled/run on different endianess
+    fn write_immediate(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
+        let small_immediate = |value: u8, ty: &Type| -> StackAddress {
+            match ty.primitive_size() {
+                1 => self.writer.immediate8(value),
+                2 => self.writer.immediate16_8(value),
+                4 => self.writer.immediate32_8(value),
+                8 => self.writer.immediate64_8(value),
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+            }
+        };
         match numeric {
-            Numeric::Unsigned(v) if ty.is_unsigned() && v <= u8::MAX as u64 => self.write_literal(v as u8, ty),
-            Numeric::Unsigned(v) if ty.is_signed() && v <= i8::MAX as u64 => self.write_literal(v as u8, ty),
-            Numeric::Signed(v) if ty.is_signed() && v >= i8::MIN as i64 && v <= i8::MAX as i64 => self.write_literal(i8::try_from(v).unwrap() as u8, ty),
-            _ if ty.is_integer() || ty.is_float() => {
-                let address = self.store_numeric_prototype(numeric, ty);
-                self.write_const(address, ty)
+            Numeric::Unsigned(v) if v <= u8::MAX as u64 => small_immediate(v as u8, ty),
+            Numeric::Signed(v) if v >= u8::MIN as i64 && v <= u8::MAX as i64 => small_immediate(v as u8, ty),
+            Numeric::Signed(v) => {
+                match ty {
+                    Type::i8 => self.writer.immediate8(v as u8),
+                    Type::i16 => self.writer.immediate16(v as u16),
+                    Type::i32 => self.writer.immediate32(v as u32),
+                    Type::i64 => self.writer.immediate64(v as u64),
+                    _ => panic!("Unexpected signed integer literal type: {:?}", ty)
+                }
             },
-            _ => panic!("Unexpected numeric literal type: {:?}", ty),
+            Numeric::Unsigned(v) => {
+                match ty {
+                    Type::i8 | Type::u8 => self.writer.immediate8(v as u8),
+                    Type::i16 | Type::u16 => self.writer.immediate16(v as u16),
+                    Type::i32 | Type::u32 => self.writer.immediate32(v as u32),
+                    Type::i64 | Type::u64 => self.writer.immediate64(v as u64),
+                    _ => panic!("Unexpected unsigned integer literal type: {:?}", ty)
+                }
+            },
+            Numeric::Float(v) => {
+                match ty {
+                    Type::f32 => self.writer.immediate32(u32::from_ne_bytes((v as f32).to_ne_bytes())),
+                    Type::f64 => self.writer.immediate64(u64::from_ne_bytes(v.to_ne_bytes())),
+                    _ => panic!("Unexpected float literal type: {:?}", ty)
+                }
+            },
         }
     }
 
@@ -1362,7 +1376,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
-                self.write_literal_numeric(Numeric::Unsigned(variant_index as u64), &index_type);
+                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
                 index_type.primitive_size() as StackAddress
             },
         })
@@ -1484,17 +1498,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset > 0 {
             select_signed_opcode!(self, offsetx_8, offsetx_16, offsetx_sa, offset as StackOffset);
-        }
-    }
-
-    /// Writes an appropriate variant of the const instruction.
-    fn write_const(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
-        match ty.primitive_size() {
-            2 => select_unsigned_opcode!(self, const16_8, const16_16, const16_sa, index),
-            4 => select_unsigned_opcode!(self, const32_8, const32_16, const32_sa, index),
-            8 => select_unsigned_opcode!(self, const64_8, const64_16, const64_sa, index),
-            //16 => opcode_unsigned!(self, const128_8, const128_16, const128_sa, index),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
 

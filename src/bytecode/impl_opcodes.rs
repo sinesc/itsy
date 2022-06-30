@@ -8,16 +8,6 @@ macro_rules! impl_opcodes {
         dest
     });
     // read parameters
-    (read u8, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u8, $from, $counter) );
-    (read u16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u16, $from, $counter) );
-    (read u32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u32, $from, $counter) );
-    (read u64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read u64, $from, $counter) );
-    (read i8,  $from:ident, $counter:expr) => ( impl_opcodes!(do_read i8, $from, $counter) );
-    (read i16, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i16, $from, $counter) );
-    (read i32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i32, $from, $counter) );
-    (read i64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read i64, $from, $counter) );
-    (read f32, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f32, $from, $counter) );
-    (read f64, $from:ident, $counter:expr) => ( impl_opcodes!(do_read f64, $from, $counter) );
     (read String, $from:ident, $counter:expr) => ( {
         let len = impl_opcodes!(do_read StackAddress, $from, $counter);
         let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
@@ -30,6 +20,7 @@ macro_rules! impl_opcodes {
     (read RustFn, $from:ident, $counter:expr) => ( T::from_index(impl_opcodes!(do_read RustFnIndex, $from, $counter)) );
     (read Builtin, $from:ident, $counter:expr) => ( Builtin::from_index(impl_opcodes!(do_read BuiltinIndex, $from, $counter)) );
     (read HeapRefOp, $from:ident, $counter:expr) => ( HeapRefOp::from_u8(impl_opcodes!(do_read u8, $from, $counter)) );
+    (read $size:ident, $from:ident, $counter:expr) => ( impl_opcodes!(do_read $size, $from, $counter) );
     // map parameter types to reader types
     (map_reader_type RustFn) => ( T );
     (map_reader_type $ty:tt) => ( $ty );
