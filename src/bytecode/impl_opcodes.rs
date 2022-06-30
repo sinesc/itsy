@@ -1,6 +1,11 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
     // perform read from slice
+    (do_read u8, $from:expr, $counter:expr) => ( {
+        let dest = $from.instructions[$counter];
+        $counter += 1;
+        dest
+    });
     (do_read $ty:tt, $from:ident, $counter:expr) => ( {
         let slice = &$from.instructions[$counter as usize..$counter as usize + ::std::mem::size_of::<$ty>()];
         let dest: $ty = $ty::from_le_bytes( slice.try_into().unwrap() );
