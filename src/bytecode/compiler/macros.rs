@@ -2,7 +2,7 @@
 // Writes a comment to the bytecode when in debug mode. // TODO: add compiler option instead
 macro_rules! comment {
     ($self:ident, $format:literal $(, $value:expr)*) => {
-        #[cfg(debug_assertions)]
+        #[cfg(feature="debugging")]
         $self.writer.comment(&format!($format $(, $value)*));
     }
 }

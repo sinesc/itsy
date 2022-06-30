@@ -19,9 +19,6 @@ macro_rules! impl_opcodes {
         $counter += len;
         ::std::str::from_utf8(slice).unwrap().to_string()
     });
-    (read StackAddress, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackAddress, $from, $counter) );
-    (read StackOffset, $from:ident, $counter:expr) => ( impl_opcodes!(do_read StackOffset, $from, $counter) );
-    (read ItemIndex, $from:ident, $counter:expr) => ( impl_opcodes!(do_read ItemIndex, $from, $counter) );
     (read RustFn, $from:ident, $counter:expr) => ( T::from_index(impl_opcodes!(do_read RustFnIndex, $from, $counter)) );
     (read Builtin, $from:ident, $counter:expr) => ( Builtin::from_index(impl_opcodes!(do_read BuiltinIndex, $from, $counter)) );
     (read HeapRefOp, $from:ident, $counter:expr) => ( HeapRefOp::from_u8(impl_opcodes!(do_read u8, $from, $counter)) );
@@ -45,14 +42,14 @@ macro_rules! impl_opcodes {
     // main definition block
     (
         $(
-            $( #[ $group_attr:meta ] )*
+            $( #[ $attr:meta ] )*
             fn
             $( /* either multiple function variants */
                 < $( $( #[ $variant_attr:meta ] )* $variant_name:ident $( < $( $generic_name:tt : $generic_type:tt ),+ > )? ( $( $variant_arg:ident : $variant_type:tt $( as $variant_type_as:tt )? ),* ) ),+ $(,)? >
                 ( & mut $variant_self:ident)
             )?
             $( /* or single function */
-                $( #[ $attr:meta ] )* $name:ident
+                $name:ident
                 ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* )
                 $( $ret:ident )?
             )?
@@ -81,28 +78,33 @@ macro_rules! impl_opcodes {
         #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub enum OpCode {
             $(
-                $( #[ $group_attr ] )*
+                $( #[ $attr ] )*
+                // single opcode
+                $(
+                    $name,
+                )?
                 // opcode variants
                 $(
                     $(
+                        $( #[$variant_attr] )*
                         $variant_name,
                     )+
                 )?
-                // single opcode
-                $( $name, )?
             )+
         }
 
         #[allow(non_upper_case_globals)]
         mod opcodes {
             $(
-                // handle single opcode
+                $( #[ $attr ] )*
+                // single opcode
                 $(
                     pub(super) const $name: u8 = super::OpCode::$name as u8;
                 )?
-                // handle opcode variants
+                // opcode variants
                 $(
                     $(
+                        $( #[$variant_attr] )*
                         pub(super) const $variant_name: u8 = super::OpCode::$variant_name as u8;
                     )+
                 )?
@@ -113,11 +115,21 @@ macro_rules! impl_opcodes {
         #[cfg(feature="compiler")]
         impl<T> crate::bytecode::Writer<T> where T: crate::bytecode::VMFunc<T> {
             $(
-                $( #[ $group_attr ] )*
+                $( #[ $attr ] )*
+                // single opcode
+                $(
+                    pub fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
+                        let insert_pos = self.position();
+                        impl_opcodes!(write u8, OpCode::$name as u8, self);
+                        $( impl_opcodes!(write $arg_type, $arg_name, self); )*
+                        insert_pos as StackAddress
+                    }
+                )?
                 // opcode variants
                 $(
                     $(
                         #[allow(unused_imports)]
+                        $( #[$variant_attr] )*
                         pub fn $variant_name(self: &Self, $( $variant_arg: impl_opcodes!(map_writer_type $variant_type) ),* ) -> StackAddress {
                             let insert_pos = self.position();
                             impl_opcodes!(write u8, OpCode::$variant_name as u8, self);
@@ -128,16 +140,6 @@ macro_rules! impl_opcodes {
                         }
                     )+
                 )?
-                // single opcode
-                $(
-                    #[allow(unused_imports)]
-                    pub fn $name(self: &Self, $($arg_name: impl_opcodes!(map_writer_type $arg_type)),* ) -> StackAddress {
-                        let insert_pos = self.position();
-                        impl_opcodes!(write u8, OpCode::$name as u8, self);
-                        $( impl_opcodes!(write $arg_type, $arg_name, self); )*
-                        insert_pos as StackAddress
-                    }
-                )?
             )+
         }
 
@@ -146,6 +148,7 @@ macro_rules! impl_opcodes {
 
             #[cfg(feature="debugging")]
             #[allow(unused_assignments)]
+            #[allow(unused_doc_comments)]
             pub(crate) fn read_instruction(self: &Self, mut position: StackAddress) -> Option<OpCode> {
                 if position >= self.instructions.len() as StackAddress {
                     None
@@ -153,11 +156,15 @@ macro_rules! impl_opcodes {
                     let instruction = impl_opcodes!(read u8, self, position);
                     match instruction {
                         $(
+                            $( #[ $attr ] )*
+                            // single opcode
                             $(
                                 opcodes::$name => Some(OpCode::$name),
                             )?
+                            // opcode variants
                             $(
                                 $(
+                                    $( #[$variant_attr] )*
                                     opcodes::$variant_name => Some(OpCode::$variant_name),
                                 )+
                             )?
@@ -177,6 +184,7 @@ macro_rules! impl_opcodes {
                 } else {
                     let instruction = impl_opcodes!(read u8, self, position);
                     #[allow(unreachable_patterns)]
+                    #[allow(unused_doc_comments)]
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::rustcall => {
@@ -184,13 +192,15 @@ macro_rules! impl_opcodes {
                             result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, position)));
                             Some((result, position))
                         }
+                        #[cfg(feature="debugging")]
                         opcodes::comment => {
                             let message = impl_opcodes!(read String, self, position);
                             let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
                             Some((result, position))
                         }
                         $(
-                            // handle opcode
+                            $( #[ $attr ] )*
+                            // single opcode
                             $(
                                 opcodes::$name => {
                                     let mut result = format!("{:?} {} ", position - 1, stringify!($name));
@@ -200,9 +210,10 @@ macro_rules! impl_opcodes {
                                     Some((result, position))
                                 }
                             )?
-                            // handle opcode variants
+                            // opcode variants
                             $(
                                 $(
+                                    $( #[$variant_attr] )*
                                     opcodes::$variant_name => {
                                         let mut result = format!("{:?} {} ", position - 1, stringify!($variant_name));
                                         $(
@@ -222,10 +233,11 @@ macro_rules! impl_opcodes {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 loop {
                     let instruction = impl_opcodes!(read u8, self, self.pc);
-                    #[allow(unreachable_patterns)]
+                    #[allow(unused_doc_comments)]
                     match instruction {
                         $(
-                            // handle single opcode
+                            $( #[ $attr ] )*
+                            // single opcode
                             $(
                                 opcodes::$name => {
                                     let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
@@ -234,9 +246,10 @@ macro_rules! impl_opcodes {
                                     $( $ret; )?
                                 }
                             )?
-                            // handle opcode variants
+                            // opcode variants
                             $(
                                 $(
+                                    $( #[$variant_attr] )*
                                     opcodes::$variant_name => {
                                         $(
                                             let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
@@ -255,10 +268,11 @@ macro_rules! impl_opcodes {
             #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 let instruction = impl_opcodes!(read u8, self, self.pc);
-                #[allow(unreachable_patterns)]
+                #[allow(unused_doc_comments)]
                 match instruction {
                     $(
-                        // handle single opcode
+                        $( #[ $attr ] )*
+                        // single opcode
                         $(
                             opcodes::$name => {
                                 let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
@@ -267,9 +281,10 @@ macro_rules! impl_opcodes {
                                 $( $ret; )?
                             }
                         )?
-                        // handle opcode variants
+                        // opcode variants
                         $(
                             $(
+                                $( #[$variant_attr] )*
                                 opcodes::$variant_name => {
                                     $(
                                         let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
@@ -289,9 +304,9 @@ macro_rules! impl_opcodes {
 
             // Generate methods for executing each bytecode on VM struct.
             $(
-                $( #[ $group_attr ] )*
+                $( #[ $attr ] )*
+                // single opcode
                 $(
-                    $( #[$attr] )*
                     #[cfg_attr(not(debug_assertions), inline)]
                     fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(map_reader_type $arg_type)),* ) {
                         #[allow(dead_code)]
@@ -303,6 +318,7 @@ macro_rules! impl_opcodes {
                         $code
                     }
                 )?
+                // opcode variants
                 $(
                     $(
                         $( #[$variant_attr] )*
