@@ -62,7 +62,7 @@ pub mod runtime {
     pub mod heap {
         //! Virtual machine heap.
         pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapRefOp, HeapOp};
-        pub use crate::bytecode::{HeapRef /*, HeapSlice*/};
+        pub use crate::bytecode::HeapRef;
     }
 }
 

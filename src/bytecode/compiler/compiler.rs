@@ -582,14 +582,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.jn0(123)                                    // stack: upper
         };
         // compile block
-        let start_target = self.writer.position();
+        let start_target = self.writer.position();              // stack: upper
         self.loop_control.push();
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_while(iter_loc as StackOffset, start_target, iter_ty);    // stack: upper
-        // fix jump addresses
+        //let increment_target = self.write_while(iter_loc as FrameOffset, -(iter_ty.primitive_size() as FrameOffset), start_target, iter_ty);    // stack: upper
+        let increment_target = self.write_clone(iter_ty);       // stack upper upper
+        self.write_preinc(iter_loc, iter_ty);      // stack upper upper new_current(=current+1)
+        self.write_lt(iter_ty);                                                    // stack upper new_current>upper
+        self.writer.j0(start_target);                                              // stack upper        // fix jump addresses
+        // exit loop
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
         for loop_control in &loop_controls {
@@ -1600,7 +1604,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             match self.init_state.initialized(binding_id) {
                 BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
                 BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
-                BranchingState::MaybeInitialized => self.writer.storex_maybe(loc, constructor),
+                BranchingState::MaybeInitialized => self.writer.storex_replace(loc, constructor), // used to be separate instruction, replace now handles both
             }
         } else {
             self.write_store(loc, ty)
@@ -2021,7 +2025,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             panic!("unsupported type")
         }
     }
-
+    /*
     /// Writes a while instruction.
     fn write_while(self: &Self, index: StackOffset, target_addr: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
@@ -2036,6 +2040,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
+    */
 }
 
 /// Itsy-trait support functions.

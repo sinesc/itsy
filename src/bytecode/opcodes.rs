@@ -1,7 +1,7 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use crate::prelude::*;
-use crate::{FrameAddress, FrameOffset, StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
+use crate::{FrameAddress, StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
 use crate::bytecode::{HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
@@ -42,30 +42,6 @@ impl_opcodes!{
         self.stack.push(value);
     }
 
-    /// Loads and increments a counter variable and compares the result against the top stack value.
-    /// Jumps to given target if the counter is less than or equal to the top stack value.
-    fn <
-        whileu8<T: u8>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whileu16<T: u16>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whileu32<T: u32>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whileu64<T: u64>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whiles8<T: i8>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whiles16<T: i16>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whiles32<T: i32>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-        whiles64<T: i64>(step: u8, counter_loc: FrameOffset, target_addr: StackAddress),
-    >(&mut self) {
-        // load upper bound
-        let upper: T = self.stack.top();
-        // load and increment counter
-        let mut counter: T = if counter_loc >= 0 { self.stack.load_fp(counter_loc as FrameAddress) } else { self.stack.load_sp((-counter_loc) as StackAddress) };
-        counter = T::wrapping_add(counter, step as T);
-        self.stack.store_fp(counter_loc as FrameAddress, counter);
-        // if counter less than or equal upper bound, jump to target
-        if counter <= upper {
-            self.pc = target_addr;
-        }
-    }
-
     /// Loads data from stack at given stackframe-offset and pushes it onto the stack.
     fn <
         load8_8<T: Data8>(loc: u8 as FrameAddress),
@@ -81,6 +57,18 @@ impl_opcodes!{
         self.stack.push(local);
     }
 
+    /// Pops heap object index, loads some data from the heap object at given offset and pushes it onto the stack.
+    fn <
+        heap_load8<T: Data8>(loc: FrameAddress),
+        heap_load16<T: Data16>(loc: FrameAddress),
+        heap_load32<T: Data32>(loc: FrameAddress),
+        heap_load64<T: Data64>(loc: FrameAddress),
+    >(&mut self) {
+        let index: StackAddress = self.stack.pop();
+        let data: T = self.heap.load(index, loc as StackAddress);
+        self.stack.push(data);
+    }
+
     /// Pops data off the stack and stores it at the given stackframe-offset.
     fn <
         store8_8<T: Data8>(loc: u8 as FrameAddress),
@@ -94,6 +82,41 @@ impl_opcodes!{
     >(&mut self) {
         let local: T = self.stack.pop();
         self.stack.store_fp(loc, local);
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given stackframe-offset.
+    /// Increases refcount of the new value.
+    fn storex_new(&mut self, loc: FrameAddress, constructor: StackAddress) {
+        let value: HeapRef = self.stack.pop();
+        self.stack.store_fp(loc, value);
+        self.refcount_value(value, constructor, HeapRefOp::Inc);
+    }
+
+    /// Pops HeapRef off the stack and stores it at the given stackframe-offset.
+    /// Decreses refcount of the previous contents if it was initialized and increases refcount of the new value.
+    fn storex_replace(&mut self, loc: FrameAddress, constructor: StackAddress) {
+        let prev: HeapRef = self.stack.load_fp(loc);
+        let next: HeapRef = self.stack.pop();
+        self.stack.store_fp(loc, next);
+        if next != prev {
+            self.refcount_value(next, constructor, HeapRefOp::Inc);
+            // prev might be 0 if it was statically impossible to determine whether a variable is initialized (e.g. 'let x; if y { x = 0 } x' cannot be known)
+            if prev.address != 0 {
+                self.refcount_value(prev, constructor, HeapRefOp::Dec);
+            }
+        }
+    }
+
+    /// Pops heap object index and some data off the stack and stores it at the given offset in the heap object.
+    fn <
+        heap_store8<T: Data8>(loc: FrameAddress),
+        heap_store16<T: Data16>(loc: FrameAddress),
+        heap_store32<T: Data32>(loc: FrameAddress),
+        heap_store64<T: Data64>(loc: FrameAddress),
+    >(&mut self) {
+        let index: StackAddress = self.stack.pop();
+        let data: T = self.stack.pop();
+        self.heap.store(index, loc as StackAddress, data);
     }
 
     /// Swap the 2 topmost stack values.
@@ -601,41 +624,6 @@ impl_opcodes!{
         self.stack.push(HeapRef::new(heap_ref, 0));
     }
 
-    /// Pops HeapRef off the stack and stores it at the given stackframe-offset.
-    /// Increases refcount of the new value.
-    fn storex_new(&mut self, loc: FrameAddress, constructor: StackAddress) {
-        let value: HeapRef = self.stack.pop();
-        self.stack.store_fp(loc, value);
-        self.refcount_value(value, constructor, HeapRefOp::Inc);
-    }
-
-    /// Pops HeapRef off the stack and stores it at the given stackframe-offset.
-    /// Decreses refcount of the previous contents and increases refcount of the new value.
-    fn storex_replace(&mut self, loc: FrameAddress, constructor: StackAddress) {
-        let prev: HeapRef = self.stack.load_fp(loc);
-        let next: HeapRef = self.stack.pop();
-        self.stack.store_fp(loc, next);
-        if next != prev {
-            self.refcount_value(next, constructor, HeapRefOp::Inc);
-            self.refcount_value(prev, constructor, HeapRefOp::Dec);
-        }
-    }
-
-    /// Pops HeapRef off the stack and stores it at the given stackframe-offset.
-    /// Decreses refcount of the previous contents, if any and increases refcount of the new value.
-    fn storex_maybe(&mut self, loc: FrameAddress, constructor: StackAddress) {
-        let prev: HeapRef = self.stack.load_fp(loc);
-        let next: HeapRef = self.stack.pop();
-        self.stack.store_fp(loc, next);
-        if next != prev {
-            self.refcount_value(next, constructor, HeapRefOp::Inc);
-            // prev might be 0 if it was statically impossible to determine whether a variable is initialized (e.g. 'let x; if y { x = 0 } x' cannot be known)
-            if prev.address != 0 {
-                self.refcount_value(prev, constructor, HeapRefOp::Dec);
-            }
-        }
-    }
-
     /// Pops a heap reference off the stack and performs a reference count operation.
     fn <
         cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
@@ -880,3 +868,33 @@ impl_opcodes!{
     fn comment(&mut self, text: String) {
     }
 }
+
+
+/*
+
+    /// Loads and increments the variable at counter_loc and compares the result against the variable at max_loc.
+    /// Jumps to given target if the counter is less than or equal to the top stack value.
+    fn <
+        whileu8<T: u8>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whileu16<T: u16>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whileu32<T: u32>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whileu64<T: u64>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whiles8<T: i8>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whiles16<T: i16>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whiles32<T: i32>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+        whiles64<T: i64>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
+    >(&mut self) {
+        // load upper bound
+        let max: T = self.stack.load(if max_loc >= 0 { self.stack.fp + max_loc as StackAddress } else { self.stack.sp() - (-max_loc) as StackAddress });
+        // load and increment counter
+        let counter_loc = if counter_loc >= 0 { self.stack.fp + counter_loc as StackAddress } else { self.stack.sp() - (-counter_loc) as StackAddress };
+        let mut counter: T = self.stack.load(counter_loc);
+        counter = T::wrapping_add(counter, 1);
+        self.stack.store(counter_loc, counter);
+        // if counter less than or equal upper bound, jump to target
+        if counter <= max {
+            self.pc = target_addr;
+        }
+    }
+
+*/

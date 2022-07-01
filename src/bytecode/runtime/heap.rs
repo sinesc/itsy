@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
-use crate::bytecode::{HeapRef /*, HeapSlice*/};
+use crate::bytecode::HeapRef;
 use crate::shared::index_twice;
 
 // Asserts that a heap item exists when debug_assertions are enabled
@@ -233,15 +233,6 @@ impl Heap {
         debug_assert!(index_a != index_b);
         index_twice(&mut self.objects, index_a as usize, index_b as usize)
     }
-
-    /// Returns a byte slice for the given heap reference.
-    pub fn slice(self: &Self, item: HeapRef, len: StackAddress) -> &[u8] {
-        let (index, offset) = item.into();
-        debug_assert_index!(self, index);
-        let offset = offset as usize;
-        let len = len as usize;
-        &self.objects[index as usize].data[offset..offset + len]
-    }
     // Copies bytes from one heap object to another (from/to their respective current offset), extending it if necessary.
     pub fn copy(self: &mut Self, dest_item: HeapRef, src_item: HeapRef, len: StackAddress) {
         debug_assert_index!(self, dest_item.index());
@@ -278,51 +269,12 @@ impl Heap {
             }
         }
     }
-    /*
-    /// Compares bytes of one heap object with another.
-    pub fn compare(self: &mut Self, a: HeapRef, b: HeapRef, len: StackAddress, op: HeapCmp) -> bool {
-        debug_assert_index!(self, a.index());
-        debug_assert_index!(self, b.index());
-        let slice_a = self.slice(a, len);
-        let slice_b = self.slice(b, len);
-        match op {
-            HeapCmp::Eq => slice_a == slice_b,
-            HeapCmp::Neq => slice_a != slice_b,
-            HeapCmp::Lt => slice_a < slice_b,
-            HeapCmp::Lte => slice_a <= slice_b,
-            HeapCmp::Gt => slice_a > slice_b,
-            HeapCmp::Gte => slice_a >= slice_b,
-        }
-    }
-    /// Returns a string slice for the given heap reference.
-    pub fn str(self: &Self, item: HeapRef, len: StackAddress) -> &str {
-        debug_assert_index!(self, item.index());
-        let slice = self.slice(item, len);
-        //un safe { std::str::from_utf8_unchecked(slice) }
-        std::str::from_utf8(slice).unwrap()
-    }
-    // Compares string slice of one heap object with another.
-    pub fn compare_str(self: &mut Self, a: HeapSlice, b: HeapSlice, op: HeapCmp) -> bool {
-        debug_assert_index!(self, a.heap_ref.index());
-        debug_assert_index!(self, b.heap_ref.index());
-        let slice_a = self.str(a.to_ref(), a.len);
-        let slice_b = self.str(b.to_ref(), b.len);
-        match op {
-            HeapCmp::Eq => slice_a == slice_b,
-            HeapCmp::Neq => slice_a != slice_b,
-            HeapCmp::Lt => slice_a < slice_b,
-            HeapCmp::Lte => slice_a <= slice_b,
-            HeapCmp::Gt => slice_a > slice_b,
-            HeapCmp::Gte => slice_a >= slice_b,
-        }
-    }
-    */
     /// Returns a string slice for the given heap reference.
     pub fn string(self: &Self, item: HeapRef) -> &str {
         debug_assert_index!(self, item.index());
         let (index, offset) = item.into();
         let slice = &self.objects[index as usize].data[offset as usize..];
-        //un safe { str::from_utf8_unchecked(&slice) }
+        //un safe { std::str::from_utf8_unchecked(&slice) }
         std::str::from_utf8(slice).unwrap()
     }
     // Compares string of one heap object with another.
@@ -344,8 +296,20 @@ impl Heap {
 
 /// Generic heap operations.
 pub trait HeapOp<T> {
-    fn read(self: &Self, item: HeapRef) -> T;
-    fn write(self: &mut Self, item: HeapRef, value: T);
+    /// Load a value from an heap object.
+    fn load(self: &Self, index: StackAddress, offset: StackAddress) -> T;
+    // Store a value to a heap object.
+    fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: T);
+    // load using a HeapRef
+    fn read(self: &Self, item: HeapRef) -> T {
+        let (index, offset) = item.into();
+        self.load(index, offset)
+    }
+    // store using a HeapRef
+    fn write(self: &mut Self, item: HeapRef, value: T) {
+        let (index, offset) = item.into();
+        self.store(index, offset, value);
+    }
     /// Reads from the given HeapRef and increments its offset by the number of read bytes.
     fn read_seq(self: &Self, item: &mut HeapRef) -> T {
         let result = self.read(*item);
@@ -364,25 +328,21 @@ pub trait HeapOp<T> {
 macro_rules! impl_heap {
     (single, $type:ident) => (
         impl HeapOp<$type> for Heap {
-            fn read(self: &Self, item: HeapRef) -> $type {
-                let (index, offset) = item.into();
-                self.objects[index as usize].data[offset as usize]
+            fn load(self: &Self, index: StackAddress, offset: StackAddress) -> $type {
+                self.objects[index as usize].data[offset as usize] as $type
             }
-            fn write(self: &mut Self, item: HeapRef, value: $type) {
-                let (index, offset) = item.into();
-                self.objects[index as usize].data[offset as usize] = value;
+            fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: $type) {
+                self.objects[index as usize].data[offset as usize] = value as u8;
             }
         }
     );
     (multi, $type:ident) => (
         impl HeapOp<$type> for Heap {
-            fn read(self: &Self, item: HeapRef) -> $type {
-                let (index, offset) = item.into();
+            fn load(self: &Self, index: StackAddress, offset: StackAddress) -> $type {
                 let offset = offset as usize;
                 $type::from_ne_bytes(self.objects[index as usize].data[offset..offset + size_of::<$type>()].try_into().unwrap())
             }
-            fn write(self: &mut Self, item: HeapRef, value: $type) {
-                let (index, offset) = item.into();
+            fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: $type) {
                 let offset = offset as usize;
                 self.objects[index as usize].data[offset..offset + size_of::<$type>()].copy_from_slice(&value.to_ne_bytes());
             }
@@ -394,7 +354,7 @@ impl_heap!(single, u8);
 impl_heap!(multi, u16);
 impl_heap!(multi, u32);
 impl_heap!(multi, u64);
-impl_heap!(multi, i8);
+impl_heap!(single, i8);
 impl_heap!(multi, i16);
 impl_heap!(multi, i32);
 impl_heap!(multi, i64);

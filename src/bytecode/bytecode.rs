@@ -305,15 +305,6 @@ impl HeapRef {
         debug_assert!((self.offset() as StackOffset + offset) as HeapAddress <= (1 << HEAP_OFFSET_BITS) - 1);
         HeapRef::new(self.index(), (self.offset() as StackOffset + offset) as StackAddress)
     }
-    /*
-    /// Returns a HeapSlice of this heap reference with the given length set.
-    pub fn to_slice(self: Self, len: StackAddress) -> HeapSlice {
-        HeapSlice {
-            len     : len,
-            heap_ref: self,
-        }
-    }
-    */
     /// Returns the HeapRef as byte array.
     pub fn to_ne_bytes(self: &Self) -> [ u8; size_of::<HeapAddress>() ] {
         self.address.to_ne_bytes()
@@ -348,29 +339,3 @@ impl Debug for HeapRef {
         write!(f, "HeapRef(index:{}, offset:{})", self.index(), self.offset())
     }
 }
-/*
-/// A heap slice as it would appear on the stack.
-#[derive(Debug, Copy, Clone)]
-pub struct HeapSlice {
-    pub len     : StackAddress,
-    pub heap_ref: HeapRef,
-}
-
-impl HeapSlice {
-    /// Returns a clone of this heap reference offset by the given value.
-    pub fn with_offset(self: Self, offset: StackOffset) -> Self {
-        Self {
-            heap_ref: self.heap_ref.with_offset(offset),
-            len     : self.len,
-        }
-    }
-    /// Returns a HeapSlice of this heap reference with the given length set.
-    pub fn to_ref(self: Self) -> HeapRef {
-        self.heap_ref
-    }
-    /// Returns the size of heap reference slices.
-    pub const fn primitive_size() -> u8 {
-        size_of::<Self>() as u8
-    }
-}
-*/
