@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use crate::prelude::*;
-use crate::StackAddress;
+use crate::{FrameAddress, StackAddress};
 use crate::frontend::ast::Pattern;
 use crate::shared::typed_ids::FunctionId;
 use std::cmp::Ordering;
@@ -10,7 +10,7 @@ use core::fmt::Debug;
 
 #[derive(Clone, Copy)]
 pub struct CallInfo {
-    pub arg_size: StackAddress,
+    pub arg_size: FrameAddress,
     pub addr: StackAddress,
 }
 
@@ -35,7 +35,7 @@ impl Functions {
         }
     }
     /// Registers an absolute function address and returns a list of placeholder positions that need to be replaced with calls to this function.
-    pub fn register_function(self: &mut Self, function_id: FunctionId, arg_size: StackAddress, addr: StackAddress) -> Option<Vec<StackAddress>> {
+    pub fn register_function(self: &mut Self, function_id: FunctionId, arg_size: FrameAddress, addr: StackAddress) -> Option<Vec<StackAddress>> {
         let call_info = CallInfo { addr, arg_size };
         self.functions.insert(function_id, call_info);
         self.call_placeholder.remove(&function_id)

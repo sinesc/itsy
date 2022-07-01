@@ -8,7 +8,7 @@ macro_rules! comment {
 }
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
-macro_rules! select_signed_opcode {
+/*macro_rules! select_signed_opcode {
     (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { unreachable!("Unsupported sa-sized variant") };
     (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
         $self.writer.$variant_sa($value as StackOffset $(, $more)*)
@@ -23,7 +23,7 @@ macro_rules! select_signed_opcode {
             select_signed_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
         }
     }}
-}
+}*/
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
 macro_rules! select_unsigned_opcode {

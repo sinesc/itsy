@@ -1,15 +1,15 @@
 use crate::prelude::*;
-use crate::StackAddress;
+use crate::FrameAddress;
 use crate::shared::typed_ids::BindingId;
 
 /// Maps bindings and arguments to indices relative to the stack frame.
 pub struct StackFrame {
     /// Maps a binding ID to a variable or argument position on the stack.
-    pub map     : Map<BindingId, StackAddress>,
+    pub map     : Map<BindingId, FrameAddress>,
     /// Index for the NEXT argument to be inserted.
-    pub arg_pos : StackAddress,
+    pub arg_pos : FrameAddress,
     /// Index for the NEXT variable to be inserted.
-    pub var_pos : StackAddress,
+    pub var_pos : FrameAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
 }
@@ -25,11 +25,11 @@ impl StackFrame {
         }
     }
     /// Add new local variable.
-    pub fn insert(self: &mut Self, binding_id: BindingId, index: StackAddress) {
-        self.map.insert(binding_id, index);
+    pub fn insert(self: &mut Self, binding_id: BindingId, loc: FrameAddress) {
+        self.map.insert(binding_id, loc);
     }
     /// Look up local variable descriptor for the given BindingId.
-    pub fn lookup(self: &Self, binding_id: BindingId) -> StackAddress {
+    pub fn lookup(self: &Self, binding_id: BindingId) -> FrameAddress {
         *self.map.get(&binding_id).expect(Self::UNKNOWN_BINDING)
     }
 }
@@ -52,7 +52,7 @@ impl StackFrames {
         self.0.pop().expect(Self::NO_STACK)
     }
     /// Returns the argument size in bytes for the top stack frame descriptor.
-    pub fn arg_size(self: &Self) -> StackAddress {
+    pub fn arg_size(self: &Self) -> FrameAddress {
         self.0.last().expect(Self::NO_STACK).arg_pos
     }
     /// Returns the return value size in bytes for the top stack frame descriptor.
@@ -60,7 +60,7 @@ impl StackFrames {
         self.0.last().expect(Self::NO_STACK).ret_size
     }
     /// Look up local variable descriptor for the given BindingId.
-    pub fn lookup(self: &mut Self, binding_id: BindingId) -> StackAddress {
+    pub fn lookup(self: &mut Self, binding_id: BindingId) -> FrameAddress {
         self.0.last().expect(Self::NO_STACK).lookup(binding_id)
     }
 }

@@ -6,6 +6,7 @@ pub mod error;
 mod util;
 mod init_state;
 
+use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
@@ -282,17 +283,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
         let binding_id = item.left.as_variable().unwrap().binding_id.unwrap();
-        let local = self.locals.lookup(binding_id);
+        let loc = self.locals.lookup(binding_id);
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                self.write_storex(local, &item.left, binding_id);
+                self.write_storex(loc, &item.left, binding_id);
                 self.init_state.initialize(binding_id);
             },
             _ => {
                 self.check_initialized(&item.left.as_variable().unwrap())?;
                 let ty = self.item_type(&item.left);
-                self.write_load(local, ty); // stack: left
+                self.write_load(loc, ty); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.item_type(&item.left);
                 match item.op { // stack: result
@@ -303,7 +304,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_storex(local, &item.left, binding_id); // stack --
+                self.write_storex(loc, &item.left, binding_id); // stack --
             },
         };
         Ok(())
@@ -398,7 +399,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.expect("Unresolved function encountered");
-                let arg_size = self.id_mappings.function_arg_size(function_id);
+                let arg_size = self.id_mappings.function_arg_size(function_id) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
@@ -553,13 +554,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_local: StackAddress, iter_type_id: TypeId) -> CompileResult {
+    fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_loc: FrameAddress, iter_type_id: TypeId) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
         self.compile_expression(&binary_op.left)?;          // stack current=lower
         let iter_ty = self.type_by_id(iter_type_id);
-        self.write_store(iter_local, iter_ty);                      // stack -
+        self.write_store(iter_loc, iter_ty);                      // stack -
         // push upper range bound
         self.compile_expression(&binary_op.right)?;             // stack upper
         // precheck bounds
@@ -567,7 +568,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
             let iter_ty = self.type_by_id(iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_local, iter_ty);                   // stack: upper upper lower
+            self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
             self.write_lte(iter_ty);                                         // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123);                // stack: upper
             self.write_dec(iter_ty);                                        // stack: upper=upper-1
@@ -576,7 +577,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // inclusive range: check if lower bound greater than upper bound.
             let iter_ty = self.type_by_id(iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_local, iter_ty);                   // stack: upper upper lower
+            self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
             self.write_lt(iter_ty);                                         // stack: upper upper_lte_lower
             self.writer.jn0(123)                                    // stack: upper
         };
@@ -587,7 +588,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.type_by_id(iter_type_id);
-        let increment_target = self.write_while(iter_local, start_target, iter_ty);    // stack: upper
+        let increment_target = self.write_while(iter_loc as StackOffset, start_target, iter_ty);    // stack: upper
         // fix jump addresses
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
@@ -602,7 +603,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_local: StackAddress, element_type_id: TypeId) -> CompileResult {
+    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
         let element_ty = self.type_by_id(element_type_id);
         let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
@@ -625,7 +626,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_cnt_nc(element_constructor, HeapRefOp::Inc);
         }
 
-        self.write_store(element_local, element_ty);                        // stack &array index <is_ref ? element>
+        self.write_store(element_loc, element_ty);                        // stack &array index <is_ref ? element>
         self.loop_control.push();
         self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
         let loop_controls = self.loop_control.pop();
@@ -705,13 +706,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             frame.insert(arg.binding_id.unwrap(), frame.arg_pos);
             self.init_state.declare(arg.binding_id.unwrap());
             self.init_state.initialize(arg.binding_id.unwrap());
-            frame.arg_pos += self.item_type(arg).primitive_size() as StackAddress;
+            frame.arg_pos += self.item_type(arg).primitive_size() as FrameAddress;
         }
 
         // create variables in local environment and reserve space on the stack
-        frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2;
+        frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2;
         self.create_stack_frame_block(item.block.as_ref().unwrap(), &mut frame);
-        let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as StackAddress * 2);
+        let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2);
         if var_size > 0 {
             self.writer.reserve(var_size as u16);
         }
@@ -1054,13 +1055,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
                 frame.insert(binding.binding_id.unwrap(), frame.var_pos);
-                frame.var_pos += self.item_type(binding).primitive_size() as StackAddress;
+                frame.var_pos += self.item_type(binding).primitive_size() as FrameAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos);
-                frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as StackAddress;
+                frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as FrameAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);
@@ -1497,7 +1498,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset > 0 {
-            select_signed_opcode!(self, offsetx_8, offsetx_16, offsetx_sa, offset as StackOffset);
+            select_unsigned_opcode!(self, offsetx_8, offsetx_16, none, offset as StackOffset);
         }
     }
 
@@ -1579,12 +1580,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, local: StackAddress, ty: &Type) -> StackAddress {
+    fn write_store(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_unsigned_opcode!(self, store8_8, store8_16, none, local),
-            2 => select_unsigned_opcode!(self, store16_8, store16_16, none, local),
-            4 => select_unsigned_opcode!(self, store32_8, store32_16, none, local),
-            8 => select_unsigned_opcode!(self, store64_8, store64_16, none, local),
+            1 => select_unsigned_opcode!(self, store8_8, store8_16, none, loc),
+            2 => select_unsigned_opcode!(self, store16_8, store16_16, none, loc),
+            4 => select_unsigned_opcode!(self, store32_8, store32_16, none, loc),
+            8 => select_unsigned_opcode!(self, store64_8, store64_16, none, loc),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1592,27 +1593,27 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
-    fn write_storex(self: &Self, local: StackAddress, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
+    fn write_storex(self: &Self, loc: FrameAddress, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
         let ty = self.item_type(item);
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             match self.init_state.initialized(binding_id) {
-                BranchingState::Initialized => self.writer.storex_replace(local, constructor),
-                BranchingState::Uninitialized => self.writer.storex_new(local, constructor),
-                BranchingState::MaybeInitialized => self.writer.storex_maybe(local, constructor),
+                BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
+                BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
+                BranchingState::MaybeInitialized => self.writer.storex_maybe(loc, constructor),
             }
         } else {
-            self.write_store(local, ty)
+            self.write_store(loc, ty)
         }
     }
 
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
+    fn write_load(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 => select_unsigned_opcode!(self, load8_8, load8_16, none, index),
-            2 => select_unsigned_opcode!(self, load16_8, load16_16, none, index),
-            4 => select_unsigned_opcode!(self, load32_8, load32_16, none, index),
-            8 => select_unsigned_opcode!(self, load64_8, load64_16, none, index),
+            1 => select_unsigned_opcode!(self, load8_8, load8_16, none, loc),
+            2 => select_unsigned_opcode!(self, load16_8, load16_16, none, loc),
+            4 => select_unsigned_opcode!(self, load32_8, load32_16, none, loc),
+            8 => select_unsigned_opcode!(self, load64_8, load64_16, none, loc),
             size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
         }
     }
@@ -1767,45 +1768,45 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
+    fn write_preinc(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.predeci64(index, -1),
-            Type::i32 | Type::u32 => self.writer.predeci32(index, -1),
-            Type::i16 | Type::u16 => self.writer.predeci16(index, -1),
-            Type::i8 | Type::u8 => self.writer.predeci8(index, -1),
+            Type::i64 | Type::u64 => self.writer.predeci64(loc, -1),
+            Type::i32 | Type::u32 => self.writer.predeci32(loc, -1),
+            Type::i16 | Type::u16 => self.writer.predeci16(loc, -1),
+            Type::i8 | Type::u8 => self.writer.predeci8(loc, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
 
     /// Write pre-decrement instruction.
-    fn write_predec(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
+    fn write_predec(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.predeci64(index, 1),
-            Type::i32 | Type::u32 => self.writer.predeci32(index, 1),
-            Type::i16 | Type::u16 => self.writer.predeci16(index, 1),
-            Type::i8 | Type::u8 => self.writer.predeci8(index, 1),
+            Type::i64 | Type::u64 => self.writer.predeci64(loc, 1),
+            Type::i32 | Type::u32 => self.writer.predeci32(loc, 1),
+            Type::i16 | Type::u16 => self.writer.predeci16(loc, 1),
+            Type::i8 | Type::u8 => self.writer.predeci8(loc, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
 
     /// Write post-increment instruction.
-    fn write_postinc(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
+    fn write_postinc(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.postdeci64(index, -1),
-            Type::i32 | Type::u32 => self.writer.postdeci32(index, -1),
-            Type::i16 | Type::u16 => self.writer.postdeci16(index, -1),
-            Type::i8 | Type::u8 => self.writer.postdeci8(index, -1),
+            Type::i64 | Type::u64 => self.writer.postdeci64(loc, -1),
+            Type::i32 | Type::u32 => self.writer.postdeci32(loc, -1),
+            Type::i16 | Type::u16 => self.writer.postdeci16(loc, -1),
+            Type::i8 | Type::u8 => self.writer.postdeci8(loc, -1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
 
     /// Write post-decrement instruction.
-    fn write_postdec(self: &Self, index: StackAddress, ty: &Type) -> StackAddress {
+    fn write_postdec(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
         match ty {
-            Type::i64 | Type::u64 => self.writer.postdeci64(index, 1),
-            Type::i32 | Type::u32 => self.writer.postdeci32(index, 1),
-            Type::i16 | Type::u16 => self.writer.postdeci16(index, 1),
-            Type::i8 | Type::u8 => self.writer.postdeci8(index, 1),
+            Type::i64 | Type::u64 => self.writer.postdeci64(loc, 1),
+            Type::i32 | Type::u32 => self.writer.postdeci32(loc, 1),
+            Type::i16 | Type::u16 => self.writer.postdeci16(loc, 1),
+            Type::i8 | Type::u8 => self.writer.postdeci8(loc, 1),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }
@@ -1998,7 +1999,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Write compare less than or equal instruction.
+    /// Write compare less than or equal instruction.StackOffset
     fn write_lte(self: &Self, ty: &Type) {
         if ty.is_primitive() {
             match ty {
@@ -2022,16 +2023,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes a while instruction.
-    fn write_while(self: &Self, index: StackAddress, target_addr: StackAddress, ty: &Type) -> StackAddress {
+    fn write_while(self: &Self, index: StackOffset, target_addr: StackAddress, ty: &Type) -> StackAddress {
         match ty.primitive_size() {
-            1 if ty.is_signed() => self.writer.whiles8(1, index as u16, target_addr),
-            1 => self.writer.whileu8(1, index as u16, target_addr),
-            2 if ty.is_signed() => self.writer.whiles16(1, index as u16, target_addr),
-            2 => self.writer.whileu16(1, index as u16, target_addr),
-            4 if ty.is_signed() => self.writer.whiles32(1, index as u16, target_addr),
-            4 => self.writer.whileu32(1, index as u16, target_addr),
-            8 if ty.is_signed() => self.writer.whiles64(1, index as u16, target_addr),
-            8 => self.writer.whileu64(1, index as u16, target_addr),
+            1 if ty.is_signed() => self.writer.whiles8(1, index as i16, target_addr),
+            1 => self.writer.whileu8(1, index as i16, target_addr),
+            2 if ty.is_signed() => self.writer.whiles16(1, index as i16, target_addr),
+            2 => self.writer.whileu16(1, index as i16, target_addr),
+            4 if ty.is_signed() => self.writer.whiles32(1, index as i16, target_addr),
+            4 => self.writer.whileu32(1, index as i16, target_addr),
+            8 if ty.is_signed() => self.writer.whiles64(1, index as i16, target_addr),
+            8 => self.writer.whileu64(1, index as i16, target_addr),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         }
     }

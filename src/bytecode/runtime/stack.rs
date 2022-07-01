@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::StackAddress;
+use crate::{StackAddress, FrameAddress};
 use crate::bytecode::HeapRef;
 
 /// A stack holding temporary bytecode operation results and inputs.
@@ -107,13 +107,13 @@ pub trait StackOffsetOp<T> {
 /// Generic stack operations relative to the stack or frame pointer.
 pub trait StackRelativeOp<T>: StackOffsetOp<T> + StackOp<T> {
     /// Store given value in the stack relative to the frame pointer.
-    fn store_fp(self: &mut Self, offset: StackAddress, value: T) {
-        let pos = self.offset_fp(offset);
+    fn store_fp(self: &mut Self, offset: FrameAddress, value: T) {
+        let pos = self.offset_fp(offset as StackAddress);
         self.store(pos, value);
     }
     /// Load a value from the stack relative to the frame pointer.
-    fn load_fp(self: &Self, offset: StackAddress) -> T {
-        let pos = self.offset_fp(offset);
+    fn load_fp(self: &Self, offset: FrameAddress) -> T {
+        let pos = self.offset_fp(offset as StackAddress);
         self.load(pos)
     }
     /// Store given value in the stack downwards relative to the stack pointer.
