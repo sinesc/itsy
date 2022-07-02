@@ -22,34 +22,38 @@ fn main() {
         let write_logs = std::path::Path::new("./logs/").is_dir();
         match build(&args[1], &mut files, write_logs) {
             Ok(program) => {
-                let mut context = Context { seed: 1.2345 };
-                let mut vm = runtime::VM::new(&program);
-                if write_logs {
-                    log("logs/bytecode.ini", false, &vm.format_program());
-                    log("logs/run.ini", false, "");
-                }
-                loop {
-                    let mut opcode_label = None;
-                    if write_logs {
-                        opcode_label = Some(vm.format_instruction().unwrap_or("-".to_string()));
-                        log("logs/run.ini", true, &format!("{}", opcode_label.as_ref().unwrap()));
-                    }
-                    let vmstate = vm.step(&mut context);
-                    if let Some(instruction_label) = opcode_label {
-                        if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {
-                            log("logs/run.ini", true, &format!(";    stack {:?}\n;    heap  {:?}", vm.stack.frame(), vm.heap.data()));
-                        }
-                    }
-                    if vmstate != runtime::VMState::Ready {
-                        break;
-                    }
-                }
+                run(program, write_logs);
             }
             Err(err) => {
                 let module_path = err.module_path();
                 let loc =  err.loc(&files[module_path].1);
                 println!("{} in line {}, column {} in file {}", err, loc.0, loc.1, files[module_path].0.to_string_lossy());
             }
+        }
+    }
+}
+
+fn run(program: Program<MyAPI>, write_logs: bool) {
+    let mut context = Context { seed: 1.2345 };
+    let mut vm = runtime::VM::new(&program);
+    if write_logs {
+        log("logs/bytecode.ini", false, &vm.format_program());
+        log("logs/run.ini", false, "");
+    }
+    loop {
+        let mut opcode_label = None;
+        if write_logs {
+            opcode_label = Some(vm.format_instruction().unwrap_or("-".to_string()));
+            log("logs/run.ini", true, &format!("{}", opcode_label.as_ref().unwrap()));
+        }
+        let vmstate = vm.step(&mut context);
+        if let Some(instruction_label) = opcode_label {
+            if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {
+                log("logs/run.ini", true, &format!(";    stack {:?}\n;    heap  {:?}", vm.stack.frame(), vm.heap.data()));
+            }
+        }
+        if vmstate != runtime::VMState::Ready {
+            break;
         }
     }
 }
