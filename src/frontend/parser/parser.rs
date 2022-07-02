@@ -1253,7 +1253,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
                 }
                 nom::Err::Error(_) => {
                     // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
-                    let error = input.max_parsed();
+                    let error = input.max_parsed.take();
                     Err(ParseError::new(ParseErrorKind::SyntaxError, Position(error.1), module_path))
                 }
             }
@@ -1275,7 +1275,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 ///     let source_file = "itsy/rustdoc/parse.itsy";
 ///     let parsed = parser::parse(|module_path| {
 ///         let filename = parser::module_filename(source_file, module_path);
-///         let file = fs::read_to_string(filename).unwrap();
+///         let file = fs::read_to_string(filename)?;
 ///         parser::parse_module(&file, module_path)
 ///     }).unwrap();
 /// }

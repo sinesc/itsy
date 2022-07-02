@@ -322,7 +322,7 @@ pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: VM
     match build_inner(source_file, &mut files) {
         Ok(program) => Ok(program),
         Err(error) => {
-            let (filename, source) = files.remove(error.module_path()).unwrap();
+            let (filename, source) = files.remove(error.module_path()).unwrap_or_default();
             Err(BuildError { error, filename, source })
         }
     }
@@ -332,7 +332,7 @@ pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: VM
 fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::HashMap<String, (std::path::PathBuf, String)>) -> Result<Program<F>, Error> where F: VMFunc<F> {
     let parsed = parser::parse(|module_path| {
         let filename = parser::module_filename(source_file, module_path);
-        let file = std::fs::read_to_string(&filename).unwrap();
+        let file = std::fs::read_to_string(&filename)?;
         let module = parser::parse_module(&file, module_path);
         files.insert(module_path.to_string(), (filename, file));
         module

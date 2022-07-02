@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 use crate::prelude::*;
 #[cfg(feature="compiler")]
-use crate::frontend::{parser::error::ParseError, resolver::error::ResolveError};
+use crate::frontend::{parser::error::{ParseError, ParseErrorKind}, resolver::error::ResolveError};
 #[cfg(feature="compiler")]
 use crate::bytecode::compiler::error::CompileError;
 
@@ -103,7 +103,7 @@ impl BuildError {
             Error::ParseError(e) => e.loc(&self.source),
             Error::ResolveError(e) => e.loc(&self.source),
             Error::CompileError(e) => e.loc(&self.source),
-            Error::RuntimeError => unreachable!(),
+            _ => (0, 0),
         }
     }
     /// Path to the module where the error occured.
@@ -116,6 +116,9 @@ impl BuildError {
 impl Display for BuildError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.loc();
-        write!(f, "{} in line {}, column {} in file {}", self.error, loc.0, loc.1, self.filename.to_string_lossy())
+        match self.error {
+            Error::ParseError(ParseError { kind: ParseErrorKind::IOError(_), .. }) => write!(f, "{}", self.error),
+            _ => write!(f, "{} in line {}, column {} in file {}", self.error, loc.0, loc.1, self.filename.to_string_lossy()),
+        }
     }
 }

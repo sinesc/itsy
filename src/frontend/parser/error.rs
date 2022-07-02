@@ -1,8 +1,9 @@
 use crate::prelude::*;
 use crate::frontend::ast::Position;
+use std::{rc::Rc, io::Error as IOError};
 
 /// Represents the various possible parser error-kinds.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum ParseErrorKind {
     SyntaxError,
     InvalidNumerical,
@@ -22,14 +23,27 @@ pub enum ParseErrorKind {
     IllegalContinue,
     IllegalClosure,
     DisabledFeature(&'static str),
+    IOError(Rc<IOError>), // io::Error fails to implement clone
 }
+
 
 /// An error reported by the parser (e.g. syntax error).
 #[derive(Clone, Debug)]
 pub struct ParseError {
-    kind: ParseErrorKind,
+    pub(crate) kind: ParseErrorKind,
     position: Position,
     module_path: String,
+}
+
+#[cfg(feature="compiler")]
+impl From<IOError> for ParseError {
+    fn from(error: IOError) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind::IOError(Rc::new(error)), // io::Error is still not cloneable
+            position: Position(0),
+            module_path: "".to_string(),
+        }
+    }
 }
 
 impl ParseError {
@@ -69,6 +83,7 @@ impl Display for ParseError {
             ParseErrorKind::IllegalWhileLoop => write!(f, "While-loops are not allowed outside of functions"),
             ParseErrorKind::IllegalBreak => write!(f, "Break-statements are not allowed outside of loops"),
             ParseErrorKind::IllegalContinue => write!(f, "Continue-statements are not allowed outside of loops"),
+            ParseErrorKind::IOError(e) => write!(f, "{}", e),
 
             // Todo: handle the others
             _ => write!(f, "{:?}", self.kind),

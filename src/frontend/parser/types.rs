@@ -73,11 +73,22 @@ impl ParserState {
 }
 
 /// Parser input
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(super) struct Input<'a> {
     pub data: &'a str,
     pub max_parsed: Rc<Cell<(Option<ParseErrorKind>, usize)>>,
     pub state: Rc<Cell<ParserState>>,
+}
+
+impl<'a> Debug for Input<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let max_parsed = self.max_parsed.clone().take();
+        f.debug_struct("Input")
+         .field("data", &self.data)
+         .field("max_parsed", &max_parsed)
+         .field("state", &self.state)
+         .finish()
+    }
 }
 
 impl<'a> Input<'a> {
@@ -91,15 +102,11 @@ impl<'a> Input<'a> {
     pub fn position(self: &Self) -> Position {
         Position(self.data.len())
     }
-    pub fn max_parsed(self: &Self) -> (Option<ParseErrorKind>, usize) {
-        self.max_parsed.get()
-    }
     pub fn max_parsed_mut(self: &Self, inner: impl Fn(&mut (Option<ParseErrorKind>, usize))) {
-        let mut max_parsed = self.max_parsed.get();
+        let mut max_parsed = self.max_parsed.take();
         inner(&mut max_parsed);
         self.max_parsed.set(max_parsed);
     }
-
     pub fn state_mut(self: &Self, inner: impl Fn(&mut ParserState)) {
         let mut state = self.state.get();
         inner(&mut state);
