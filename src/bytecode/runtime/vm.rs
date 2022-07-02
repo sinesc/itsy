@@ -71,19 +71,6 @@ impl<T, U> VM<T, U> {
         self.state
     }
 
-    /// Executes single bytecode instruction.
-    #[cfg(feature="debugging")]
-    pub fn step(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
-        if self.state != VMState::Ready && self.state != VMState::Yielded {
-            panic!("Attempted to run in non-ready state");
-        }
-        self.exec_step(context);
-        if self.state == VMState::Terminated && self.heap.len() > 1 {
-            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
-        }
-        self.state
-    }
-
     /// Resets the VM, keeping only code and constants.
     pub fn reset(self: &mut Self) {
         self.stack.reset();
@@ -91,43 +78,6 @@ impl<T, U> VM<T, U> {
         self.heap.alloc(0, 0);
         self.pc = 0;
         self.state = VMState::Ready;
-    }
-
-    /// Disassembles the bytecode and returns it as a string.
-    #[cfg(feature="debugging")]
-    pub fn format_program(self: &Self) -> String where T: VMFunc<T> + VMData<T, U> {
-        let mut position = 0;
-        let mut result = "".to_string();
-        while let Some((instruction, next_position)) = self.describe_instruction(position) {
-            result.push_str(&instruction);
-            result.push_str("\n");
-            position = next_position;
-        }
-        result
-    }
-
-    /// Disassembles the current bytecode instruction and returns it as a string.
-    #[cfg(feature="debugging")]
-    pub fn format_instruction(self: &Self) -> Option<String> where T: VMFunc<T> + VMData<T, U> {
-        self.describe_instruction(self.pc).map(|result| result.0)
-    }
-
-    /// Returns the current instruction
-    #[cfg(feature="debugging")]
-    pub fn get_instruction(self: &Self) -> Option<OpCode> where T: VMFunc<T> + VMData<T, U> {
-        self.read_instruction(self.pc)
-    }
-
-    /// Returns the current stack as a string.
-    #[cfg(feature="debugging")]
-    pub fn format_stack(self: &Self) -> String {
-        format!("{:?}", self.stack)
-    }
-
-    /// Returns the current stack-frame as a string.
-    #[cfg(feature="debugging")]
-    pub fn format_frame(self: &Self) -> String {
-        format!("{:?}", &self.stack.frame())
     }
 
     /// Pushes program const pool onto the stack, converting them from Little Endian to native endianness.
@@ -349,5 +299,54 @@ impl<T, U> VM<T, U> {
             };
             *constructor_offset = parsed.next;
         }
+    }
+}
+
+#[cfg(feature="debugging")]
+impl<T, U> VM<T, U> {
+    /// Executes single bytecode instruction.
+    pub fn step(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
+        if self.state != VMState::Ready && self.state != VMState::Yielded {
+            panic!("Attempted to run in non-ready state");
+        }
+        self.exec_step(context);
+        if self.state == VMState::Terminated && self.heap.len() > 1 {
+            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
+        }
+        self.state
+    }
+
+    /// Disassembles the bytecode and returns it as a string.
+    #[cfg(feature="symbols")]
+    pub fn format_program(self: &Self) -> String where T: VMFunc<T> + VMData<T, U> {
+        let mut position = 0;
+        let mut result = "".to_string();
+        while let Some((instruction, next_position)) = self.describe_instruction(position) {
+            result.push_str(&instruction);
+            result.push_str("\n");
+            position = next_position;
+        }
+        result
+    }
+
+    /// Disassembles the current bytecode instruction and returns it as a string.
+    #[cfg(feature="symbols")]
+    pub fn format_instruction(self: &Self) -> Option<String> where T: VMFunc<T> + VMData<T, U> {
+        self.describe_instruction(self.pc).map(|result| result.0)
+    }
+
+    /// Returns the current instruction
+    pub fn get_instruction(self: &Self) -> Option<OpCode> where T: VMFunc<T> + VMData<T, U> {
+        self.read_instruction(self.pc)
+    }
+
+    /// Returns the current stack as a string.
+    pub fn format_stack(self: &Self) -> String {
+        format!("{:?}", self.stack)
+    }
+
+    /// Returns the current stack-frame as a string.
+    pub fn format_frame(self: &Self) -> String {
+        format!("{:?}", &self.stack.frame())
     }
 }

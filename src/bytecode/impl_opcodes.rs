@@ -144,93 +144,9 @@ macro_rules! impl_opcodes {
             )+
         }
 
-        /// Bytecode execution/output/debug.
+        /// Bytecode execution/output.
         #[cfg(feature="runtime")]
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
-
-            #[cfg(feature="debugging")]
-            #[allow(unused_assignments)]
-            #[allow(unused_doc_comments)]
-            pub(crate) fn read_instruction(self: &Self, mut position: StackAddress) -> Option<OpCode> {
-                if position >= self.instructions.len() as StackAddress {
-                    None
-                } else {
-                    let instruction = impl_opcodes!(read u8, self, position);
-                    match instruction {
-                        $(
-                            $( #[ $attr ] )*
-                            // single opcode
-                            $(
-                                opcodes::$name => Some(OpCode::$name),
-                            )?
-                            // opcode variants
-                            $(
-                                $(
-                                    $( #[$variant_attr] )*
-                                    opcodes::$variant_name => Some(OpCode::$variant_name),
-                                )+
-                            )?
-                        )+
-                        _ => None,
-                    }
-                }
-            }
-
-            /// Returns disassembled opcode as string at given position along with the next opcode position.
-            //#[allow(unused_imports)]
-            #[allow(unused_mut)]
-            #[cfg(feature="debugging")]
-            pub(crate) fn describe_instruction(self: &Self, mut position: StackAddress) -> Option<(String, StackAddress)> {
-                if position >= self.instructions.len() as StackAddress {
-                    None
-                } else {
-                    let instruction = impl_opcodes!(read u8, self, position);
-                    #[allow(unreachable_patterns)]
-                    #[allow(unused_doc_comments)]
-                    match instruction {
-                        // implement special formatting for some opcodes
-                        opcodes::rustcall => {
-                            let mut result = format!("{:?} {} ", position - 1, stringify!(rustcall));
-                            result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, position)));
-                            Some((result, position))
-                        }
-                        #[cfg(feature="debugging")]
-                        opcodes::comment => {
-                            let message = impl_opcodes!(read String, self, position);
-                            let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
-                            Some((result, position))
-                        }
-                        $(
-                            $( #[ $attr ] )*
-                            // single opcode
-                            $(
-                                opcodes::$name => {
-                                    let mut result = format!("{:?} {} ", position - 1, stringify!($name));
-                                    $(
-                                        result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, position) ));
-                                    )*
-                                    Some((result, position))
-                                }
-                            )?
-                            // opcode variants
-                            $(
-                                $(
-                                    $( #[$variant_attr] )*
-                                    opcodes::$variant_name => {
-                                        let mut result = format!("{:?} {} ", position - 1, stringify!($variant_name));
-                                        $(
-                                            result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, position) ));
-                                        )*
-                                        Some((result, position))
-                                    }
-                                )+
-                            )?
-                        ),+,
-                        _ => unreachable!("Invalid opcode"),
-                    }
-                }
-            }
-
             /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 loop {
@@ -265,9 +181,12 @@ macro_rules! impl_opcodes {
                     }
                 }
             }
+        }
 
+        /// Bytecode debugging.
+        #[cfg(all(feature="runtime", feature="debugging"))]
+        impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
             /// Execute the next bytecode from the VMs code buffer.
-            #[cfg(feature="debugging")]
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 let instruction = impl_opcodes!(read u8, self, self.pc);
                 #[allow(unused_doc_comments)]
@@ -297,6 +216,87 @@ macro_rules! impl_opcodes {
                         )?
                     ),+
                     _ => unreachable!("Invalid opcode"),
+                }
+            }
+
+            #[allow(unused_assignments)]
+            #[allow(unused_doc_comments)]
+            pub(crate) fn read_instruction(self: &Self, mut position: StackAddress) -> Option<OpCode> {
+                if position >= self.instructions.len() as StackAddress {
+                    None
+                } else {
+                    let instruction = impl_opcodes!(read u8, self, position);
+                    match instruction {
+                        $(
+                            $( #[ $attr ] )*
+                            // single opcode
+                            $(
+                                opcodes::$name => Some(OpCode::$name),
+                            )?
+                            // opcode variants
+                            $(
+                                $(
+                                    $( #[$variant_attr] )*
+                                    opcodes::$variant_name => Some(OpCode::$variant_name),
+                                )+
+                            )?
+                        )+
+                        _ => None,
+                    }
+                }
+            }
+
+            /// Returns disassembled opcode as string at given position along with the next opcode position.
+            //#[allow(unused_imports)]
+            #[allow(unused_mut)]
+            #[cfg(feature="symbols")]
+            pub(crate) fn describe_instruction(self: &Self, mut position: StackAddress) -> Option<(String, StackAddress)> {
+                if position >= self.instructions.len() as StackAddress {
+                    None
+                } else {
+                    let instruction = impl_opcodes!(read u8, self, position);
+                    #[allow(unreachable_patterns)]
+                    #[allow(unused_doc_comments)]
+                    match instruction {
+                        // implement special formatting for some opcodes
+                        opcodes::rustcall => {
+                            let mut result = format!("{:?} {} ", position - 1, stringify!(rustcall));
+                            result.push_str(&format!("{:?} ", impl_opcodes!(read RustFn, self, position)));
+                            Some((result, position))
+                        }
+                        opcodes::comment => {
+                            let message = impl_opcodes!(read String, self, position);
+                            let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
+                            Some((result, position))
+                        }
+                        $(
+                            $( #[ $attr ] )*
+                            // single opcode
+                            $(
+                                opcodes::$name => {
+                                    let mut result = format!("{:?} {} ", position - 1, stringify!($name));
+                                    $(
+                                        result.push_str(&format!("{:?} ", impl_opcodes!(read $arg_type, self, position) ));
+                                    )*
+                                    Some((result, position))
+                                }
+                            )?
+                            // opcode variants
+                            $(
+                                $(
+                                    $( #[$variant_attr] )*
+                                    opcodes::$variant_name => {
+                                        let mut result = format!("{:?} {} ", position - 1, stringify!($variant_name));
+                                        $(
+                                            result.push_str(&format!("{:?} ", impl_opcodes!(read $variant_type, self, position) ));
+                                        )*
+                                        Some((result, position))
+                                    }
+                                )+
+                            )?
+                        ),+,
+                        _ => unreachable!("Invalid opcode"),
+                    }
                 }
             }
         }

@@ -79,6 +79,7 @@
             "args": [
                 "run",
                 "--features=\"debugging\"",
+                "--features=\"symbols\"",
                 "--example",
                 "debug-run",
                 "--",

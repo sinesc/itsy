@@ -12,8 +12,8 @@ pub mod parser {
     pub use crate::frontend::parser::{parse, parse_module, module_filename, types::ParsedModule, types::ParsedProgram, error::{ParseError, ParseErrorKind}};
 }
 
-pub mod internal {
-    //! Advanced functionality like AST and bytecode manipulation,
+pub mod internals {
+    //! Advanced functionality like AST and bytecode manipulation.
     #[cfg(feature="compiler")]
     pub mod ast {
         //! Abstract syntax tree representation.

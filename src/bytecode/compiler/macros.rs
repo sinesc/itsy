@@ -1,8 +1,8 @@
 
-// Writes a comment to the bytecode when in debug mode. // TODO: add compiler option instead
+// Writes a comment to the bytecode if the symbols feature is enabled.
 macro_rules! comment {
     ($self:ident, $format:literal $(, $value:expr)*) => {
-        #[cfg(feature="debugging")]
+        #[cfg(feature="symbols")]
         $self.writer.comment(&format!($format $(, $value)*));
     }
 }

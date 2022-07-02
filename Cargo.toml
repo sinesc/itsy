@@ -15,6 +15,7 @@ default = [ "compiler", "runtime" ]
 compiler = [ "nom" ]
 runtime = [ ]
 debugging = [ ]
+symbols = [ ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }
@@ -29,7 +30,7 @@ required-features = [ "compiler", "runtime"  ]
 
 [[example]]
 name = "debug-run"
-required-features = [ "compiler", "runtime", "debugging" ]
+required-features = [ "compiler", "runtime", "debugging", "symbols" ]
 
 [[example]]
 name = "profile-run"

@@ -868,7 +868,7 @@ impl_opcodes!{
 
     /// Does nothing. Written as comment into the opcode stream.
     #[allow(unused_variables)]
-    #[cfg(feature="debugging")]
+    #[cfg(feature="symbols")]
     fn comment(&mut self, text: String) {
     }
 }

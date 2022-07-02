@@ -5,7 +5,7 @@
 //!
 //! Look at the [build_str] or [itsy_api!] example to get started.
 //!
-//! Documentation for the builtin Itsy-types is available [here](crate::internal::documentation). These types and methods are available from Itsy (not Rust).
+//! Documentation for the builtin Itsy-types is available [here](crate::internals::documentation). These types and methods are available from Itsy (not Rust).
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
@@ -129,8 +129,8 @@ macro_rules! itsy_api {
     (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret $vm:ident, String, $value:ident) => { {
-        let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::internal::binary::sizes::ItemIndex::MAX);
-        $vm.stack.push($crate::internal::binary::heap::HeapRef::new(index, 0));
+        let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
+        $vm.stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, $_:tt, $value:ident) => {
         compile_error!("Unsupported return type");
@@ -151,8 +151,8 @@ macro_rules! itsy_api {
     (@handle_param $vm:ident, str) => { $vm.stack.pop() };
     (@handle_param $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
     // trait: translate parameter types
-    (@handle_param_type String) => { $crate::internal::binary::heap::HeapRef };
-    (@handle_param_type str) => { $crate::internal::binary::heap::HeapRef };
+    (@handle_param_type String) => { $crate::internals::binary::heap::HeapRef };
+    (@handle_param_type str) => { $crate::internals::binary::heap::HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // trait: translate ref-param values
     (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
@@ -162,8 +162,8 @@ macro_rules! itsy_api {
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
     (@handle_ref_param_type $other:ident) => { $other };
     // trait: refcount handling for ref-params
-    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internal::binary::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internal::binary::heap::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
     // trait: reverse argument load order
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -176,22 +176,22 @@ macro_rules! itsy_api {
     };
     // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
-        impl $crate::internal::binary::VMFunc<$type_name> for $type_name {
-            fn to_index(self: Self) -> $crate::internal::binary::sizes::RustFnIndex {
-                self as $crate::internal::binary::sizes::RustFnIndex
+        impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
+            fn to_index(self: Self) -> $crate::internals::binary::sizes::RustFnIndex {
+                self as $crate::internals::binary::sizes::RustFnIndex
             }
-            fn from_index(index: $crate::internal::binary::sizes::RustFnIndex) -> Self {
+            fn from_index(index: $crate::internals::binary::sizes::RustFnIndex) -> Self {
                 //un safe { ::std::mem::trans mute(index) }
                 match index {
                     $(
-                        x if x == Self::$name as $crate::internal::binary::sizes::RustFnIndex => Self::$name,
+                        x if x == Self::$name as $crate::internals::binary::sizes::RustFnIndex => Self::$name,
                     )+
                     _ => panic!("Invalid VMFunc index {}", index),
                 }
             }
             #[allow(unused_mut)]
             #[cfg(feature="compiler")]
-            fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::internal::binary::sizes::RustFnIndex, &'static str, Vec<&'static str>)> {
+            fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::internals::binary::sizes::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
                     map.insert(stringify!($name), ($type_name::$name.to_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
@@ -200,10 +200,10 @@ macro_rules! itsy_api {
             }
         }
         #[cfg(feature="runtime")]
-        impl $crate::internal::binary::VMData<$type_name, $context_type> for $type_name {
+        impl $crate::internals::binary::VMData<$type_name, $context_type> for $type_name {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
-                use $crate::internal::binary::stack::StackOp;
+                use $crate::internals::binary::stack::StackOp;
                 match self {
                     $(
                         $type_name::$name => {

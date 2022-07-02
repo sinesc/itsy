@@ -1,4 +1,4 @@
-pub use itsy::{build_str, run as itsy_run, parser::parse_module, internal::binary::sizes::{StackAddress, STACK_ADDRESS_TYPE}, internal::resolved::Type};
+pub use itsy::{build_str, run as itsy_run, parser::parse_module, internals::binary::sizes::{StackAddress, STACK_ADDRESS_TYPE}, internals::resolved::Type};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
