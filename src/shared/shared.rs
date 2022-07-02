@@ -5,10 +5,9 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::prelude::*;
-use crate::shared::{typed_ids::TypeId, meta::{Type, Array, Binding}};
+use crate::shared::{typed_ids::TypeId, meta::{Type, Array}};
 #[cfg(feature="compiler")]
-use crate::shared::typed_ids::BindingId;
+use crate::{prelude::*, shared::{typed_ids::BindingId, meta::Binding}};
 
 /// A container holding type id to type mappings
 pub(crate) trait TypeContainer {
@@ -115,6 +114,7 @@ impl Add for Progress {
 }
 
 /// References two elements of a slice mutably
+#[cfg(feature="runtime")]
 pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
     if a == b {
         panic!("tried to index element {} twice", a);

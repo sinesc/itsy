@@ -6,6 +6,7 @@
         "./itsy"
     ],
     "rust-analyzer.cargo.features": [
-        "debugging", "compiler"
+        "runtime", "compiler"
     ],
+    "rust-analyzer.cargo.noDefaultFeatures": true,
 }

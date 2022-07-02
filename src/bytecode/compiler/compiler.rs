@@ -11,7 +11,7 @@ use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, runtime::heap::HeapRefOp};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::{LoopControlStack, LoopControl, Functions};

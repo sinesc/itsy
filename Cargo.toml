@@ -11,40 +11,38 @@ readme = "README.md"
 keywords = [ "language", "scripting" ]
 
 [features]
-default = [ "compiler" ]
+default = [ "compiler", "runtime" ]
 compiler = [ "nom" ]
+runtime = [ ]
 debugging = [ ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }
 
-[dev-dependencies]
-itsy = { path = ".", features = [ "compiler" ] }
-
 [lib]
 name = "itsy"
 path = "src/lib.rs"
 
-[[bin]]
-doc = false
-name = "debug-run"
-path = "src/bin/debug-run.rs"
-required-features = [ "compiler", "debugging" ]
-
-[[bin]]
-doc = false
-name = "profile-run"
-path = "src/bin/profile-run.rs"
-required-features = [ "compiler", "debugging" ]
-
-[[bin]]
-doc = false
-name = "bench"
-path = "src/bin/bench.rs"
-required-features = [ "compiler" ]
-
-[[bin]]
-doc = false
+[[example]]
 name = "run"
-path = "src/bin/run.rs"
+required-features = [ "compiler", "runtime"  ]
+
+[[example]]
+name = "debug-run"
+required-features = [ "compiler", "runtime", "debugging" ]
+
+[[example]]
+name = "profile-run"
+required-features = [ "compiler", "runtime", "debugging" ]
+
+[[example]]
+name = "bench"
+required-features = [ "compiler", "runtime" ]
+
+[[example]]
+name = "itsyc"
 required-features = [ "compiler" ]
+
+[[example]]
+name = "itsyvm"
+required-features = [ "runtime" ]

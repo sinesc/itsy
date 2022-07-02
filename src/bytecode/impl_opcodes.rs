@@ -27,8 +27,8 @@ macro_rules! impl_opcodes {
     (map_reader_type RustFn) => ( T );
     (map_reader_type $ty:tt) => ( $ty );
     // write parameters
-    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
-    (write Builtin, $value:expr, $to:ident) => ( $to.write(&$value.into_index().to_le_bytes()[..]) );
+    (write RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_le_bytes()[..]) );
+    (write Builtin, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_le_bytes()[..]) );
     (write HeapRefOp, $value:expr, $to:ident) => ( $to.write(&[ $value as u8 ]) );
     (write String, $value:expr, $to:ident) => (
         $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
@@ -94,6 +94,7 @@ macro_rules! impl_opcodes {
         }
 
         #[allow(non_upper_case_globals)]
+        #[cfg(feature="runtime")]
         mod opcodes {
             $(
                 $( #[ $attr ] )*
@@ -144,6 +145,7 @@ macro_rules! impl_opcodes {
         }
 
         /// Bytecode execution/output/debug.
+        #[cfg(feature="runtime")]
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
 
             #[cfg(feature="debugging")]
@@ -300,6 +302,7 @@ macro_rules! impl_opcodes {
         }
 
         /// Bytecode instructions. Implemented on VM by the `impl_opcodes!` macro.
+        #[cfg(feature="runtime")]
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
 
             // Generate methods for executing each bytecode on VM struct.

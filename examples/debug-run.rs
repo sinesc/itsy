@@ -2,9 +2,11 @@ use itsy::*;
 use std::{env, path::PathBuf, collections::HashMap};
 
 /*
- * This binary is a simple debugging tool to run test scripts, log AST and bytecode and trace the VM.
+ * Demo script runner with debug logging of AST and bytecode.
  * To enable logging, create a "logs" directoy parallel to the "src" directory. To disable logging again, simply delete the directory.
  * Note that this script is *really* slow due to single-stepping through the bytecode and optionally writing the logs.
+ *
+ * Usage from project root e.g. target/debug/examples/debug-run itsy/examples/mandelbrot.itsy
  */
 
 mod shared;
@@ -62,7 +64,7 @@ fn log(filename: &str, append: bool, data: &str) {
     }
 }
 
-fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<compiler::Program<MyAPI>, Error> {
+fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<binary::Program<MyAPI>, Error> {
     let source_file = source_file.as_ref();
     let parsed = parser::parse(|module_path| {
         let filename = parser::module_filename(source_file, module_path);

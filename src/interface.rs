@@ -42,28 +42,33 @@ pub mod resolver {
 pub mod compiler {
     //! Bytecode generation.
     //!
-    //! See [compile] for an example that compiles a [ResolvedProgram](crate::resolver::ResolvedProgram) into a [Program], ready to be run by [run](crate::run) or [VM::run](crate::VM::run).
-    pub use crate::bytecode::Program;
+    //! See [compile] for an example that compiles a [ResolvedProgram](crate::resolver::ResolvedProgram) into a [Program](crate::binary::Program), ready to be run by [run](crate::run) or [VM::run](crate::VM::run).
     pub use crate::bytecode::compiler::{compile, error::{CompileError, CompileErrorKind}};
     pub use crate::bytecode::writer::{Writer, StoreConst};
-    pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
 }
 
 #[cfg(doc)]
 pub use crate::bytecode::builtins::documentation;
 
+#[cfg(feature="runtime")]
 pub mod runtime {
     //! Bytecode execution.
-    pub use crate::bytecode::{runtime::vm::{VM, VMState}, VMFunc, VMData};
+    pub use crate::bytecode::runtime::vm::{VM, VMState};
     pub mod stack {
         //! Virtual machine stack.
         pub use crate::bytecode::runtime::stack::{Stack, StackOp, StackOffsetOp, StackRelativeOp};
     }
     pub mod heap {
         //! Virtual machine heap.
-        pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapRefOp, HeapOp};
-        pub use crate::bytecode::HeapRef;
+        pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapOp};
+        pub use crate::bytecode::{HeapRef, HeapRefOp};
     }
+}
+
+pub mod binary {
+    pub use crate::bytecode::{VMFunc, VMData};
+    pub use crate::bytecode::Program;
+    pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
 }
 
 pub mod sizes {

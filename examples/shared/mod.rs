@@ -1,7 +1,9 @@
 use itsy::*;
+#[allow(unused_imports)]
 use std::io::{self, Write};
 
 /// Demo context data.
+#[allow(dead_code)]
 pub struct Context {
     pub seed: f64,
 }

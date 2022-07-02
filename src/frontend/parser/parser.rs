@@ -1272,7 +1272,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 /// use std::fs;
 ///
 /// fn main() {
-///     let source_file = "itsy/examples/parse.itsy";
+///     let source_file = "itsy/rustdoc/parse.itsy";
 ///     let parsed = parser::parse(|module_path| {
 ///         let filename = parser::module_filename(source_file, module_path);
 ///         let file = fs::read_to_string(filename).unwrap();

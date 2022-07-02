@@ -1,8 +1,12 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use crate::prelude::*;
-use crate::{FrameAddress, StackAddress, StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex, ItemIndex};
-use crate::bytecode::{HeapRef, builtins::Builtin, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp, HeapRefOp}, vm::{VMState, CopyTarget}}};
+use crate::{FrameAddress, StackAddress, ItemIndex};
+use crate::bytecode::{HeapRefOp, builtins::Builtin};
+#[cfg(feature="runtime")]
+use crate::{StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex};
+#[cfg(feature="runtime")]
+use crate::bytecode::{HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::{VMState, CopyTarget}}};
 
 type Data8 = u8;
 type Data16 = u16;

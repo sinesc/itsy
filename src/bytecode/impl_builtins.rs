@@ -129,9 +129,11 @@ macro_rules! impl_builtins {
         }
 
         impl Builtin {
-            pub(crate) fn into_index(self: Self) -> $crate::BuiltinIndex {
+            #[cfg(feature="compiler")]
+            pub(crate) fn to_index(self: Self) -> $crate::BuiltinIndex {
                 self as $crate::BuiltinIndex
             }
+            #[cfg(feature="runtime")]
             pub(crate) fn from_index(index: $crate::BuiltinIndex) -> Self {
                 //un safe { ::std::mem::trans mute(index) }
                 match index {
@@ -153,6 +155,7 @@ macro_rules! impl_builtins {
                     _ => panic!("Invalid Builtin index {}", index),
                 }
             }
+            // TODO try to make this work. needs to support the generic typeslot of arrays. would avoid the manual implementation in Resolver
             /*#[allow(unused_mut)]
             pub(crate) fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::BuiltinIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
@@ -162,6 +165,7 @@ macro_rules! impl_builtins {
                 map
             }*/
             #[allow(unused_variables, unused_assignments, unused_imports)]
+            #[cfg(feature="runtime")]
             pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress) {
                 use $crate::runtime::stack::StackOp;
                 match self {

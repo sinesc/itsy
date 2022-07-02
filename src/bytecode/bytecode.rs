@@ -12,13 +12,15 @@ pub mod builtins;
 #[cfg(feature="compiler")]
 pub mod compiler;
 #[path="runtime/runtime.rs"]
+#[cfg(feature="runtime")]
 pub mod runtime;
 
 use crate::prelude::*;
+use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
-use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, ItemIndex, RustFnIndex};
-use crate::bytecode::runtime::{vm::VM, stack::{Stack, StackOp}};
+#[cfg(feature="runtime")]
+use crate::{ItemIndex, bytecode::runtime::{vm::VM, stack::{Stack, StackOp}}};
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
@@ -26,8 +28,9 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn from_index(index: RustFnIndex) -> Self;
     #[doc(hidden)]
-    fn into_index(self: Self) -> RustFnIndex;
+    fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
+    #[cfg(feature="compiler")]
     fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
 }
 
@@ -35,6 +38,7 @@ pub trait VMFunc<T>: Debug {
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMData<T: VMFunc<T>, U> {
     #[doc(hidden)]
+    #[cfg(feature="runtime")]
     fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
 }
 
@@ -115,6 +119,34 @@ impl<T> Program<T> where T: VMFunc<T> {
     }
 }
 
+
+/// Allowed heap reference counting operations.
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(u8)]
+pub enum HeapRefOp {
+    /// Increase reference counter.
+    Inc,
+    /// Decrease reference counter, free on zero.
+    Dec,
+    /// Decrease reference counter but do not free on zero.
+    DecNoFree,
+    /// Free if reference counter is 0, otherwise do nothing.
+    Free,
+}
+
+impl HeapRefOp {
+    #[cfg(feature="runtime")]
+    pub(crate) fn from_u8(index: u8) -> Self {
+        match index {
+            x if x == Self::Inc as u8 => Self::Inc,
+            x if x == Self::Dec as u8 => Self::Dec,
+            x if x == Self::Free as u8 => Self::Free,
+            x if x == Self::DecNoFree as u8 => Self::DecNoFree,
+            _ => panic!("Invalid HeapRefOp index {}", index),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 #[allow(dead_code)]
@@ -181,6 +213,7 @@ pub enum Constructor {
 }
 
 /// Information about a serialized constructor
+#[cfg(feature="runtime")]
 pub struct ConstructorData {
     /// Construction operation
     pub op: Constructor,
@@ -190,7 +223,17 @@ pub struct ConstructorData {
     pub next: StackAddress,
 }
 
+#[cfg(feature="compiler")]
 impl Constructor {
+    /// Returns u8 representation of this constructor.
+    pub fn to_u8(self: Self) -> u8 {
+        self as u8
+    }
+}
+
+#[cfg(feature="runtime")]
+impl Constructor {
+    /// Creates a constructor instance from given u8.
     pub fn from_u8(raw: u8) -> Constructor {
         //un safe { ::std::mem::transmute(raw) }
         match raw {
@@ -201,9 +244,6 @@ impl Constructor {
             x if x == Self::Enum as u8 => Self::Enum,
             index @ _ => unreachable!("Invalid constructor type {}", index),
         }
-    }
-    pub fn to_u8(self: Self) -> u8 {
-        self as u8
     }
     // Parses a constructor.
     pub fn parse(stack: &Stack, mut offset: StackAddress) -> ConstructorData {

@@ -4,7 +4,7 @@ use std::{env, collections::HashMap, time::{Instant, Duration}};
 /*
  * Opcode profiler
  *
- * Usage from project root e.g. target/release/profile-run itsy/examples/mandelbrot.itsy
+ * Usage from project root e.g. target/release/examples/profile-run itsy/examples/mandelbrot.itsy
  */
 
 mod shared;

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
-use crate::bytecode::HeapRef;
+use crate::bytecode::{HeapRef, HeapRefOp};
 use crate::shared::index_twice;
 
 // Asserts that a heap item exists when debug_assertions are enabled
@@ -25,32 +25,6 @@ pub enum HeapCmp {
     Lte,
     Gt,
     Gte
-}
-
-/// Allowed heap reference counting operations.
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[repr(u8)]
-pub enum HeapRefOp {
-    /// Increase reference counter.
-    Inc,
-    /// Decrease reference counter, free on zero.
-    Dec,
-    /// Decrease reference counter but do not free on zero.
-    DecNoFree,
-    /// Free if reference counter is 0, otherwise do nothing.
-    Free,
-}
-
-impl HeapRefOp {
-    pub(crate) fn from_u8(index: u8) -> Self {
-        match index {
-            x if x == Self::Inc as u8 => Self::Inc,
-            x if x == Self::Dec as u8 => Self::Dec,
-            x if x == Self::Free as u8 => Self::Free,
-            x if x == Self::DecNoFree as u8 => Self::DecNoFree,
-            _ => panic!("Invalid HeapRefOp index {}", index),
-        }
-    }
 }
 
 /// A reference counted heap object.

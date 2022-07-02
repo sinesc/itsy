@@ -4,7 +4,7 @@ use std::env;
 /*
  * Demo script runner
  *
- * Usage from project root e.g. target/release/run itsy/examples/mandelbrot.itsy
+ * Usage from project root e.g. target/release/examples/run itsy/examples/mandelbrot.itsy
  */
 
 mod shared;

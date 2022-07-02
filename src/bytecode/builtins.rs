@@ -1,11 +1,13 @@
 //! Built-in functions. These will be implemented on the Builtin enum and exec'd via vm::builtincall()
 
-use std::str::Chars;
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset};
-use crate::bytecode::{HeapRef, runtime::heap::{HeapOp, HeapRefOp}};
+#[cfg(feature="runtime")]
+use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp, runtime::heap::HeapOp}};
+#[cfg(feature="runtime")]
+use std::str::Chars;
 
 /// Appends len chars from source starting at start to target. If len is None the entire remaining source will be copied.
+#[cfg(feature="runtime")]
 fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut String) -> Chars<'a> {
 
     let mut iter = source.chars();

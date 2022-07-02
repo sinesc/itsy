@@ -6,74 +6,22 @@
     },
     "tasks": [
         {
-            "label": "cargo run file in debug-runner",
+            "label": "cargo build library",
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run",
-                "--features=\"compiler\"",
-                "--features=\"debugging\"",
-                "--bin",
-                "debug-run",
-                "--",
-                "${relativeFile}"
-            ],
-            "options": {
-                "env": {
-                    "RUST_BACKTRACE": "1"
-                }
-            },
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "cargo run file in profile-runner",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "run",
-                "--features=\"compiler\"",
-                "--features=\"debugging\"",
-                "--release",
-                "--bin",
-                "profile-run",
-                "--",
-                "${relativeFile}"
-            ],
-            "options": {
-                "env": {
-                    "RUST_BACKTRACE": "1"
-                }
-            },
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "cargo run file in runner",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "run",
-                "--features=\"compiler\"",
-                "--release",
-                "--bin",
-                "run",
-                "--",
-                "${relativeFile}"
+                "build"
             ],
             "group": "build",
             "problemMatcher": []
         },
         {
-            "label": "cargo run bench",
+            "label": "cargo build library (release)",
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run",
-                "--features=\"compiler\"",
-                "--release",
-                "--bin",
-                "bench"
+                "build",
+                "--release"
             ],
             "group": "build",
             "problemMatcher": []
@@ -95,22 +43,95 @@
             "problemMatcher": []
         },
         {
-            "label": "cargo build library",
+            "label": "cargo build itsyc (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
-                "build"
+                "build",
+                "--no-default-features",
+                "--features=\"compiler\"",
+                "--release",
+                "--example",
+                "itsyc"
             ],
             "group": "build",
             "problemMatcher": []
         },
         {
-            "label": "cargo build library (release)",
+            "label": "cargo build itsyvm (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
                 "build",
-                "--release"
+                "--no-default-features",
+                "--features=\"runtime\"",
+                "--release",
+                "--example",
+                "itsyvm"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo run file in debug-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"debugging\"",
+                "--example",
+                "debug-run",
+                "--",
+                "${relativeFile}"
+            ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo run file in profile-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"debugging\"",
+                "--release",
+                "--example",
+                "profile-run",
+                "--",
+                "${relativeFile}"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo run file in runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--example",
+                "run",
+                "--",
+                "${relativeFile}"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo run bench (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--example",
+                "bench"
             ],
             "group": "build",
             "problemMatcher": []

@@ -38,7 +38,9 @@ mod config_derived {
 }
 use config_derived::*;
 
-use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMFunc, VMData, Program};
+use bytecode::{VMFunc, Program};
+#[cfg(feature="runtime")]
+use bytecode::{runtime::vm::VM, runtime::vm::VMState, VMData};
 #[cfg(feature="compiler")]
 use bytecode::compiler::compile;
 #[cfg(feature="compiler")]
@@ -182,8 +184,8 @@ macro_rules! itsy_api {
     };
     // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
-        impl $crate::runtime::VMFunc<$type_name> for $type_name {
-            fn into_index(self: Self) -> $crate::sizes::RustFnIndex {
+        impl $crate::binary::VMFunc<$type_name> for $type_name {
+            fn to_index(self: Self) -> $crate::sizes::RustFnIndex {
                 self as $crate::sizes::RustFnIndex
             }
             fn from_index(index: $crate::sizes::RustFnIndex) -> Self {
@@ -196,15 +198,17 @@ macro_rules! itsy_api {
                 }
             }
             #[allow(unused_mut)]
+            #[cfg(feature="compiler")]
             fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::sizes::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($type_name::$name.into_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
+                    map.insert(stringify!($name), ($type_name::$name.to_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
                 )*
                 map
             }
         }
-        impl $crate::runtime::VMData<$type_name, $context_type> for $type_name {
+        #[cfg(feature="runtime")]
+        impl $crate::binary::VMData<$type_name, $context_type> for $type_name {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
                 use $crate::runtime::stack::StackOp;
@@ -341,6 +345,7 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
 ///
 /// The name of the entry function must be `main`. See [VM] for more control
 /// about running a program or [build_str] for an example that uses the `run` function.
+#[cfg(feature="runtime")]
 pub fn run<F, D>(program: &Program<F>, context: &mut D) -> Result<VM<F, D>, Error> where F: VMFunc<F> + VMData<F, D> {
     let mut vm = VM::new(program);
     match vm.run(context) {
