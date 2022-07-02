@@ -75,7 +75,7 @@ struct Compiler<T> {
 /// }
 /// ```
 ///
-/// The returned [Program] is now ready to be run by [run](crate::run) or [VM::run](crate::VM::run).
+/// The returned [Program] is now ready to be run by [run](crate::run) or [VM::run](crate::runtime::VM::run).
 pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> where T: VMFunc<T> {
 
     let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;

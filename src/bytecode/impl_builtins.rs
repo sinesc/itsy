@@ -14,7 +14,7 @@ macro_rules! impl_builtins {
     (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret $vm:ident, String, $value:ident) => { {
         let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::ItemIndex::MAX);
-        $vm.stack.push($crate::runtime::heap::HeapRef::new(index, 0));
+        $vm.stack.push($crate::bytecode::HeapRef::new(index, 0));
     } };
     (@handle_ret $vm:ident, HeapRef, $value:ident) => { $vm.stack.push($value); };
     (@handle_ret $vm:ident, StackAddress, $value:ident) => { $vm.stack.push($value); };
@@ -39,8 +39,8 @@ macro_rules! impl_builtins {
     (@handle_param $vm:ident, StackOffset) => { $vm.stack.pop() };
     (@handle_param $vm:ident, $_:tt) => { compile_error!("Unsupported parameter type") };
     // translate parameter types
-    (@handle_param_type String) => { $crate::runtime::heap::HeapRef };
-    (@handle_param_type str) => { $crate::runtime::heap::HeapRef };
+    (@handle_param_type String) => { $crate::bytecode::HeapRef };
+    (@handle_param_type str) => { $crate::bytecode::HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // translate ref-param values
     (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
@@ -50,9 +50,9 @@ macro_rules! impl_builtins {
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
     (@handle_ref_param_type $other:ident) => { $other };
     // refcount handling for ref-params
-    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
-    //(@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::runtime::heap::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
+    //(@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
     // reverse argument load order
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -104,7 +104,7 @@ macro_rules! impl_builtins {
 
         #[cfg(doc)]
         pub mod documentation {
-            //! Builtin Itsy types
+            //! Generated documentation of builtin Itsy types.
             //!
             //! This module is only built with cargo doc and not generally available to Rust code. It is used as a place to document the builtin
             //! types available from within Itsy code. Due to limitations in the generation the following simplifications were made:
@@ -167,7 +167,7 @@ macro_rules! impl_builtins {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             #[cfg(feature="runtime")]
             pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress) {
-                use $crate::runtime::stack::StackOp;
+                use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
                 match self {
                     $(
                     $(

@@ -6,10 +6,9 @@ pub mod error;
 pub mod resolved;
 
 use crate::{prelude::*, VariantIndex};
-use crate::ast::{Visibility, LiteralValue};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE, STACK_OFFSET_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
-use crate::frontend::ast::{self, Positioned, Typeable, Resolvable, CallSyntax};
+use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable, Resolvable, CallSyntax};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;

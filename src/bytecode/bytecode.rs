@@ -43,7 +43,7 @@ pub trait VMData<T: VMFunc<T>, U> {
 }
 
 /// An Itsy bytecode program. Programs can be created using the [compile](compiler::compile) function or the bytecode [Writer] and can
-/// be executed by [run](crate::run) or [VM::run](crate::VM::run).
+/// be executed by [run](crate::run) or [VM::run](crate::runtime::VM::run).
 #[derive(Clone, Debug)]
 pub struct Program<T> {
     rust_fn: PhantomData<T>,

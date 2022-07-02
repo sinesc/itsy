@@ -23,7 +23,7 @@ fn main() -> std::io::Result<()> {
         let mut file = File::open(&args[1])?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
-        match binary::Program::<MyAPI>::from_bytes(&contents) {
+        match Program::<MyAPI>::from_bytes(&contents) {
             Some(program) => {
                 let mut context = Context { seed: 1.2345 };
                 let mut vm = runtime::VM::new(&program);

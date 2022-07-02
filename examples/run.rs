@@ -10,6 +10,12 @@ use std::env;
 mod shared;
 use shared::{Context, MyAPI};
 
+fn run(program: Program<MyAPI>) {
+    let mut context = Context { seed: 1.2345 };
+    let mut vm = runtime::VM::new(&program);
+    vm.run(&mut context);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -18,9 +24,7 @@ fn main() {
     } else {
         match build::<MyAPI, _>(&args[1]) {
             Ok(program) => {
-                let mut context = Context { seed: 1.2345 };
-                let mut vm = runtime::VM::new(&program);
-                vm.run(&mut context);
+                run(program);
             }
             Err(err) => {
                 println!("{}", err);

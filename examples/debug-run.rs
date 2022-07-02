@@ -64,7 +64,7 @@ fn log(filename: &str, append: bool, data: &str) {
     }
 }
 
-fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<binary::Program<MyAPI>, Error> {
+fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<Program<MyAPI>, Error> {
     let source_file = source_file.as_ref();
     let parsed = parser::parse(|module_path| {
         let filename = parser::module_filename(source_file, module_path);

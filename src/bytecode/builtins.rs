@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 #[cfg(feature="runtime")]
-use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp, runtime::heap::HeapOp}};
+use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp}};
 #[cfg(feature="runtime")]
 use std::str::Chars;
 
