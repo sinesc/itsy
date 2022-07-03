@@ -28,7 +28,7 @@ fn main() {
 }
 
 fn run(program: Program<MyAPI>) {
-    let mut context = Context { seed: 1.2345 };
+    let mut context = Context::new();
     let mut vm = runtime::VM::new(program);
     let mut opcode_stats = HashMap::new();
     let vm_start_time = Instant::now();

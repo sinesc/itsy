@@ -34,7 +34,7 @@ fn main() {
 }
 
 fn run(program: Program<MyAPI>, write_logs: bool) {
-    let mut context = Context { seed: 1.2345 };
+    let mut context = Context::new();
     let mut vm = runtime::VM::new(program);
     if write_logs {
         log("logs/bytecode.ini", false, &vm.format_program());

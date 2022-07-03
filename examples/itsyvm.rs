@@ -25,7 +25,7 @@ fn main() -> std::io::Result<()> {
         file.read_to_end(&mut contents)?;
         match Program::<MyAPI>::from_bytes(&contents) {
             Some(program) => {
-                let mut context = Context { seed: 1.2345 };
+                let mut context = Context::new();
                 let mut vm = runtime::VM::new(program);
                 vm.run(&mut context).unwrap();
             }

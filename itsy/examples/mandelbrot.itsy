@@ -6,38 +6,55 @@
  *    println(s: String)
  */
 
-fn mandelbrot(columns: u32, rows: u32) -> [ String ] {
+fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, zoom_x: f64, zoom_y: f64) -> String {
 
-    let chars = [ ".", ",", "`", "´", "'", "~", "^", "°", "$", ";", "=", "o", "O", "%", "&", ":" ];
-    let lines: [ String ] = [ ]; // FIXME: type annotation should not be required
-    let max_x = columns as f32;
-    let max_y = rows as f32;
-    let y = -1.4f32;
+    let chars = [ ".", ",", "`", "´", "'", "^", "°", "~", ":", "=", "*", "o", "O", "0" ];
+    let start_depth = if depth > chars.len() as u32 { depth - chars.len() as u32 } else { 0 };
+    let result = "";
+    let max_x = columns as f64;
+    let max_y = rows as f64;
+    let x0 = -2.0f64 + ((2.0 + zoom_x) * (1.0 - zoom));
+    let y = -1.4f64 + ((1.4 + zoom_y) * (1.0 - zoom));
 
     for _ in 0..rows {
-        let x = -2.0f32;
+        let x = x0;
         let line = "";
         for _ in 0..columns {
-            let r = 0f32;
-            let i = 0f32;
+            let r = 0f64;
+            let i = 0f64;
             let n = 0;
-            while n < 16 && r * r + i * i <= 4.0 {
-                r = r * r - i * i + x;
+            while n < depth && r * r + i * i <= 4.0 {
+                let r_tmp = r * r - i * i + x;
                 i = 2.0 * r * i + y;
+                r = r_tmp;
                 n += 1;
             }
-            line += chars[n-1];
-            x += 3.6 / max_x;
+            line += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
+            x += 3.6 / max_x * zoom;
         }
-        lines.push(line);
-        y += 2.81 / max_y;
+        result += line + "\n";
+        y += 2.80 / max_y * zoom;
     }
 
-    lines
+    result
 }
 
 fn main() {
-    for line in mandelbrot(80, 25) {
-        println(line);
+    let zoom = 1.0;
+    let runtime = 0;
+
+    // clear terminal
+    let esc = String::from_ascii(27);
+    print("{esc}[2J");
+
+    for i in 0..640 {
+        let iterations = 28 + i / 4;
+        // move cursor to top left position
+        print("{esc}[1;1H\nMandelbrot set, {iterations} iterations, {runtime}ms/f        \n");
+        // print fractal
+        print(mandelbrot(80, 30, iterations, zoom, 0.32570659879, 0.0470399495155));
+        // adjut zoom level and wait a bit
+        zoom = zoom * 0.95;
+        runtime = interval(1000 / 32);
     }
 }
