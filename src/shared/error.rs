@@ -1,21 +1,18 @@
-#[cfg(feature="compiler")]
 use std::path::{Path, PathBuf};
 use crate::prelude::*;
-#[cfg(feature="compiler")]
 use crate::frontend::{parser::error::{ParseError, ParseErrorKind}, resolver::error::ResolveError};
-#[cfg(feature="compiler")]
 use crate::bytecode::compiler::error::CompileError;
+#[cfg(feature="runtime")]
+use crate::bytecode::runtime::error::RuntimeError;
 
 /// An error generated during program compilation or execution.
 #[derive(Clone, Debug)]
 pub enum Error {
-    #[cfg(feature="compiler")]
     ParseError(ParseError),
-    #[cfg(feature="compiler")]
     ResolveError(ResolveError),
-    #[cfg(feature="compiler")]
     CompileError(CompileError),
-    RuntimeError, // TODO: details
+    #[cfg(feature="runtime")]
+    RuntimeError(RuntimeError),
 }
 
 #[cfg(feature="compiler")]
@@ -26,7 +23,8 @@ impl Error {
             Self::ParseError(e) => e.loc(input),
             Self::ResolveError(e) => e.loc(input),
             Self::CompileError(e) => e.loc(input),
-            Self::RuntimeError => (0, 0),
+            #[cfg(feature="runtime")]
+            Self::RuntimeError(_) => (0, 0),
         }
     }
     /// Path to the module where the error occured.
@@ -35,7 +33,8 @@ impl Error {
             Self::ParseError(e) => e.module_path(),
             Self::ResolveError(e) => e.module_path(),
             Self::CompileError(e) => e.module_path(),
-            Self::RuntimeError => "",
+            #[cfg(feature="runtime")]
+            Self::RuntimeError(_) => "",
         }
     }
 }
@@ -43,40 +42,41 @@ impl Error {
 impl Display for Error {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            #[cfg(feature="compiler")]
             Self::ParseError(e) => write!(f, "Parser error: {}", e),
-            #[cfg(feature="compiler")]
             Self::ResolveError(e) => write!(f, "Resolver error: {}", e),
-            #[cfg(feature="compiler")]
             Self::CompileError(e) => write!(f, "Compiler error: {}", e),
-            Self::RuntimeError => write!(f, "Runtime error"),
+            #[cfg(feature="runtime")]
+            Self::RuntimeError(e) => write!(f, "Runtime error: {}", e),
         }
     }
 }
 
-#[cfg(feature="compiler")]
 impl From<ParseError> for Error {
     fn from(error: ParseError) -> Error {
         Error::ParseError(error)
     }
 }
 
-#[cfg(feature="compiler")]
 impl From<ResolveError> for Error {
     fn from(error: ResolveError) -> Error {
         Error::ResolveError(error)
     }
 }
 
-#[cfg(feature="compiler")]
 impl From<CompileError> for Error {
     fn from(error: CompileError) -> Error {
         Error::CompileError(error)
     }
 }
 
+#[cfg(feature="runtime")]
+impl From<RuntimeError> for Error {
+    fn from(error: RuntimeError) -> Error {
+        Error::RuntimeError(error)
+    }
+}
+
 /// An `Error`-wrapper returned by `build()`.
-#[cfg(feature="compiler")]
 #[derive(Clone, Debug)]
 pub struct BuildError {
     pub(crate) error: Error,
@@ -84,7 +84,6 @@ pub struct BuildError {
     pub(crate) source: String,
 }
 
-#[cfg(feature="compiler")]
 impl BuildError {
     /// Returns the error being wrapped by this build error.
     pub fn error(self: &Self) -> &Error {
@@ -104,7 +103,8 @@ impl BuildError {
             Error::ParseError(e) => e.loc(&self.source),
             Error::ResolveError(e) => e.loc(&self.source),
             Error::CompileError(e) => e.loc(&self.source),
-            _ => (0, 0),
+            #[cfg(feature="runtime")]
+            Error::RuntimeError(e) => (0, e.offset() as u32),
         }
     }
     /// Path to the module where the error occured.
@@ -113,11 +113,10 @@ impl BuildError {
     }
 }
 
-#[cfg(feature="compiler")]
 impl Display for BuildError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.loc();
-        match self.error {
+        match &self.error {
             Error::ParseError(ParseError { kind: ParseErrorKind::IOError(_), .. }) => write!(f, "{}", self.error),
             _ => write!(f, "{} in line {}, column {} in file {}", self.error, loc.0, loc.1, self.filename.to_string_lossy()),
         }

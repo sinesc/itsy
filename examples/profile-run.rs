@@ -29,21 +29,21 @@ fn main() {
 
 fn run(program: Program<MyAPI>) {
     let mut context = Context { seed: 1.2345 };
-    let mut vm = runtime::VM::new(&program);
+    let mut vm = runtime::VM::new(program);
     let mut opcode_stats = HashMap::new();
     let vm_start_time = Instant::now();
     loop {
-        let vmstate = {
-            let start_time = Instant::now();
-            let current_opcode = vm.get_instruction();
-            let vmstate = vm.step(&mut context);
-            let elapsed_time = Instant::now() - start_time;
-            let stats = opcode_stats.entry(current_opcode).or_insert((0, Duration::ZERO));
-            stats.0 += 1;
-            stats.1 += elapsed_time;
-            vmstate
-        };
-        if vmstate != runtime::VMState::Ready {
+        // time single step
+        let start_time = Instant::now();
+        let current_opcode = vm.get_instruction();
+        vm.step(&mut context).unwrap();
+        let elapsed_time = Instant::now() - start_time;
+        let stats = opcode_stats.entry(current_opcode).or_insert((0, Duration::ZERO));
+        stats.0 += 1;
+        stats.1 += elapsed_time;
+
+        // check if vm is finished
+        if vm.state() != runtime::VMState::Ready {
             let vm_elapsed_time = Instant::now() - vm_start_time;
             let mut stats: Vec<(_, _)> = opcode_stats.into_iter().collect();
             stats.sort_by(|a, b| a.1.1.cmp(&b.1.1));

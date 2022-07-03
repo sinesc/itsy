@@ -35,8 +35,8 @@ fn main() {
     let mut context = BenchContext { time: None };
     match build::<BenchAPI, _>("itsy/bench/main.itsy") {
         Ok(program) => {
-            let mut vm = runtime::VM::new(&program);
-            vm.run(&mut context);
+            let mut vm = runtime::VM::new(program);
+            vm.run(&mut context).unwrap();
         }
         Err(err) => {
             println!("{}", err);

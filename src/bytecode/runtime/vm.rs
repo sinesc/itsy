@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
-use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp}}};
+use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp}, error::*}};
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
 
@@ -42,16 +42,16 @@ pub struct VM<T, U> {
 /// Public VM methods.
 impl<T, U> VM<T, U> {
     /// Create a new VM instance with the given Program.
-    pub fn new(program: &Program<T>) -> Self where T: VMFunc<T> + VMData<T, U> {
+    pub fn new(program: Program<T>) -> Self where T: VMFunc<T> + VMData<T, U> {
         let Program { instructions, consts, const_descriptors, .. } = program;
-        let stack = Self::init_consts(consts, const_descriptors);
+        let stack = Self::init_consts(&consts, &const_descriptors);
         // occupy heap element 0 so we can identify intialized heap objects their address != 0
         let mut heap = Heap::new();
         heap.alloc(0, 0);
         VM {
             context_type: PhantomData,
             func_type   : PhantomData,
-            instructions: instructions.clone(),
+            instructions: instructions,
             pc          : 0,
             state       : VMState::Ready,
             stack       : stack,
@@ -60,14 +60,19 @@ impl<T, U> VM<T, U> {
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
+    pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
-            panic!("Attempted to run in non-ready state");
+            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
         }
         self.exec(context);
         if self.state == VMState::Terminated && self.heap.len() > 1 {
-            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
+            return Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption));
         }
+        Ok(())
+    }
+
+    /// Returns the current VM state
+    pub fn state(self: &Self) -> VMState {
         self.state
     }
 
@@ -305,15 +310,15 @@ impl<T, U> VM<T, U> {
 #[cfg(feature="debugging")]
 impl<T, U> VM<T, U> {
     /// Executes single bytecode instruction.
-    pub fn step(self: &mut Self, context: &mut U) -> VMState where T: VMFunc<T> + VMData<T, U> {
+    pub fn step(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
-            panic!("Attempted to run in non-ready state");
+            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
         }
         self.exec_step(context);
         if self.state == VMState::Terminated && self.heap.len() > 1 {
-            panic!("{} Heap elements remaining after program termination: {:?}", self.heap.len(), self.heap.data());
+            return Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption));
         }
-        self.state
+        Ok(())
     }
 
     /// Disassembles the bytecode and returns it as a string.

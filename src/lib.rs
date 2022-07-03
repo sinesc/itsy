@@ -80,8 +80,8 @@ use config_derived::*;
 ///     )).unwrap();
 ///
 ///     // Create a new VM and run the program.
-///     let mut vm = VM::new(&program);
-///     vm.run(&mut context);
+///     let mut vm = VM::new(program);
+///     vm.run(&mut context).unwrap();
 /// }
 /// ```
 ///
@@ -177,6 +177,7 @@ macro_rules! itsy_api {
     // implement VMFunc trait
     (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
+            #[cfg(feature="compiler")]
             fn to_index(self: Self) -> $crate::internals::binary::sizes::RustFnIndex {
                 self as $crate::internals::binary::sizes::RustFnIndex
             }
@@ -281,7 +282,7 @@ macro_rules! itsy_api {
 ///         }
 ///     )).unwrap();
 ///
-///     run(&program, &mut ()).unwrap();
+///     run(program, &mut ()).unwrap();
 /// }
 /// ```
 #[cfg(feature="compiler")]
@@ -338,13 +339,8 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
 /// The name of the entry function must be `main`. See [VM](crate::runtime::VM) for more control
 /// about running a program or [build_str] for an example that uses the `run` function.
 #[cfg(feature="runtime")]
-pub fn run<F, D>(program: &Program<F>, context: &mut D) -> Result<bytecode::runtime::vm::VM<F, D>, Error> where F: bytecode::VMFunc<F> + bytecode::VMData<F, D> {
-    use bytecode::{runtime::vm::VM, runtime::vm::VMState};
+pub fn run<F, D>(program: Program<F>, context: &mut D) -> Result<bytecode::runtime::vm::VM<F, D>, bytecode::runtime::error::RuntimeError> where F: bytecode::VMFunc<F> + bytecode::VMData<F, D> {
+    use bytecode::{runtime::vm::VM};
     let mut vm = VM::new(program);
-    match vm.run(context) {
-        VMState::Ready => Err(Error::RuntimeError), // TODO: or maybe panic? if this happens its an itsy bug
-        VMState::Terminated => Ok(vm),
-        VMState::Yielded => Ok(vm),
-        VMState::RuntimeError => Err(Error::RuntimeError),
-    }
+    vm.run(context).map(|_| vm)
 }

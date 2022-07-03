@@ -26,8 +26,8 @@ fn main() -> std::io::Result<()> {
         match Program::<MyAPI>::from_bytes(&contents) {
             Some(program) => {
                 let mut context = Context { seed: 1.2345 };
-                let mut vm = runtime::VM::new(&program);
-                vm.run(&mut context);
+                let mut vm = runtime::VM::new(program);
+                vm.run(&mut context).unwrap();
             }
             None => {
                 println!("Error deserializing program");

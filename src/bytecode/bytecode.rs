@@ -28,6 +28,7 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn from_index(index: RustFnIndex) -> Self;
     #[doc(hidden)]
+    #[cfg(feature="compiler")]
     fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
     #[cfg(feature="compiler")]

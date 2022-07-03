@@ -97,11 +97,10 @@ pub fn run(code: &str) -> Context {
         }
     };
     let mut context = Vec::new();
-    match itsy_run(&program, &mut context) {
+    match itsy_run(program, &mut context) {
         Ok(_) => { },
         Err(err) => {
-            let loc =  err.loc(&input);
-            panic!("{} in line {}, column {}.", err, loc.0, loc.1);
+            panic!("{}", err);
         }
     }
     context

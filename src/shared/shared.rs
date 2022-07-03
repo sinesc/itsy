@@ -3,6 +3,7 @@
 pub mod numeric;
 pub mod typed_ids;
 pub mod meta;
+#[cfg(feature="compiler")]
 pub mod error;
 
 use crate::shared::{typed_ids::TypeId, meta::{Type, Array}};
