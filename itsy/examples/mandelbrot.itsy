@@ -23,10 +23,13 @@ fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, zoom_x: f64, zoom_
             let r = 0f64;
             let i = 0f64;
             let n = 0;
-            while n < depth && r * r + i * i <= 4.0 {
-                let r_tmp = r * r - i * i + x;
+            while n < depth {
+                let r_tmp = r * r - i * i;
+                if r_tmp > 4.0 { // actual mandelbrot should check r² + i², but we check r² - i² because it looks cooler and allows reuse of r_tmp
+                    break;
+                }
                 i = 2.0 * r * i + y;
-                r = r_tmp;
+                r = r_tmp + x;
                 n += 1;
             }
             line += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
@@ -50,7 +53,7 @@ fn main() {
     for i in 0..640 {
         let iterations = 28 + i / 4;
         // move cursor to top left position
-        print("{esc}[1;1H\nMandelbrot set, {iterations} iterations, {runtime}ms/f        \n");
+        print("{esc}[1;1H\nModified Mandelbrot set, {iterations} iterations, zoom {(1.0f64/zoom).floor()}x, {runtime}ms/f        \n");
         // print fractal
         print(mandelbrot(80, 30, iterations, zoom, 0.32570659879, 0.0470399495155));
         // adjut zoom level and wait a bit
