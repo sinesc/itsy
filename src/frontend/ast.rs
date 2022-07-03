@@ -1261,7 +1261,18 @@ pub struct Call {
 
 impl_typeable!(Call);
 impl_positioned!(Call);
-impl_display!(Call, "{}({:?})", ident, args);
+
+impl Display for Call {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut args = self.args.iter().map(|e| format!("{}", e)).collect::<Vec<String>>();
+        let call_syntax = match &self.call_syntax {
+            CallSyntax::Ident => "".to_string(),
+            CallSyntax::Path(p) => p.to_string() + "::",
+            CallSyntax::Method => args.remove(0) + ".",
+        };
+        write!(f, "{}{}({})", call_syntax, &self.ident.to_string(), args.join(", "))
+    }
+}
 
 impl Resolvable for Call {
     fn num_resolved(self: &Self) -> Progress {
