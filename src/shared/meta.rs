@@ -187,6 +187,7 @@ pub enum BuiltinGroup {
     StringToUppercase,
     StringRepeat,
     StringFind,
+    StringFromAscii,
 }
 
 /// Information about a data type in a resolved program.

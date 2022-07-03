@@ -285,9 +285,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Create float builtin function signature.
-    fn create_string_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
-        //let i32_type_id = self.primitive_type_id(Type::i32)?;
+    fn create_string_builtin(self: &mut Self, name: &str) -> ResolveResult<Option<FunctionId>> {
+        let type_id = self.primitive_type_id(Type::String)?;
         let bool_type_id = self.primitive_type_id(Type::bool)?;
+        let u8_type_id = self.primitive_type_id(Type::u8)?;
         let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
         let so_type_id = self.primitive_type_id(STACK_OFFSET_TYPE)?;
         let mut insert = |g, r, a: Vec<TypeId>| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(), Some(FunctionKind::Builtin(type_id, g))));
@@ -305,6 +306,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             "to_uppercase"  => insert(BuiltinGroup::StringToUppercase, type_id, vec![ type_id ]),
             "repeat"        => insert(BuiltinGroup::StringRepeat, type_id, vec![ type_id, sa_type_id ]),
             "find"          => insert(BuiltinGroup::StringFind, so_type_id, vec![ type_id, type_id ]),
+            "String::from_ascii"    => insert(BuiltinGroup::StringFromAscii, type_id, vec![ u8_type_id ]),
             _ => None,
         })
     }
@@ -819,7 +821,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                         if item.function_id.is_none() {
-                            item.function_id = self.create_string_builtin(&item.ident.name, type_id)?;
+                            item.function_id = self.create_string_builtin(&item.ident.name)?;
                         }
                     } else {
                         // try method on type
@@ -841,7 +843,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 },
                 CallSyntax::Path(static_path) => {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
-                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
+                    // todo fix this hack: path handling needs a rework
+                    if static_path.name.len() == 1 && static_path.name[0].name == "String" {
+                        item.function_id = self.create_string_builtin(&path)?; // FIXME: probably will include module path if any.
+                    } else {
+                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
+                    }
                 },
             }
             if item.function_id.is_none() && self.stage.must_resolve() {

@@ -1740,6 +1740,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BuiltinGroup::StringToUppercase => { self.writer.builtincall(Builtin::string_to_uppercase); },
                     BuiltinGroup::StringRepeat => { self.writer.builtincall(Builtin::string_repeat); },
                     BuiltinGroup::StringFind => { self.writer.builtincall(Builtin::string_find); },
+                    BuiltinGroup::StringFromAscii => { self.writer.builtincall(Builtin::string_from_ascii); },
                     _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
                 }
             },
