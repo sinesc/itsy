@@ -1628,7 +1628,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let constructor = self.get_constructor(ty);
             self.write_cnt_nc(constructor, HeapRefOp::Free);
         }
-        self.writer.discard(ty.primitive_size());
+        if ty.primitive_size() > 0 {
+            self.writer.discard(ty.primitive_size());
+        }
     }
 
     /// Swap topmost 2 stack values.
