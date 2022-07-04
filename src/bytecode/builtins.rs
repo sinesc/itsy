@@ -166,6 +166,40 @@ impl_builtins! {
                 result
             }
         }
+
+        /// Reverses the order of elements in the array.
+        reverse(self: Self) {
+            fn <
+                array_reverse8<T: u8>(this: Array),
+                array_reverse16<T: u16>(this: Array),
+                array_reverse32<T: u32>(this: Array),
+                array_reverse64<T: u64>(this: Array),
+            >(&mut vm) {
+                let index = this.index();
+                let num_elements = vm.heap.item(index).data.len() / size_of::<T>();
+                for i in 0..num_elements/2 {
+                    let left_offset = i * size_of::<T>();
+                    let right_offset = (num_elements - i - 1) * size_of::<T>();
+                    let left: T = vm.heap.load(index, left_offset);
+                    let right: T = vm.heap.load(index, right_offset);
+                    vm.heap.store(index, left_offset, right);
+                    vm.heap.store(index, right_offset, left);
+                }
+            }
+
+            fn array_reversex(&mut vm + constructor, this: Array) {
+                let index = this.index();
+                let num_elements = vm.heap.item(index).data.len() / size_of::<HeapRef>();
+                for i in 0..num_elements/2 {
+                    let left_offset = i * size_of::<HeapRef>();
+                    let right_offset = (num_elements - i - 1) * size_of::<HeapRef>();
+                    let left: HeapRef = vm.heap.load(index, left_offset);
+                    let right: HeapRef = vm.heap.load(index, right_offset);
+                    vm.heap.store(index, left_offset, right);
+                    vm.heap.store(index, right_offset, left);
+                }
+            }
+        }
     }
 
     Float {

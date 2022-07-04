@@ -42,22 +42,43 @@ fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, zoom_x: f64, zoom_
     result
 }
 
+struct Frame {
+    iterations: u32,
+    zoom: f64,
+}
+
 fn main() {
-    let zoom = 1.0;
-    let runtime = 0;
+    // compute frame parameters into an array so we can easily reverse the zoom direction once we reach f64 limits
+    let zoom = 1.5;
+    let zoom_multiplier = 0.99;
+    let num_frames = 700;
+    let frames: [ Frame ] = [ ];
+
+    for i in 0..num_frames {
+        // adjust iterations while zooming to keep a narrow boundary
+        let iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
+        frames.push(Frame { iterations: iterations, zoom: zoom });
+        // adjut zoom level ever faster
+        zoom = zoom * zoom_multiplier;
+        zoom_multiplier -= 0.000115;
+    }
 
     // clear terminal
     let esc = String::from_ascii(27);
     print("{esc}[2J");
 
-    for i in 0..700 {
-        let iterations = 28 + i / 4;
-        // move cursor to top left position
-        print("{esc}[1;1HModified Mandelbrot set, {iterations} iterations, zoom {(1.0/zoom).floor()}x, {runtime}ms/f        \n");
-        // print fractal
-        print(mandelbrot(80, 30, iterations, zoom, 0.32570659879, 0.0470399495155));
-        // adjut zoom level and wait a bit
-        zoom = zoom * 0.95;
-        runtime = interval(1000 / 32);
+    let runtime = 0;
+
+    while true {
+        // move cursor to top left position and print fractal
+        for frame in frames {
+            print("{esc}[1;1HModified Mandelbrot set, {frame.iterations} iterations, zoom {(1.0/frame.zoom).floor()}x, {runtime}ms/f        \n");
+            print(mandelbrot(80, 30, frame.iterations, frame.zoom, 0.32570659879, 0.0470399495155));
+            // interval waits for the given time but considers how much time already elapsed since last call
+            runtime = interval(1000 / 32);
+        }
+        frames.reverse();
     }
+
+    print("{esc}[2J");
 }
