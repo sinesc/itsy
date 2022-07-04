@@ -49,33 +49,31 @@ impl_builtins! {
         /// Returns the length of the array.
         len(self: Self) -> u64 {
             fn <
-                array_len8<T: u8>(this: HeapRef) -> u64,
-                array_len16<T: u16>(this: HeapRef) -> u64,
-                array_len32<T: u32>(this: HeapRef) -> u64,
-                array_len64<T: u64>(this: HeapRef) -> u64,
+                array_len8<T: u8>(this: Array) -> u64,
+                array_len16<T: u16>(this: Array) -> u64,
+                array_len32<T: u32>(this: Array) -> u64,
+                array_len64<T: u64>(this: Array) -> u64,
             >(&mut vm) {
                 (vm.heap.item(this.index()).data.len() / size_of::<T>()) as u64
             }
 
-            fn array_lenx(&mut vm + constructor, this: HeapRef) -> u64 {
-                let len = (vm.heap.item(this.index()).data.len() / size_of::<HeapRef>()) as u64;
-                vm.refcount_value(this, constructor, HeapRefOp::Free);
-                len
+            fn array_lenx(&mut vm + constructor, this: Array) -> u64 {
+                (vm.heap.item(this.index()).data.len() / size_of::<HeapRef>()) as u64
             }
         }
 
         /// Appends an element to the back of the array.
         push(self: Self, value: Any) {
             fn <
-                array_push8<T: u8>(this: HeapRef, value: u8),
-                array_push16<T: u16>(this: HeapRef, value: u16),
-                array_push32<T: u32>(this: HeapRef, value: u32),
-                array_push64<T: u64>(this: HeapRef, value: u64),
+                array_push8<T: u8>(this: Array, value: u8),
+                array_push16<T: u16>(this: Array, value: u16),
+                array_push32<T: u32>(this: Array, value: u32),
+                array_push64<T: u64>(this: Array, value: u64),
             >(&mut vm) {
                 vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
             }
 
-            fn array_pushx(&mut vm + constructor, this: HeapRef, value: HeapRef) {
+            fn array_pushx(&mut vm + constructor, this: Array, value: HeapRef) {
                 vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
                 vm.refcount_value(value, constructor, HeapRefOp::Inc);
             }
@@ -84,10 +82,10 @@ impl_builtins! {
         /// Removes the last element from an array and returns it.
         pop(self: Self) -> Any {
             fn <
-                array_pop8<T: u8>(this: HeapRef) -> u8,
-                array_pop16<T: u16>(this: HeapRef) -> u16,
-                array_pop32<T: u32>(this: HeapRef) -> u32,
-                array_pop64<T: u64>(this: HeapRef) -> u64,
+                array_pop8<T: u8>(this: Array) -> u8,
+                array_pop16<T: u16>(this: Array) -> u16,
+                array_pop32<T: u32>(this: Array) -> u32,
+                array_pop64<T: u64>(this: Array) -> u64,
             >(&mut vm) {
                 let index = this.index();
                 let offset = vm.heap.item(index).data.len() - size_of::<T>();
@@ -96,7 +94,7 @@ impl_builtins! {
                 result
             }
 
-            fn array_popx(&mut vm + constructor, this: HeapRef) -> HeapRef { // FIXME: once data enums are usable this needs to return an Option
+            fn array_popx(&mut vm + constructor, this: Array) -> HeapRef { // FIXME: once data enums are usable this needs to return an Option
                 let index = this.index();
                 let offset = vm.heap.item(index).data.len() - size_of::<HeapRef>();
                 let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
@@ -109,10 +107,10 @@ impl_builtins! {
         /// Shortens the array, keeping the first len elements and dropping the rest.
         truncate(self: Self, size: u64) {
             fn <
-                array_truncate8<T: u8>(this: HeapRef, size: StackAddress),
-                array_truncate16<T: u16>(this: HeapRef, size: StackAddress),
-                array_truncate32<T: u32>(this: HeapRef, size: StackAddress),
-                array_truncate64<T: u64>(this: HeapRef, size: StackAddress),
+                array_truncate8<T: u8>(this: Array, size: StackAddress),
+                array_truncate16<T: u16>(this: Array, size: StackAddress),
+                array_truncate32<T: u32>(this: Array, size: StackAddress),
+                array_truncate64<T: u64>(this: Array, size: StackAddress),
             >(&mut vm) {
                 let index = this.index();
                 let current_size = vm.heap.item(index).data.len();
@@ -122,7 +120,7 @@ impl_builtins! {
                 }
             }
 
-            fn array_truncatex(&mut vm + constructor, this: HeapRef, size: StackAddress) {
+            fn array_truncatex(&mut vm + constructor, this: Array, size: StackAddress) {
                 let index = this.index();
                 let current_size = vm.heap.item(index).data.len();
                 let new_size = size_of::<HeapRef>() * size as usize;
@@ -141,10 +139,10 @@ impl_builtins! {
         /// Removes and returns the element at position index within the array, shifting all elements after it to the left.
         remove(self: Self, element: u64 ) -> Any {
             fn <
-                array_remove8<T: u8>(this: HeapRef, element: StackAddress) -> u8,
-                array_remove16<T: u16>(this: HeapRef, element: StackAddress) -> u16,
-                array_remove32<T: u32>(this: HeapRef, element: StackAddress) -> u32,
-                array_remove64<T: u64>(this: HeapRef, element: StackAddress) -> u64,
+                array_remove8<T: u8>(this: Array, element: StackAddress) -> u8,
+                array_remove16<T: u16>(this: Array, element: StackAddress) -> u16,
+                array_remove32<T: u32>(this: Array, element: StackAddress) -> u32,
+                array_remove64<T: u64>(this: Array, element: StackAddress) -> u64,
             >(&mut vm) {
                 const ELEMENT_SIZE: usize = size_of::<T>();
                 let offset = element as usize * ELEMENT_SIZE;
@@ -156,7 +154,7 @@ impl_builtins! {
                 result
             }
 
-            fn array_removex(&mut vm + constructor, this: HeapRef, element: StackAddress) -> HeapRef {
+            fn array_removex(&mut vm + constructor, this: Array, element: StackAddress) -> HeapRef {
                 const ELEMENT_SIZE: usize = size_of::<HeapRef>();
                 let offset = element as usize * ELEMENT_SIZE;
                 let index = this.index();

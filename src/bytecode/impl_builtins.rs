@@ -1,63 +1,38 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_builtins {
-    // handle return values
-    (@handle_ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
-    (@handle_ret $vm:ident, String, $value:ident) => { {
+    // push return values
+    (@handle_ret_value $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
+    (@handle_ret_value $vm:ident, String, $value:ident) => { {
         let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::ItemIndex::MAX);
-        $vm.stack.push($crate::bytecode::HeapRef::new(index, 0));
+        $vm.stack.push(HeapRef::new(index, 0));
     } };
-    (@handle_ret $vm:ident, HeapRef, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, StackAddress, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, StackOffset, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, $_:tt, $value:ident) => { compile_error!("Unsupported return type"); };
-    // handle parameters
-    (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u16) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i8) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i16) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, f32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
-    (@handle_param $vm:ident, String) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, str) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, HeapRef) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, StackAddress) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, StackOffset) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, $_:tt) => { compile_error!("Unsupported parameter type") };
+    (@handle_ret_value $vm:ident, $_:tt, $value:ident) => { $vm.stack.push($value);  };
+    // pop parameter values
+    (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
+    (@handle_param_value $vm:ident, $_:tt) => { $vm.stack.pop() };
     // translate parameter types
-    (@handle_param_type String) => { $crate::bytecode::HeapRef };
-    (@handle_param_type str) => { $crate::bytecode::HeapRef };
+    (@handle_param_type String) => { HeapRef };
+    (@handle_param_type str) => { HeapRef };
+    (@handle_param_type Array) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
-    // translate ref-param values
+    // convert ref-param values
     (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
     (@handle_ref_param $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
     (@handle_ref_param $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
-    // translate ref-param types
-    (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
+    // translate ref-param pseudo types to actual types
+    (@handle_ref_param_type str) => { &str };
+    (@handle_ref_param_type Array) => { HeapRef };
     (@handle_ref_param_type $other:ident) => { $other };
-    // refcount handling for ref-params
-    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) }; // FIXME need constructor here
-    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
+    // implement refcount handling for ref-params
+    (@handle_ref_param_free $vm:ident, String, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, str, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, Array, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $constructor, $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $element_constructor, $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // reverse argument load order
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
         $(
-            let $arg_name: impl_builtins!(@handle_param_type $arg_type) = impl_builtins!(@handle_param $vm, $arg_type);
+            let $arg_name: impl_builtins!(@handle_param_type $arg_type) = impl_builtins!(@handle_param_value $vm, $arg_type);
         )*
     };
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
@@ -69,28 +44,31 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
     // write implementation variant
-    (@write $compiler:ident, $ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
-        if $ty.is_ref() {
+    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
+        let $element_ty = $element_ty.unwrap();
+        if $element_ty.is_ref() {
             let constructor = $compiler.get_constructor($ty);
-            $compiler.writer.builtincallx(Builtin::$variant_x, constructor);
+            let element_constructor = $compiler.get_constructor($element_ty);
+            $compiler.writer.builtincallx(Builtin::$variant_x, constructor, element_constructor);
         } else {
-            match $ty.primitive_size() {
-                8 => $compiler.writer.builtincall(Builtin::$variant_64),
-                4 => $compiler.writer.builtincall(Builtin::$variant_32),
-                2 => $compiler.writer.builtincall(Builtin::$variant_16),
-                1 => $compiler.writer.builtincall(Builtin::$variant_8),
+            let constructor = $compiler.get_constructor($ty);
+            match $element_ty.primitive_size() {
+                8 => $compiler.writer.builtincallx(Builtin::$variant_64, constructor, 0),
+                4 => $compiler.writer.builtincallx(Builtin::$variant_32, constructor, 0),
+                2 => $compiler.writer.builtincallx(Builtin::$variant_16, constructor, 0),
+                1 => $compiler.writer.builtincallx(Builtin::$variant_8, constructor, 0),
                 _ => unreachable!("Invalid type size for builtin call"),
             };
         }
     } };
-    (@write $compiler:ident, $ty:ident, $variant_32:ident, $variant_64:ident) => { {
+    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_32:ident, $variant_64:ident) => { {
         match $ty.primitive_size() {
             8 => $compiler.writer.builtincall(Builtin::$variant_64),
             4 => $compiler.writer.builtincall(Builtin::$variant_32),
             _ => unreachable!("Invalid type size for builtin call"),
         };
     } };
-    (@write $compiler:ident, $ty:ident, $variant:ident) => { {
+    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
         $compiler.writer.builtincall(Builtin::$variant)
     } };
     // main definition block
@@ -104,7 +82,7 @@ macro_rules! impl_builtins {
                     ( & mut $variant_vm:ident )
                 )?
                 $(
-                    $name:ident ( $( & mut $vm:ident $( + $constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
+                    $name:ident ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
                 )?
                 $code:block
             )+ }
@@ -173,12 +151,13 @@ macro_rules! impl_builtins {
                         }
                     }
                     #[allow(unused_variables)]
-                    pub(crate) fn write<T>(self: &Self, compiler: &Compiler<T>, type_id: TypeId) where T: VMFunc<T> {
+                    pub(crate) fn write<T>(self: &Self, compiler: &Compiler<T>, type_id: TypeId, inner_type_id: Option<TypeId>) where T: VMFunc<T> {
                         let ty = compiler.type_by_id(type_id);
+                        let element_ty = inner_type_id.map(|type_id| compiler.type_by_id(type_id));
                         match self {
                             $( // function
                                 Self::$builtin_function => {
-                                    impl_builtins!(@write compiler, ty
+                                    impl_builtins!(@write compiler, ty, element_ty
                                         $( // implementation
                                             $( // builtin variants
                                                 $(
@@ -249,7 +228,7 @@ macro_rules! impl_builtins {
             }
             #[allow(unused_variables, unused_assignments, unused_imports)]
             #[cfg(feature="runtime")]
-            pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress) {
+            pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress) {
                 use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
                 match self {
                     $( // type
@@ -275,12 +254,12 @@ macro_rules! impl_builtins {
                                             };
                                             // Handle refcounting.
                                             $(
-                                                impl_builtins!(@handle_ref_param_free vm, $variant_type, $variant_arg);
+                                                impl_builtins!(@handle_ref_param_free vm, $variant_type, $variant_arg, constructor, element_constructor);
                                             )*
                                             // Set return value, if any.
                                             $(
                                                 let ret_typed: $variant_ret_type = ret;
-                                                impl_builtins!(@handle_ret vm, $variant_ret_type, ret_typed);
+                                                impl_builtins!(@handle_ret_value vm, $variant_ret_type, ret_typed);
                                             )?
                                         },
                                     )+
@@ -303,18 +282,18 @@ macro_rules! impl_builtins {
                                             )*
                                             $(
                                                 let $vm = &mut *vm;
-                                                $( let $constructor = constructor; )?
+                                                $( let $element_constructor = element_constructor; )?
                                             )?
                                             $code
                                         };
                                         // Handle refcounting.
                                         $(
-                                            impl_builtins!(@handle_ref_param_free vm, $arg_type, $arg_name);
+                                            impl_builtins!(@handle_ref_param_free vm, $arg_type, $arg_name, constructor, element_constructor);
                                         )*
                                         // Set return value, if any.
                                         $(
                                             let ret_typed: $ret_type = ret;
-                                            impl_builtins!(@handle_ret vm, $ret_type, ret_typed);
+                                            impl_builtins!(@handle_ret_value vm, $ret_type, ret_typed);
                                         )?
                                     },
                                 )?

@@ -1665,14 +1665,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
         #[allow(unreachable_patterns)]
         match (ty, builtin) {
-            (&Type::Array(Array { type_id: Some(inner_type_id) }), BuiltinType::Array(array_builtin)) => {
-                array_builtin.write(self, inner_type_id);
+            (&Type::Array(Array { type_id: inner_type_id @ Some(_) }), BuiltinType::Array(array_builtin)) => {
+                array_builtin.write(self, type_id, inner_type_id);
             },
             (Type::f32 | Type::f64, BuiltinType::Float(float_builtin)) => {
-                float_builtin.write(self, type_id);
+                float_builtin.write(self, type_id, None);
             },
             (Type::String, BuiltinType::String(string_builtin)) => {
-                string_builtin.write(self, type_id);
+                string_builtin.write(self, type_id, None);
             },
             _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
         }
