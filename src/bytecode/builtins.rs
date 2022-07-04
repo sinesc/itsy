@@ -273,6 +273,16 @@ impl_builtins! {
             }
         }
 
+        /// Calculates the least nonnegative remainder of self (mod rhs).
+        rem_euclid(self: Self, rhs: Self) -> Self {
+            fn <
+                float_rem_euclid32<T: u32>(this: f32, rhs: f32) -> f32,
+                float_rem_euclid64<T: u64>(this: f64, rhs: f64) -> f64,
+            >(&mut vm) {
+                this.rem_euclid(rhs)
+            }
+        }
+
         /// Raises a number to an integer power.
         powi(self: Self, n: i32) -> Self {
             fn <
@@ -495,13 +505,13 @@ impl_builtins! {
 
         /// Returns true if the number is neither zero, infinite, subnormal, or NaN.
         is_normal(self: Self) -> bool {
-        fn <
-            float_is_normal_32<T: u32>(this: f32) -> bool,
-            float_is_normal_64<T: u64>(this: f64) -> bool,
-        >(&mut vm) {
-            this.is_normal()
+            fn <
+                float_is_normal_32<T: u32>(this: f32) -> bool,
+                float_is_normal_64<T: u64>(this: f64) -> bool,
+            >(&mut vm) {
+                this.is_normal()
+            }
         }
-    }
 
         /// Takes the reciprocal (inverse) of a number, 1/x.
         recip(self: Self) -> Self {
