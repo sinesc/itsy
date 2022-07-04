@@ -53,7 +53,7 @@ fn main() {
     for i in 0..700 {
         let iterations = 28 + i / 4;
         // move cursor to top left position
-        print("{esc}[1;1HModified Mandelbrot set, {iterations} iterations, zoom {(1.0f64/zoom).floor()}x, {runtime}ms/f        \n");
+        print("{esc}[1;1HModified Mandelbrot set, {iterations} iterations, zoom {(1.0/zoom).floor()}x, {runtime}ms/f        \n");
         // print fractal
         print(mandelbrot(80, 30, iterations, zoom, 0.32570659879, 0.0470399495155));
         // adjut zoom level and wait a bit
