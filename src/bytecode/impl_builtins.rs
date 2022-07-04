@@ -132,6 +132,7 @@ macro_rules! impl_builtins {
             )+
         }
 
+        #[cfg(feature="compiler")]
         #[derive(Copy, Clone, Debug, PartialEq)]
         pub enum BuiltinType {
             $( // type
@@ -139,6 +140,7 @@ macro_rules! impl_builtins {
             )+
         }
 
+        #[cfg(feature="compiler")]
         pub mod builtin_types {
             use super::{Builtin, BuiltinType};
             use crate::frontend::resolver::Resolver;
@@ -195,8 +197,6 @@ macro_rules! impl_builtins {
                 }
             )+
         }
-
-
 
         #[cfg(doc)]
         pub mod documentation {

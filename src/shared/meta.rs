@@ -2,9 +2,8 @@ use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
-use crate::bytecode::builtins::BuiltinType;
 #[cfg(feature="compiler")]
-use crate::RustFnIndex;
+use crate::{RustFnIndex, bytecode::builtins::BuiltinType};
 
 /// Binding meta information.
 #[cfg(feature="compiler")]
