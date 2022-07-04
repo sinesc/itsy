@@ -50,7 +50,7 @@ fn main() {
     // compute frame parameters into an array so we can easily reverse the zoom direction once we reach f64 limits
     let zoom = 2.0;
     let zoom_multiplier = 0.99;
-    let num_frames = 700;
+    let num_frames = 695;
     let width = 80;
     let height = 24;
     let frames: [ Frame ] = [ ];
@@ -62,6 +62,11 @@ fn main() {
         // adjut zoom level ever faster
         zoom = zoom * zoom_multiplier;
         zoom_multiplier -= 0.000115;
+    }
+
+    // duplicate some frames to delay zoom for a few seconds
+    for i in 0..100 {
+        frames.insert(0, frames[0]);
     }
 
     // clear terminal

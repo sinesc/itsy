@@ -49,16 +49,16 @@ impl_builtins! {
         /// Returns the length of the array.
         len(self: Self) -> u64 {
             fn <
-                array_len8<T: u8>(this: Array) -> u64,
-                array_len16<T: u16>(this: Array) -> u64,
-                array_len32<T: u32>(this: Array) -> u64,
-                array_len64<T: u64>(this: Array) -> u64,
+                array_len8<T: u8>(this: Array) -> StackAddress,
+                array_len16<T: u16>(this: Array) -> StackAddress,
+                array_len32<T: u32>(this: Array) -> StackAddress,
+                array_len64<T: u64>(this: Array) -> StackAddress,
             >(&mut vm) {
-                (vm.heap.item(this.index()).data.len() / size_of::<T>()) as u64
+                (vm.heap.item(this.index()).data.len() / size_of::<T>()) as StackAddress
             }
 
-            fn array_lenx(&mut vm + constructor, this: Array) -> u64 {
-                (vm.heap.item(this.index()).data.len() / size_of::<HeapRef>()) as u64
+            fn array_lenx(&mut vm + constructor, this: Array) -> StackAddress {
+                (vm.heap.item(this.index()).data.len() / size_of::<HeapRef>()) as StackAddress
             }
         }
 
@@ -136,6 +136,37 @@ impl_builtins! {
             }
         }
 
+        /// Inserts an element at position index within the array, shifting all elements after it to the right.
+        insert(self: Self, index: u64, value: Any) {
+            fn <
+                array_insert8<T: u8>(this: Array, index: StackAddress, value: u8),
+                array_insert16<T: u16>(this: Array, index: StackAddress, value: u16),
+                array_insert32<T: u32>(this: Array, index: StackAddress, value: u32),
+                array_insert64<T: u64>(this: Array, index: StackAddress, value: u64),
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let heap_index = this.index();
+                let data = &mut vm.heap.item_mut(heap_index).data;
+                let data_len = data.len();
+                data.resize(data_len + ELEMENT_SIZE, 0);
+                let index = index as usize;
+                data.copy_within(index * ELEMENT_SIZE .. data_len, (index + 1) * ELEMENT_SIZE);
+                vm.heap.store(heap_index, index * ELEMENT_SIZE, value);
+            }
+
+            fn array_insertx(&mut vm + constructor, this: Array, index: u64, value: HeapRef) {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let heap_index = this.index();
+                let data = &mut vm.heap.item_mut(heap_index).data;
+                let data_len = data.len();
+                data.resize(data_len + ELEMENT_SIZE, 0);
+                let index = index as usize;
+                data.copy_within(index * ELEMENT_SIZE .. data_len, (index + 1) * ELEMENT_SIZE);
+                vm.heap.store(heap_index, index * ELEMENT_SIZE, value);
+                vm.refcount_value(value, constructor, HeapRefOp::Inc);
+            }
+        }
+
         /// Removes and returns the element at position index within the array, shifting all elements after it to the left.
         remove(self: Self, element: u64 ) -> Any {
             fn <
@@ -175,11 +206,12 @@ impl_builtins! {
                 array_reverse32<T: u32>(this: Array),
                 array_reverse64<T: u64>(this: Array),
             >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
                 let index = this.index();
-                let num_elements = vm.heap.item(index).data.len() / size_of::<T>();
+                let num_elements = vm.heap.item(index).data.len() / ELEMENT_SIZE;
                 for i in 0..num_elements/2 {
-                    let left_offset = i * size_of::<T>();
-                    let right_offset = (num_elements - i - 1) * size_of::<T>();
+                    let left_offset = i * ELEMENT_SIZE;
+                    let right_offset = (num_elements - i - 1) * ELEMENT_SIZE;
                     let left: T = vm.heap.load(index, left_offset);
                     let right: T = vm.heap.load(index, right_offset);
                     vm.heap.store(index, left_offset, right);
@@ -188,11 +220,12 @@ impl_builtins! {
             }
 
             fn array_reversex(&mut vm + constructor, this: Array) {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
                 let index = this.index();
-                let num_elements = vm.heap.item(index).data.len() / size_of::<HeapRef>();
+                let num_elements = vm.heap.item(index).data.len() / ELEMENT_SIZE;
                 for i in 0..num_elements/2 {
-                    let left_offset = i * size_of::<HeapRef>();
-                    let right_offset = (num_elements - i - 1) * size_of::<HeapRef>();
+                    let left_offset = i * ELEMENT_SIZE;
+                    let right_offset = (num_elements - i - 1) * ELEMENT_SIZE;
                     let left: HeapRef = vm.heap.load(index, left_offset);
                     let right: HeapRef = vm.heap.load(index, right_offset);
                     vm.heap.store(index, left_offset, right);
