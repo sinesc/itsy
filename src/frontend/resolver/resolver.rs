@@ -6,16 +6,17 @@ pub mod error;
 pub mod resolved;
 
 use crate::{prelude::*, VariantIndex};
-use crate::{ItemIndex, STACK_ADDRESS_TYPE, STACK_OFFSET_TYPE};
+use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable, Resolvable, CallSyntax};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, BuiltinGroup, Binding};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
 use crate::shared::numeric::Numeric;
+use crate::bytecode::builtins::builtin_types;
 
 use crate::bytecode::VMFunc;
 
@@ -54,7 +55,7 @@ impl Stage {
 }
 
 /// Temporary internal state during program type/binding resolution.
-struct Resolver<'ctx> {
+pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
     stage           : Stage,
     /// Scope id this state operates in.
@@ -220,17 +221,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Try to create concrete array builtin function signature for the given array type
     fn try_create_array_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
         let array_ty = self.type_by_id(type_id).as_array().unwrap_or_ice(ICE)?;
-        let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
-        let void_type_id = self.primitive_type_id(Type::void)?;
-        if let &Array { type_id: Some(element_type_id) } = array_ty {
-            let mut insert = |g, r, a: Vec<TypeId>| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(), Some(FunctionKind::Builtin(type_id, g))));
-            Ok(match name {
-                "len"       => insert(BuiltinGroup::ArrayLen, sa_type_id, vec![ type_id ]),
-                "push"      => insert(BuiltinGroup::ArrayPush, void_type_id, vec![ type_id, element_type_id ]),
-                "pop"       => insert(BuiltinGroup::ArrayPop, element_type_id, vec![ type_id ]),
-                "truncate"  => insert(BuiltinGroup::ArrayTruncate, void_type_id, vec![ type_id, sa_type_id ]),
-                "remove"    => insert(BuiltinGroup::ArrayRemove, element_type_id, vec![ type_id, sa_type_id ]),
-                _ => None,
+        if let &Array { type_id: element_type_id @ Some(_) } = array_ty {
+            Ok(match builtin_types::Array::resolve(self, name, type_id, element_type_id) {
+                None => None,
+                Some((builtin_type, result_type_id, arg_type_ids)) => {
+                    Some(self.scopes.insert_function(
+                        scopes::Scopes::root_id(),
+                        name,
+                        Some(result_type_id),
+                        arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
+                        Some(FunctionKind::Builtin(type_id, builtin_type))
+                    ))
+                }
             })
         } else {
             Ok(None)
@@ -239,75 +241,34 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Create float builtin function signature.
     fn create_float_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
-        let i32_type_id = self.primitive_type_id(Type::i32)?;
-        let bool_type_id = self.primitive_type_id(Type::bool)?;
-        let mut insert = |g, r, a: Vec<TypeId>| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(), Some(FunctionKind::Builtin(type_id, g))));
-        Ok(match name {
-            "floor"     => insert(BuiltinGroup::FloatFloor, type_id, vec![ type_id ]),
-            "ceil"      => insert(BuiltinGroup::FloatCeil, type_id, vec![ type_id ]),
-            "round"     => insert(BuiltinGroup::FloatRound, type_id, vec![ type_id ]),
-            "trunc"     => insert(BuiltinGroup::FloatTrunc, type_id, vec![ type_id ]),
-            "fract"     => insert(BuiltinGroup::FloatFract, type_id, vec![ type_id ]),
-            "signum"    => insert(BuiltinGroup::FloatSignum, type_id, vec![ type_id ]),
-            "abs"       => insert(BuiltinGroup::FloatAbs, type_id, vec![ type_id ]),
-            "powi"      => insert(BuiltinGroup::FloatPowi, type_id, vec![ type_id, i32_type_id ]),
-            "powf"      => insert(BuiltinGroup::FloatPowf, type_id, vec![ type_id, type_id ]),
-            "sqrt"      => insert(BuiltinGroup::FloatSqrt, type_id, vec![ type_id ]),
-            "exp"       => insert(BuiltinGroup::FloatExp, type_id, vec![ type_id ]),
-            "exp2"      => insert(BuiltinGroup::FloatExp2, type_id, vec![ type_id ]),
-            "ln"        => insert(BuiltinGroup::FloatLn, type_id, vec![ type_id ]),
-            "log"       => insert(BuiltinGroup::FloatLog, type_id, vec![ type_id, type_id ]),
-            "log2"      => insert(BuiltinGroup::FloatLog2, type_id, vec![ type_id ]),
-            "log10"     => insert(BuiltinGroup::FloatLog10, type_id, vec![ type_id ]),
-            "cbrt"      => insert(BuiltinGroup::FloatCbrt, type_id, vec![ type_id ]),
-            "hypot"     => insert(BuiltinGroup::FloatHypot, type_id, vec![ type_id, type_id ]),
-            "sin"       => insert(BuiltinGroup::FloatSin, type_id, vec![ type_id ]),
-            "cos"       => insert(BuiltinGroup::FloatCos, type_id, vec![ type_id ]),
-            "tan"       => insert(BuiltinGroup::FloatTan, type_id, vec![ type_id ]),
-            "asin"      => insert(BuiltinGroup::FloatAsin, type_id, vec![ type_id ]),
-            "acos"      => insert(BuiltinGroup::FloatAcos, type_id, vec![ type_id ]),
-            "atan"      => insert(BuiltinGroup::FloatAtan, type_id, vec![ type_id ]),
-            "atan2"     => insert(BuiltinGroup::FloatAtan2, type_id, vec![ type_id, type_id ]),
-
-            "is_nan"    => insert(BuiltinGroup::FloatIsNaN, bool_type_id, vec![ type_id ]),
-            "is_infinite"=> insert(BuiltinGroup::FloatIsInfinite, bool_type_id, vec![ type_id ]),
-            "is_finite" => insert(BuiltinGroup::FloatIsFinite, bool_type_id, vec![ type_id ]),
-            "is_subnormal"=> insert(BuiltinGroup::FloatIsSubnormal, bool_type_id, vec![ type_id ]),
-            "is_normal" => insert(BuiltinGroup::FloatIsNormal, bool_type_id, vec![ type_id ]),
-            "recip"     => insert(BuiltinGroup::FloatRecip, type_id, vec![ type_id ]),
-            "to_degrees"=> insert(BuiltinGroup::FloatToDegrees, type_id, vec![ type_id ]),
-            "to_radians"=> insert(BuiltinGroup::FloatToRadians, type_id, vec![ type_id ]),
-            "min"       => insert(BuiltinGroup::FloatMin, type_id, vec![ type_id, type_id ]),
-            "max"       => insert(BuiltinGroup::FloatMax, type_id, vec![ type_id, type_id ]),
-            "clamp"     => insert(BuiltinGroup::FloatClamp, type_id, vec![ type_id, type_id, type_id ]),
-            _ => None,
+        Ok(match builtin_types::Float::resolve(self, name, type_id, None) {
+            None => None,
+            Some((builtin_type, result_type_id, arg_type_ids)) => {
+                Some(self.scopes.insert_function(
+                    scopes::Scopes::root_id(),
+                    name,
+                    Some(result_type_id),
+                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::Builtin(type_id, builtin_type))
+                ))
+            }
         })
     }
 
     /// Create float builtin function signature.
     fn create_string_builtin(self: &mut Self, name: &str) -> ResolveResult<Option<FunctionId>> {
         let type_id = self.primitive_type_id(Type::String)?;
-        let bool_type_id = self.primitive_type_id(Type::bool)?;
-        let u8_type_id = self.primitive_type_id(Type::u8)?;
-        let sa_type_id = self.primitive_type_id(STACK_ADDRESS_TYPE)?;
-        let so_type_id = self.primitive_type_id(STACK_OFFSET_TYPE)?;
-        let mut insert = |g, r, a: Vec<TypeId>| Some(self.scopes.insert_function(scopes::Scopes::root_id(), name, Some(r), a.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(), Some(FunctionKind::Builtin(type_id, g))));
-        Ok(match name {
-            "insert"        => insert(BuiltinGroup::StringInsert, type_id, vec![ type_id, sa_type_id, type_id ]),
-            "slice"         => insert(BuiltinGroup::StringSlice, type_id, vec![ type_id, sa_type_id, sa_type_id ]),
-            "starts_with"   => insert(BuiltinGroup::StringStartsWith, bool_type_id, vec![ type_id, type_id ]),
-            "ends_with"     => insert(BuiltinGroup::StringEndsWith, bool_type_id, vec![ type_id, type_id ]),
-            "trim"          => insert(BuiltinGroup::StringTrim, type_id, vec![ type_id ]),
-            "trim_start"    => insert(BuiltinGroup::StringTrimStart, type_id, vec![ type_id ]),
-            "trim_end"      => insert(BuiltinGroup::StringTrimEnd, type_id, vec![ type_id ]),
-            "contains"      => insert(BuiltinGroup::StringContains, bool_type_id, vec![ type_id, type_id ]),
-            "replace"       => insert(BuiltinGroup::StringReplace, type_id, vec![ type_id, type_id, type_id ]),
-            "to_lowercase"  => insert(BuiltinGroup::StringToLowercase, type_id, vec![ type_id ]),
-            "to_uppercase"  => insert(BuiltinGroup::StringToUppercase, type_id, vec![ type_id ]),
-            "repeat"        => insert(BuiltinGroup::StringRepeat, type_id, vec![ type_id, sa_type_id ]),
-            "find"          => insert(BuiltinGroup::StringFind, so_type_id, vec![ type_id, type_id ]),
-            "String::from_ascii"    => insert(BuiltinGroup::StringFromAscii, type_id, vec![ u8_type_id ]),
-            _ => None,
+        Ok(match builtin_types::String::resolve(self, name, type_id, None) {
+            None => None,
+            Some((builtin_type, result_type_id, arg_type_ids)) => {
+                Some(self.scopes.insert_function(
+                    scopes::Scopes::root_id(),
+                    name,
+                    Some(result_type_id),
+                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::Builtin(type_id, builtin_type))
+                ))
+            }
         })
     }
 
@@ -353,7 +314,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns the type-id for given primitive.
-    fn primitive_type_id(self: &Self, ty: Type) -> ResolveResult<TypeId> {
+    pub(crate) fn primitive_type_id(self: &Self, ty: Type) -> ResolveResult<TypeId> {
         self.primitives.get(&ty).cloned().unwrap_or_ice(ICE)
     }
 
@@ -794,48 +755,57 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved_or_err(&mut item.expr, ret_type_id)
     }
 
+    fn resolve_call_method(self: &mut Self, item: &mut ast::Call, _expected_result: Option<TypeId>) -> ResolveResult {
+        let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
+        self.resolve_expression(arg, None)?;
+        if let Some(type_id) = arg.type_id(self) {
+            if self.type_by_id(type_id).as_array().is_some() {
+                item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
+                if item.function_id.is_none() {
+                    item.function_id = self.try_create_array_builtin(&item.ident.name, type_id)?;
+                }
+            } else if self.type_by_id(type_id).is_float() {
+                item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
+                if item.function_id.is_none() {
+                    item.function_id = self.create_float_builtin(&item.ident.name, type_id)?;
+                }
+            } else if self.type_by_id(type_id).is_string() {
+                item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
+                if item.function_id.is_none() {
+                    item.function_id = self.create_string_builtin(&item.ident.name)?;
+                }
+            } else {
+                // try method on type
+                let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;
+                let path = self.make_path(&[ type_name, &item.ident.name ]);
+                item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
+                // try trait default implementations
+                if item.function_id.is_none() {
+                    let function_id = self.scopes.trait_function_id(self.scope_id, &item.ident.name, type_id);
+                    if function_id.is_some() {
+                        item.function_id = function_id;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Resolves an occurance of a function call.
     fn resolve_call(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
-
         // locate function definition
         if item.function_id.is_none() {
             let path;
             match &item.call_syntax {
                 CallSyntax::Method => {
                     let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
-                    self.resolve_expression(arg, None)?;
-                    let type_id = arg.type_id(self).unwrap_or_ice("Unresolved self binding in method call")?;
-                    if self.type_by_id(type_id).as_array().is_some() {
-                        path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
-                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
-                        if item.function_id.is_none() {
-                            item.function_id = self.try_create_array_builtin(&item.ident.name, type_id)?;
-                        }
-                    } else if self.type_by_id(type_id).is_float() {
-                        path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
-                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
-                        if item.function_id.is_none() {
-                            item.function_id = self.create_float_builtin(&item.ident.name, type_id)?;
-                        }
-                    } else if self.type_by_id(type_id).is_string() {
-                        path = format!("{}::{}", self.type_by_id(type_id), &item.ident.name); // TODO: this should be lazy on error
-                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
-                        if item.function_id.is_none() {
-                            item.function_id = self.create_string_builtin(&item.ident.name)?;
-                        }
+                    let type_name = if let Some(type_id) = arg.type_id(self) {
+                        self.scopes.type_name(type_id).map_or(format!("{}::{}", self.type_by_id(type_id), &item.ident.name), |t| t.to_string())
                     } else {
-                        // try method on type
-                        let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;
-                        path = self.make_path(&[ type_name, &item.ident.name ]);
-                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, type_id));
-                        // try trait default implementations
-                        if item.function_id.is_none() {
-                            let function_id = self.scopes.trait_function_id(self.scope_id, &item.ident.name, type_id);
-                            if function_id.is_some() {
-                                item.function_id = function_id;
-                            }
-                        }
-                    }
+                        "<unknown>".to_string()
+                    };
+                    path = self.make_path(&[ type_name, item.ident.name.clone() ]);// TODO: this should be lazy on error
+                    self.resolve_call_method(item, expected_result)?;
                 },
                 CallSyntax::Ident => {
                     path = self.make_path(&[ &item.ident.name ]);
@@ -845,7 +815,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
                     // todo fix this hack: path handling needs a rework
                     if static_path.name.len() == 1 && static_path.name[0].name == "String" {
-                        item.function_id = self.create_string_builtin(&path)?; // FIXME: probably will include module path if any.
+                        item.function_id = self.create_string_builtin(&item.ident.name)?;
                     } else {
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                     }

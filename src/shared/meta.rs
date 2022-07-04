@@ -2,6 +2,7 @@ use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
+use crate::bytecode::builtins::BuiltinType;
 #[cfg(feature="compiler")]
 use crate::RustFnIndex;
 
@@ -123,71 +124,8 @@ pub enum FunctionKind {
     Function,
     Method(TypeId),
     Rust(RustFnIndex),
-    Builtin(TypeId, BuiltinGroup),
+    Builtin(TypeId, BuiltinType),
     Variant(TypeId, VariantIndex),
-}
-
-/// Builtin function groups. Together with a type id these are used to select a concrete, type-specific builtin function implementation.
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg(feature="compiler")]
-pub enum BuiltinGroup {
-    ArrayLen,
-    ArrayPush,
-    ArrayPop,
-    ArrayTruncate,
-    ArrayRemove,
-
-    FloatFloor,
-    FloatCeil,
-    FloatRound,
-    FloatTrunc,
-    FloatFract,
-    FloatAbs,
-    FloatSignum,
-    FloatPowi,
-    FloatPowf,
-    FloatSqrt,
-    FloatExp,
-    FloatExp2,
-    FloatLn,
-    FloatLog,
-    FloatLog2,
-    FloatLog10,
-    FloatCbrt,
-    FloatHypot,
-    FloatSin,
-    FloatCos,
-    FloatTan,
-    FloatAsin,
-    FloatAcos,
-    FloatAtan,
-    FloatAtan2,
-    FloatIsNaN,
-    FloatIsInfinite,
-    FloatIsFinite,
-    FloatIsSubnormal,
-    FloatIsNormal,
-    FloatRecip,
-    FloatToDegrees,
-    FloatToRadians,
-    FloatMin,
-    FloatMax,
-    FloatClamp,
-
-    StringInsert,
-    StringSlice,
-    StringStartsWith,
-    StringEndsWith,
-    StringTrim,
-    StringTrimStart,
-    StringTrimEnd,
-    StringContains,
-    StringReplace,
-    StringToLowercase,
-    StringToUppercase,
-    StringRepeat,
-    StringFind,
-    StringFromAscii,
 }
 
 /// Information about a data type in a resolved program.

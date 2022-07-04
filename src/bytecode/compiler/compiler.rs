@@ -9,18 +9,18 @@ mod init_state;
 use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, BuiltinGroup, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow}, resolver::resolved::{ResolvedProgram, IdMappings}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult};
 use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
-struct Compiler<T> {
+pub(crate) struct Compiler<T> {
     /// Bytecode writer used to output to.
-    writer: Writer<T>,
+    pub(crate) writer: Writer<T>,
     /// Type and mutability data.
     id_mappings: IdMappings,
     /// Maps from binding id to load-argument for each frame.
@@ -370,10 +370,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 comment!(self, "call {}()", item.ident.name);
                 self.writer.rustcall(T::from_index(rust_fn_index));
             },
-            FunctionKind::Builtin(type_id, builtin_group) => {
+            FunctionKind::Builtin(type_id, builtin_type) => {
                 self.compile_call_args(&function, item)?;
                 comment!(self, "call {}()", item.ident.name);
-                self.write_builtin(builtin_group, self.type_by_id(type_id));
+                self.write_builtin(builtin_type, self.type_by_id(type_id));
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(&function, item)?;
@@ -618,7 +618,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_cnt_nc(array_constructor, HeapRefOp::Inc);
         self.write_clone_ref();                                         // stack &array &array
         let array_ty = self.item_type(&item.expr);
-        self.write_builtin(BuiltinGroup::ArrayLen, array_ty);             // stack &array len
+        self.write_builtin(BuiltinType::Array(builtin_types::Array::len), array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index (indexing from the end to be able to count downwards from len)
 
@@ -982,7 +982,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Returns constructor index for given type or 0.
-    fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
+    pub(crate) fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
         *self.constructors.get(&type_id).unwrap_or(&0)
     }
@@ -1661,90 +1661,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions for build-in len method.
-    fn write_builtin(self: &Self, builtin: BuiltinGroup, ty: &Type) {
-        let constructor = self.get_constructor(ty);
+    fn write_builtin(self: &Self, builtin: BuiltinType, ty: &Type) {
+        let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
         #[allow(unreachable_patterns)]
-        match ty {
-            &Type::Array(Array { type_id }) => {
-                let inner_ty = self.type_by_id(type_id.unwrap());
-                match builtin {
-                    BuiltinGroup::ArrayLen => {
-                        self.writer.heap_size(constructor);
-                        self.writer.shrsa(match inner_ty.primitive_size() {
-                            1 => 0,
-                            2 => 1,
-                            4 => 2,
-                            8 => 3,
-                            _ => unreachable!("Unsupported inner size for type {} for builtin group {:?}", ty, builtin),
-                        });
-                    }
-                    BuiltinGroup::ArrayPush => select_array_builtin!(self, inner_ty, array_push8, array_push16, array_push32, array_push64, array_pushx),
-                    BuiltinGroup::ArrayPop => select_array_builtin!(self, inner_ty, array_pop8, array_pop16, array_pop32, array_pop64, array_popx),
-                    BuiltinGroup::ArrayTruncate => select_array_builtin!(self, inner_ty, array_truncate8, array_truncate16, array_truncate32, array_truncate64, array_truncatex),
-                    BuiltinGroup::ArrayRemove => select_array_builtin!(self, inner_ty, array_remove8, array_remove16, array_remove32, array_remove64, array_removex),
-                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
-                }
+        match (ty, builtin) {
+            (&Type::Array(Array { type_id: Some(inner_type_id) }), BuiltinType::Array(array_builtin)) => {
+                array_builtin.write(self, inner_type_id);
             },
-            Type::f32 | Type::f64 => {
-                match builtin {
-                    BuiltinGroup::FloatFloor => select_float_builtin!(self, ty, float_floor32, float_floor64),
-                    BuiltinGroup::FloatCeil => select_float_builtin!(self, ty, float_ceil32, float_ceil64),
-                    BuiltinGroup::FloatRound => select_float_builtin!(self, ty, float_round32, float_round64),
-                    BuiltinGroup::FloatTrunc => select_float_builtin!(self, ty, float_trunc32, float_trunc64),
-                    BuiltinGroup::FloatFract => select_float_builtin!(self, ty, float_fract32, float_fract64),
-                    BuiltinGroup::FloatAbs => select_float_builtin!(self, ty, float_abs32, float_abs64),
-                    BuiltinGroup::FloatSignum => select_float_builtin!(self, ty, float_signum32, float_signum64),
-                    BuiltinGroup::FloatPowi => select_float_builtin!(self, ty, float_powi32, float_powi64),
-                    BuiltinGroup::FloatPowf => select_float_builtin!(self, ty, float_powf32, float_powf64),
-                    BuiltinGroup::FloatSqrt => select_float_builtin!(self, ty, float_sqrt32, float_sqrt64),
-                    BuiltinGroup::FloatExp => select_float_builtin!(self, ty, float_exp32, float_exp64),
-                    BuiltinGroup::FloatExp2 => select_float_builtin!(self, ty, float_exp2_32, float_exp2_64),
-                    BuiltinGroup::FloatLn => select_float_builtin!(self, ty, float_ln32, float_ln64),
-                    BuiltinGroup::FloatLog => select_float_builtin!(self, ty, float_log32, float_log64),
-                    BuiltinGroup::FloatLog2 => select_float_builtin!(self, ty, float_log2_32, float_log2_64),
-                    BuiltinGroup::FloatLog10 => select_float_builtin!(self, ty, float_log10_32, float_log10_64),
-                    BuiltinGroup::FloatCbrt => select_float_builtin!(self, ty, float_cbrt32, float_cbrt64),
-                    BuiltinGroup::FloatHypot => select_float_builtin!(self, ty, float_hypot32, float_hypot64),
-                    BuiltinGroup::FloatSin => select_float_builtin!(self, ty, float_sin32, float_sin64),
-                    BuiltinGroup::FloatCos => select_float_builtin!(self, ty, float_cos32, float_cos64),
-                    BuiltinGroup::FloatTan => select_float_builtin!(self, ty, float_tan32, float_tan64),
-                    BuiltinGroup::FloatAsin => select_float_builtin!(self, ty, float_asin32, float_asin64),
-                    BuiltinGroup::FloatAcos => select_float_builtin!(self, ty, float_acos32, float_acos64),
-                    BuiltinGroup::FloatAtan => select_float_builtin!(self, ty, float_atan32, float_atan64),
-                    BuiltinGroup::FloatAtan2 => select_float_builtin!(self, ty, float_atan2_32, float_atan2_64),
-                    BuiltinGroup::FloatIsNaN => select_float_builtin!(self, ty, float_is_nan_32, float_is_nan_64),
-                    BuiltinGroup::FloatIsInfinite => select_float_builtin!(self, ty, float_is_infinite_32, float_is_infinite_64),
-                    BuiltinGroup::FloatIsFinite => select_float_builtin!(self, ty, float_is_finite_32, float_is_finite_64),
-                    BuiltinGroup::FloatIsSubnormal => select_float_builtin!(self, ty, float_is_subnormal_32, float_is_subnormal_64),
-                    BuiltinGroup::FloatIsNormal => select_float_builtin!(self, ty, float_is_normal_32, float_is_normal_64),
-                    BuiltinGroup::FloatRecip => select_float_builtin!(self, ty, float_recip_32, float_recip_64),
-                    BuiltinGroup::FloatToDegrees => select_float_builtin!(self, ty, float_to_degrees_32, float_to_degrees_64),
-                    BuiltinGroup::FloatToRadians => select_float_builtin!(self, ty, float_to_radians_32, float_to_radians_64),
-                    BuiltinGroup::FloatMin => select_float_builtin!(self, ty, float_min_32, float_min_64),
-                    BuiltinGroup::FloatMax => select_float_builtin!(self, ty, float_max_32, float_max_64),
-                    BuiltinGroup::FloatClamp => select_float_builtin!(self, ty, float_clamp_32, float_clamp_64),
-                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
-                }
+            (Type::f32 | Type::f64, BuiltinType::Float(float_builtin)) => {
+                float_builtin.write(self, type_id);
             },
-            Type::String => {
-                use crate::bytecode::builtins::Builtin;
-                match builtin {
-                    BuiltinGroup::StringInsert => { self.writer.builtincall(Builtin::string_insert); },
-                    BuiltinGroup::StringSlice => { self.writer.builtincall(Builtin::string_slice); },
-                    BuiltinGroup::StringStartsWith => { self.writer.builtincall(Builtin::string_starts_with); },
-                    BuiltinGroup::StringEndsWith => { self.writer.builtincall(Builtin::string_ends_with); },
-                    BuiltinGroup::StringTrim => { self.writer.builtincall(Builtin::string_trim); },
-                    BuiltinGroup::StringTrimStart => { self.writer.builtincall(Builtin::string_trim_start); },
-                    BuiltinGroup::StringTrimEnd => { self.writer.builtincall(Builtin::string_trim_end); },
-                    BuiltinGroup::StringContains => { self.writer.builtincall(Builtin::string_contains); },
-                    BuiltinGroup::StringReplace => { self.writer.builtincall(Builtin::string_replace); },
-                    BuiltinGroup::StringToLowercase => { self.writer.builtincall(Builtin::string_to_lowercase); },
-                    BuiltinGroup::StringToUppercase => { self.writer.builtincall(Builtin::string_to_uppercase); },
-                    BuiltinGroup::StringRepeat => { self.writer.builtincall(Builtin::string_repeat); },
-                    BuiltinGroup::StringFind => { self.writer.builtincall(Builtin::string_find); },
-                    BuiltinGroup::StringFromAscii => { self.writer.builtincall(Builtin::string_from_ascii); },
-                    _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
-                }
+            (Type::String, BuiltinType::String(string_builtin)) => {
+                string_builtin.write(self, type_id);
             },
             _ => unreachable!("Builtin {builtin:?} not implemented for {ty}"),
         }
