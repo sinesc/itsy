@@ -16,9 +16,9 @@ macro_rules! impl_builtins {
     (@handle_param_type Array) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // convert ref-param values
-    (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
-    (@handle_ref_param $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
-    (@handle_ref_param $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
+    (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
+    (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
     // translate ref-param pseudo types to actual types
     (@handle_ref_param_type str) => { &str };
     (@handle_ref_param_type Array) => { HeapRef };
@@ -230,6 +230,7 @@ macro_rules! impl_builtins {
             #[cfg(feature="runtime")]
             pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress) {
                 use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+                use builtin_functions::*;
                 match self {
                     $( // type
                         $( // function
@@ -247,10 +248,9 @@ macro_rules! impl_builtins {
                                             let ret = {
                                                 // Shadow HeapRef arguments with actual argument value.
                                                 $(
-                                                    let $variant_arg: impl_builtins!(@handle_ref_param_type $variant_type) = impl_builtins!(@handle_ref_param vm, $variant_type, $variant_arg);
+                                                    let $variant_arg: impl_builtins!(@handle_ref_param_type $variant_type) = impl_builtins!(@handle_ref_param_value vm, $variant_type, $variant_arg);
                                                 )*
-                                                let $variant_vm = &mut *vm;
-                                                $code
+                                                builtin_functions::$variant_name(vm, /*constructor, element_constructor,*/ $( $variant_arg ),* )
                                             };
                                             // Handle refcounting.
                                             $(
@@ -278,8 +278,10 @@ macro_rules! impl_builtins {
                                         let ret = {
                                             // Shadow HeapRef arguments with actual argument value.
                                             $(
-                                                let $arg_name: impl_builtins!(@handle_ref_param_type $arg_type) = impl_builtins!(@handle_ref_param vm, $arg_type, $arg_name);
+                                                let $arg_name: impl_builtins!(@handle_ref_param_type $arg_type) = impl_builtins!(@handle_ref_param_value vm, $arg_type, $arg_name);
                                             )*
+                                            // note: borrowing issues with this. probably solvable but we really only need the variants to be able to call each other. single builtins would get no benefit from being moved to functions.
+                                            //builtin_functions::$name(vm, constructor, element_constructor, $( $arg_name ),* )
                                             $(
                                                 let $vm = &mut *vm;
                                                 $( let $element_constructor = element_constructor; )?
@@ -302,6 +304,54 @@ macro_rules! impl_builtins {
                     )+
                 }
             }
+        }
+
+        #[cfg(feature="runtime")]
+        mod builtin_functions {
+            use super::*;
+            $( // type
+                $( // function
+                    $( // implementation
+
+                        $( // builtin variants
+                            $(
+                                #[allow(unused_variables, unused_assignments, unused_imports)]
+                                #[cfg(feature="runtime")]
+                                pub(super) fn $variant_name<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $variant_arg : impl_builtins!(@handle_ref_param_type $variant_type) ),* ) $( -> $variant_ret_type )? {
+                                    use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+                                    $(
+                                        #[allow(dead_code)]
+                                        $( type $generic_name = $generic_type; )+
+                                    )?
+                                    let $variant_vm = &mut *vm;
+                                    $code
+                                }
+                            )+
+                        )?
+                        /* (see exec())
+                        $( // single variant
+                            #[allow(unused_variables, unused_assignments, unused_imports)]
+                            #[cfg(feature="runtime")]
+                            pub(super) fn $name<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress, $( $arg_name : impl_builtins!(@handle_ref_param_type $arg_type) ),* ) $( -> $ret_type )? {
+                                use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+                                #[allow(dead_code)]
+                                /// Single variant builtins don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
+                                trait T { }
+                                #[allow(dead_code)]
+                                /// Single variant builtins don't provide U. This definition of U is intended to shadow the VM's generic U in order to trigger an error on accidental use. This is not the U you are looking for.
+                                trait U { }
+                                $(
+                                    let $vm = &mut *vm;
+                                    $( let $element_constructor = element_constructor; )?
+                                )?
+                                $code
+                            }
+                        )?
+                        */
+
+                    )+
+                )+
+            )+
         }
     };
 }

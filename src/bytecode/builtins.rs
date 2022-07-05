@@ -608,9 +608,15 @@ impl_builtins! {
     }
 
     String {
+        /// Returns the length of the string.
+        len(self: Self) -> u64 {
+            fn string_len(this: &str) -> StackAddress {
+                this.chars().count() as StackAddress
+            }
+        }
 
         /// Inserts another string into this String at the given UTF-8 character position.
-        insert(self: Self, position: u64, other: Self) -> String {
+        insert(self: Self, position: u64, other: Self) -> Self {
             fn string_insert(this: &str, position: StackAddress, other: &str) -> String {
                 let mut result = String::with_capacity(this.len() + other.len());
                 let mut remainder = append(0, Some(position as usize), &this, &mut result);
@@ -627,7 +633,7 @@ impl_builtins! {
         }
 
         /// Returns a substring of the String, starting at given UTF-8 character position and the given length.
-        slice(self: Self, position: u64, len: u64) -> String {
+        slice(self: Self, position: u64, len: u64) -> Self {
             fn string_slice(this: &str, position: StackAddress, len: StackAddress) -> String {
                 let mut result = String::with_capacity(len as usize); // todo: probably want to over-allocate here since our len is in chars an capacity in bytes
                 let _ = append(position as usize, if len > 0 { Some(len as usize) } else { None }, &this, &mut result);
@@ -678,28 +684,28 @@ impl_builtins! {
         }
 
         /// Replaces occurences of the given substring with another string.
-        replace(self: Self, from: Self, to: Self) -> String {
+        replace(self: Self, from: Self, to: Self) -> Self {
             fn string_replace(this: &str, from: &str, to: &str) -> String {
                 this.replace(from, to)
             }
         }
 
         /// Returns the lowercase equivalent of this string.
-        to_lowercase(self: Self) -> String {
+        to_lowercase(self: Self) -> Self {
             fn string_to_lowercase(this: &str) -> String {
                 this.to_lowercase()
             }
         }
 
         /// Returns the uppercase equivalent of this string.
-        to_uppercase(self: Self) -> String {
+        to_uppercase(self: Self) -> Self {
             fn string_to_uppercase(this: &str) -> String {
                 this.to_uppercase()
             }
         }
 
         /// Creates a new String by repeating this string n times.
-        repeat(self: Self, n: u64) -> String {
+        repeat(self: Self, n: u64) -> Self {
             fn string_repeat(this: &str, n: StackAddress) -> String {
                 if this.len().checked_mul(n as usize).is_some() {
                     this.repeat(n as usize)
@@ -731,7 +737,7 @@ impl_builtins! {
         }
 
         /// Returns the string representation of given ASCII code.
-        from_ascii(char_code: u8) -> String {
+        from_ascii(char_code: u8) -> Self {
             fn string_from_ascii(char_code: u8) -> String {
                 (char_code as char).to_string()
             }
