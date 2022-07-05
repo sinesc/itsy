@@ -94,7 +94,7 @@ use config_derived::*;
 macro_rules! itsy_api {
     ($vis:vis $type_name:ident, $context_type:ty, {
         $(
-            fn $name:tt(&mut $context:ident $(, $arg_name:ident: $($arg_type:tt)+)*) $(-> $ret_type:ident)? $code:block
+            fn $name:tt(&mut $context_name:ident $(, $arg_name:ident: $($arg_type:tt)+)*) $(-> $ret_type:ident)? $code:block
         )*
     } ) => { }
 }
@@ -175,7 +175,7 @@ macro_rules! itsy_api {
         itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
     };
     // implement VMFunc trait
-    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context:ident [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context_name:ident $( , $vm_name:ident )? [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
         impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
             #[cfg(feature="compiler")]
             fn to_index(self: Self) -> $crate::internals::binary::sizes::RustFnIndex {
@@ -208,7 +208,7 @@ macro_rules! itsy_api {
                 match self {
                     $(
                         $type_name::$name => {
-                            let $context = context;
+                            let $context_name = context;
                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
                             itsy_api!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
                             // Run code.
@@ -217,6 +217,7 @@ macro_rules! itsy_api {
                                 $(
                                     let $arg_name: itsy_api!(@handle_ref_param_type $arg_type) = itsy_api!(@handle_ref_param vm, $arg_type, $arg_name);
                                 )*
+                                $( let $vm_name = &mut *vm; )?
                                 $code
                             };
                             // Handle refcounting.
@@ -243,12 +244,12 @@ macro_rules! itsy_api {
             // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
             // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
             // components using push down accumulation to transform them into a non-ambiguous format
-            fn $name:tt ( & mut $context:ident $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
+            fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
         )* }
     ) => {
         /// Rust function mapping. Generated from function signatures defined via the `itsy_api!` macro.
         itsy_api!(@enum [ $( $globalmeta )* ], $vis, $type_name $(, $name [ $( $attr ),* ] )* );
-        itsy_api!(@trait $type_name, $context_type $(, $name, $context [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
+        itsy_api!(@trait $type_name, $context_type $(, $name, $context_name $(, $vm_name )? [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
