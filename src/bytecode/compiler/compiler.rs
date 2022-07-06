@@ -319,7 +319,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.compile_expression(&item.right)?;      // stack: &left right
                 let ty = self.item_type(&item.left);
-                self.write_heap_putx(ty, false);    // stack: --
+                self.write_heap_put(ty, false);    // stack: --
             },
             _ => {
                 self.compile_expression(&item.left)?;       // stack: &left
@@ -336,7 +336,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     _ => unreachable!("Unsupported assignment operator encountered"),
                 };
-                self.write_heap_putx(ty, false); // stack -
+                self.write_heap_put(ty, false); // stack -
             },
         }
         Ok(())
@@ -1519,20 +1519,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions to put a value of the given type at the target of the top heap reference on the stack.
-    fn write_heap_put(self: &Self, ty: &Type) -> StackAddress {
-        match ty.primitive_size() {
-            1 => self.writer.heap_put8(),
-            2 => self.writer.heap_put16(),
-            4 => self.writer.heap_put32(),
-            8 => self.writer.heap_put64(),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        }
-    }
-
-    /// Writes instructions to put a value of the given type at the target of the top heap reference on the stack.
     /// If the value being written is a heap reference itself, its refcount will be increased and unless is_new_heap_ref is true
     /// and the replaced value will have its refcount decreased.
-    fn write_heap_putx(self: &Self, ty: &Type, is_new_heap_ref: bool) -> StackAddress {
+    fn write_heap_put(self: &Self, ty: &Type, is_new_heap_ref: bool) -> StackAddress {
         if ty.is_ref() {
             let constructor = self.get_constructor(ty);
             if !is_new_heap_ref {
@@ -1541,33 +1530,47 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.writer.heap_putx_new(constructor)
             }
         } else {
-            self.write_heap_put(ty)
+            match ty.primitive_size() {
+                1 => self.writer.heap_put8(),
+                2 => self.writer.heap_put16(),
+                4 => self.writer.heap_put32(),
+                8 => self.writer.heap_put64(),
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+            }
         }
     }
 
     /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
     fn write_heap_fetch_member(self: &Self, container_type: &Type, result_type: &Type, offset: StackAddress) {
         let constructor = self.get_constructor(container_type);
-        match result_type.primitive_size() {
-            1 => { self.writer.heap_fetch_member8(offset, constructor); },
-            2 => { self.writer.heap_fetch_member16(offset, constructor); },
-            4 => { self.writer.heap_fetch_member32(offset, constructor); },
-            8 => { self.writer.heap_fetch_member64(offset, constructor); },
-            //16 => { self.writer.heap_fetch_member128(offset); },
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
+        if result_type.is_ref() {
+            self.writer.heap_fetch_memberx(offset, constructor);
+        } else {
+            match result_type.primitive_size() {
+                1 => { self.writer.heap_fetch_member8(offset, constructor); },
+                2 => { self.writer.heap_fetch_member16(offset, constructor); },
+                4 => { self.writer.heap_fetch_member32(offset, constructor); },
+                8 => { self.writer.heap_fetch_member64(offset, constructor); },
+                //16 => { self.writer.heap_fetch_member128(offset); },
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
+            }
         }
     }
 
     /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
     fn write_heap_fetch_element(self: &Self, container_type: &Type, result_type: &Type) {
         let constructor = self.get_constructor(container_type);
-        match result_type.primitive_size() {
-            1 => { self.writer.heap_fetch_element8(constructor); },
-            2 => { self.writer.heap_fetch_element16(constructor); },
-            4 => { self.writer.heap_fetch_element32(constructor); },
-            8 => { self.writer.heap_fetch_element64(constructor); },
-            //16 => { self.writer.heap_fetch_element128(); },
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
+        if result_type.is_ref() {
+            self.writer.heap_fetch_elementx(constructor);
+        } else {
+            match result_type.primitive_size() {
+                1 => { self.writer.heap_fetch_element8(constructor); },
+                2 => { self.writer.heap_fetch_element16(constructor); },
+                4 => { self.writer.heap_fetch_element32(constructor); },
+                8 => { self.writer.heap_fetch_element64(constructor); },
+                //16 => { self.writer.heap_fetch_element128(); },
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, result_type),
+            }
         }
     }
 

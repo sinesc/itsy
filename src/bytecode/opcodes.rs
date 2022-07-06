@@ -827,6 +827,16 @@ impl_opcodes!{
         self.stack.push(data);
     }
 
+    /// Pop a heap reference and push the heap value at its current offset + given offset onto the stack. Drops temporary references.
+    fn heap_fetch_memberx(&mut self, offset: StackAddress, constructor: StackAddress) {
+        let item: HeapRef = self.stack.pop();
+        let data: HeapRef = self.heap.read(item.with_offset(offset as StackOffset));
+        self.heap.ref_item(data.index(), HeapRefOp::Inc); // non recursive is fine since we only want to prevent it from being dropped and will reverse the change immediately
+        self.refcount_value(item, constructor, HeapRefOp::Free);
+        self.heap.ref_item(data.index(), HeapRefOp::DecNoFree);
+        self.stack.push(data);
+    }
+
     /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references.
     fn <
         heap_fetch_element8<T: Data8>(constructor: StackAddress),
@@ -838,6 +848,17 @@ impl_opcodes!{
         let item: HeapRef = self.stack.pop();
         let data: T = self.heap.read(item.with_offset((size_of::<T>() as StackAddress * element_index) as StackOffset));
         self.refcount_value(item, constructor, HeapRefOp::Free);
+        self.stack.push(data);
+    }
+
+    /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references.
+    fn heap_fetch_elementx(&mut self, constructor: StackAddress) {
+        let element_index: StackAddress = self.stack.pop();
+        let item: HeapRef = self.stack.pop();
+        let data: HeapRef = self.heap.read(item.with_offset((size_of::<HeapRef>() as StackAddress * element_index) as StackOffset));
+        self.heap.ref_item(data.index(), HeapRefOp::Inc); // non recursive is fine since we only want to prevent it from being dropped and will reverse the change immediately
+        self.refcount_value(item, constructor, HeapRefOp::Free);
+        self.heap.ref_item(data.index(), HeapRefOp::DecNoFree);
         self.stack.push(data);
     }
 
