@@ -223,3 +223,57 @@ fn tempory_access() {
     ));
     assert_all(&result, &[ 1u8, 2, 3 ]);
 }
+
+#[test]
+fn nested_temporaries() {
+    let result = run(stringify!(
+        struct Outer {
+            inner: Inner,
+        }
+        struct Inner {
+            value: u16,
+        }
+        fn main() {
+            let a = [ Outer { inner: Inner { value: 3 }} ][0].inner.value;
+            let b = Outer { inner: Inner { value: 4 }}.inner.value; // temporary intermediate results
+            ret_u16(a);
+            ret_u16(b);
+
+            let c = [ Outer { inner: Inner { value: 5 }} ];
+            let d = Outer { inner: Inner { value: 6 }}; // non-temporary
+            c[0] = d;
+            ret_u16(c[0].inner.value);
+
+            let e = [ Outer { inner: Inner { value: 7 }} ];
+            e[0] = Outer { inner: Inner { value: 8 }};
+            ret_u16(e[0].inner.value);
+
+            let f = [ Outer { inner: Inner { value: 9 }} ][0];
+            f = Outer { inner: Inner { value: 10 } };
+            ret_u16(f.inner.value);
+        }
+    ));
+    assert_all(&result, &[ 3u16, 4, 6, 8, 10 ]);
+}
+
+
+#[test]
+fn string_copy_vs_reference() {
+    let result = run(stringify!(
+        let s = "Hello"; // original
+        let t = [ s ];   // array with copy of s
+        let u = t;       // array referencing array with copy of s
+        ret_string(t[0]);
+        ret_string(s);
+
+        t[0] += " brave";
+        s += " World";
+        ret_string(t[0]);
+        ret_string(s);
+
+        t[0] += " new world";
+        ret_string(t[0]);
+        ret_string(u[0]);
+    ));
+    assert_all(&result, &[ "Hello", "Hello", "Hello brave", "Hello World", "Hello brave new world", "Hello brave new world" ].map(|s| s.to_string()));
+}
