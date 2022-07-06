@@ -41,7 +41,8 @@ itsy_api!(
         fn sleep(&mut context, milliseconds: u64) {
             thread::sleep(Duration::from_millis(milliseconds));
         }
-        fn interval(&mut context, milliseconds: u64) -> u64 {
+        /// Pauses for the given number of milliseconds minus the number of milliseconds since the last call.
+        fn wait_frame(&mut context, milliseconds: u64) -> u64 {
             let already_expired = (Instant::now() - context.last_frame).as_millis() as u64;
             if already_expired < milliseconds {
                 let remaining = milliseconds - already_expired;

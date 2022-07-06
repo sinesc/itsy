@@ -2,6 +2,12 @@
  * Mandelbrot fractal example. CTRL+C to exit.
  */
 
+struct Frame {
+    max_iterations: u32,
+    zoom: f64,
+    interp: f64,
+}
+
 fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64) -> String {
 
     let chars = [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "$", "#", "X", "O", "*" ];
@@ -32,7 +38,7 @@ fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, cen
                 n += 1;
             }
             line += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
-            x += 3.6 / max_x * zoom;
+            x += 4.0 / max_x * zoom;
         }
         result += line + "\n";
         y += 2.80 / max_y * zoom;
@@ -41,54 +47,82 @@ fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, cen
     result
 }
 
-struct Frame {
-    iterations: u32,
-    zoom: f64,
-}
+/*
+ * Compute zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
+ * them later.
+ * Any point that requires less than max_iterations - 15 iterations to fall into the set is rendered as
+ * whitespace by mandelbrot(). This gives the set a clearly defined boundary. The values generated below
+ * were tweaked to keep 'narrowing' the set boundary slightly slower than they are magnified by the zoom.
+ * The result is a trail or flame like effect during the later stages of the zoom.
+ * In other words, these values were picked because they looked cool and there is really no math involved.
+ */
+fn compute_frame_parameters() -> [ Frame ] {
 
-fn main() {
-    // compute frame parameters into an array so we can easily reverse the zoom direction once we reach f64 limits
     let zoom = 2.0;
     let zoom_multiplier = 0.99;
-    let num_frames = 695;
-    let width = 80;
-    let height = 24;
+    let num_frames = 690;
     let frames: [ Frame ] = [ ];
 
     for i in 0..num_frames {
-        // adjust iterations while zooming to keep a narrow boundary
-        let iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
-        frames.push(Frame { iterations: iterations, zoom: zoom });
+        // adjust max_iterations while zooming to keep a narrow boundary
+        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
+        frames.push(Frame { max_iterations: max_iterations, zoom: zoom, interp: 1.0 });
         // adjut zoom level ever faster
         zoom = zoom * zoom_multiplier;
         zoom_multiplier -= 0.000115;
     }
 
-    // duplicate some frames to delay zoom for a few seconds
+    // Duplicate some frames to delay zoom for a few seconds.
     for i in 0..100 {
-        frames.insert(0, frames[0]);
+        frames.insert(0, Frame { max_iterations: frames[0].max_iterations, zoom: frames[0].zoom, interp: frames[0].interp });
     }
 
-    // clear terminal
+    // Interpolation value used when moving from one coordinate to the next
+    for i in 0..180 {
+        frames[i].interp = (i as f64 / 180.0);
+    }
+
+    frames
+}
+
+fn clear() {
     let esc = String::from_ascii(27);
     print("{esc}[2J");
+}
+
+fn render(frame: Frame, coordinate: [ f64 ], angle: f64, runtime: u64, width: u32, height: u32) {
+    // move cursor to top left position and print fractal
+    let esc = String::from_ascii(27);
+    let x = coordinate[0] * frame.interp;
+    let y = coordinate[1] * frame.interp;
+    print("{esc}[1;1H" + mandelbrot(width, height, frame.max_iterations, frame.zoom, x, y, angle));
+    print("{esc}[1;1HModified Mandelbrot set");
+    let exit_str = "{runtime}ms/f, CTRL+C to exit";
+    print("{esc}[1;{width-exit_str.len() as u32+1}H{exit_str}");
+    print("{esc}[{height};1H{x.fmt(10)} {y.fmt(10)}i, max. iterations {frame.max_iterations}, zoom {(1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 })}x, {angle.to_degrees().rem_euclid(360.0).floor()}°");
+}
+
+fn main() {
+    clear();
 
     let runtime = 0;
+    let frames = compute_frame_parameters();
     let angle = 0.0;
+    let coordinates = [
+        [ 0.32570659879f64, 0.0470399495155 ],
+        [ -0.75 + 0.0008200260000962, 0.1 + 0.00010049997100001 ],
+    ];
 
-    // run through the frame coordinates forwards/backwards while continously rotating the fractal
     while true {
-        for frame in frames {
-            // move cursor to top left position and print fractal
-            print("{esc}[1;1H" + mandelbrot(width, height, frame.iterations, frame.zoom, 0.32570659879, 0.0470399495155, angle));
-            print("{esc}[1;1HModified Mandelbrot set, {frame.iterations} iterations, zoom {(1.0/frame.zoom).floor()}x, {angle.to_degrees().rem_euclid(360.0).floor()}°, {runtime}ms/f ");
-            print("{esc}[{height};1HCTRL+C to exit ");
-            angle += 0.015;
-            // interval waits for the given time but considers how much time already elapsed since last call
-            runtime = interval(1000 / 32);
+        for coordinate in coordinates {
+            for _ in 0..2 {
+                for frame in frames {
+                    render(frame, coordinate, angle, runtime, 80, 24);
+                    runtime = wait_frame(1000 / 33);
+                    angle += 0.015;
+                }
+                frames.reverse();
+            }
         }
-        frames.reverse();
     }
-
-    print("{esc}[2J");
 }

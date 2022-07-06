@@ -266,6 +266,16 @@ impl_builtins! {
             }
         }
 
+        /// Returns a string of a number formatted to the given number of decimals.
+        fmt(self: Self, decimals: u32) -> String {
+            fn <
+                float_format32<T: u32>(this: f32, decimals: u32) -> String,
+                float_format64<T: u64>(this: f64, decimals: u32) -> String,
+            >(&mut vm) {
+                format!("{:.1$}", this, decimals as usize)
+            }
+        }
+
         /// Returns the integer part of a number.
         trunc(self: Self) -> Self {
             fn <
