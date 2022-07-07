@@ -53,7 +53,7 @@ impl_builtins! {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ``` ignore
     /// let greetings = [
     ///     "Guten Tag!",
     ///     "Bonjour!",
@@ -267,7 +267,7 @@ impl_builtins! {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ``` ignore
     /// let approx: f64 = 355.0; // also try this with `f32`
     /// let imation = 113.0;
     /// let pi_approx = (approx / imation).fmt(7);
@@ -737,7 +737,7 @@ impl_builtins! {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ``` ignore
     /// let hello = "Добридень";
     /// let original_hello = hello;
     /// hello += "!";

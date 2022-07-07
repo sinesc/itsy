@@ -18,18 +18,19 @@ pub enum ResolveErrorKind {
     NumberOfArguments(String, ItemIndex, ItemIndex),
     MutabilityEscalation,
     AssignToImmutable,
-    CannotResolve(String),
     UndefinedFunction(String),
     UndefinedType(String),
     UndefinedItem(String),
-    /// Enum variant value is not an integer.
-    InvalidVariantValue(Numeric),
     /// Duplicate discriminant.
     DuplicateVariantValue(Numeric),
+    /// Enum variant value is not an integer.
+    InvalidVariantValue(Numeric),
     /// Enum variant literal is not numeric. TODO: non-numeric currently intercepted by the parser. eventually consts should be allowed here which the parser wouldn't catch
     InvalidVariantLiteral,
-    InvalidOperation(String),
     NotATraitMethod(String, String),
+    NotIterable(String),
+    CannotResolve(String),
+    InvalidOperation(String),
     Internal(String),
     Unsupported(String),
 }
@@ -41,7 +42,6 @@ pub struct ResolveError {
     position: Position,
     module_path: String,
 }
-
 impl ResolveError {
     pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
@@ -59,29 +59,29 @@ impl ResolveError {
         &self.module_path
     }
 }
-
 impl Display for ResolveError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[allow(unreachable_patterns)]
         match &self.kind {
-            ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {}, got {}", e, g),
-            ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {} to {}", t1, t2),
-            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {} for expected type {}", n, t),
-            ResolveErrorKind::UndefinedVariable(v) => write!(f, "Undefined variable '{}'", v),
-            ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{}'", m),
-            ResolveErrorKind::NumberOfArguments(func, e, g) => write!(f, "Invalid number of arguments. Function '{}' expects {} argument, got {}", func, e, g),
+            ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {e}, got {g}"),
+            ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {t1} to {t2}"),
+            ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {n} for expected type {t}"),
+            ResolveErrorKind::UndefinedVariable(v) => write!(f, "Undefined variable '{v}'"),
+            ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{m}'"),
+            ResolveErrorKind::NumberOfArguments(func, e, g) => write!(f, "Invalid number of arguments. Function '{func}' expects {e} argument, got {g}"),
             ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
             ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
-            ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {}", b), // fallback case
             ResolveErrorKind::UndefinedFunction(func) => write!(f, "Undefined function '{}'", func),
             ResolveErrorKind::UndefinedType(t) => write!(f, "Undefined type '{}'", t),
             ResolveErrorKind::UndefinedItem(i) => write!(f, "Undefined item '{}'", i),
-            ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
-            ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
-            ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
-            ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
             ResolveErrorKind::DuplicateVariantValue(numeric) => write!(f, "Duplicate enum variant discriminant {numeric}"),
             ResolveErrorKind::InvalidVariantValue(numeric) => write!(f, "Invalid enum variant discriminant {numeric}. Discriminants must be integer types"),
+            ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
+            ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
+            ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case
+            ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
+            ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
+            ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
             _ => write!(f, "{:?}", self.kind),
         }
     }

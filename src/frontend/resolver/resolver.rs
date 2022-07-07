@@ -958,6 +958,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if let Some(array) = self.type_by_id_mut(array_type_id).as_array_mut() {
                         array.type_id = Some(iter_type_id);
                     }
+                } else if self.item_type(&item.expr).map_or(false, |expr| expr.as_array().is_none()) {
+                    let type_name = self.type_name(item.expr.type_id(self).unwrap());
+                    return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
                 }
             },
             _ => return Err(ResolveError::new(&item.iter, ResolveErrorKind::InvalidOperation("Unsupported for in operand".to_string()), self.module_path)),
@@ -1142,6 +1145,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.set_type_id(item, expr_type_id)?;
             }
         };
+
+        // check binding is resolved. Resolvable (via resolved_or_err) does not do this for us. (TODO/FIXME)
+        if self.stage.must_resolve() {
+            if let Binding { type_id: None, .. } = self.binding_by_id(item.binding_id.unwrap()) {
+                return Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(item.ident.to_string()), self.module_path))
+            }
+        }
 
         self.resolved_or_err(item, None)
     }
