@@ -45,6 +45,31 @@ fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut St
 
 impl_builtins! {
 
+    /// Dynamically sized array type.
+    ///
+    /// Arrays store a variable amount of `Element`s of the same type. Arrays are a reference type,
+    /// meaning that when an array already bound to one variable is bound to another, both of the
+    /// variables will point at the same data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let greetings = [
+    ///     "Guten Tag!",
+    ///     "Bonjour!",
+    ///     "Добридень!",
+    ///     "¡Hola!",
+    ///     "今日は",
+    /// ];
+    ///
+    /// greetings.push("Hello!");
+    ///
+    /// for greeting in greetings {
+    ///     print("- {greeting} -");
+    /// }
+    /// ```
+    ///
+    /// This prints `- Guten Tag! -- Bonjour! -- Добридень! -- ¡Hola! -- 今日は -- Hello! -`.
     Array {
         /// Returns the length of the array.
         len(self: Self) -> u64 {
@@ -63,7 +88,7 @@ impl_builtins! {
         }
 
         /// Appends an element to the back of the array.
-        push(self: Self, value: Any) {
+        push(self: Self, value: Element) {
             fn <
                 array_push8<T: u8>(this: Array, value: u8),
                 array_push16<T: u16>(this: Array, value: u16),
@@ -80,7 +105,7 @@ impl_builtins! {
         }
 
         /// Removes the last element from an array and returns it.
-        pop(self: Self) -> Any {
+        pop(self: Self) -> Element {
             fn <
                 array_pop8<T: u8>(this: Array) -> u8,
                 array_pop16<T: u16>(this: Array) -> u16,
@@ -137,7 +162,7 @@ impl_builtins! {
         }
 
         /// Inserts an element at position index within the array, shifting all elements after it to the right.
-        insert(self: Self, index: u64, value: Any) {
+        insert(self: Self, index: u64, value: Element) {
             fn <
                 array_insert8<T: u8>(this: Array, index: StackAddress, value: u8),
                 array_insert16<T: u16>(this: Array, index: StackAddress, value: u16),
@@ -168,7 +193,7 @@ impl_builtins! {
         }
 
         /// Removes and returns the element at position index within the array, shifting all elements after it to the left.
-        remove(self: Self, element: u64 ) -> Any {
+        remove(self: Self, element: u64 ) -> Element {
             fn <
                 array_remove8<T: u8>(this: Array, element: StackAddress) -> u8,
                 array_remove16<T: u16>(this: Array, element: StackAddress) -> u16,
@@ -235,7 +260,94 @@ impl_builtins! {
         }
     }
 
+    /// The `f32` and `f64` floating point types.
+    ///
+    /// Value types that can represent a wide range of decimal numbers. `f64` has increased precision
+    /// over `f32`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let approx: f64 = 355.0; // also try this with `f32`
+    /// let imation = 113.0;
+    /// let pi_approx = (approx / imation).fmt(7);
+    ///
+    /// println("π is approximately {pi_approx}.");
+    /// ```
+    ///
+    /// This prints `π is approximately 3.1415929.`.
     Float {
+
+        /// Machine epsilon value for float type.
+        EPSILON() -> Self {
+            fn <
+                float_epsilon32<T: f32>() -> f32,
+                float_epsilon64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::EPSILON
+            }
+        }
+
+        /// Smallest finite float value.
+        MIN() -> Self {
+            fn <
+                float_min32<T: f32>() -> f32,
+                float_min64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::MIN
+            }
+        }
+
+        /// Smallest positive normal float value.
+        MIN_POSITIVE() -> Self {
+            fn <
+                float_min_positive32<T: f32>() -> f32,
+                float_min_positive64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::MIN_POSITIVE
+            }
+        }
+
+        /// Largest finite float value.
+        MAX() -> Self {
+            fn <
+                float_max32<T: f32>() -> f32,
+                float_max64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::MAX
+            }
+        }
+
+        /// Not a Number (NaN).
+        NAN() -> Self {
+            fn <
+                float_nan32<T: f32>() -> f32,
+                float_nan64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::NAN
+            }
+        }
+
+        /// Infinity (∞).
+        INFINITY() -> Self {
+            fn <
+                float_infinity32<T: f32>() -> f32,
+                float_infinity64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::INFINITY
+            }
+        }
+
+        /// Negative infinity (−∞).
+        NEG_INFINITY() -> Self {
+            fn <
+                float_neg_infinity32<T: f32>() -> f32,
+                float_neg_infinity64<T: f64>() -> f64,
+            >(&mut vm) {
+                T::NEG_INFINITY
+            }
+        }
+
         /// Returns the largest integer less than or equal to a number.
         floor(self: Self) -> Self {
             fn <
@@ -617,6 +729,23 @@ impl_builtins! {
         }
     }
 
+    /// A string of characters.
+    ///
+    /// Strings are always UTF-8 encoded. Positions within the string refer to UTF-8 character
+    /// offsets, not byte offsets. Internally strings are an immutable reference type that behaves like
+    /// a mutable value type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let hello = "Добридень";
+    /// let original_hello = hello;
+    /// hello += "!";
+    ///
+    /// println("{hello} <-> {original_hello}");
+    /// ```
+    ///
+    /// This prints `Добридень! <-> Добридень`.
     String {
         /// Returns the length of the string.
         len(self: Self) -> u64 {

@@ -816,6 +816,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     // todo fix this hack: path handling needs a rework
                     if static_path.name.len() == 1 && static_path.name[0].name == "String" {
                         item.function_id = self.create_string_builtin(&item.ident.name)?;
+                    } else if static_path.name.len() == 1 && static_path.name[0].name == "f32" {
+                        item.function_id = self.create_float_builtin(&item.ident.name, self.primitive_type_id(Type::f32)?)?;
+                    } else if static_path.name.len() == 1 && static_path.name[0].name == "f64" {
+                        item.function_id = self.create_float_builtin(&item.ident.name, self.primitive_type_id(Type::f64)?)?;
                     } else {
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                     }

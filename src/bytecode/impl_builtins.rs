@@ -40,7 +40,7 @@ macro_rules! impl_builtins {
     };
     // type id mapping for resolver function
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Self) => { $type_id };
-    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Any) => { $inner_type_id.expect("Generic type not defined but used.") };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic type not defined but used.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
     // write implementation variant
@@ -73,20 +73,23 @@ macro_rules! impl_builtins {
     } };
     // main definition block
     (
-        $( $builtin_type:ident { $(
-            $( #[ $attr:meta ] )*
-            $builtin_function:ident ( $( $doc_arg:ident : $doc_type:ident ),* ) $( -> $doc_result_type:ident )? { $(
-                fn
-                $( /* either multiple function variants */
-                    < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
-                    ( & mut $variant_vm:ident )
-                )?
-                $(
-                    $name:ident ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
-                )?
-                $code:block
+        $(
+            $( #[ $builtin_type_attr:meta ] )*
+            $builtin_type:ident { $(
+                $( #[ $attr:meta ] )*
+                $builtin_function:ident ( $( $doc_arg:ident : $doc_type:ident ),* ) $( -> $doc_result_type:ident )? { $(
+                    fn
+                    $( /* either multiple function variants */
+                        < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
+                        ( & mut $variant_vm:ident )
+                    )?
+                    $(
+                        $name:ident ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
+                    )?
+                    $code:block
+                )+ }
             )+ }
-        )+ } )+
+        )+
     ) => {
 
         /// Builtin functions callable via the `builtincall` opcode. Generated from method signatures defined via the impl_builtins! macro.
@@ -181,16 +184,14 @@ macro_rules! impl_builtins {
         pub mod documentation {
             //! Generated documentation of builtin Itsy types.
             //!
-            //! This module is only built with cargo doc and not generally available to Rust code. It is used as a place to document the builtin
-            //! types available from within Itsy code. Due to limitations in the generation the following simplifications were made:
+            //! This module is only built with `cfg(doc)` enabled and used as a place to document the builtin types available in Itsy.
             //!
-            //! - `Array` documents the builtin `[ ]` type. `Any` here refers to the type the array was specialized with.
-            //! - `Float` documents the builtin `f32` and `f64` types. There is no actual `Float` type in Itsy.
-            //! - `String` documents the builtin `String`-type.
-            //!
-            //! Most of the builtins are thin wrappers over Rust `std` methods. The `Float` documentation is mostly copied from the standard library documentation.
-            $( pub struct $builtin_type { } )+
-            struct Any { }
+            //! Most of the builtins are thin wrappers over Rust `std` methods. Much of the documentation is copied from the standard library documentation.
+            $(
+                $( #[ $builtin_type_attr ] )*
+                pub struct $builtin_type { }
+            )+
+            struct Element { }
             $( // type
                 impl $builtin_type {
                     $( // function
