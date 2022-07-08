@@ -143,66 +143,19 @@ impl<T, U> VM<T, U> {
     }
 
     /// Constructs instance from given constructor and prototype. Modifies input for internal purposes.
-    pub(crate) fn construct_value(self: &mut Self, constructor_offset: StackAddress, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) -> StackAddress {
-        let parsed = Constructor::parse(&self.stack, constructor_offset);
-        match parsed.op {
-            Constructor::Primitive => {
-                let primitive_size = Constructor::parse_primitive(&self.stack, parsed.offset) as StackAddress;
-                self.construct_copy_value(target, *prototype_offset, primitive_size);
-                *prototype_offset += primitive_size;
-            },
-            Constructor::Array => {
-                let heap_ref = HeapRef::new(self.heap.alloc(0, ItemIndex::MAX), 0); // TODO: use with_capacity() with correct final size. probably best to store final array size with constructor so we don't need to look ahead at runtime
-                self.construct_write_ref(target, heap_ref);
-                // read size from prototype instead of constructor
-                let num_elements: ItemIndex = self.stack.load(*prototype_offset);
-                *prototype_offset += size_of_val(&num_elements) as StackAddress;
-                for _ in 0..num_elements {
-                    // reuse offset for each array element
-                    self.construct_value(parsed.offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
-                }
-            },
-            Constructor::Struct => {
-                let (implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
-                let heap_ref = HeapRef::new(self.heap.alloc(0, implementor_index), 0);
-                self.construct_write_ref(target, heap_ref);
-                for _ in 0..num_fields {
-                    field_offset = self.construct_value(field_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
-                }
-            },
-            Constructor::Enum => {
-                // TODO: this is never used, enum literals are compiled to use upload instruction
-                let (implementor_index, num_variants, variant_table_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
-                // read variant index from prototype
-                let variant_index: ItemIndex = self.stack.load(*prototype_offset);
-                *prototype_offset += size_of_val(&variant_index) as StackAddress;
-                assert!(variant_index < num_variants, "Prototype specifies invalid enum variant");
-                // seek to variant offset, read it from constructor and seek to the offset
-                let (num_fields, mut variant_field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
-                // read and construct fields for the variant
-                let heap_ref = HeapRef::new(self.heap.alloc(0, implementor_index), 0);
-                self.construct_write_ref(target, heap_ref);
-                self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&variant_index.to_ne_bytes());
-                for _ in 0..num_fields {
-                    variant_field_offset = self.construct_value(variant_field_offset, prototype_offset, CopyTarget::Heap(heap_ref), existing_strings);
-                }
-            },
-            Constructor::String => {
-                if existing_strings {
-                    let num_bytes = HeapRef::primitive_size() as StackAddress;
-                    self.construct_copy_value(target, *prototype_offset, num_bytes);
-                    *prototype_offset += num_bytes;
-                } else {
-                    let heap_ref = HeapRef::new(self.heap.alloc(0, ItemIndex::MAX), 0);
-                    self.construct_write_ref(target, heap_ref);
-                    let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
-                    *prototype_offset += size_of_val(&num_bytes) as StackAddress;
-                    self.construct_copy_value(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
-                    *prototype_offset += num_bytes;
-                }
-            },
-        };
-        parsed.next
+    pub(crate) fn construct_value(self: &mut Self, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) {
+        if existing_strings {
+            let num_bytes = HeapRef::primitive_size() as StackAddress;
+            self.construct_copy_value(target, *prototype_offset, num_bytes);
+            *prototype_offset += num_bytes;
+        } else {
+            let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
+            let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
+            self.construct_write_ref(target, heap_ref);
+            *prototype_offset += size_of_val(&num_bytes) as StackAddress;
+            self.construct_copy_value(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
+            *prototype_offset += num_bytes;
+        }
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.

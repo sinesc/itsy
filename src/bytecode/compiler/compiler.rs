@@ -785,18 +785,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
                 self.write_immediate(variant_value, enum_ty);
             },
-            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::String(_) | LiteralValue::Variant(_) => {
-                if item.value.is_const() {
-                    // simple constant constructor, construct from const pool prototypes
-                    let constructor = self.get_constructor(ty);
-                    let prototype = self.store_literal_prototype(item);
-                    self.writer.construct(constructor, prototype);
-                } else {
-                    // non-constant constructor, construct from stack
-                    let type_id = item.type_id(self).unwrap();
-                    let size = self.write_literal_prototype_builder(item)?;
-                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-                }
+            LiteralValue::String(ref string_literal) => {
+                // copy strings from const pool prototypes
+                let prototype = self.writer.const_len();
+                self.writer.store_const(string_literal.as_str());
+                self.writer.construct(prototype);
+            }
+            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::Variant(_) => {
+                // construct to stack, then upload to heap
+                let type_id = item.type_id(self).unwrap();
+                let size = self.write_literal_prototype_builder(item)?;
+                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
         Ok(())
@@ -1109,7 +1108,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 }
 
-/// Const pool writer functions.
+/// Opcode writer functions.
 impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Stores an instance constructor on the const pool.
@@ -1180,84 +1179,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         position
     }
-
-    /// Stores constant literal prototype on the const pool.
-    fn store_literal_prototype(self: &Self, item: &ast::Literal) -> StackAddress {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.item_type(item);
-        let pos = self.writer.const_len();
-        match &item.value {
-            LiteralValue::Void => { },
-            &LiteralValue::Numeric(int) => {
-                self.store_numeric_prototype(int, ty);
-            },
-            &LiteralValue::Bool(boolean) =>  {
-                match ty {
-                    Type::bool => self.writer.store_const(if boolean { 1u8 } else { 0u8 }),
-                    _ => panic!("Unexpected boolean literal type: {:?}", ty)
-                };
-            },
-            LiteralValue::String(string_literal) => {
-                self.writer.store_const(string_literal.as_str());
-            },
-            LiteralValue::Array(array_literal) => {
-                self.writer.store_const(array_literal.elements.len() as ItemIndex);
-                for element in &array_literal.elements {
-                    self.store_literal_prototype(element.as_literal().unwrap());
-                }
-            },
-            LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
-                for (name, _) in struct_def.fields.iter() {
-                    let field = struct_literal.fields.get(&name[..]).expect("Missing struct field");
-                    self.store_literal_prototype(field.as_literal().unwrap());
-                }
-            },
-            LiteralValue::Variant(variant) => {
-                let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::unsigned(size_of::<VariantIndex>());
-                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
-                self.store_numeric_prototype(Numeric::Unsigned(variant_index as u64), &index_type);
-            },
-        };
-        pos
-    }
-
-    /// Stores given numeric on the const pool.
-    fn store_numeric_prototype(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
-        match numeric {
-            Numeric::Signed(v) => {
-                match ty {
-                    Type::i8 => self.writer.store_const(v as i8),
-                    Type::i16 => self.writer.store_const(v as i16),
-                    Type::i32 => self.writer.store_const(v as i32),
-                    Type::i64 => self.writer.store_const(v as i64),
-                    _ => panic!("Unexpected signed integer literal type: {:?}", ty)
-                }
-            },
-            Numeric::Unsigned(v) => {
-                match ty {
-                    Type::i8 | Type::u8 => self.writer.store_const(v as u8),
-                    Type::i16 | Type::u16 => self.writer.store_const(v as u16),
-                    Type::i32 | Type::u32 => self.writer.store_const(v as u32),
-                    Type::i64 | Type::u64 => self.writer.store_const(v as u64),
-                    _ => panic!("Unexpected unsigned integer literal type: {:?}", ty)
-                }
-            },
-            Numeric::Float(v) => {
-                match ty {
-                    Type::f32 => self.writer.store_const(v as f32),
-                    Type::f64 => self.writer.store_const(v as f64),
-                    _ => panic!("Unexpected float literal type: {:?}", ty)
-                }
-            },
-            //Numeric::Overflow => panic!("Literal computation overflow")
-        }
-    }
-}
-
-/// Opcode writer functions.
-impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a return instruction for the current function being compiled.
     fn write_ret(self: &Self) {
@@ -1351,13 +1272,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.item_type(item);
         Ok(match &item.value {
             LiteralValue::Void | LiteralValue::Numeric(_) | LiteralValue::Bool(_) => unreachable!("Invalid prototype type"),
-            LiteralValue::String(_) => {
+            LiteralValue::String(string_literal) => {
                 // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
                 // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
                 // later use a special constructor instruction that assumes strings are already on the heap.
-                let constructor = self.get_constructor(ty);
-                let prototype = self.store_literal_prototype(item);
-                self.writer.construct(constructor, prototype);
+                let prototype = self.writer.const_len();
+                self.writer.store_const(string_literal.as_str());
+                self.writer.construct(prototype);
                 Type::String.primitive_size() as StackAddress
             },
             LiteralValue::Array(array_literal) => {

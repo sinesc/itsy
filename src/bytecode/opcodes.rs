@@ -615,9 +615,9 @@ impl_opcodes!{
     }
 
     /// Constructs an instance of a non-primitive type.
-    fn construct(&mut self, constructor: StackAddress, prototype: StackAddress) {
+    fn construct(&mut self, prototype: StackAddress) {
         let mut prototype = prototype; // impl_opcodes macro does not allow mut arguments
-        self.construct_value(constructor, &mut prototype, CopyTarget::Stack, false);
+        self.construct_value(&mut prototype, CopyTarget::Stack, false);
     }
 
     /// Moves an instance that was constructed on the stack to the heap.
