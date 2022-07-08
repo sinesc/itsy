@@ -7,7 +7,9 @@ use crate::shared::index_twice;
 macro_rules! debug_assert_index {
     ($self:ident, $index:expr) => {
         #[cfg(debug_assertions)]
-        if $self.free.iter().find(|&&pos| pos == $index).is_some() {
+        if $self.free_small.iter().find(|&&pos| pos == $index).is_some() ||
+            $self.free_medium.iter().find(|&&pos| pos == $index).is_some() ||
+            $self.free_large.iter().find(|&&pos| pos == $index).is_some() {
             panic!("HEAP: operation on previously freed object {}", $index);
         }
         #[cfg(debug_assertions)]
@@ -54,41 +56,67 @@ impl HeapObject {
 /// A heap holding non-primitive objects, e.g. strings.
 #[derive(Debug)]
 pub struct Heap {
-    objects: Vec<HeapObject>,
-    free: Vec<StackAddress>,
-    epoch: usize,
+    objects     : Vec<HeapObject>,
+    free_small  : Vec<StackAddress>,
+    free_medium : Vec<StackAddress>,
+    free_large  : Vec<StackAddress>,
+    epoch       : usize,
 }
 
 impl Heap {
+    const MAX_SIZE_SMALL: StackAddress = 64;
+    const MAX_SIZE_LARGE: StackAddress = 64 * 1024;
+
     /// Creates a new VM heap.
     pub fn new() -> Self {
         Self {
-            objects: Vec::with_capacity(128),
-            free: Vec::with_capacity(16),
-            epoch: 0,
+            objects     : Vec::with_capacity(256),
+            free_small  : Vec::with_capacity(256),
+            free_medium : Vec::with_capacity(16),
+            free_large  : Vec::with_capacity(4),
+            epoch       : 0,
         }
     }
     /// Deallocates freed chunks of memory.
     pub fn purge(self: &mut Self) {
-        // todo: truncate if len=0 or items are consecutive
-        for &v in self.free.iter() {
+        for &v in self.free_small.iter() {
+            let _drop = replace(&mut self.objects[v as usize].data, Vec::new());
+        }
+        for &v in self.free_medium.iter() {
+            let _drop = replace(&mut self.objects[v as usize].data, Vec::new());
+        }
+        for &v in self.free_large.iter() {
             let _drop = replace(&mut self.objects[v as usize].data, Vec::new());
         }
     }
     /// Number of active heap elements.
     pub fn len(self: &Self) -> StackAddress {
-        (self.objects.len() - self.free.len()) as StackAddress
+        (self.objects.len() - self.free_small.len() - self.free_medium.len() - self.free_large.len()) as StackAddress
+    }
+    /// Number of active heap elements.
+    pub fn free(self: &Self) -> (StackAddress, StackAddress, StackAddress, StackAddress) {
+        (
+            self.free_small.len() as StackAddress,
+            self.free_medium.len() as StackAddress,
+            self.free_large.len() as StackAddress,
+            (self.free_small.iter().map(|&i| self.objects[i as usize].data.capacity()).sum::<usize>()
+                + self.free_medium.iter().map(|&i| self.objects[i as usize].data.capacity()).sum::<usize>()
+                + self.free_large.iter().map(|&i| self.objects[i as usize].data.capacity()).sum::<usize>()
+            ) as StackAddress
+        )
     }
     /// Resets the heap, freeing all memory.
     pub fn reset(self: &mut Self) {
         self.objects.truncate(0);
-        self.free = Vec::with_capacity(16);
+        self.free_small = Vec::with_capacity(256);
+        self.free_medium = Vec::with_capacity(16);
+        self.free_large = Vec::with_capacity(4);
     }
     /// Returns a map of unfreed heap objects and their reference counts.
     pub fn data(self: &Self) -> Map<StackAddress, (StackAddress, &Vec<u8>)> {
         self.objects.iter()
             .enumerate()
-            .filter(|&(i, _)| !self.free.contains(&(i as StackAddress)))
+            .filter(|&(i, _)| !self.free_small.contains(&(i as StackAddress)) && !self.free_medium.contains(&(i as StackAddress)) && !self.free_large.contains(&(i as StackAddress)))
             .map(|(i, h)| (i as StackAddress, (h.refs, &h.data)))
             .collect()
     }
@@ -99,9 +127,10 @@ impl Heap {
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc(self: &mut Self, size_hint: StackAddress, implementor_index: ItemIndex) -> StackAddress {
-        if let Some(index) = self.free.pop() {
+        if let Some(index) = self.find_empty(size_hint) {
             let object = &mut self.objects[index as usize];
             object.data.truncate(0);
+            object.data.shrink_to(size_hint as usize);
             object.implementor_index = implementor_index;
             object.refs = 0;
             object.epoch = self.epoch;
@@ -114,7 +143,7 @@ impl Heap {
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc_place(self: &mut Self, data: Vec<u8>, implementor_index: ItemIndex) -> StackAddress {
-        if let Some(index) = self.free.pop() {
+        if let Some(index) = self.find_empty(data.capacity() as StackAddress) {
             let object = &mut self.objects[index as usize];
             object.data = data;
             object.implementor_index = implementor_index;
@@ -129,9 +158,10 @@ impl Heap {
     }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc_copy(self: &mut Self, data: &[ u8 ], implementor_index: ItemIndex) -> StackAddress {
-        if let Some(index) = self.free.pop() {
+        if let Some(index) = self.find_empty(data.len() as StackAddress) {
             let object = &mut self.objects[index as usize];
             object.data.truncate(0);
+            object.data.shrink_to(data.len());
             object.data.extend_from_slice(data);
             object.implementor_index = implementor_index;
             object.refs = 0;
@@ -183,7 +213,22 @@ impl Heap {
     /// Free a chunk of memory.
     pub fn free_item(self: &mut Self, index: StackAddress) {
         debug_assert_index!(self, index);
-        self.free.push(index);
+        if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_SMALL {
+            self.free_small.push(index);
+        } else if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_LARGE {
+            self.free_medium.push(index);
+        } else {
+            self.free_large.push(index);
+        }
+    }
+    fn find_empty(self: &mut Self, size: StackAddress) -> Option<StackAddress> {
+        if size <= Self::MAX_SIZE_SMALL {
+            self.free_small.pop()
+        } else if size <= Self::MAX_SIZE_LARGE {
+            self.free_medium.pop()
+        } else {
+            self.free_large.pop()
+        }
     }
     /// Returns the dynamic dispatch implementor index of the given heap object.
     pub fn item_implementor_index(self: &Self, index: StackAddress) -> ItemIndex {
