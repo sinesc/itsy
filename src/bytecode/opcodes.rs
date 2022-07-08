@@ -6,7 +6,7 @@ use crate::bytecode::{HeapRefOp, builtins::Builtin};
 #[cfg(feature="runtime")]
 use crate::{StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex};
 #[cfg(feature="runtime")]
-use crate::bytecode::{HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::{VMState, CopyTarget}}};
+use crate::bytecode::{HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState}};
 
 type Data8 = u8;
 type Data16 = u16;
@@ -614,20 +614,6 @@ impl_opcodes!{
         self.stack.fp = prev_fp;
     }
 
-    /// Constructs an instance of a non-primitive type.
-    fn construct(&mut self, prototype: StackAddress) {
-        let mut prototype = prototype; // impl_opcodes macro does not allow mut arguments
-        self.construct_value(&mut prototype, CopyTarget::Stack, false);
-    }
-
-    /// Moves an instance that was constructed on the stack to the heap.
-    fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
-        let data_start = self.stack.sp() as usize - size as usize;
-        let heap_ref = self.heap.alloc_copy(&self.stack.data()[data_start..], implementor_index);
-        self.stack.truncate(data_start as StackAddress);
-        self.stack.push(HeapRef::new(heap_ref, 0));
-    }
-
     /// Pops a heap reference off the stack and performs a reference count operation.
     fn <
         cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
@@ -646,6 +632,24 @@ impl_opcodes!{
     >(&mut self) {
         let item: HeapRef = self.stack.top();
         self.refcount_value(item, constructor, op);
+    }
+
+    /// Moves an instance that was constructed on the stack to the heap.
+    fn upload(&mut self, size: StackAddress, implementor_index: ItemIndex) {
+        let data_start = self.stack.sp() as usize - size as usize;
+        let heap_ref = self.heap.alloc_copy(&self.stack.data()[data_start..], implementor_index);
+        self.stack.truncate(data_start as StackAddress);
+        self.stack.push(HeapRef::new(heap_ref, 0));
+    }
+
+    /// Constructs an instance of a non-primitive type.
+    fn string(&mut self, const_offset: StackAddress) {
+        let num_bytes: StackAddress = self.stack.load(const_offset);
+        let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
+        self.stack.push(heap_ref);
+        let string_offset = const_offset as usize + size_of_val(&num_bytes);
+        let src = self.stack.data();
+        self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&src[string_offset..string_offset + num_bytes as usize]);
     }
 
     /// Pops 2 heap references to strings, compares the strings for equality and pushes the result. Drops temporary references.

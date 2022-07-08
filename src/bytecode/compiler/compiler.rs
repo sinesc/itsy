@@ -769,12 +769,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
         let ty = self.item_type(item);
-        match item.value {
+        match &item.value {
             LiteralValue::Void => { },
-            LiteralValue::Numeric(numeric) => { self.write_immediate(numeric, ty); }
+            LiteralValue::Numeric(numeric) => { self.write_immediate(*numeric, ty); }
             LiteralValue::Bool(v) =>  {
                 match ty {
-                    Type::bool => { if v { self.writer.immediate8(1); } else { self.writer.immediate8(0); } },
+                    Type::bool => { if *v { self.writer.immediate8(1); } else { self.writer.immediate8(0); } },
                     _ => panic!("Unexpected boolean literal type: {:?}", ty)
                 };
             },
@@ -786,15 +786,42 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_immediate(variant_value, enum_ty);
             },
             LiteralValue::String(ref string_literal) => {
-                // copy strings from const pool prototypes
+                // store string on const pool and write instruction to load it from const pool directly onto th heap
                 let prototype = self.writer.const_len();
                 self.writer.store_const(string_literal.as_str());
-                self.writer.construct(prototype);
+                self.writer.string(prototype);
             }
-            LiteralValue::Array(_) | LiteralValue::Struct(_) | LiteralValue::Variant(_) => {
-                // construct to stack, then upload to heap
+            LiteralValue::Array(array_literal) => {
+                // write instructions to construct the array on the stack and once complete, upload it to the heap
+                for element in &array_literal.elements {
+                    self.compile_expression(element)?;
+                }
+                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
+                let size = array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress;
                 let type_id = item.type_id(self).unwrap();
-                let size = self.write_literal_prototype_builder(item)?;
+                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+            },
+            LiteralValue::Struct(struct_literal) => {
+                // write instructions to construct the struct on the stack and once complete, upload it to the heap
+                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                // collect fields first to avoid borrow checker
+                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
+                for field in fields {
+                    self.compile_expression(field)?;
+                }
+                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
+                let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress);
+                let type_id = item.type_id(self).unwrap();
+                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+            },
+            LiteralValue::Variant(variant) => {
+                // write instructions to construct the data-variant enum on the stack and once complete, upload it to the heap
+                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
+                let index_type = Type::unsigned(size_of::<VariantIndex>());
+                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
+                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
+                let size = index_type.primitive_size() as StackAddress;
+                let type_id = item.type_id(self).unwrap();
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
@@ -1264,48 +1291,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             },
         }
-    }
-
-    /// Writes instructions to assemble a prototype.
-    fn write_literal_prototype_builder(self: &mut Self, item: &ast::Literal) -> CompileResult<StackAddress> {
-        use crate::frontend::ast::LiteralValue;
-        let ty = self.item_type(item);
-        Ok(match &item.value {
-            LiteralValue::Void | LiteralValue::Numeric(_) | LiteralValue::Bool(_) => unreachable!("Invalid prototype type"),
-            LiteralValue::String(string_literal) => {
-                // we cannot generate the string onto the stack since string operations (e.g. x = MyStruct { a: "hello" + "world" }) require references.
-                // this would also cause a lot of copying from heap to stack and back. instead we treat strings normally and
-                // later use a special constructor instruction that assumes strings are already on the heap.
-                let prototype = self.writer.const_len();
-                self.writer.store_const(string_literal.as_str());
-                self.writer.construct(prototype);
-                Type::String.primitive_size() as StackAddress
-            },
-            LiteralValue::Array(array_literal) => {
-                for element in &array_literal.elements {
-                    self.compile_expression(element)?;
-                }
-                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
-                array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress
-            },
-            LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
-                // collect fields first to avoid borrow checker
-                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
-                for field in fields {
-                    self.compile_expression(field)?;
-                }
-                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
-                struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress)
-            },
-            LiteralValue::Variant(variant) => {
-                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
-                let index_type = Type::unsigned(size_of::<VariantIndex>());
-                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
-                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
-                index_type.primitive_size() as StackAddress
-            },
-        })
     }
 
     /// Writes a primitive cast.

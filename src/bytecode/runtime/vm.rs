@@ -19,12 +19,6 @@ pub enum VMState {
     RuntimeError,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum CopyTarget {
-    Stack,
-    Heap(HeapRef),
-}
-
 /// A virtual machine for running Itsy bytecode.
 ///
 /// See [itsy_api](crate::itsy_api) for an example that runs an Itsy program using [VM::run].
@@ -119,43 +113,6 @@ impl<T, U> VM<T, U> {
         let arg: ItemIndex = self.stack.load(*constructor_offset);
         *constructor_offset += size_of_val(&arg) as StackAddress;
         arg
-    }
-
-    /// Writes prototype copy to given target (stack or heap).
-    fn construct_copy_value(self: &mut Self, target: CopyTarget, prototype_offset: StackAddress, num_bytes: StackAddress) {
-        match target {
-            CopyTarget::Heap(target_heap_ref) => {
-                let src = self.stack.data();
-                self.heap.item_mut(target_heap_ref.index()).data.extend_from_slice(&src[prototype_offset as usize .. prototype_offset as usize + num_bytes as usize]);
-            },
-            CopyTarget::Stack => unreachable!(), //self.stack.extend(prototype_offset, num_bytes),
-        }
-    }
-
-    /// Writes a heap reference to the given target (stack or heap).
-    fn construct_write_ref(self: &mut Self, target: CopyTarget, heap_ref: HeapRef) {
-        match target {
-            CopyTarget::Heap(target_heap_ref) => {
-                self.heap.item_mut(target_heap_ref.index()).data.extend_from_slice(&heap_ref.to_ne_bytes());
-            },
-            CopyTarget::Stack => self.stack.push(heap_ref),
-        }
-    }
-
-    /// Constructs instance from given constructor and prototype. Modifies input for internal purposes.
-    pub(crate) fn construct_value(self: &mut Self, prototype_offset: &mut StackAddress, target: CopyTarget, existing_strings: bool) {
-        if existing_strings {
-            let num_bytes = HeapRef::primitive_size() as StackAddress;
-            self.construct_copy_value(target, *prototype_offset, num_bytes);
-            *prototype_offset += num_bytes;
-        } else {
-            let num_bytes: StackAddress = self.stack.load(*prototype_offset); // fetch num bytes from prototype instead of constructor. strings have variable length
-            let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
-            self.construct_write_ref(target, heap_ref);
-            *prototype_offset += size_of_val(&num_bytes) as StackAddress;
-            self.construct_copy_value(CopyTarget::Heap(heap_ref), *prototype_offset, num_bytes);
-            *prototype_offset += num_bytes;
-        }
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
