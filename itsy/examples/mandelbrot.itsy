@@ -99,7 +99,7 @@ fn render(frame: Frame, coordinate: [ f64 ], angle: f64, runtime: u64, width: u3
     print("{esc}[1;1HModified Mandelbrot set");
     let exit_str = "{runtime}ms/f, CTRL+C to exit";
     print("{esc}[1;{width-exit_str.len() as u32+1}H{exit_str}");
-    print("{esc}[{height};1H{x.fmt(10)} {y.fmt(10)}i, max. iterations {frame.max_iterations}, zoom {(1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 })}x, {angle.to_degrees().rem_euclid(360.0).floor()}°");
+    print("{esc}[{height};1H{x.fmt(14)} {y.fmt(14)}i, max. iter {frame.max_iterations}, zoom {(1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 })}x, {angle.to_degrees().rem_euclid(360.0).floor()}°");
 }
 
 fn main() {
@@ -110,7 +110,8 @@ fn main() {
     let angle = 0.0;
     let coordinates = [
         [ 0.32570659879f64, 0.0470399495155 ],
-        [ -0.75 + 0.0008200260000962, 0.1 + 0.00010049997100001 ],
+        [ -0.1081742949375, 0.905426290979918 ],
+        [ -0.7491799739999038, 0.100100499971 ],
     ];
 
     while true {
