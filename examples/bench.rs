@@ -29,6 +29,9 @@ itsy_api!(BenchAPI, BenchContext, {
     fn rust_stringcat(&mut context, n: i32) -> String {
         stringcat(n)
     }
+    fn heap_purge(&mut context, &mut vm) {
+        vm.heap.purge();
+    }
 });
 
 fn main() {
