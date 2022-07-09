@@ -1,0 +1,31 @@
+Revision: f0994a8a968f6ae967c003687def39f5e8e1d92a
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 09.07.2022 10:28:56
+Message:
+remove now superfluous construct benchmarks
+
+----
+Modified: itsy/bench/main.itsy
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy avg: 0.3573 min: 0.3568 max: 0.3577 var: 0.253%
+  rust avg: 0.0131 min: 0.0130 max: 0.0133 var: 2.439%
+  factor 27.24x
+fib_r
+  itsy avg: 0.2043 min: 0.2031 max: 0.2070 var: 1.922%
+  rust avg: 0.0066 min: 0.0066 max: 0.0067 var: 1.356%
+  factor 30.81x
+stringcat
+  itsy avg: 0.0020 min: 0.0019 max: 0.0021 var: 13.012%
+  rust avg: 0.0032 min: 0.0020 max: 0.0067 var: 237.473%
+  factor 0.61x
+upload_struct
+  itsy avg: 0.3691 min: 0.3668 max: 0.3726 var: 1.555%
+upload_array
+  itsy avg: 0.6974 min: 0.6947 max: 0.7020 var: 1.050%
+string_return
+  itsy avg: 0.1170 min: 0.1152 max: 0.1202 var: 4.294%
+heap_reuse
+  itsy avg: 0.1123 min: 0.1088 max: 0.1173 var: 7.850%
