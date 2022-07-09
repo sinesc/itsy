@@ -114,7 +114,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     for (type_id, ty) in compiler.id_mappings.types() {
         if !ty.is_primitive() && !ty.as_trait().is_some() {
             // store constructor, remember position
-            let position = compiler.store_constructor(type_id);
+            let position = compiler.store_constructor(type_id, &mut None, &mut 0);
             compiler.constructors.insert(type_id, position);
             // for trait implementing types, link constructor to trait implementor (trait objects still need proper reference counting, which requires the constructor of the concrete type)
             if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
@@ -787,9 +787,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::String(ref string_literal) => {
                 // store string on const pool and write instruction to load it from const pool directly onto th heap
-                let prototype = self.writer.const_len();
+                // note: we get the offset from current const_len() and not the store_const() result as that points to
+                // the start of the string  while the we neeed to point at the meta data it writes before the string (the length)
+                let string_const = self.writer.const_len();
                 self.writer.store_const(string_literal.as_str());
-                self.writer.string(prototype);
+                self.writer.upload_const(string_const);
             }
             LiteralValue::Array(array_literal) => {
                 // write instructions to construct the array on the stack and once complete, upload it to the heap
@@ -1139,7 +1141,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Stores an instance constructor on the const pool.
-    fn store_constructor(self: &Self, type_id: TypeId) -> StackAddress {
+    fn store_constructor(self: &Self, type_id: TypeId, prev_primitive: &mut Option<(StackAddress, ItemIndex)>, fields_merged: &mut ItemIndex) -> StackAddress {
         let store_len = |inner: &mut dyn FnMut()| {
             let len_position = self.writer.const_len();
             self.writer.store_const(123 as ItemIndex);
@@ -1151,25 +1153,33 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let position = self.writer.const_len();
         match self.type_by_id(type_id) {
             Type::Array(array) => {
+                *prev_primitive = None;
                 self.writer.store_const(Constructor::Array);
                 store_len(&mut || {
-                    self.store_constructor(array.type_id.expect("Unresolved array element type"));
+                    self.store_constructor(array.type_id.expect("Unresolved array element type"), &mut None, &mut 0);
                 });
+                *prev_primitive = None;
             }
             Type::Struct(structure) => {
+                *prev_primitive = None;
                 self.writer.store_const(Constructor::Struct);
                 store_len(&mut || {
                     self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-                    self.writer.store_const(structure.fields.len() as ItemIndex);
+                    let field_size_offset = self.writer.store_const(structure.fields.len() as ItemIndex);
+                    let mut fields_merged = 0;
+                    let mut prev_primitive = None;
                     for field in &structure.fields {
-                        self.store_constructor(field.1.expect("Unresolved struct field type"));
+                        self.store_constructor(field.1.expect("Unresolved struct field type"), &mut prev_primitive, &mut fields_merged);
                     }
+                    self.writer.update_const(field_size_offset, structure.fields.len() as ItemIndex - fields_merged);
                 });
             }
             Type::String => {
+                *prev_primitive = None;
                 self.writer.store_const(Constructor::String);
             }
             Type::Enum(enumeration) => {
+                *prev_primitive = None;
                 self.writer.store_const(Constructor::Enum);
                 store_len(&mut || {
                     self.writer.store_const(*self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
@@ -1186,8 +1196,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         let variant_offset = self.writer.store_const(num_fields as ItemIndex);
                         variant_offsets.push(variant_offset);
                         if num_fields > 0 {
+                            // TODO: implement primitive field merge (see Struct case)
                             for field in fields.as_data().unwrap() {
-                                self.store_constructor(field.expect("Unresolved enum field type"));
+                                self.store_constructor(field.expect("Unresolved enum field type"), &mut None, &mut 0);
                             }
                         }
                     }
@@ -1197,12 +1208,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         self.writer.update_const(const_position, variant_offset as StackAddress);
                     }
                 });
+                *prev_primitive = None;
             }
             Type::Trait(_) => unimplemented!("trait constructor"),
-            ty @ _ => {
-                self.writer.store_const(Constructor::Primitive);
-                self.writer.store_const(ty.primitive_size() as ItemIndex);
-            }
+            ty @ _ if ty.is_primitive() => {
+                // try to merge primitive with previous primitive
+                if let Some((offset, len)) = prev_primitive {
+                    let primitive_size = ty.primitive_size() as ItemIndex;
+                    *len += primitive_size as ItemIndex;
+                    *fields_merged += 1;
+                    self.writer.update_const(*offset, *len);
+                } else {
+                    self.writer.store_const(Constructor::Primitive);
+                    let primitive_size = ty.primitive_size() as ItemIndex;
+                    *prev_primitive = Some((self.writer.const_len(), primitive_size));
+                    self.writer.store_const(primitive_size);
+                }
+            },
+            ty @ _ => panic!("Unsupported type {:?} in constructor serialization", ty),
         }
         position
     }

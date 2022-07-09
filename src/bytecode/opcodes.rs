@@ -642,8 +642,8 @@ impl_opcodes!{
         self.stack.push(HeapRef::new(heap_ref, 0));
     }
 
-    /// Constructs an instance of a non-primitive type.
-    fn string(&mut self, const_offset: StackAddress) {
+    /// Loads primitive data from the const pool directly onto the heap, pushing the new heap reference to the stack.
+    fn upload_const(&mut self, const_offset: StackAddress) {
         let num_bytes: StackAddress = self.stack.load(const_offset);
         let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
         self.stack.push(heap_ref);
