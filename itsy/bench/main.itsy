@@ -11,11 +11,16 @@ struct Test {
 struct ConstructTestInner {
     c: i32,
     d: u64,
+    e: f32,
+    f: i8,
 }
 
 struct ConstructTest {
     a: ConstructTestInner,
-    b: [ u64 ],
+    b: u8,
+    c: i64,
+    d: f32,
+    e: [ u64 ],
 }
 
 fn bench_mandelbrot(results: [ Test ]) {
@@ -75,7 +80,7 @@ fn bench_upload_struct(results: [ Test ]) {
 
     for i in 0..1000000 {
         // partially dynamic contents -> upload opcode
-        let item = ConstructTest { a: ConstructTestInner { c: 14, d: i }, b: [ 1, 2, i, 8, 131231 ] };
+        let item = ConstructTest { a: ConstructTestInner { c: 14, d: i, e: 3.14, f: -21 }, b: 17, c: i as i64, d: 1.7, e: [ 1, 2, i, 8, 131231 ] };
     }
 
     let itsy_time = stop_time();
@@ -101,40 +106,6 @@ fn bench_upload_array(results: [ Test ]) {
     let itsy_time = stop_time();
 
     results.push(Test { name: "upload_array", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_construct_struct(results: [ Test ]) {
-
-    start_time();
-
-    for i in 0..1000000 {
-        // static contents -> construct opcode
-        let item = ConstructTest { a: ConstructTestInner { c: 14, d: 894839483 }, b: [ 1, 2, 4, 8, 131231 ] };
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "construct_struct", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_construct_array(results: [ Test ]) {
-
-    start_time();
-
-    for i in 0..1000000 {
-        // static contents -> construct opcode
-        let item = [
-            [ 1u64, 2, 3, 4 ],
-            [ 5, 6, 7, 8, 9 ],
-            [ 10, 11, 12 ],
-            [ 13, 14, 15, 16, 17, 18 ],
-            [ 19, 20 ],
-        ];
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "construct_array", rust_time: 0.0, itsy_time: itsy_time });
 }
 
 fn bench_string_return(results: [ Test ]) {
@@ -226,11 +197,7 @@ fn main() {
         heap_purge();
         bench_stringcat(pass_results);
         heap_purge();
-        bench_construct_struct(pass_results);
-        heap_purge();
         bench_upload_struct(pass_results);
-        heap_purge();
-        bench_construct_array(pass_results);
         heap_purge();
         bench_upload_array(pass_results);
         heap_purge();
