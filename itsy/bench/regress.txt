@@ -1,11 +1,38 @@
+Revision: ef60b6422feaa3509f2817246b106058b623020c
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 09.07.2022 10:56:49
+Message:
+combine primitives within constructors
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy avg: 0.3596 min: 0.3589 max: 0.3604 var: 0.424%
+  rust avg: 0.0131 min: 0.0130 max: 0.0132 var: 1.234%
+  factor 27.44x
+fib_r
+  itsy avg: 0.2023 min: 0.2016 max: 0.2038 var: 1.076%
+  rust avg: 0.0063 min: 0.0063 max: 0.0063 var: 1.425%
+  factor 32.23x
+stringcat
+  itsy avg: 0.0019 min: 0.0019 max: 0.0021 var: 12.611%
+  rust avg: 0.0032 min: 0.0020 max: 0.0069 var: 238.045%
+  factor 0.60x
+upload_struct
+  itsy avg: 0.3040 min: 0.3034 max: 0.3055 var: 0.699%
+upload_array
+  itsy avg: 0.6824 min: 0.6793 max: 0.6860 var: 0.977%
+string_return
+  itsy avg: 0.1166 min: 0.1154 max: 0.1182 var: 2.442%
+heap_reuse
+  itsy avg: 0.1182 min: 0.1151 max: 0.1196 var: 3.906%
+
+
 Revision: f0994a8a968f6ae967c003687def39f5e8e1d92a
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 09.07.2022 10:28:56
 Message:
 remove now superfluous construct benchmarks
-
-----
-Modified: itsy/bench/main.itsy
 
 Ballpark Bench™ - Measuring in approximate baseball fields
 running 5 passes, pass 1...2...3...4...5...
