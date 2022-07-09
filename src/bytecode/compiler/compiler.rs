@@ -170,7 +170,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // if this is a trait impl check compatibility to trait
                     if let Some(TypeName { type_id, .. }) = impl_block.trt {
                         let trait_type_id = type_id.expect("Unresolved trait encountered");
-                        let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
+                        let trt = self.ty(&trait_type_id).as_trait().unwrap();
                         let function_id = function.function_id;
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
@@ -196,7 +196,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
-                    let result_type = self.item_type(result);
+                    let result_type = self.ty(result);
                     comment!(self, "discarding result");
                     self.write_discard(result_type);
                 }
@@ -207,7 +207,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::Block(block) => {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
-                    let result_type = self.item_type(result);
+                    let result_type = self.ty(result);
                     comment!(self, "discarding result");
                     self.write_discard(result_type);
                 }
@@ -215,7 +215,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             S::Expression(expression) => {
                 self.compile_expression(expression)?;
-                let result_type = self.item_type(expression);
+                let result_type = self.ty(expression);
                 comment!(self, "discarding result");
                 self.write_discard(result_type);
                 Ok(())
@@ -240,9 +240,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 comment!(self, "block returning");
                 self.compile_expression(expr)?;
                 // inc result, then dec everything
-                self.item_cnt(expr, true, HeapRefOp::Inc);
+                self.write_cnt(self.ty(expr), true, HeapRefOp::Inc);
                 self.write_scope_destructor(BranchingScope::Function);
-                self.item_cnt(expr, true, HeapRefOp::DecNoFree);
+                self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree);
                 self.write_ret();
                 Ok(())
             },
@@ -292,10 +292,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             _ => {
                 self.check_initialized(&item.left.as_variable().unwrap())?;
-                let ty = self.item_type(&item.left);
-                self.write_load(loc, ty); // stack: left
+                self.write_load(loc, self.ty(&item.left)); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
-                let ty = self.item_type(&item.left);
+                let ty = self.ty(&item.left);
                 match item.op { // stack: result
                     BO::AddAssign => self.write_add(ty),
                     BO::SubAssign => self.write_sub(ty),
@@ -318,16 +317,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::Assign => {
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.compile_expression(&item.right)?;      // stack: &left right
-                let ty = self.item_type(&item.left);
+                let ty = self.ty(&item.left);
                 self.write_heap_put(ty, false);    // stack: --
             },
             _ => {
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.write_clone_ref();                     // stack: &left &left
-                let ty = self.item_type(&item.left);
+                let ty = self.ty(&item.left);
                 self.write_heap_fetch(ty);                      // stack: &left left
                 self.compile_expression(&item.right)?;      // stack: &left left right
-                let ty = self.item_type(&item.left);
+                let ty = self.ty(&item.left);
                 match item.op {                                 // stack: &left result
                     BO::AddAssign => self.write_add(ty),
                     BO::SubAssign => self.write_sub(ty),
@@ -351,7 +350,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.compile_expression(arg)?;
             match function.kind.unwrap() {
                 FunctionKind::Method(_) | FunctionKind::Function => {
-                    self.item_cnt(arg, true, HeapRefOp::Inc);
+                    self.write_cnt(self.ty(arg), true, HeapRefOp::Inc);
                 },
                 _ => { }
             }
@@ -373,11 +372,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             FunctionKind::Builtin(type_id, builtin_type) => {
                 self.compile_call_args(&function, item)?;
                 comment!(self, "call {}()", item.ident.name);
-                self.write_builtin(builtin_type, self.type_by_id(type_id));
+                self.write_builtin(builtin_type, self.ty(&type_id));
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(&function, item)?;
-                if self.type_by_id(object_type_id).as_trait().is_some() {
+                if self.ty(&object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id);
                     let function_arg_size = self.id_mappings.function_arg_size(function_id);
@@ -431,7 +430,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id)
         };
-        self.write_load(load_index, self.item_type(item));
+        self.write_load(load_index, self.ty(item));
         Ok(())
     }
 
@@ -559,14 +558,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
         self.compile_expression(&binary_op.left)?;          // stack current=lower
-        let iter_ty = self.type_by_id(iter_type_id);
+        let iter_ty = self.ty(&iter_type_id);
         self.write_store(iter_loc, iter_ty);                      // stack -
         // push upper range bound
         self.compile_expression(&binary_op.right)?;             // stack upper
         // precheck bounds
         let skip_jump = if binary_op.op == ast::BinaryOperator::Range {
             // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
-            let iter_ty = self.type_by_id(iter_type_id);
+            let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
             self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
             self.write_lte(iter_ty);                                         // stack: upper upper_lte_lower
@@ -575,7 +574,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             skip_jump
         } else {
             // inclusive range: check if lower bound greater than upper bound.
-            let iter_ty = self.type_by_id(iter_type_id);
+            let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
             self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
             self.write_lt(iter_ty);                                         // stack: upper upper_lte_lower
@@ -587,7 +586,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
-        let iter_ty = self.type_by_id(iter_type_id);
+        let iter_ty = self.ty(&iter_type_id);
         //let increment_target = self.write_while(iter_loc as FrameOffset, -(iter_ty.primitive_size() as FrameOffset), start_target, iter_ty);    // stack: upper
         let increment_target = self.write_clone(iter_ty);       // stack upper upper
         self.write_preinc(iter_loc, iter_ty);      // stack upper upper new_current(=current+1)
@@ -609,25 +608,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
-        let element_ty = self.type_by_id(element_type_id);
-        let element_constructor = if element_ty.is_ref() { self.get_constructor(element_ty) } else { 0 };
-        let array_ty = self.item_type(&item.expr);
-        let array_constructor = self.get_constructor(array_ty);
 
         self.compile_expression(&item.expr)?;                       // stack &array
-        self.write_cnt_nc(array_constructor, HeapRefOp::Inc);
+        let array_ty = self.ty(&item.expr);
+        self.write_cnt(array_ty, true, HeapRefOp::Inc);
         self.write_clone_ref();                                         // stack &array &array
-        let array_ty = self.item_type(&item.expr);
         self.write_builtin(BuiltinType::Array(builtin_types::Array::len), array_ty);             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index (indexing from the end to be able to count downwards from len)
 
-        let element_ty = self.type_by_id(element_type_id);
+        let element_ty = self.ty(&element_type_id);
         self.write_heap_tail_element_nc(array_ty, element_ty);   // stack &array index element
 
         if element_ty.is_ref() {
             self.write_clone(element_ty);                                   // stack &array index element element
-            self.write_cnt_nc(element_constructor, HeapRefOp::Inc);
+            self.write_cnt(element_ty, true, HeapRefOp::Inc);
         }
 
         self.write_store(element_loc, element_ty);                        // stack &array index <is_ref ? element>
@@ -635,10 +630,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
         let loop_controls = self.loop_control.pop();
 
-        let element_ty = self.type_by_id(element_type_id);
+        let element_ty = self.ty(&element_type_id);
 
         let cnt_target = if element_ty.is_ref() {
-            Some(self.write_cnt(element_constructor, HeapRefOp::Dec))
+            Some(self.write_cnt(element_ty, false, HeapRefOp::Dec))
         } else {                                                          // stack &array index
             None
         };
@@ -649,7 +644,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // reference but doesn't jump back to the start of the loop. the normal loop exit has to jump over this.
         let break_target = if element_ty.is_ref() && loop_controls.iter().find(|&lc| matches!(lc, LoopControl::Break(_))).is_some() {
             let exit_skip_target = self.writer.jmp(123);
-            let break_target = self.write_cnt(element_constructor, HeapRefOp::Dec);
+            let break_target = self.write_cnt(element_ty, false, HeapRefOp::Dec);
             let exit_target = self.writer.position();
             self.writer.overwrite(exit_skip_target, |w| w.jmp(exit_target));
             Some(break_target)
@@ -668,7 +663,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         // discard counter
         self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
-        self.write_cnt(array_constructor, HeapRefOp::Dec);         // stack --
+        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec);         // stack --
         Ok(())
     }
 
@@ -705,12 +700,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // create arguments in local environment
         self.init_state.push(BranchingKind::Single, BranchingScope::Function);
         let mut frame = StackFrame::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.item_type(ret).primitive_size());
+        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.ty(ret).primitive_size());
         for arg in item.sig.args.iter() {
             frame.insert(arg.binding_id.unwrap(), frame.arg_pos);
             self.init_state.declare(arg.binding_id.unwrap());
             self.init_state.initialize(arg.binding_id.unwrap());
-            frame.arg_pos += self.item_type(arg).primitive_size() as FrameAddress;
+            frame.arg_pos += self.ty(arg).primitive_size() as FrameAddress;
         }
 
         // create variables in local environment and reserve space on the stack
@@ -751,9 +746,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
             // inc result, then dec everything
-            self.item_cnt(result, true, HeapRefOp::Inc);
+            self.write_cnt(self.ty(result), true, HeapRefOp::Inc);
             self.write_scope_destructor(BranchingScope::Block);
-            self.item_cnt(result, true, HeapRefOp::DecNoFree);
+            self.write_cnt(self.ty(result), true, HeapRefOp::DecNoFree);
         } else if item.control_flow() == None {
             comment!(self, "block ending");
             self.write_scope_destructor(BranchingScope::Block);
@@ -768,7 +763,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_literal(self: &mut Self, item: &ast::Literal) -> CompileResult {
         use crate::frontend::ast::LiteralValue;
         comment!(self, "{}", item);
-        let ty = self.item_type(item);
+        let ty = self.ty(item);
         match &item.value {
             LiteralValue::Void => { },
             LiteralValue::Numeric(numeric) => { self.write_immediate(*numeric, ty); }
@@ -781,7 +776,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
                 // primitive enums don't need to be heap allocated
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let enum_ty = self.type_by_id(enum_def.primitive.unwrap().0);
+                let enum_ty = self.ty(&enum_def.primitive.unwrap().0);
                 let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
                 self.write_immediate(variant_value, enum_ty);
             },
@@ -798,8 +793,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 for element in &array_literal.elements {
                     self.compile_expression(element)?;
                 }
-                let array_ty = self.item_type(item).as_array().expect("Expected array type, got something else");
-                let size = array_literal.elements.len() as StackAddress * self.type_by_id(array_ty.type_id.unwrap()).primitive_size() as StackAddress;
+                let array_ty = self.ty(item).as_array().expect("Expected array type, got something else");
+                let size = array_literal.elements.len() as StackAddress * self.ty(&array_ty.type_id).primitive_size() as StackAddress;
                 let type_id = item.type_id(self).unwrap();
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
@@ -811,14 +806,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 for field in fields {
                     self.compile_expression(field)?;
                 }
-                let struct_ty = self.item_type(item).as_struct().expect("Expected struct type, got something else");
-                let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.type_by_id(f.1.unwrap()).primitive_size() as StackAddress);
+                let struct_ty = self.ty(item).as_struct().expect("Expected struct type, got something else");
+                let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.ty(f.1).primitive_size() as StackAddress);
                 let type_id = item.type_id(self).unwrap();
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
             LiteralValue::Variant(variant) => {
                 // write instructions to construct the data-variant enum on the stack and once complete, upload it to the heap
-                let enum_def = self.item_type(item).as_enum().expect("Encountered non-enum type on enum variant");
+                let enum_def = self.ty(item).as_enum().expect("Encountered non-enum type on enum variant");
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
                 self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
@@ -845,7 +840,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             UO::Minus => {
                 self.compile_expression(&item.expr)?;
                 comment!(self, "negate");
-                let item_type = self.item_type(&item.expr);
+                let item_type = self.ty(&item.expr);
                 self.write_neg(item_type);
             }
             UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
@@ -855,7 +850,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         let binding_id = var.binding_id.expect("Unresolved binding encountered");
                         self.locals.lookup(binding_id)
                     };
-                    let exp_type = self.item_type(&item.expr);
+                    let exp_type = self.ty(&item.expr);
                     match item.op {
                         UO::IncBefore => self.write_preinc(load_index, &exp_type),
                         UO::DecBefore => self.write_predec(load_index, &exp_type),
@@ -867,7 +862,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     assert!(binary_op.op == BinaryOperator::IndexWrite || binary_op.op == BinaryOperator::AccessWrite, "Expected IndexWrite or AccessWrite operation");
                     self.compile_expression(&item.expr)?;           // stack: &left
                     comment!(self, "{}", item);
-                    let exp_type = self.item_type(&item.expr);
+                    let exp_type = self.ty(&item.expr);
                     match item.op {
                         UO::IncBefore => self.write_heap_preinc(&exp_type),
                         UO::DecBefore => self.write_heap_predec(&exp_type),
@@ -890,8 +885,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_expression(&item.left)?; // stack: left
         comment!(self, "{}", item.op);
         self.compile_expression(&item.right)?; // stack: left right
-        let ty_result = self.item_type(item);
-        let ty_left = self.item_type(&item.left);
+        let ty_result = self.ty(item);
+        let ty_left = self.ty(&item.left);
         match item.op {                             // stack: result
             // arithmetic/concat
             BO::Add => self.write_add(ty_result),
@@ -941,8 +936,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
         self.compile_expression(&item.left)?;
         self.compile_expression(&item.right)?;
-        let result_type = self.item_type(item);
-        let compare_type = self.item_type(&item.left);
+        let result_type = self.ty(item);
+        let compare_type = self.ty(&item.left);
         match item.op {
             BO::Index => {
                 comment!(self, "[{}]", &item.right);
@@ -991,8 +986,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_cast(self: &mut Self, item: &ast::Cast) -> CompileResult {
 
         self.compile_expression(&item.expr)?;
-        let from = self.item_type(&item.expr);
-        let to = self.item_type(&item.ty);
+        let from = self.ty(&item.expr);
+        let to = self.ty(&item.ty);
         self.write_cast(from, to);
         Ok(())
     }
@@ -1002,7 +997,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns the type of given AST item.
-    fn item_type(self: &Self, item: &impl Typeable) -> &Type {
+    fn ty(self: &Self, item: &impl Typeable) -> &Type {
         match item.type_id(self) {
             None => panic!("Unresolved type encountered"),
             Some(type_id) => self.type_by_id(type_id)
@@ -1010,7 +1005,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Returns constructor index for given type or 0.
-    pub(crate) fn get_constructor(self: &Self, ty: &Type) -> StackAddress {
+    pub(super) fn constructor(self: &Self, ty: &Type) -> StackAddress {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
         *self.constructors.get(&type_id).unwrap_or(&0)
     }
@@ -1041,7 +1036,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if field_name == member_name {
                 break;
             }
-            let field_type = self.type_by_id(field_type_id.expect("Unresolved struct field encountered"));
+            let field_type = self.ty(field_type_id);
             // use reference size for references, otherwise shallow type size
             offset += field_type.primitive_size() as StackAddress;
         }
@@ -1087,13 +1082,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
                 frame.insert(binding.binding_id.unwrap(), frame.var_pos);
-                frame.var_pos += self.item_type(binding).primitive_size() as FrameAddress;
+                frame.var_pos += self.ty(binding).primitive_size() as FrameAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame);
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos);
-                frame.var_pos += self.item_type(&for_loop.iter).primitive_size() as FrameAddress;
+                frame.var_pos += self.ty(&for_loop.iter).primitive_size() as FrameAddress;
                 self.create_stack_frame_block(&for_loop.block, frame);
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame);
@@ -1113,17 +1108,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes reference counting operation on given item.
-    fn item_cnt(self: &Self, item: &impl Typeable, nc: bool, op: HeapRefOp) {
-        let ty = self.item_type(item);
-        if ty.is_ref() {
-            match nc {
-                true => self.write_cnt_nc(self.get_constructor(ty), op),
-                false => self.write_cnt(self.get_constructor(ty), op),
-            };
-        }
-    }
-
     /// Checks whether the given variable is initialized
     fn check_initialized(self: &Self, item: &ast::Variable) -> CompileResult {
         let binding_id = item.binding_id.expect("Unresolved binding encountered");
@@ -1135,10 +1119,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Ok(())
         }
     }
-}
-
-/// Opcode writer functions.
-impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Stores an instance constructor on the const pool.
     fn store_constructor(self: &Self, type_id: TypeId, prev_primitive: &mut Option<(StackAddress, ItemIndex)>, fields_merged: &mut ItemIndex) -> StackAddress {
@@ -1151,7 +1131,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.update_const(len_position, inner_len as ItemIndex);
         };
         let position = self.writer.const_len();
-        match self.type_by_id(type_id) {
+        match self.ty(&type_id) {
             Type::Array(array) => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Array);
@@ -1229,6 +1209,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         position
     }
+}
+
+/// Opcode writer functions.
+impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a return instruction for the current function being compiled.
     fn write_ret(self: &Self) {
@@ -1251,18 +1235,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let state = self.init_state.initialized(binding_id);
                 if state != BranchingState::Uninitialized {
                     let type_id = self.binding_by_id(binding_id).type_id.unwrap();
-                    let ty = self.type_by_id(type_id);
+                    let ty = self.ty(&type_id);
                     if ty.is_ref() {
                         comment!(self, "freeing local {}", local);
                         if state == BranchingState::Initialized {
                             self.write_load(local, ty);
-                            self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+                            self.write_cnt(ty, false, HeapRefOp::Dec);
                         } else if state == BranchingState::MaybeInitialized {
                             self.write_load(local, ty);
                             let init_jump = self.writer.jn0_sa_nc(123);
                             self.write_discard(ty);
                             let uninit_jump = self.writer.jmp(123);
-                            let init_target = self.write_cnt(self.get_constructor(ty), HeapRefOp::Dec);
+                            let init_target = self.write_cnt(ty, false, HeapRefOp::Dec);
                             self.writer.overwrite(init_jump, |w| w.jn0_sa_nc(init_target));
                             let done_target = self.writer.position();
                             self.writer.overwrite(uninit_jump, |w| w.jmp(done_target));
@@ -1352,7 +1336,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if from == &Type::f64 && to.is_string() {
             self.writer.f64_to_string();
         } else if let Some(Enum { primitive: Some((primitive, _)), .. }) = from.as_enum() {
-            let from = self.type_by_id(*primitive);
+            let from = self.ty(primitive);
             self.write_cast(from, to);
         } else if from != to {
             unreachable!("Invalid cast {:?} to {:?}", from, to);
@@ -1418,14 +1402,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Writes an appropriate variant of the cnt_nc instruction.
-    fn write_cnt_nc(self: &Self, constructor: StackAddress, op: HeapRefOp) -> StackAddress {
-        select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op)
-    }
-
-    /// Writes an appropriate variant of the cnt instruction.
-    fn write_cnt(self: &Self, constructor: StackAddress, op: HeapRefOp) -> StackAddress {
-        select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op)
+    /// Writes reference counting operation for given Typeable.
+    fn write_cnt(self: &Self, ty: &Type, nc: bool, op: HeapRefOp) -> StackAddress {
+        if ty.is_ref() {
+            let constructor = self.constructor(ty);
+            match nc {
+                true => select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op),
+                false => select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op),
+            }
+        } else {
+            self.writer.position()
+        }
     }
 
     /// Writes instructions to compute member offset for access on a struct.
@@ -1452,7 +1439,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// and the replaced value will have its refcount decreased.
     fn write_heap_put(self: &Self, ty: &Type, is_new_heap_ref: bool) -> StackAddress {
         if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
+            let constructor = self.constructor(ty);
             if !is_new_heap_ref {
                 self.writer.heap_putx_replace(constructor)
             } else {
@@ -1471,7 +1458,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
     fn write_heap_fetch_member(self: &Self, container_type: &Type, result_type: &Type, offset: StackAddress) {
-        let constructor = self.get_constructor(container_type);
+        let constructor = self.constructor(container_type);
         if result_type.is_ref() {
             self.writer.heap_fetch_memberx(offset, constructor);
         } else {
@@ -1488,7 +1475,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
     fn write_heap_fetch_element(self: &Self, container_type: &Type, result_type: &Type) {
-        let constructor = self.get_constructor(container_type);
+        let constructor = self.constructor(container_type);
         if result_type.is_ref() {
             self.writer.heap_fetch_elementx(constructor);
         } else {
@@ -1505,7 +1492,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch an element from the end of the array whose reference is at the top of the stack.
     fn write_heap_tail_element_nc(self: &Self, container_type: &Type, result_type: &Type) {
-        let constructor = self.get_constructor(container_type);
+        let constructor = self.constructor(container_type);
         match result_type.primitive_size() {
             1 => { self.writer.heap_tail_element8_nc(constructor); },
             2 => { self.writer.heap_tail_element16_nc(constructor); },
@@ -1530,9 +1517,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
     fn write_storex(self: &Self, loc: FrameAddress, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
-        let ty = self.item_type(item);
+        let ty = self.ty(item);
         if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
+            let constructor = self.constructor(ty);
             match self.init_state.initialized(binding_id) {
                 BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
                 BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
@@ -1557,8 +1544,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Discard topmost stack value and drop temporaries for reference types.
     fn write_discard(self: &Self, ty: &Type) {
         if ty.is_ref() {
-            let constructor = self.get_constructor(ty);
-            self.write_cnt_nc(constructor, HeapRefOp::Free);
+            self.write_cnt(ty, true, HeapRefOp::Free);
         }
         if ty.primitive_size() > 0 {
             self.writer.discard(ty.primitive_size());

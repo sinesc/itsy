@@ -26,6 +26,24 @@ macro_rules! impl_typeable {
     };
 }
 
+impl Typeable for TypeId {
+    fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
+        Some(*self)
+    }
+    fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {
+        panic!("Cannot mutate TypeId through Typeable trait.")
+    }
+}
+
+impl Typeable for Option<TypeId> {
+    fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
+        *self
+    }
+    fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {
+        panic!("Cannot mutate Option<TypeId> through Typeable trait.")
+    }
+}
+
 /// Resolvable AST structures.
 pub(crate) trait Resolvable {
     /// Number of resolved and total items.
