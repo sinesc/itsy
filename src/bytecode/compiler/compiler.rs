@@ -287,7 +287,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                self.write_storex(loc, &item.left, binding_id);
+                self.write_store(loc, self.ty(&item.left), Some(binding_id));
                 self.init_state.initialize(binding_id);
             },
             _ => {
@@ -303,7 +303,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_storex(loc, &item.left, binding_id); // stack --
+                self.write_store(loc, self.ty(&item.left), Some(binding_id)); // stack --
             },
         };
         Ok(())
@@ -415,7 +415,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if !(expr.is_zero_literal() && self.init_state.len() == 2) {
                 self.compile_expression(expr)?;
                 let local = self.locals.lookup(binding_id);
-                self.write_storex(local, item, binding_id);
+                self.write_store(local, self.ty(item), Some(binding_id));
             }
             self.init_state.initialize(binding_id);
         }
@@ -558,8 +558,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
         self.compile_expression(&binary_op.left)?;          // stack current=lower
-        let iter_ty = self.ty(&iter_type_id);
-        self.write_store(iter_loc, iter_ty);                      // stack -
+        self.write_store(iter_loc, self.ty(&iter_type_id), None);                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
         // push upper range bound
         self.compile_expression(&binary_op.right)?;             // stack upper
         // precheck bounds
@@ -625,7 +624,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_cnt(element_ty, true, HeapRefOp::Inc);
         }
 
-        self.write_store(element_loc, element_ty);                        // stack &array index <is_ref ? element>
+        self.write_store(element_loc, element_ty, None);                        // stack &array index <is_ref ? element>  // TODO: this doesn't do storex, why does it work?
         self.loop_control.push();
         self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
         let loop_controls = self.loop_control.pop();
@@ -1503,30 +1502,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the store instruction.
-    fn write_store(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
-        match ty.primitive_size() {
-            1 => select_unsigned_opcode!(self, store8_8, store8_16, none, loc),
-            2 => select_unsigned_opcode!(self, store16_8, store16_16, none, loc),
-            4 => select_unsigned_opcode!(self, store32_8, store32_16, none, loc),
-            8 => select_unsigned_opcode!(self, store64_8, store64_16, none, loc),
-            size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
-        }
-    }
-
-    /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
-    fn write_storex(self: &Self, loc: FrameAddress, item: &impl Typeable, binding_id: BindingId) -> StackAddress {
-        let ty = self.ty(item);
-        if ty.is_ref() {
+    fn write_store(self: &Self, loc: FrameAddress, ty: &Type, binding_id: Option<BindingId>) -> StackAddress {
+        if ty.is_ref() && binding_id.is_some() {
             let constructor = self.constructor(ty);
-            match self.init_state.initialized(binding_id) {
+            match self.init_state.initialized(binding_id.unwrap()) {
                 BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
                 BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
                 BranchingState::MaybeInitialized => self.writer.storex_replace(loc, constructor), // used to be separate instruction, replace now handles both
             }
         } else {
-            self.write_store(loc, ty)
+            match ty.primitive_size() {
+                1 => select_unsigned_opcode!(self, store8_8, store8_16, none, loc),
+                2 => select_unsigned_opcode!(self, store16_8, store16_16, none, loc),
+                4 => select_unsigned_opcode!(self, store32_8, store32_16, none, loc),
+                8 => select_unsigned_opcode!(self, store64_8, store64_16, none, loc),
+                size @ _ => unreachable!("Unsupported size {} for type {:?}", size, ty),
+            }
         }
     }
 
