@@ -102,11 +102,81 @@ macro_rules! itsy_api {
 #[cfg(not(doc))]
 #[macro_export]
 macro_rules! itsy_api {
-    // enum: generate rustfn enum
-    (@enum [ $( $globalmeta:meta )* ], $vis:vis, $type_name:ident $(, $name:tt [ $( $attr:meta ),* ] )* ) => {
+    // VM: Pushes the return value and converts some special cases.
+    (@handle_ret_value $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
+    (@handle_ret_value $vm:ident, String, $value:ident) => { {
+        let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
+        $vm.stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
+    } };
+    (@handle_ret_value $vm:ident, $_:tt, $value:ident) => {
+        compile_error!("Unsupported return type");
+    };
+    // VM: Pops an argument and converts some special cases.
+    (@handle_param_value $vm:ident, u8) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, u16) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, u32) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, u64) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, i8) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, i16) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, i32) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, i64) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, f32) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, f64) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
+    (@handle_param_value $vm:ident, String) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, str) => { $vm.stack.pop() };
+    (@handle_param_value $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
+    // VM: Translate parameter list pseudo-types to internally used types.
+    (@handle_param_type String) => { $crate::internals::binary::heap::HeapRef };
+    (@handle_param_type str) => { $crate::internals::binary::heap::HeapRef };
+    (@handle_param_type $other:ident) => { $other };
+    // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
+    (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
+    (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
+    (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
+    // VM: Translate some pseudo-type names to concrete rust types.
+    (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
+    (@handle_ref_param_type $other:ident) => { $other };
+    // VM: Generate reference counting code for some pseudo type arguments.
+    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
+    // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
+    (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
+        $(
+            let $arg_name: itsy_api!(@handle_param_type $arg_type) = itsy_api!(@handle_param_value $vm, $arg_type);
+        )*
+    };
+    (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
+        itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
+    };
+    // Main definition block
+    (
+        $(#[$globalmeta:meta])*
+        $vis:vis $type_name:ident, $context_type:ty, { $(
+            $( #[ $attr:meta ] )*
+            // FIXME: ret_type is simple ident only (ambiguity issues)
+            // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
+            // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
+            // components using push down accumulation to transform them into a non-ambiguous format
+            fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
+        )* }
+    ) => {
+
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
         $(#[$globalmeta])*
+        // Rust function mapping. Generated from function signatures defined via the `itsy_api!` macro.
         $vis enum $type_name {
             $(
                 $( #[ $attr ] )*
@@ -115,67 +185,7 @@ macro_rules! itsy_api {
             #[doc(hidden)]
             _dummy
         }
-    };
-    // trait: handle return values
-    (@handle_ret $vm:ident, u8, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u16, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, u64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i8, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i16, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, i64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, f32, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, f64, $value:ident) => { $vm.stack.push($value); };
-    (@handle_ret $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
-    (@handle_ret $vm:ident, String, $value:ident) => { {
-        let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
-        $vm.stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
-    } };
-    (@handle_ret $vm:ident, $_:tt, $value:ident) => {
-        compile_error!("Unsupported return type");
-    };
-    // trait: handle parameters
-    (@handle_param $vm:ident, u8) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u16) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, u64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i8) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i16) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, i64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, f32) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, f64) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
-    (@handle_param $vm:ident, String) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, str) => { $vm.stack.pop() };
-    (@handle_param $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
-    // trait: translate parameter types
-    (@handle_param_type String) => { $crate::internals::binary::heap::HeapRef };
-    (@handle_param_type str) => { $crate::internals::binary::heap::HeapRef };
-    (@handle_param_type $other:ident) => { $other };
-    // trait: translate ref-param values
-    (@handle_ref_param $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
-    (@handle_ref_param $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
-    (@handle_ref_param $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
-    // trait: translate ref-param types
-    (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
-    (@handle_ref_param_type $other:ident) => { $other };
-    // trait: refcount handling for ref-params
-    (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
-    // trait: reverse argument load order
-    (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
-        $(
-            let $arg_name: itsy_api!(@handle_param_type $arg_type) = itsy_api!(@handle_param $vm, $arg_type);
-        )*
-    };
-    (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
-        itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
-    };
-    // implement VMFunc trait
-    (@trait $type_name:ident, $context_type:ty $(, $name:tt, $context_name:ident $( , $vm_name:ident )? [ $( $arg_name:ident : $arg_type:ident , )* ] [ $($ret_type:ident)? ] $code:block )* ) => {
+
         impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
             #[cfg(feature="compiler")]
             fn to_index(self: Self) -> $crate::internals::binary::sizes::RustFnIndex {
@@ -200,6 +210,7 @@ macro_rules! itsy_api {
                 map
             }
         }
+
         #[cfg(feature="runtime")]
         impl $crate::internals::binary::VMData<$type_name, $context_type> for $type_name {
             #[allow(unused_variables, unused_assignments, unused_imports)]
@@ -215,7 +226,7 @@ macro_rules! itsy_api {
                             let ret = {
                                 // Shadow HeapRef arguments with actual argument value.
                                 $(
-                                    let $arg_name: itsy_api!(@handle_ref_param_type $arg_type) = itsy_api!(@handle_ref_param vm, $arg_type, $arg_name);
+                                    let $arg_name: itsy_api!(@handle_ref_param_type $arg_type) = itsy_api!(@handle_ref_param_value vm, $arg_type, $arg_name);
                                 )*
                                 $( let $vm_name = &mut *vm; )?
                                 $code
@@ -227,7 +238,7 @@ macro_rules! itsy_api {
                             // Set return value, if any.
                             $(
                                 let ret_typed: $ret_type = ret;
-                                itsy_api!(@handle_ret vm, $ret_type, ret_typed);
+                                itsy_api!(@handle_ret_value vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -235,21 +246,6 @@ macro_rules! itsy_api {
                 }
             }
         }
-    };
-    (
-        $(#[$globalmeta:meta])*
-        $vis:vis $type_name:ident, $context_type:ty, { $(
-            $( #[ $attr:meta ] )*
-            // FIXME: ret_type is simple ident only (ambiguity issues)
-            // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
-            // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
-            // components using push down accumulation to transform them into a non-ambiguous format
-            fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $( & )? $arg_type:ident )* ) $( -> $ret_type:ident )? $code:block
-        )* }
-    ) => {
-        /// Rust function mapping. Generated from function signatures defined via the `itsy_api!` macro.
-        itsy_api!(@enum [ $( $globalmeta )* ], $vis, $type_name $(, $name [ $( $attr ),* ] )* );
-        itsy_api!(@trait $type_name, $context_type $(, $name, $context_name $(, $vm_name )? [ $( $arg_name : $arg_type , )* ] [ $( $ret_type )? ] $code )* );
     };
 }
 
