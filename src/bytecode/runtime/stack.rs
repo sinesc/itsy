@@ -50,7 +50,7 @@ impl Stack {
     }
     /// Returns the current frame as slice.
     pub fn frame(self: &Self) -> &[u8] {
-        &self.data[self.fp as usize..]
+        &self.data[if self.sp() >= self.fp + 16 { self.fp + 16 } else { self.fp } as usize..]
     }
     /// Returns the entire stack as slice.
     pub fn data(self: &Self) -> &[u8] {
