@@ -1,35 +1,35 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_builtins {
-    // push return values
+    // VM: Pushes the return value and converts some special cases.
     (@handle_ret_value $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
     (@handle_ret_value $vm:ident, String, $value:ident) => { {
         let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::ItemIndex::MAX);
         $vm.stack.push(HeapRef::new(index, 0));
     } };
     (@handle_ret_value $vm:ident, $_:tt, $value:ident) => { $vm.stack.push($value);  };
-    // pop parameter values
+    // VM: Pops an argument and converts some special cases.
     (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param_value $vm:ident, $_:tt) => { $vm.stack.pop() };
-    // translate parameter types
+    // VM: Translate parameter list pseudo-types to internally used types.
     (@handle_param_type String) => { HeapRef };
     (@handle_param_type str) => { HeapRef };
     (@handle_param_type Array) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
-    // convert ref-param values
+    // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
     (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
-    // translate ref-param pseudo types to actual types
+    // VM: Translate some pseudo-type names to concrete rust types.
     (@handle_ref_param_type str) => { &str };
     (@handle_ref_param_type Array) => { HeapRef };
     (@handle_ref_param_type $other:ident) => { $other };
-    // implement refcount handling for ref-params
+    // VM: Generate reference counting code for some pseudo type arguments.
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, Array, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $constructor, $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $element_constructor, $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
-    // reverse argument load order
+    // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
         $(
             let $arg_name: impl_builtins!(@handle_param_type $arg_type) = impl_builtins!(@handle_param_value $vm, $arg_type);
@@ -38,12 +38,12 @@ macro_rules! impl_builtins {
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
         impl_builtins!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
     };
-    // type id mapping for resolver function
+    // Resolver: Type id mapping for resolve() function
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Self) => { $type_id };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic type not defined but used.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
-    // write implementation variant
+    // Compiler: Write implementation variants
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
         let $element_ty = $element_ty.unwrap();
         if $element_ty.is_ref() {
@@ -71,7 +71,7 @@ macro_rules! impl_builtins {
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
         $compiler.writer.builtincall(Builtin::$variant)
     } };
-    // main definition block
+    // Main definition block
     (
         $(
             $( #[ $builtin_type_attr:meta ] )*
@@ -79,11 +79,11 @@ macro_rules! impl_builtins {
                 $( #[ $attr:meta ] )*
                 $builtin_function:ident ( $( $doc_arg:ident : $doc_type:ident ),* ) $( -> $doc_result_type:ident )? { $(
                     fn
-                    $( /* either multiple function variants */
+                    $( // Either multiple function variants...
                         < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
                         ( & mut $variant_vm:ident )
                     )?
-                    $(
+                    $( // or single function.
                         $name:ident ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
                     )?
                     $code:block
