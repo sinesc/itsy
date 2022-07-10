@@ -4,9 +4,13 @@ use crate::prelude::*;
 use crate::{FrameAddress, StackAddress, ItemIndex};
 use crate::bytecode::{HeapRefOp, builtins::Builtin};
 #[cfg(feature="runtime")]
-use crate::{StackOffset, STACK_ADDRESS_TYPE, RustFnIndex, BuiltinIndex};
-#[cfg(feature="runtime")]
-use crate::bytecode::{HeapRef, runtime::{stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState}};
+use crate::{
+    StackOffset, STACK_ADDRESS_TYPE,
+    bytecode::{
+        HeapRef,
+        runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState}
+    }
+};
 
 type Data8 = u8;
 type Data16 = u16;
@@ -247,7 +251,7 @@ impl_opcodes!{
             32 => self.stack.push(if value > u32::MAX as T { u32::MAX } else if value < u32::MIN as T { u32::MIN } else { value as u32 }),
             16 => self.stack.push(if value > u16::MAX as T { u16::MAX } else if value < u16::MIN as T { u16::MIN } else { value as u16 }),
             8 => self.stack.push(if value > u8::MAX as T { u8::MAX } else if value < u8::MIN as T { u8::MIN } else { value as u8 }),
-            _ => self.state = VMState::RuntimeError,
+            _ => unreachable!("Invalid size argument for trimu* opcode"),
         };
     }
 
@@ -263,7 +267,7 @@ impl_opcodes!{
             32 => self.stack.push(if value > i32::MAX as T { i32::MAX } else if value < i32::MIN as T { i32::MIN } else { value as i32 }),
             16 => self.stack.push(if value > i16::MAX as T { i16::MAX } else if value < i16::MIN as T { i16::MIN } else { value as i16 }),
             8 => self.stack.push(if value > i8::MAX as T { i8::MAX } else if value < i8::MIN as T { i8::MIN } else { value as i8 }),
-            _ => self.state = VMState::RuntimeError,
+            _ => unreachable!("Invalid size argument for trims* opcode"),
         };
     }
 
@@ -281,7 +285,7 @@ impl_opcodes!{
             64 => self.stack.push(value as u64),
             32 => self.stack.push(value as u32),
             16 => self.stack.push(value as u16),
-            _ => self.state = VMState::RuntimeError,
+            _ => unreachable!("Invalid size argument for extend* opcode"),
         };
     }
 
@@ -900,7 +904,7 @@ impl_opcodes!{
     }*/
 
     /// Terminate program execution.
-    fn exit(&mut self) return {
+    fn exit(&mut self) [ return ] {
         self.state = VMState::Terminated;
     }
 

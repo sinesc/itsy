@@ -2,9 +2,10 @@ use crate::prelude::*;
 use crate::StackAddress;
 
 /// Represents the various possible runtime error-kinds.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RuntimeErrorKind {
     NotReady,
+    UnexpectedReady,
     HeapCorruption,
     Panic,
 }
@@ -13,7 +14,7 @@ pub enum RuntimeErrorKind {
 #[derive(Clone, Debug)]
 pub struct RuntimeError {
     kind: RuntimeErrorKind,
-    offset: StackAddress,
+    offset: StackAddress, // TODO: pc/sp here
 }
 
 impl RuntimeError {

@@ -39,19 +39,28 @@ macro_rules! impl_opcodes {
     (map_writer_type RustFn) => ( T );
     (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
+    (@flag $self:ident, return) => { return };
+    (@flag $self:ident, check) => { match $self.state {
+        VMState::Error(_) => { return; },
+        _ => { },
+    } };
     // main definition block
     (
         $(
             $( #[ $attr:meta ] )*
             fn
             $( /* either multiple function variants */
-                < $( $( #[ $variant_attr:meta ] )* $variant_name:ident $( < $( $generic_name:tt : $generic_type:tt ),+ > )? ( $( $variant_arg:ident : $variant_type:tt $( as $variant_type_as:tt )? ),* ) ),+ $(,)? >
-                ( & mut $variant_self:ident)
+                < $(
+                    $( #[ $variant_attr:meta ] )*
+                    $variant_name:ident $( < $( $generic_name:tt : $generic_type:tt ),+ > )? ( $( $variant_arg:ident : $variant_type:tt $( as $variant_type_as:tt )? ),* )
+                    $( [ $variant_flag:ident ] )?
+                ),+ $(,)? >
+                ( & mut $variant_self:ident )
             )?
             $( /* or single function */
                 $name:ident
                 ( & mut $self:ident $(, & mut $context:ident)? $(, $arg_name:ident : $arg_type:tt )* )
-                $( $ret:ident )?
+                $( [ $flag:ident ] )?
             )?
             $code:block
         )+
@@ -149,6 +158,7 @@ macro_rules! impl_opcodes {
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
             /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
+                use crate::{RustFnIndex, BuiltinIndex};
                 loop {
                     let instruction = impl_opcodes!(read u8, self, self.pc);
                     #[allow(unused_doc_comments)]
@@ -161,7 +171,7 @@ macro_rules! impl_opcodes {
                                     let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
-                                    $( $ret; )?
+                                    $( impl_opcodes!(@flag self, $flag); )?
                                 }
                             )?
                             // opcode variants
@@ -173,6 +183,7 @@ macro_rules! impl_opcodes {
                                             let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                         )*
                                         self.$variant_name( $( $variant_arg ),* );
+                                        $( impl_opcodes!(@flag self, $variant_flag); )?
                                     }
                                 )+
                             )?
@@ -188,6 +199,7 @@ macro_rules! impl_opcodes {
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
             /// Execute the next bytecode from the VMs code buffer.
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
+                use crate::{RustFnIndex, BuiltinIndex};
                 let instruction = impl_opcodes!(read u8, self, self.pc);
                 #[allow(unused_doc_comments)]
                 match instruction {
@@ -199,7 +211,7 @@ macro_rules! impl_opcodes {
                                 let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
-                                $( $ret; )?
+                                $( impl_opcodes!(@flag self, $flag); )?
                             }
                         )?
                         // opcode variants
@@ -211,6 +223,7 @@ macro_rules! impl_opcodes {
                                         let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                     )*
                                     self.$variant_name( $( $variant_arg ),* );
+                                    $( impl_opcodes!(@flag self, $variant_flag); )?
                                 }
                             )+
                         )?
@@ -251,6 +264,7 @@ macro_rules! impl_opcodes {
             #[allow(unused_mut)]
             #[cfg(feature="symbols")]
             pub(crate) fn describe_instruction(self: &Self, mut position: StackAddress) -> Option<(String, StackAddress)> {
+                use crate::{RustFnIndex, BuiltinIndex};
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {

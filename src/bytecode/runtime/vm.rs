@@ -16,7 +16,7 @@ pub enum VMState {
     /// The program has terminated and must be reset before it can be run again.
     Terminated,
     /// The program encountered a runtime error and must be reset before it can be run again.
-    RuntimeError,
+    Error(RuntimeErrorKind),
 }
 
 /// A virtual machine for running Itsy bytecode.
@@ -59,10 +59,14 @@ impl<T, U> VM<T, U> {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
         }
         self.exec(context);
-        if self.state == VMState::Terminated && self.heap.len() > 1 {
-            return Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption));
+        match self.state {
+            VMState::Terminated if self.heap.len() > 1 => {
+                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption))
+            },
+            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind)),
+            VMState::Ready => Err(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady)),
+            VMState::Terminated | VMState::Yielded => Ok(()),
         }
-        Ok(())
     }
 
     /// Returns the current VM state
@@ -225,10 +229,13 @@ impl<T, U> VM<T, U> {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
         }
         self.exec_step(context);
-        if self.state == VMState::Terminated && self.heap.len() > 1 {
-            return Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption));
+        match self.state {
+            VMState::Terminated if self.heap.len() > 1 => {
+                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption))
+            },
+            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind)),
+            VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(()),
         }
-        Ok(())
     }
 
     /// Disassembles the bytecode and returns it as a string.
