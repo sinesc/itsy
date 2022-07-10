@@ -1716,10 +1716,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write subtraction instruction.
     fn write_sub(self: &Self, ty: &Type) {
         match ty {
-            Type::i8 | Type::u8 => self.writer.subi8(),
-            Type::i16 | Type::u16 => self.writer.subi16(),
-            Type::i32 | Type::u32 => self.writer.subi32(),
-            Type::i64 | Type::u64 => self.writer.subi64(),
+            Type::i8 => self.writer.subs8(),
+            Type::i16 => self.writer.subs16(),
+            Type::i32 => self.writer.subs32(),
+            Type::i64 => self.writer.subs64(),
+            Type::u8 => self.writer.subu8(),
+            Type::u16 => self.writer.subu16(),
+            Type::u32 => self.writer.subu32(),
+            Type::u64 => self.writer.subu64(),
             Type::f32 => self.writer.subf32(),
             Type::f64 => self.writer.subf64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
@@ -1729,10 +1733,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write addition instruction.
     fn write_add(self: &Self, ty: &Type) {
         match ty {
-            Type::i8 | Type::u8 => self.writer.addi8(),
-            Type::i16 | Type::u16 => self.writer.addi16(),
-            Type::i32 | Type::u32 => self.writer.addi32(),
-            Type::i64 | Type::u64 => self.writer.addi64(),
+            Type::i8 => self.writer.adds8(),
+            Type::i16 => self.writer.adds16(),
+            Type::i32 => self.writer.adds32(),
+            Type::i64 => self.writer.adds64(),
+            Type::u8 => self.writer.addu8(),
+            Type::u16 => self.writer.addu16(),
+            Type::u32 => self.writer.addu32(),
+            Type::u64 => self.writer.addu64(),
             Type::f32 => self.writer.addf32(),
             Type::f64 => self.writer.addf64(),
             Type::String => self.writer.string_concatx(),
@@ -1743,10 +1751,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write multiplication instruction.
     fn write_mul(self: &Self, ty: &Type) {
         match ty {
-            Type::i8 | Type::u8 => self.writer.muli8(),
-            Type::i16 | Type::u16 => self.writer.muli16(),
-            Type::i32 | Type::u32 => self.writer.muli32(),
-            Type::i64 | Type::u64 => self.writer.muli64(),
+            Type::i8 => self.writer.muls8(),
+            Type::i16 => self.writer.muls16(),
+            Type::i32 => self.writer.muls32(),
+            Type::i64 => self.writer.muls64(),
+            Type::u8 => self.writer.mulu8(),
+            Type::u16 => self.writer.mulu16(),
+            Type::u32 => self.writer.mulu32(),
+            Type::u64 => self.writer.mulu64(),
             Type::f32 => self.writer.mulf32(),
             Type::f64 => self.writer.mulf64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
@@ -1756,10 +1768,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write square instruction.
     fn write_sq(self: &Self, ty: &Type) {
         match ty {
-            Type::i8 | Type::u8 => self.writer.sqi8(),
-            Type::i16 | Type::u16 => self.writer.sqi16(),
-            Type::i32 | Type::u32 => self.writer.sqi32(),
-            Type::i64 | Type::u64 => self.writer.sqi64(),
+            Type::i8 => self.writer.sqs8(),
+            Type::i16 => self.writer.sqs16(),
+            Type::i32 => self.writer.sqs32(),
+            Type::i64 => self.writer.sqs64(),
+            Type::u8 => self.writer.squ8(),
+            Type::u16 => self.writer.squ16(),
+            Type::u32 => self.writer.squ32(),
+            Type::u64 => self.writer.squ64(),
             Type::f32 => self.writer.sqf32(),
             Type::f64 => self.writer.sqf64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
@@ -1770,12 +1786,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn write_div(self: &Self, ty: &Type) {
         match ty {
             Type::i8 => self.writer.divs8(),
-            Type::u8 => self.writer.divu8(),
             Type::i16 => self.writer.divs16(),
-            Type::u16 => self.writer.divu16(),
             Type::i32 => self.writer.divs32(),
-            Type::u32 => self.writer.divu32(),
             Type::i64 => self.writer.divs64(),
+            Type::u8 => self.writer.divu8(),
+            Type::u16 => self.writer.divu16(),
+            Type::u32 => self.writer.divu32(),
             Type::u64 => self.writer.divu64(),
             Type::f32 => self.writer.divf32(),
             Type::f64 => self.writer.divf64(),
@@ -1787,12 +1803,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn write_rem(self: &Self, ty: &Type) {
         match ty {
             Type::i8 => self.writer.rems8(),
-            Type::u8 => self.writer.remu8(),
             Type::i16 => self.writer.rems16(),
-            Type::u16 => self.writer.remu16(),
             Type::i32 => self.writer.rems32(),
-            Type::u32 => self.writer.remu32(),
             Type::i64 => self.writer.rems64(),
+            Type::u8 => self.writer.remu8(),
+            Type::u16 => self.writer.remu16(),
+            Type::u32 => self.writer.remu32(),
             Type::u64 => self.writer.remu64(),
             Type::f32 => self.writer.remf32(),
             Type::f64 => self.writer.remf64(),
@@ -1852,12 +1868,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.clts8(),
-                Type::u8 => self.writer.cltu8(),
                 Type::i16 => self.writer.clts16(),
-                Type::u16 => self.writer.cltu16(),
                 Type::i32 => self.writer.clts32(),
-                Type::u32 => self.writer.cltu32(),
                 Type::i64 => self.writer.clts64(),
+                Type::u8 => self.writer.cltu8(),
+                Type::u16 => self.writer.cltu16(),
+                Type::u32 => self.writer.cltu32(),
                 Type::u64 => self.writer.cltu64(),
                 Type::f32 => self.writer.cltf32(),
                 Type::f64 => self.writer.cltf64(),
@@ -1875,12 +1891,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.cltes8(),
-                Type::u8 => self.writer.clteu8(),
                 Type::i16 => self.writer.cltes16(),
-                Type::u16 => self.writer.clteu16(),
                 Type::i32 => self.writer.cltes32(),
-                Type::u32 => self.writer.clteu32(),
                 Type::i64 => self.writer.cltes64(),
+                Type::u8 => self.writer.clteu8(),
+                Type::u16 => self.writer.clteu16(),
+                Type::u32 => self.writer.clteu32(),
                 Type::u64 => self.writer.clteu64(),
                 Type::f32 => self.writer.cltef32(),
                 Type::f64 => self.writer.cltef64(),

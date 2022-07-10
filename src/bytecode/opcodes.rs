@@ -309,14 +309,22 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their sum.
     fn <
-        addi8<T: Data8>(),
-        addi16<T: Data16>(),
-        addi32<T: Data32>(),
-        addi64<T: Data64>()
+        adds8<T: i8>() [ check ],
+        adds16<T: i16>() [ check ],
+        adds32<T: i32>() [ check ],
+        adds64<T: i64>() [ check ],
+        addu8<T: u8>() [ check ],
+        addu16<T: u16>() [ check ],
+        addu32<T: u32>() [ check ],
+        addu64<T: u64>() [ check ],
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_add(a, b));
+        let result = T::overflowing_add(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
     }
 
     /// Pops 2 values from the stack and pushes their sum.
@@ -331,14 +339,22 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their difference.
     fn <
-        subi8<T: Data8>(),
-        subi16<T: Data16>(),
-        subi32<T: Data32>(),
-        subi64<T: Data64>()
+        subs8<T: i8>() [ check ],
+        subs16<T: i16>() [ check ],
+        subs32<T: i32>() [ check ],
+        subs64<T: i64>() [ check ],
+        subu8<T: u8>() [ check ],
+        subu16<T: u16>() [ check ],
+        subu32<T: u32>() [ check ],
+        subu64<T: u64>() [ check ],
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_sub(a, b));
+        let result = T::overflowing_sub(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
     }
 
     /// Pops 2 values from the stack and pushes their difference.
@@ -353,27 +369,22 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their product.
     fn <
-        sqi8<T: Data8>(),
-        sqi16<T: Data16>(),
-        sqi32<T: Data32>(),
-        sqi64<T: Data64>(),
-        sqf32<T: f32>(),
-        sqf64<T: f64>(),
-    >(&mut self) {
-        let v: T = self.stack.pop();
-        self.stack.push(v * v);
-    }
-
-    /// Pops 2 values from the stack and pushes their product.
-    fn <
-        muli8<T: Data8>(),
-        muli16<T: Data16>(),
-        muli32<T: Data32>(),
-        muli64<T: Data64>()
+        muls8<T: i8>() [ check ],
+        muls16<T: i16>() [ check ],
+        muls32<T: i32>() [ check ],
+        muls64<T: i64>() [ check ],
+        mulu8<T: u8>() [ check ],
+        mulu16<T: u16>() [ check ],
+        mulu32<T: u32>() [ check ],
+        mulu64<T: u64>() [ check ],
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_mul(a, b));
+        let result = T::overflowing_mul(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
     }
 
     /// Pops 2 values from the stack and pushes their product.
@@ -388,24 +399,46 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
-        divs8<T: i8>(),
-        divs16<T: i16>(),
-        divs32<T: i32>(),
-        divs64<T: i64>(),
-        divu8<T: u8>(),
-        divu16<T: u16>(),
-        divu32<T: u32>(),
-        divu64<T: u64>()
+        divs8<T: i8>() [ check ],
+        divs16<T: i16>() [ check ],
+        divs32<T: i32>() [ check ],
+        divs64<T: i64>() [ check ],
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_div(a, b));
+        self.stack.push(if b == 0 {
+            self.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
+            0
+        } else {
+            let result = T::overflowing_div(a, b);
+            if result.1 {
+                self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+            }
+            result.0
+        });
     }
 
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
-        divf32<T: f32>(),
-        divf64<T: f64>()
+        divu8<T: u8>() [ check ],
+        divu16<T: u16>() [ check ],
+        divu32<T: u32>() [ check ],
+        divu64<T: u64>() [ check ],
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push(if b == 0 {
+            self.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
+            0
+        } else {
+            a / b
+        });
+    }
+
+    /// Pops 2 values from the stack and pushes their quotient.
+    fn <
+        divf32<T: f32>() [ check ],
+        divf64<T: f64>() [ check ],
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
@@ -414,10 +447,21 @@ impl_opcodes!{
 
     /// Pops a value off the stack and pushes its negative.
     fn <
-        negs8<T: i8>(),
-        negs16<T: i16>(),
-        negs32<T: i32>(),
-        negs64<T: i64>(),
+        negs8<T: i8>() [ check ],
+        negs16<T: i16>() [ check ],
+        negs32<T: i32>() [ check ],
+        negs64<T: i64>() [ check ],
+    >(&mut self) {
+        let v: T = self.stack.pop();
+        let result = T::overflowing_neg(v);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops a value off the stack and pushes its negative.
+    fn <
         negf32<T: f32>(),
         negf64<T: f64>(),
     >(&mut self) {
@@ -427,10 +471,22 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their remainder.
     fn <
-        rems8<T: i8>(),
-        rems16<T: i16>(),
-        rems32<T: i32>(),
-        rems64<T: i64>(),
+        rems8<T: i8>() [ check ],
+        rems16<T: i16>() [ check ],
+        rems32<T: i32>() [ check ],
+        rems64<T: i64>() [ check ],
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        let result = T::overflowing_rem(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops 2 values from the stack and pushes their remainder.
+    fn <
         remu8<T: u8>(),
         remu16<T: u16>(),
         remu32<T: u32>(),
@@ -438,7 +494,7 @@ impl_opcodes!{
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_rem(a, b));
+        self.stack.push(a % b);
     }
 
     /// Pops 2 values from the stack and pushes their remainder.
@@ -449,6 +505,34 @@ impl_opcodes!{
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
         self.stack.push(a % b);
+    }
+
+    /// Pops 2 values from the stack and pushes their product.
+    fn <
+        sqs8<T: i8>() [ check ],
+        sqs16<T: i16>() [ check ],
+        sqs32<T: i32>() [ check ],
+        sqs64<T: i64>() [ check ],
+        squ8<T: u8>() [ check ],
+        squ16<T: u16>() [ check ],
+        squ32<T: u32>() [ check ],
+        squ64<T: u64>() [ check ],
+    >(&mut self) {
+        let v: T = self.stack.pop();
+        let result = T::overflowing_mul(v, v);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops 2 values from the stack and pushes their product.
+    fn <
+        sqf32<T: f32>(),
+        sqf64<T: f64>(),
+    >(&mut self) {
+        let v: T = self.stack.pop();
+        self.stack.push(v * v);
     }
 
     /// Pops stack address sized value, shifts it by given number of bits and pushes it.

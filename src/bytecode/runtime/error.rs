@@ -10,6 +10,7 @@ pub enum RuntimeErrorKind {
     HeapCorruption,
     Panic,
     IntegerOverflow,
+    DivisionByZero,
 }
 
 /// An error reported by the runtime.
@@ -49,6 +50,7 @@ impl Display for RuntimeError {
             RuntimeErrorKind::HeapCorruption => write!(f, "Heap elements remaining after program termination."),
             RuntimeErrorKind::Panic => write!(f, "Panic at opcode {opcode}"),
             RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),
+            RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}"),
             _ => write!(f, "{:?}", self.kind),
         }
     }
