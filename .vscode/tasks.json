@@ -73,6 +73,47 @@
             "problemMatcher": []
         },
         {
+            "label": "cargo build debug-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"debugging\"",
+                "--features=\"symbols\"",
+                "--example",
+                "debug-run",
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo build profile-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"debugging\"",
+                "--release",
+                "--example",
+                "profile-run",
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo build runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--example",
+                "run",
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
             "label": "cargo run file in debug-runner (example)",
             "type": "shell",
             "command": "cargo",
