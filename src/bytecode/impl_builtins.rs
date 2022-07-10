@@ -10,24 +10,26 @@ macro_rules! impl_builtins {
     // VM: Pops an argument and converts some special cases.
     (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param_value $vm:ident, $_:tt) => { $vm.stack.pop() };
-    // VM: Translate parameter list pseudo-types to internally used types.
+    // VM: Translate parameter list/result pseudo-types to internally used types.
     (@handle_param_type String) => { HeapRef };
     (@handle_param_type str) => { HeapRef };
     (@handle_param_type Array) => { HeapRef };
+    (@handle_param_type Element) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
     (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
     // VM: Translate some pseudo-type names to concrete rust types.
-    (@handle_ref_param_type str) => { &str };
-    (@handle_ref_param_type Array) => { HeapRef };
-    (@handle_ref_param_type $other:ident) => { $other };
+    (@map_ref_type str) => { &str };
+    (@map_ref_type Array) => { HeapRef };
+    (@map_ref_type Element) => { HeapRef };
+    (@map_ref_type $other:ident) => { $other };
     // VM: Generate reference counting code for some pseudo type arguments.
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, Array, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $constructor, $crate::bytecode::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, HeapRef, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $element_constructor, $crate::bytecode::HeapRefOp::Free) };
+    (@handle_ref_param_free $vm:ident, Element, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $element_constructor, $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -40,7 +42,12 @@ macro_rules! impl_builtins {
     };
     // Resolver: Type id mapping for resolve() function
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Self) => { $type_id };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Array) => { $type_id };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic type not defined but used.") };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, str) => { $resolver.primitive_type_id(Type::String).unwrap() };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackAddress) => { $resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap() };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackOffset) => { $resolver.primitive_type_id(crate::STACK_OFFSET_TYPE).unwrap() };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, HeapRef) => { $inner_type_id.expect("Generic type not defined but used.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
     // Compiler: Write implementation variants
@@ -113,7 +120,7 @@ macro_rules! impl_builtins {
                     fn
                     $( // Either multiple function variants...
                         < $(
-                            $vname:ident $( < $( $vgeneric_name:ident : $vgeneric_type:ident )? > )? ( $( $varg_name:ident : $vtype_name:ident $( as $vtype_name_as:ident )? ),* )
+                            $vname:ident $( < $vgeneric_name:ident : $vgeneric_type:ident > )? ( $( $varg_name:ident : $varg_type:ident $( as $varg_type_as:ident )? ),* )
                             $( -> $vret_type:ident )?
                         ),+ $(,)? >
                         ( & mut $vvm:ident )
@@ -183,18 +190,37 @@ macro_rules! impl_builtins {
                         // This allows us to always accept void and String types for each match arm. We use void for arrays (they are generic,
                         // there is nothing to check) as well as String for strings (so that we don't have to annotate each string builting with <T: String>).
                         let require_type = if inner_type_id.is_some() { &Type::void } else { resolver.type_by_id(type_id) };
+
                         match (name, require_type) {
                             $( // function
-                                (
-                                    stringify!($builtin_function), Type::String | Type::void $( $( $( $( $( | Type::$vgeneric_type )? )? )+ )? )+
-                                )
-                                => {
-                                    Some((
-                                        super::BuiltinType::$builtin_type($builtin_type::$builtin_function),
-                                        impl_builtins!(@type_map resolver, type_id, inner_type_id $(, $doc_result_type )?),
-                                        vec![ $( impl_builtins!(@type_map resolver, type_id, inner_type_id, $doc_type) ),* ]
-                                    ))
-                                },
+                                $( // implementation
+                                    $( // Either multiple function variants...
+                                        $( // variant
+                                            (
+                                                stringify!($builtin_function), $( Type::$vgeneric_type )?
+                                            )
+                                            => {
+                                                Some((
+                                                    super::BuiltinType::$builtin_type($builtin_type::$builtin_function),
+                                                    impl_builtins!(@type_map resolver, type_id, inner_type_id $(, $vret_type )?),
+                                                    vec![ $( impl_builtins!(@type_map resolver, type_id, inner_type_id, $varg_type) ),* ]
+                                                ))
+                                            },
+                                        )+
+                                    )?
+                                    $( // or single function.
+                                        (
+                                            stringify!($builtin_function), Type::String | Type::void
+                                        )
+                                        => {
+                                            Some((
+                                                super::BuiltinType::$builtin_type($builtin_type::$builtin_function),
+                                                impl_builtins!(@type_map resolver, type_id, inner_type_id $(, $ret_type )?),
+                                                vec![ $( impl_builtins!(@type_map resolver, type_id, inner_type_id, $arg_type ) ),* ]
+                                            ))
+                                        }
+                                    )?
+                                )+
                             )+
                             _ => None,
                         }
@@ -283,25 +309,25 @@ macro_rules! impl_builtins {
                                         Builtin::$vname => {
                                             $(
                                                 #[allow(dead_code)]
-                                                $( type $vgeneric_name = $vgeneric_type; )+
+                                                type $vgeneric_name = $vgeneric_type;
                                             )?
                                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                                            impl_builtins!(@load_args_reverse vm [ $( $varg_name $vtype_name )* ]);
+                                            impl_builtins!(@load_args_reverse vm [ $( $varg_name $varg_type )* ]);
                                             // Run code.
                                             let ret = {
                                                 // Shadow HeapRef arguments with actual argument value.
                                                 $(
-                                                    let $varg_name: impl_builtins!(@handle_ref_param_type $vtype_name) = impl_builtins!(@handle_ref_param_value vm, $vtype_name, $varg_name);
+                                                    let $varg_name: impl_builtins!(@map_ref_type $varg_type) = impl_builtins!(@handle_ref_param_value vm, $varg_type, $varg_name);
                                                 )*
                                                 builtin_functions::$vname(vm, /*constructor, element_constructor,*/ $( $varg_name ),* )
                                             };
                                             // Handle refcounting.
                                             $(
-                                                impl_builtins!(@handle_ref_param_free vm, $vtype_name, $varg_name, constructor, element_constructor);
+                                                impl_builtins!(@handle_ref_param_free vm, $varg_type, $varg_name, constructor, element_constructor);
                                             )*
                                             // Set return value, if any.
                                             $(
-                                                let ret_typed: $vret_type = ret;
+                                                let ret_typed: impl_builtins!(@map_ref_type $vret_type) = ret;
                                                 impl_builtins!(@handle_ret_value vm, $vret_type, ret_typed);
                                             )?
                                         },
@@ -321,7 +347,7 @@ macro_rules! impl_builtins {
                                         let ret = {
                                             // Shadow HeapRef arguments with actual argument value.
                                             $(
-                                                let $arg_name: impl_builtins!(@handle_ref_param_type $arg_type) = impl_builtins!(@handle_ref_param_value vm, $arg_type, $arg_name);
+                                                let $arg_name: impl_builtins!(@map_ref_type $arg_type) = impl_builtins!(@handle_ref_param_value vm, $arg_type, $arg_name);
                                             )*
                                             // note: borrowing issues with this. probably solvable but we really only need the variants to be able to call each other. single builtins would get no benefit from being moved to functions.
                                             //builtin_functions::$name(vm, constructor, element_constructor, $( $arg_name ),* )
@@ -337,7 +363,7 @@ macro_rules! impl_builtins {
                                         )*
                                         // Set return value, if any.
                                         $(
-                                            let ret_typed: $ret_type = ret;
+                                            let ret_typed: impl_builtins!(@map_ref_type $ret_type) = ret;
                                             impl_builtins!(@handle_ret_value vm, $ret_type, ret_typed);
                                         )?
                                     },
@@ -360,11 +386,11 @@ macro_rules! impl_builtins {
                             $(
                                 #[allow(unused_variables, unused_assignments, unused_imports)]
                                 #[cfg(feature="runtime")]
-                                pub(super) fn $vname<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $varg_name : impl_builtins!(@handle_ref_param_type $vtype_name) ),* ) $( -> $vret_type )? {
+                                pub(super) fn $vname<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $varg_name : impl_builtins!(@map_ref_type $varg_type) ),* ) $( -> impl_builtins!(@map_ref_type $vret_type) )? {
                                     use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
                                     $(
                                         #[allow(dead_code)]
-                                        $( type $vgeneric_name = $vgeneric_type; )+
+                                        type $vgeneric_name = $vgeneric_type;
                                     )?
                                     let $vvm = &mut *vm;
                                     $code
@@ -375,7 +401,7 @@ macro_rules! impl_builtins {
                         $( // single variant
                             #[allow(unused_variables, unused_assignments, unused_imports)]
                             #[cfg(feature="runtime")]
-                            pub(super) fn $name<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress, $( $arg_name : impl_builtins!(@handle_ref_param_type $arg_type) ),* ) $( -> $ret_type )? {
+                            pub(super) fn $name<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress, $( $arg_name : impl_builtins!(@map_ref_type $arg_type) ),* ) $( -> $ret_type )? {
                                 use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
                                 #[allow(dead_code)]
                                 /// Single variant builtins don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
