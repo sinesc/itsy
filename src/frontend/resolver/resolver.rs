@@ -239,26 +239,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Create float builtin function signature.
-    fn create_float_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
-        Ok(match builtin_types::Float::resolve(self, name, type_id, None) {
-            None => None,
-            Some((builtin_type, result_type_id, arg_type_ids)) => {
-                Some(self.scopes.insert_function(
-                    scopes::Scopes::root_id(),
-                    name,
-                    Some(result_type_id),
-                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::Builtin(type_id, builtin_type))
-                ))
-            }
-        })
-    }
+    /// Create integer/float/string builtin function signature.
+    fn try_create_scalar_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<FunctionId>> {
 
-    /// Create float builtin function signature.
-    fn create_string_builtin(self: &mut Self, name: &str) -> ResolveResult<Option<FunctionId>> {
-        let type_id = self.primitive_type_id(Type::String)?;
-        Ok(match builtin_types::String::resolve(self, name, type_id, None) {
+        let resolved = match self.type_by_id(type_id) {
+            ty @ _ if ty.is_integer()   => builtin_types::Integer::resolve(self, name, type_id, None),
+            ty @ _ if ty.is_float()     => builtin_types::Float::resolve(self, name, type_id, None),
+            ty @ _ if ty.is_string()    => builtin_types::String::resolve(self, name, type_id, None),
+            _ => None,
+        };
+
+        Ok(match resolved {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
                 Some(self.scopes.insert_function(
@@ -759,20 +750,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
         self.resolve_expression(arg, None)?;
         if let Some(type_id) = arg.type_id(self) {
-            if self.type_by_id(type_id).as_array().is_some() {
+            let ty = self.type_by_id(type_id);
+            if ty.as_array().is_some() {
                 item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                 if item.function_id.is_none() {
                     item.function_id = self.try_create_array_builtin(&item.ident.name, type_id)?;
                 }
-            } else if self.type_by_id(type_id).is_float() {
+            } else if ty.is_float() || ty.is_integer() || ty.is_string() {
                 item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
                 if item.function_id.is_none() {
-                    item.function_id = self.create_float_builtin(&item.ident.name, type_id)?;
-                }
-            } else if self.type_by_id(type_id).is_string() {
-                item.function_id = self.scopes.lookup_function_id(self.scope_id, (&item.ident.name, type_id));
-                if item.function_id.is_none() {
-                    item.function_id = self.create_string_builtin(&item.ident.name)?;
+                    item.function_id = self.try_create_scalar_builtin(&item.ident.name, type_id)?;
                 }
             } else {
                 // try method on type
@@ -814,12 +801,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 CallSyntax::Path(static_path) => {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
                     // todo fix this hack: path handling needs a rework
-                    if static_path.name.len() == 1 && static_path.name[0].name == "String" {
-                        item.function_id = self.create_string_builtin(&item.ident.name)?;
-                    } else if static_path.name.len() == 1 && static_path.name[0].name == "f32" {
-                        item.function_id = self.create_float_builtin(&item.ident.name, self.primitive_type_id(Type::f32)?)?;
-                    } else if static_path.name.len() == 1 && static_path.name[0].name == "f64" {
-                        item.function_id = self.create_float_builtin(&item.ident.name, self.primitive_type_id(Type::f64)?)?;
+                    let if_let_chain_where_are_you_type_id = self.scopes.type_id(scopes::Scopes::root_id(), &static_path.name[0].name);
+                    if static_path.name.len() == 1 && if_let_chain_where_are_you_type_id.is_some() {
+                        item.function_id = self.try_create_scalar_builtin(&item.ident.name, if_let_chain_where_are_you_type_id.unwrap())?;
                     } else {
                         item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
                     }

@@ -44,6 +44,7 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
     // Compiler: Write implementation variants
+    // TODO these cases are super ugly. maybe a muncher could make this better?
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
         let $element_ty = $element_ty.unwrap();
         if $element_ty.is_ref() {
@@ -67,6 +68,25 @@ macro_rules! impl_builtins {
             4 => $compiler.writer.builtincall(Builtin::$variant_32),
             _ => unreachable!("Invalid type size for builtin call"),
         };
+    } };
+    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
+        if $ty.is_signed() {
+            match $ty.primitive_size() {
+                8 => $compiler.writer.builtincall(Builtin::$variant_i64),
+                4 => $compiler.writer.builtincall(Builtin::$variant_i32),
+                2 => $compiler.writer.builtincall(Builtin::$variant_i16),
+                1 => $compiler.writer.builtincall(Builtin::$variant_i8),
+                _ => unreachable!("Invalid type size for builtin call"),
+            };
+        } else {
+            match $ty.primitive_size() {
+                8 => $compiler.writer.builtincall(Builtin::$variant_u64),
+                4 => $compiler.writer.builtincall(Builtin::$variant_u32),
+                2 => $compiler.writer.builtincall(Builtin::$variant_u16),
+                1 => $compiler.writer.builtincall(Builtin::$variant_u8),
+                _ => unreachable!("Invalid type size for builtin call"),
+            };
+        }
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
         $compiler.writer.builtincall(Builtin::$variant)

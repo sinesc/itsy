@@ -1594,6 +1594,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             (Type::f32 | Type::f64, BuiltinType::Float(float_builtin)) => {
                 float_builtin.write(self, type_id, None);
             },
+            (Type::i8 | Type::i16 | Type::i32 | Type::i64 | Type::u8 | Type::u16 | Type::u32 | Type::u64, BuiltinType::Integer(integer_builtin)) => {
+                integer_builtin.write(self, type_id, None);
+            },
             (Type::String, BuiltinType::String(string_builtin)) => {
                 string_builtin.write(self, type_id, None);
             },

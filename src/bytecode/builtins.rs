@@ -276,6 +276,43 @@ impl_builtins! {
         }
     }
 
+    /// Integer gypes
+    Integer {
+
+        /// The smallest value that can be represented by this integer type.
+        MIN() -> Self {
+            fn <
+                int_mini8<T: i8>() -> i8,
+                int_mini16<T: i16>() -> i16,
+                int_mini32<T: i32>() -> i32,
+                int_mini64<T: i64>() -> i64,
+                int_minu8<T: u8>() -> u8,
+                int_minu16<T: u16>() -> u16,
+                int_minu32<T: u32>() -> u32,
+                int_minu64<T: u64>() -> u64,
+            >(&mut vm) {
+                T::MIN
+            }
+        }
+
+        /// The largest value that can be represented by this integer type.
+        MAX() -> Self {
+            fn <
+                int_maxi8<T: i8>() -> i8,
+                int_maxi16<T: i16>() -> i16,
+                int_maxi32<T: i32>() -> i32,
+                int_maxi64<T: i64>() -> i64,
+                int_maxu8<T: u8>() -> u8,
+                int_maxu16<T: u16>() -> u16,
+                int_maxu32<T: u32>() -> u32,
+                int_maxu64<T: u64>() -> u64,
+            >(&mut vm) {
+                T::MAX
+            }
+        }
+
+    }
+
     /// The `f32` and `f64` floating point types.
     ///
     /// Value types that can represent a wide range of decimal numbers. `f64` has increased precision
