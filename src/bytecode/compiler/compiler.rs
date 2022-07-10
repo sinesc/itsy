@@ -970,7 +970,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given binary operation.
     fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        if item.op.is_simple() {
+        fn equals(a: &ast::Expression, b: &ast::Expression) -> bool {
+            use ast::Expression as E;
+            use ast::Variable as V;
+            match (a, b) {
+                (E::Variable(V { binding_id: Some(a_binding_id), .. }), E::Variable(V { binding_id: Some(b_binding_id), .. })) => a_binding_id == b_binding_id,
+                _ => false,
+            }
+        }
+        if item.op == ast::BinaryOperator::Mul && equals(&item.left, &item.right) {  // TODO: move to optimizer
+            self.compile_expression(&item.left)?;
+            self.write_sq(self.ty(&item.left));
+            Ok(())
+        } else if item.op.is_simple() {
             self.compile_binary_op_simple(item)
         } else if item.op.is_shortcircuit() {
             self.compile_binary_op_shortcircuiting(item)
@@ -1737,6 +1749,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i64 | Type::u64 => self.writer.muli64(),
             Type::f32 => self.writer.mulf32(),
             Type::f64 => self.writer.mulf64(),
+            _ => unreachable!("Unsupported operation for type {:?}", ty),
+        };
+    }
+
+    /// Write square instruction.
+    fn write_sq(self: &Self, ty: &Type) {
+        match ty {
+            Type::i8 | Type::u8 => self.writer.sqi8(),
+            Type::i16 | Type::u16 => self.writer.sqi16(),
+            Type::i32 | Type::u32 => self.writer.sqi32(),
+            Type::i64 | Type::u64 => self.writer.sqi64(),
+            Type::f32 => self.writer.sqf32(),
+            Type::f64 => self.writer.sqf64(),
             _ => unreachable!("Unsupported operation for type {:?}", ty),
         };
     }

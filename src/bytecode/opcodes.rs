@@ -349,6 +349,19 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their product.
     fn <
+        sqi8<T: Data8>(),
+        sqi16<T: Data16>(),
+        sqi32<T: Data32>(),
+        sqi64<T: Data64>(),
+        sqf32<T: f32>(),
+        sqf64<T: f64>(),
+    >(&mut self) {
+        let v: T = self.stack.pop();
+        self.stack.push(v * v);
+    }
+
+    /// Pops 2 values from the stack and pushes their product.
+    fn <
         muli8<T: Data8>(),
         muli16<T: Data16>(),
         muli32<T: Data32>(),
