@@ -428,6 +428,16 @@ impl_builtins! {
             }
         }
 
+        /// Calculates Euclidean division, the matching method for rem_euclid.
+        div_euclid(self: Self, rhs: Self) -> Self {
+            fn <
+                float_div_euclid32<T: u32>(this: f32, rhs: f32) -> f32,
+                float_div_euclid64<T: u64>(this: f64, rhs: f64) -> f64,
+            >(&mut vm) {
+                this.div_euclid(rhs)
+            }
+        }
+
         /// Calculates the least nonnegative remainder of self (mod rhs).
         rem_euclid(self: Self, rhs: Self) -> Self {
             fn <
