@@ -28,6 +28,7 @@ pub struct VM<T, U> {
     func_type               : PhantomData<T>,
     pub(crate) instructions : Vec<u8>,
     pub(crate) pc           : StackAddress,
+    pub(crate) error_pc     : StackAddress,
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
@@ -47,6 +48,7 @@ impl<T, U> VM<T, U> {
             func_type   : PhantomData,
             instructions: instructions,
             pc          : 0,
+            error_pc    : 0,
             state       : VMState::Ready,
             stack       : stack,
             heap        : heap,
@@ -60,12 +62,28 @@ impl<T, U> VM<T, U> {
         }
         self.exec(context);
         match self.state {
-            VMState::Terminated if self.heap.len() > 1 => {
-                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None))
+            VMState::Terminated if self.heap.len() > 1 => Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None)),
+            VMState::Error(kind) => Err(RuntimeError::new(self.error_pc, kind, None)),
+            VMState::Ready => {
+                let kind = RuntimeErrorKind::UnexpectedReady;
+                self.state = VMState::Error(kind);
+                Err(RuntimeError::new(self.pc, kind, None))
             },
-            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind, None)),
-            VMState::Ready => Err(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady, None)),
             VMState::Terminated | VMState::Yielded => Ok(()),
+        }
+    }
+
+    /// Clears runtime error, allowing the VM to resume via run(). This is a no-op if the VM is
+    /// in Ready or Yielded state and an error in Terminated state.
+    pub fn clear_error(self: &mut Self) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
+        match self.state {
+            VMState::Error(_) => {
+                self.error_pc = 0;
+                self.state = VMState::Ready;
+                Ok(())
+            },
+            VMState::Ready | VMState::Yielded => Ok(()),
+            _ => Err(RuntimeError::new(0, RuntimeErrorKind::CannotClear, None)),
         }
     }
 
@@ -80,6 +98,7 @@ impl<T, U> VM<T, U> {
         self.heap.reset();
         self.heap.alloc(0, 0);
         self.pc = 0;
+        self.error_pc = 0;
         self.state = VMState::Ready;
     }
 
@@ -230,11 +249,9 @@ impl<T, U> VM<T, U> {
         }
         self.exec_step(context);
         match self.state {
-            VMState::Terminated if self.heap.len() > 1 => {
-                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None))
-            },
+            VMState::Terminated if self.heap.len() > 1 => Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None)),
             VMState::Error(kind) => {
-                let opcode = self.describe_instruction(self.pc).map(|result| result.0);
+                let opcode = self.describe_instruction(self.error_pc).map(|result| result.0);
                 Err(RuntimeError::new(self.pc, kind, opcode))
             },
             VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(()),

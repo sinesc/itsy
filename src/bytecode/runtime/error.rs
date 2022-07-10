@@ -5,6 +5,7 @@ use crate::StackAddress;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RuntimeErrorKind {
     NotReady,
+    CannotClear,
     UnexpectedReady,
     HeapCorruption,
     Panic,
@@ -43,7 +44,8 @@ impl Display for RuntimeError {
         #[allow(unreachable_patterns)]
         match &self.kind {
             RuntimeErrorKind::NotReady => write!(f, "VM is not ready."),
-            RuntimeErrorKind::UnexpectedReady => write!(f, "VM unexpectedly ready after program termination."),
+            RuntimeErrorKind::CannotClear => write!(f, "Cannot clear VM error. VM is not in a resumable state."),
+            RuntimeErrorKind::UnexpectedReady => write!(f, "VM returned before reaching an exit or yld instruction."),
             RuntimeErrorKind::HeapCorruption => write!(f, "Heap elements remaining after program termination."),
             RuntimeErrorKind::Panic => write!(f, "Panic at opcode {opcode}"),
             RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),

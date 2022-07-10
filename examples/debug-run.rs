@@ -47,10 +47,11 @@ fn run(program: Program<MyAPI>, write_logs: bool) {
             log("logs/run.ini", true, &format!("{}", opcode_label.as_ref().unwrap()));
         }
         if let Some(e) = vm.step(&mut context).err() {
-            println!("\nRuntime error: {e}");
+            println!("\n---\nRuntime error: {e}");
             println!("Stack: {:?}", vm.stack.data());
             println!("Heap: {:?}", vm.heap.data());
-            break;
+            println!("Resuming vm...\n---");
+            vm.clear_error().unwrap();
         }
         if let Some(instruction_label) = opcode_label {
             if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {

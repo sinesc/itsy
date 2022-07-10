@@ -46,7 +46,7 @@ macro_rules! impl_opcodes {
     (@flag $self:ident, $prev_pc:ident, return) => { return };
     (@flag $self:ident, $prev_pc:ident, check) => { match $self.state {
         VMState::Error(_) => {
-            $self.pc = $prev_pc - 1; // opcode was already read
+            $self.error_pc = $prev_pc - 1; // opcode was already read
             return;
         },
         _ => { },
