@@ -246,12 +246,6 @@ impl Constructor {
             index @ _ => unreachable!("Invalid constructor type {}", index),
         }
     }
-    // Parses a constructor.
-    pub fn parse(stack: &Stack, mut offset: StackAddress) -> ConstructorData {
-        let constructor = Constructor::from_u8(stack.load(offset));
-        offset += size_of_val(&constructor) as StackAddress;
-        Self::parse_with(stack, offset, constructor)
-    }
     // Parses serialized constructor parameters with given constructor op.
     pub fn parse_with(stack: &Stack, mut offset: StackAddress, constructor: Constructor) -> ConstructorData {
         match constructor {
@@ -283,10 +277,6 @@ impl Constructor {
                 }
             },
         }
-    }
-    // Parses primitive constructor parameters.
-    pub fn parse_primitive(stack: &Stack, offset: StackAddress) -> ItemIndex {
-        stack.load(offset)
     }
     // Parses struct constructor parameters.
     pub fn parse_struct(stack: &Stack, mut offset: StackAddress) -> (ItemIndex, ItemIndex, StackAddress) {
