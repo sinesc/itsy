@@ -114,7 +114,7 @@ impl_builtins! {
                 vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
             }
 
-            fn array_pushx(&mut vm + constructor, this: Array, value: HeapRef) {
+            fn array_pushx(&mut vm + constructor, this: Array, value: Element) {
                 vm.heap.item_mut(this.index()).data.extend_from_slice(&value.to_ne_bytes());
                 vm.refcount_value(value, constructor, HeapRefOp::Inc);
             }
@@ -135,7 +135,7 @@ impl_builtins! {
                 result
             }
 
-            fn array_popx(&mut vm + constructor, this: Array) -> HeapRef { // FIXME: once data enums are usable this needs to return an Option
+            fn array_popx(&mut vm + constructor, this: Array) -> Element { // FIXME: once data enums are usable this needs to return an Option
                 let index = this.index();
                 let offset = vm.heap.item(index).data.len() - size_of::<HeapRef>();
                 let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
@@ -226,7 +226,7 @@ impl_builtins! {
                 result
             }
 
-            fn array_removex(&mut vm + constructor, this: Array, element: StackAddress) -> HeapRef {
+            fn array_removex(&mut vm + constructor, this: Array, element: StackAddress) -> Element {
                 const ELEMENT_SIZE: usize = size_of::<HeapRef>();
                 let offset = element as usize * ELEMENT_SIZE;
                 let index = this.index();
@@ -330,7 +330,12 @@ impl_builtins! {
             }
         }
 
-        /// The size of this integer type in bits.
+        /// Computes the absolute value of self.
+        ///
+        /// # Error
+        ///
+        /// Returns Integer::MAX() and halts the VM if the absolute value is not representable (as is the case for Integer::MIN).
+        /// The VM is resumable.
         abs(self: Self) -> Self {
             fn <
                 int_absi8<T: i8>(this: i8) -> i8,
@@ -338,7 +343,116 @@ impl_builtins! {
                 int_absi32<T: i32>(this: i32) -> i32,
                 int_absi64<T: i64>(this: i64) -> i64,
             >(&mut vm) {
-                this.abs()
+                if this == T::MIN {
+                    vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+                    T::MAX
+                } else {
+                    this.abs()
+                }
+            }
+        }
+
+        /// Computes the absolute difference between self and other.
+        abs_diff(self: Self, other: Self) -> UnsignedSelf {
+            fn <
+                int_abs_diffi8<T: i8>(this: i8, other: i8) -> u8,
+                int_abs_diffi16<T: i16>(this: i16, other: i16) -> u16,
+                int_abs_diffi32<T: i32>(this: i32, other: i32) -> u32,
+                int_abs_diffi64<T: i64>(this: i64, other: i64) -> u64,
+                int_abs_diffu8<T: u8>(this: u8, other: u8) -> u8,
+                int_abs_diffu16<T: u16>(this: u16, other: u16) -> u16,
+                int_abs_diffu32<T: u32>(this: u32, other: u32) -> u32,
+                int_abs_diffu64<T: u64>(this: u64, other: u64) -> u64,
+            >(&mut vm) {
+                this.abs_diff(other)
+            }
+        }
+
+        /// Calculates the quotient of Euclidean division of self by rhs.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if `other` is 0. The VM is resumable.\
+        /// Returns `self` and halts the VM when an overflow occurs. The VM is resumable.
+        div_euclid(self: Self, other: Self) -> Self {
+            fn <
+                int_div_euclidi8<T: i8>(this: i8, other: i8) -> i8,
+                int_div_euclidi16<T: i16>(this: i16, other: i16) -> i16,
+                int_div_euclidi32<T: i32>(this: i32, other: i32) -> i32,
+                int_div_euclidi64<T: i64>(this: i64, other: i64) -> i64,
+                int_div_euclidu8<T: u8>(this: u8, other: u8) -> u8,
+                int_div_euclidu16<T: u16>(this: u16, other: u16) -> u16,
+                int_div_euclidu32<T: u32>(this: u32, other: u32) -> u32,
+                int_div_euclidu64<T: u64>(this: u64, other: u64) -> u64,
+            >(&mut vm) {
+                if other == 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
+                    0
+                } else {
+                    // todo: split signed/unsigned, use div_euclid for unsigned (can't overflow)
+                    let result = T::overflowing_div_euclid(this, other);
+                    if result.1 {
+                        vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+                    }
+                    result.0
+                }
+            }
+        }
+
+        /// Calculates the least nonnegative remainder of self (mod rhs).
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if `other` is 0. The VM is resumable.\
+        /// Returns 0 and halts the VM when an overflow occurs. The VM is resumable.
+        rem_euclid(self: Self, other: Self) -> Self {
+            fn <
+                int_rem_euclidi8<T: i8>(this: i8, other: i8) -> i8,
+                int_rem_euclidi16<T: i16>(this: i16, other: i16) -> i16,
+                int_rem_euclidi32<T: i32>(this: i32, other: i32) -> i32,
+                int_rem_euclidi64<T: i64>(this: i64, other: i64) -> i64,
+                int_rem_euclidu8<T: u8>(this: u8, other: u8) -> u8,
+                int_rem_euclidu16<T: u16>(this: u16, other: u16) -> u16,
+                int_rem_euclidu32<T: u32>(this: u32, other: u32) -> u32,
+                int_rem_euclidu64<T: u64>(this: u64, other: u64) -> u64,
+            >(&mut vm) {
+                if other == 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
+                    0
+                } else {
+                    // todo: split signed/unsigned, use div_euclid for unsigned (can't overflow)
+                    let result = T::overflowing_rem_euclid(this, other);
+                    if result.1 {
+                        vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+                    }
+                    result.0
+                }
+            }
+        }
+
+        /// Raises self to the power of exp.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM when an overflow occurs. The VM is resumable.
+        pow(self: Self, exp: u32) -> Self {
+            fn <
+                int_powi8<T: i8>(this: i8, exp: u32) -> i8,
+                int_powi16<T: i16>(this: i16, exp: u32) -> i16,
+                int_powi32<T: i32>(this: i32, exp: u32) -> i32,
+                int_powi64<T: i64>(this: i64, exp: u32) -> i64,
+                int_powu8<T: u8>(this: u8, exp: u32) -> u8,
+                int_powu16<T: u16>(this: u16, exp: u32) -> u16,
+                int_powu32<T: u32>(this: u32, exp: u32) -> u32,
+                int_powu64<T: u64>(this: u64, exp: u32) -> u64,
+            >(&mut vm) {
+                let result = T::overflowing_pow(this, exp);
+                if result.1 {
+                    vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+                    0
+                } else {
+                    result.0
+                }
             }
         }
 

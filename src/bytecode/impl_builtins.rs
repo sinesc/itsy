@@ -260,6 +260,7 @@ macro_rules! impl_builtins {
                 pub struct $builtin_type { }
             )+
             struct Element { }
+            struct UnsignedSelf { }
             $( // type
                 impl $builtin_type {
                     $( // function
