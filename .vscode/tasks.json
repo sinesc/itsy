@@ -77,7 +77,7 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run",
+                "build",
                 "--features=\"debugging\"",
                 "--features=\"symbols\"",
                 "--example",
@@ -91,7 +91,7 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run",
+                "build",
                 "--features=\"debugging\"",
                 "--release",
                 "--example",
@@ -105,7 +105,7 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run",
+                "build",
                 "--release",
                 "--example",
                 "run",
