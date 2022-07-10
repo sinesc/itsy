@@ -11,6 +11,7 @@ pub enum RuntimeErrorKind {
     Panic,
     IntegerOverflow,
     DivisionByZero,
+    InvalidArgument,
 }
 
 /// An error reported by the runtime.
@@ -51,6 +52,7 @@ impl Display for RuntimeError {
             RuntimeErrorKind::Panic => write!(f, "Panic at opcode {opcode}"),
             RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),
             RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}"),
+            RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}"),
             _ => write!(f, "{:?}", self.kind),
         }
     }

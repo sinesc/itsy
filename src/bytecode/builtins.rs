@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 #[cfg(feature="runtime")]
-use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp}};
+use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp, runtime::{vm::VMState, error::RuntimeErrorKind}}};
 #[cfg(feature="runtime")]
 use std::str::Chars;
 
@@ -747,12 +747,21 @@ impl_builtins! {
         }
 
         /// Restrict a value to a certain interval unless it is NaN.
+        ///
+        /// # Error
+        ///
+        /// Returns 0.0 and halts the VM if `min > max`, `min` is NaN, or `max` is NaN. The VM is resumable.
         clamp(self: Self, min: Self, max: Self) -> Self {
             fn <
                 float_clamp_32<T: u32>(this: f32, min: f32, max: f32) -> f32,
                 float_clamp_64<T: u64>(this: f64, min: f64, max: f64) -> f64,
             >(&mut vm) {
-                this.clamp(min, max)
+                if min.is_nan() || max.is_nan() || min > max {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0.0
+                } else {
+                    this.clamp(min, max)
+                }
             }
         }
     }

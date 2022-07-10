@@ -19,6 +19,25 @@ type Data64 = u64;
 
 impl_opcodes!{
 
+    [
+        /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
+        /// # Naming
+        ///
+        /// `<op><suffix1>[_<suffix2>[_nc]]`
+        ///
+        /// `suffix1` refers to stack inputs/outputs\
+        /// `suffix2` refers to bytecode (compiletime) arguments
+        ///
+        /// `f`/`s`/`u`/`i`/`x`      float/signed/unsigned/any integer/heap reference (instruction performs refcounting)\
+        /// `8`/`16`/`32`/`64`/`sa`  size in bits, sa=StackAddress sized\
+        /// `nc`                     operation is non-consuming, meaning stack arguments will be read but not removed
+        ///
+        /// # Examples
+        /// `addi32`    add two 32 bit integer\
+        /// `addf64`    add two 64 bit floats\
+        /// `const64_8` load 64 bit from constpool at given 8 bit address
+    ]
+
     /// Does nothing.
     fn noop(&mut self) { }
 
@@ -660,12 +679,12 @@ impl_opcodes!{
     }
 
     /// Calls the given builtin function.
-    fn builtincall(&mut self, builtin: Builtin) {
+    fn builtincall(&mut self, builtin: Builtin) [ check ] {
         builtin.exec(self, 0, 0);
     }
 
     /// Calls the given builtin function.
-    fn builtincallx(&mut self, builtin: Builtin, constructor: StackAddress, element_constructor: StackAddress) {
+    fn builtincallx(&mut self, builtin: Builtin, constructor: StackAddress, element_constructor: StackAddress) [ check ] {
         builtin.exec(self, constructor, element_constructor);
     }
 

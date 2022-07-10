@@ -83,11 +83,16 @@ macro_rules! impl_builtins {
                 $builtin_function:ident ( $( $doc_arg:ident : $doc_type:ident ),* ) $( -> $doc_result_type:ident )? { $(
                     fn
                     $( // Either multiple function variants...
-                        < $( $variant_name:ident $( < $( $generic_name:ident : $generic_type:ident ),+ > )? ( $( $variant_arg:ident : $variant_type:ident $( as $variant_type_as:ident )? ),* ) $( -> $variant_ret_type:ident )? ),+ $(,)? >
-                        ( & mut $variant_vm:ident )
+                        < $(
+                            $vname:ident $( < $( $vgeneric_name:ident : $vgeneric_type:ident ),+ > )? ( $( $varg_name:ident : $vtype_name:ident $( as $vtype_name_as:ident )? ),* )
+                            $( -> $vret_type:ident )?
+                        ),+ $(,)? >
+                        ( & mut $vvm:ident )
                     )?
                     $( // or single function.
-                        $name:ident ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* ) $( -> $ret_type:ident )?
+                        $name:ident
+                        ( $( & mut $vm:ident $( + $element_constructor:ident )? , )?  $( $arg_name:ident : $( & )? $arg_type:ident ),* )
+                        $( -> $ret_type:ident )?
                     )?
                     $code:block
                 )+ }
@@ -105,7 +110,7 @@ macro_rules! impl_builtins {
                     $( // implementation
                         $( // builtin variants
                             $(
-                                $variant_name,
+                                $vname,
                             )+
                         )?
                         $( // single builtin
@@ -167,7 +172,7 @@ macro_rules! impl_builtins {
                                         $( // implementation
                                             $( // builtin variants
                                                 $(
-                                                    , $variant_name
+                                                    , $vname
                                                 )+
                                             )?
                                             $( // single builtin
@@ -214,7 +219,7 @@ macro_rules! impl_builtins {
                             $( // implementation
                                 $( // builtin variants
                                     $(
-                                        x if x == Self::$variant_name as $crate::BuiltinIndex => Self::$variant_name,
+                                        x if x == Self::$vname as $crate::BuiltinIndex => Self::$vname,
                                     )+
                                 )?
                                 $( // single builtin
@@ -237,29 +242,29 @@ macro_rules! impl_builtins {
                             $( // implementation
                                 $( // builtin variants
                                     $(
-                                        Builtin::$variant_name => {
+                                        Builtin::$vname => {
                                             $(
                                                 #[allow(dead_code)]
-                                                $( type $generic_name = $generic_type; )+
+                                                $( type $vgeneric_name = $vgeneric_type; )+
                                             )?
                                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                                            impl_builtins!(@load_args_reverse vm [ $( $variant_arg $variant_type )* ]);
+                                            impl_builtins!(@load_args_reverse vm [ $( $varg_name $vtype_name )* ]);
                                             // Run code.
                                             let ret = {
                                                 // Shadow HeapRef arguments with actual argument value.
                                                 $(
-                                                    let $variant_arg: impl_builtins!(@handle_ref_param_type $variant_type) = impl_builtins!(@handle_ref_param_value vm, $variant_type, $variant_arg);
+                                                    let $varg_name: impl_builtins!(@handle_ref_param_type $vtype_name) = impl_builtins!(@handle_ref_param_value vm, $vtype_name, $varg_name);
                                                 )*
-                                                builtin_functions::$variant_name(vm, /*constructor, element_constructor,*/ $( $variant_arg ),* )
+                                                builtin_functions::$vname(vm, /*constructor, element_constructor,*/ $( $varg_name ),* )
                                             };
                                             // Handle refcounting.
                                             $(
-                                                impl_builtins!(@handle_ref_param_free vm, $variant_type, $variant_arg, constructor, element_constructor);
+                                                impl_builtins!(@handle_ref_param_free vm, $vtype_name, $varg_name, constructor, element_constructor);
                                             )*
                                             // Set return value, if any.
                                             $(
-                                                let ret_typed: $variant_ret_type = ret;
-                                                impl_builtins!(@handle_ret_value vm, $variant_ret_type, ret_typed);
+                                                let ret_typed: $vret_type = ret;
+                                                impl_builtins!(@handle_ret_value vm, $vret_type, ret_typed);
                                             )?
                                         },
                                     )+
@@ -317,13 +322,13 @@ macro_rules! impl_builtins {
                             $(
                                 #[allow(unused_variables, unused_assignments, unused_imports)]
                                 #[cfg(feature="runtime")]
-                                pub(super) fn $variant_name<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $variant_arg : impl_builtins!(@handle_ref_param_type $variant_type) ),* ) $( -> $variant_ret_type )? {
+                                pub(super) fn $vname<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $varg_name : impl_builtins!(@handle_ref_param_type $vtype_name) ),* ) $( -> $vret_type )? {
                                     use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
                                     $(
                                         #[allow(dead_code)]
-                                        $( type $generic_name = $generic_type; )+
+                                        $( type $vgeneric_name = $vgeneric_type; )+
                                     )?
-                                    let $variant_vm = &mut *vm;
+                                    let $vvm = &mut *vm;
                                     $code
                                 }
                             )+
