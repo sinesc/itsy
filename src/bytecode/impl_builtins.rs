@@ -69,6 +69,15 @@ macro_rules! impl_builtins {
             _ => unreachable!("Invalid type size for builtin call"),
         };
     } };
+    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident) => { {
+        match $ty.primitive_size() {
+            8 => $compiler.writer.builtincall(Builtin::$variant_64),
+            4 => $compiler.writer.builtincall(Builtin::$variant_32),
+            2 => $compiler.writer.builtincall(Builtin::$variant_16),
+            1 => $compiler.writer.builtincall(Builtin::$variant_8),
+            _ => unreachable!("Invalid type size for builtin call"),
+        };
+    } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
         if $ty.is_signed() {
             match $ty.primitive_size() {
@@ -104,7 +113,7 @@ macro_rules! impl_builtins {
                     fn
                     $( // Either multiple function variants...
                         < $(
-                            $vname:ident $( < $( $vgeneric_name:ident : $vgeneric_type:ident ),+ > )? ( $( $varg_name:ident : $vtype_name:ident $( as $vtype_name_as:ident )? ),* )
+                            $vname:ident $( < $( $vgeneric_name:ident : $vgeneric_type:ident )? > )? ( $( $varg_name:ident : $vtype_name:ident $( as $vtype_name_as:ident )? ),* )
                             $( -> $vret_type:ident )?
                         ),+ $(,)? >
                         ( & mut $vvm:ident )
@@ -168,9 +177,18 @@ macro_rules! impl_builtins {
                 impl $builtin_type {
                     #[allow(unused_variables)]
                     pub(crate) fn resolve(resolver: &Resolver, name: &str, type_id: TypeId, inner_type_id: Option<TypeId>) -> Option<(BuiltinType, TypeId, Vec<TypeId>)> {
-                        match name {
+                        // The require_type here is only used to typecheck primitive types of the same type-group against each other.
+                        // Since the resolver already invokes the correct type-group version of this function (e.g. Integer::resolve vs String::resolve)
+                        // we don't have to worry about guarding against types not present in this group.
+                        // This allows us to always accept void and String types for each match arm. We use void for arrays (they are generic,
+                        // there is nothing to check) as well as String for strings (so that we don't have to annotate each string builting with <T: String>).
+                        let require_type = if inner_type_id.is_some() { &Type::void } else { resolver.type_by_id(type_id) };
+                        match (name, require_type) {
                             $( // function
-                                stringify!($builtin_function) => {
+                                (
+                                    stringify!($builtin_function), Type::String | Type::void $( $( $( $( $( | Type::$vgeneric_type )? )? )+ )? )+
+                                )
+                                => {
                                     Some((
                                         super::BuiltinType::$builtin_type($builtin_type::$builtin_function),
                                         impl_builtins!(@type_map resolver, type_id, inner_type_id $(, $doc_result_type )?),

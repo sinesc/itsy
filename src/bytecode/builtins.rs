@@ -276,7 +276,10 @@ impl_builtins! {
         }
     }
 
-    /// Integer gypes
+    /// The signed `i8` to `i64` and unsigned `u8` to `u64` integer types.
+    ///
+    /// Note: Some methods listed here are only available on signed or only on unsigned types. Due to limitations in the documentation
+    /// generation signed and unsigned types cannot currently be listed separately.
     Integer {
 
         /// The smallest value that can be represented by this integer type.
@@ -308,6 +311,34 @@ impl_builtins! {
                 int_maxu64<T: u64>() -> u64,
             >(&mut vm) {
                 T::MAX
+            }
+        }
+
+        /// The size of this integer type in bits.
+        BITS() -> u32 {
+            fn <
+                int_bitsi8<T: i8>() -> u32,
+                int_bitsi16<T: i16>() -> u32,
+                int_bitsi32<T: i32>() -> u32,
+                int_bitsi64<T: i64>() -> u32,
+                int_bitsu8<T: u8>() -> u32,
+                int_bitsu16<T: u16>() -> u32,
+                int_bitsu32<T: u32>() -> u32,
+                int_bitsu64<T: u64>() -> u32,
+            >(&mut vm) {
+                T::BITS
+            }
+        }
+
+        /// The size of this integer type in bits.
+        abs(self: Self) -> Self {
+            fn <
+                int_absi8<T: i8>(this: i8) -> i8,
+                int_absi16<T: i16>(this: i16) -> i16,
+                int_absi32<T: i32>(this: i32) -> i32,
+                int_absi64<T: i64>(this: i64) -> i64,
+            >(&mut vm) {
+                this.abs()
             }
         }
 
@@ -406,8 +437,8 @@ impl_builtins! {
         /// Returns the largest integer less than or equal to a number.
         floor(self: Self) -> Self {
             fn <
-                float_floor32<T: u32>(this: f32) -> f32,
-                float_floor64<T: u64>(this: f64) -> f64,
+                float_floor32<T: f32>(this: f32) -> f32,
+                float_floor64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.floor()
             }
@@ -416,8 +447,8 @@ impl_builtins! {
         /// Returns the smallest integer greater than or equal to a number.
         ceil(self: Self) -> Self {
             fn <
-                float_ceil32<T: u32>(this: f32) -> f32,
-                float_ceil64<T: u64>(this: f64) -> f64,
+                float_ceil32<T: f32>(this: f32) -> f32,
+                float_ceil64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.ceil()
             }
@@ -426,8 +457,8 @@ impl_builtins! {
         /// Returns the nearest integer to a number. Round half-way cases away from 0.0.
         round(self: Self) -> Self {
             fn <
-                float_round32<T: u32>(this: f32) -> f32,
-                float_round64<T: u64>(this: f64) -> f64,
+                float_round32<T: f32>(this: f32) -> f32,
+                float_round64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.round()
             }
@@ -436,8 +467,8 @@ impl_builtins! {
         /// Returns a string of a number formatted to the given number of decimals.
         fmt(self: Self, decimals: u32) -> String {
             fn <
-                float_format32<T: u32>(this: f32, decimals: u32) -> String,
-                float_format64<T: u64>(this: f64, decimals: u32) -> String,
+                float_format32<T: f32>(this: f32, decimals: u32) -> String,
+                float_format64<T: f64>(this: f64, decimals: u32) -> String,
             >(&mut vm) {
                 format!("{:.1$}", this, decimals as usize)
             }
@@ -446,8 +477,8 @@ impl_builtins! {
         /// Returns the integer part of a number.
         trunc(self: Self) -> Self {
             fn <
-                float_trunc32<T: u32>(this: f32) -> f32,
-                float_trunc64<T: u64>(this: f64) -> f64,
+                float_trunc32<T: f32>(this: f32) -> f32,
+                float_trunc64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.trunc()
             }
@@ -456,8 +487,8 @@ impl_builtins! {
         /// Returns the fractional part of a number.
         fract(self: Self) -> Self {
             fn <
-                float_fract32<T: u32>(this: f32) -> f32,
-                float_fract64<T: u64>(this: f64) -> f64,
+                float_fract32<T: f32>(this: f32) -> f32,
+                float_fract64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.fract()
             }
@@ -466,8 +497,8 @@ impl_builtins! {
         /// Computes the absolute value of self. Returns NAN if the number is NAN.
         abs(self: Self) -> Self {
             fn <
-                float_abs32<T: u32>(this: f32) -> f32,
-                float_abs64<T: u64>(this: f64) -> f64,
+                float_abs32<T: f32>(this: f32) -> f32,
+                float_abs64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.abs()
             }
@@ -476,8 +507,8 @@ impl_builtins! {
         /// Returns a number that represents the sign of self.
         signum(self: Self) -> Self {
             fn <
-                float_signum32<T: u32>(this: f32) -> f32,
-                float_signum64<T: u64>(this: f64) -> f64,
+                float_signum32<T: f32>(this: f32) -> f32,
+                float_signum64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.signum()
             }
@@ -486,8 +517,8 @@ impl_builtins! {
         /// Calculates Euclidean division, the matching method for rem_euclid.
         div_euclid(self: Self, rhs: Self) -> Self {
             fn <
-                float_div_euclid32<T: u32>(this: f32, rhs: f32) -> f32,
-                float_div_euclid64<T: u64>(this: f64, rhs: f64) -> f64,
+                float_div_euclid32<T: f32>(this: f32, rhs: f32) -> f32,
+                float_div_euclid64<T: f64>(this: f64, rhs: f64) -> f64,
             >(&mut vm) {
                 this.div_euclid(rhs)
             }
@@ -496,8 +527,8 @@ impl_builtins! {
         /// Calculates the least nonnegative remainder of self (mod rhs).
         rem_euclid(self: Self, rhs: Self) -> Self {
             fn <
-                float_rem_euclid32<T: u32>(this: f32, rhs: f32) -> f32,
-                float_rem_euclid64<T: u64>(this: f64, rhs: f64) -> f64,
+                float_rem_euclid32<T: f32>(this: f32, rhs: f32) -> f32,
+                float_rem_euclid64<T: f64>(this: f64, rhs: f64) -> f64,
             >(&mut vm) {
                 this.rem_euclid(rhs)
             }
@@ -506,8 +537,8 @@ impl_builtins! {
         /// Raises a number to an integer power.
         powi(self: Self, n: i32) -> Self {
             fn <
-                float_powi32<T: u32>(this: f32, n: i32) -> f32,
-                float_powi64<T: u64>(this: f64, n: i32) -> f64,
+                float_powi32<T: f32>(this: f32, n: i32) -> f32,
+                float_powi64<T: f64>(this: f64, n: i32) -> f64,
             >(&mut vm) {
                 this.powi(n)
             }
@@ -516,8 +547,8 @@ impl_builtins! {
         /// Raises a number to a floating point power.
         powf(self: Self, n: Self) -> Self {
             fn <
-                float_powf32<T: u32>(this: f32, n: f32) -> f32,
-                float_powf64<T: u64>(this: f64, n: f64) -> f64,
+                float_powf32<T: f32>(this: f32, n: f32) -> f32,
+                float_powf64<T: f64>(this: f64, n: f64) -> f64,
             >(&mut vm) {
                 this.powf(n)
             }
@@ -526,8 +557,8 @@ impl_builtins! {
         /// Returns the square root of a number.
         sqrt(self: Self) -> Self {
             fn <
-                float_sqrt32<T: u32>(this: f32) -> f32,
-                float_sqrt64<T: u64>(this: f64) -> f64,
+                float_sqrt32<T: f32>(this: f32) -> f32,
+                float_sqrt64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.sqrt()
             }
@@ -536,8 +567,8 @@ impl_builtins! {
         /// Returns e^(self), (the exponential function).
         exp(self: Self) -> Self {
             fn <
-                float_exp32<T: u32>(this: f32) -> f32,
-                float_exp64<T: u64>(this: f64) -> f64,
+                float_exp32<T: f32>(this: f32) -> f32,
+                float_exp64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.exp()
             }
@@ -546,8 +577,8 @@ impl_builtins! {
         /// Returns 2^(self).
         exp2(self: Self) -> Self {
             fn <
-                float_exp2_32<T: u32>(this: f32) -> f32,
-                float_exp2_64<T: u64>(this: f64) -> f64,
+                float_exp2_32<T: f32>(this: f32) -> f32,
+                float_exp2_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.exp2()
             }
@@ -556,8 +587,8 @@ impl_builtins! {
         /// Returns the natural logarithm of the number.
         ln(self: Self) -> Self {
             fn <
-                float_ln32<T: u32>(this: f32) -> f32,
-                float_ln64<T: u64>(this: f64) -> f64,
+                float_ln32<T: f32>(this: f32) -> f32,
+                float_ln64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.ln()
             }
@@ -566,8 +597,8 @@ impl_builtins! {
         /// Returns the logarithm of the number with respect to an arbitrary base.
         log(self: Self, base: Self) -> Self {
             fn <
-                float_log32<T: u32>(this: f32, base: f32) -> f32,
-                float_log64<T: u64>(this: f64, base: f64) -> f64,
+                float_log32<T: f32>(this: f32, base: f32) -> f32,
+                float_log64<T: f64>(this: f64, base: f64) -> f64,
             >(&mut vm) {
                 this.log(base)
             }
@@ -576,8 +607,8 @@ impl_builtins! {
         /// Returns the base 2 logarithm of the number.
         log2(self: Self) -> Self {
             fn <
-                float_log2_32<T: u32>(this: f32) -> f32,
-                float_log2_64<T: u64>(this: f64) -> f64,
+                float_log2_32<T: f32>(this: f32) -> f32,
+                float_log2_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.log2()
             }
@@ -586,8 +617,8 @@ impl_builtins! {
         /// Returns the base 10 logarithm of the number.
         log10(self: Self) -> Self {
             fn <
-                float_log10_32<T: u32>(this: f32) -> f32,
-                float_log10_64<T: u64>(this: f64) -> f64,
+                float_log10_32<T: f32>(this: f32) -> f32,
+                float_log10_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.log10()
             }
@@ -596,8 +627,8 @@ impl_builtins! {
         /// Returns the cube root of a number.
         cbrt(self: Self) -> Self {
             fn <
-                float_cbrt32<T: u32>(this: f32) -> f32,
-                float_cbrt64<T: u64>(this: f64) -> f64,
+                float_cbrt32<T: f32>(this: f32) -> f32,
+                float_cbrt64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.cbrt()
             }
@@ -606,8 +637,8 @@ impl_builtins! {
         /// Calculates the length of the hypotenuse of a right-angle triangle given legs of length x and y.
         hypot(self: Self, other: Self) -> Self {
             fn <
-                float_hypot32<T: u32>(this: f32, other: f32) -> f32,
-                float_hypot64<T: u64>(this: f64, other: f64) -> f64,
+                float_hypot32<T: f32>(this: f32, other: f32) -> f32,
+                float_hypot64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.hypot(other)
             }
@@ -616,8 +647,8 @@ impl_builtins! {
         /// Computes the sine of a number (in radians).
         sin(self: Self) -> Self {
             fn <
-                float_sin32<T: u32>(this: f32) -> f32,
-                float_sin64<T: u64>(this: f64) -> f64,
+                float_sin32<T: f32>(this: f32) -> f32,
+                float_sin64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.sin()
             }
@@ -626,8 +657,8 @@ impl_builtins! {
         /// Computes the cosine of a number (in radians).
         cos(self: Self) -> Self {
             fn <
-                float_cos32<T: u32>(this: f32) -> f32,
-                float_cos64<T: u64>(this: f64) -> f64,
+                float_cos32<T: f32>(this: f32) -> f32,
+                float_cos64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.cos()
             }
@@ -636,8 +667,8 @@ impl_builtins! {
         /// Computes the tangent of a number (in radians).
         tan(self: Self) -> Self {
             fn <
-                float_tan32<T: u32>(this: f32) -> f32,
-                float_tan64<T: u64>(this: f64) -> f64,
+                float_tan32<T: f32>(this: f32) -> f32,
+                float_tan64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.tan()
             }
@@ -646,8 +677,8 @@ impl_builtins! {
         /// Computes the arcsine of a number. Return value is in radians in the range [-pi/2, pi/2] or NaN if the number is outside the range [-1, 1].
         asin(self: Self) -> Self {
             fn <
-                float_asin32<T: u32>(this: f32) -> f32,
-                float_asin64<T: u64>(this: f64) -> f64,
+                float_asin32<T: f32>(this: f32) -> f32,
+                float_asin64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.asin()
             }
@@ -656,8 +687,8 @@ impl_builtins! {
         /// Computes the arccosine of a number. Return value is in radians in the range [0, pi] or NaN if the number is outside the range [-1, 1].
         acos(self: Self) -> Self {
             fn <
-                float_acos32<T: u32>(this: f32) -> f32,
-                float_acos64<T: u64>(this: f64) -> f64,
+                float_acos32<T: f32>(this: f32) -> f32,
+                float_acos64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.acos()
             }
@@ -666,8 +697,8 @@ impl_builtins! {
         /// Computes the arctangent of a number. Return value is in radians in the range [-pi/2, pi/2];
         atan(self: Self) -> Self {
             fn <
-                float_atan32<T: u32>(this: f32) -> f32,
-                float_atan64<T: u64>(this: f64) -> f64,
+                float_atan32<T: f32>(this: f32) -> f32,
+                float_atan64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.atan()
             }
@@ -676,8 +707,8 @@ impl_builtins! {
         /// Computes the four quadrant arctangent of self (y) and other (x) in radians.
         atan2(self: Self, other: Self) -> Self {
             fn <
-                float_atan2_32<T: u32>(this: f32, other: f32) -> f32,
-                float_atan2_64<T: u64>(this: f64, other: f64) -> f64,
+                float_atan2_32<T: f32>(this: f32, other: f32) -> f32,
+                float_atan2_64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.atan2(other)
             }
@@ -686,8 +717,8 @@ impl_builtins! {
         /// Returns true if this value is NaN.
         is_nan(self: Self) -> bool {
             fn <
-                float_is_nan_32<T: u32>(this: f32) -> bool,
-                float_is_nan_64<T: u64>(this: f64) -> bool,
+                float_is_nan_32<T: f32>(this: f32) -> bool,
+                float_is_nan_64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_nan()
             }
@@ -696,8 +727,8 @@ impl_builtins! {
         /// Returns true if this value is positive infinity or negative infinity, and false otherwise.
         is_infinite(self: Self) -> bool {
             fn <
-                float_is_infinite_32<T: u32>(this: f32) -> bool,
-                float_is_infinite_64<T: u64>(this: f64) -> bool,
+                float_is_infinite_32<T: f32>(this: f32) -> bool,
+                float_is_infinite_64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_infinite()
             }
@@ -706,8 +737,8 @@ impl_builtins! {
         /// Returns true if this number is neither infinite nor NaN.
         is_finite(self: Self) -> bool {
             fn <
-                float_is_finite_32<T: u32>(this: f32) -> bool,
-                float_is_finite_64<T: u64>(this: f64) -> bool,
+                float_is_finite_32<T: f32>(this: f32) -> bool,
+                float_is_finite_64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_finite()
             }
@@ -716,8 +747,8 @@ impl_builtins! {
         /// Returns true if the number is subnormal.
         is_subnormal(self: Self) -> bool {
             fn <
-                float_is_subnormal_32<T: u32>(this: f32) -> bool,
-                float_is_subnormal_64<T: u64>(this: f64) -> bool,
+                float_is_subnormal_32<T: f32>(this: f32) -> bool,
+                float_is_subnormal_64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_subnormal()
             }
@@ -726,8 +757,8 @@ impl_builtins! {
         /// Returns true if the number is neither zero, infinite, subnormal, or NaN.
         is_normal(self: Self) -> bool {
             fn <
-                float_is_normal_32<T: u32>(this: f32) -> bool,
-                float_is_normal_64<T: u64>(this: f64) -> bool,
+                float_is_normal_32<T: f32>(this: f32) -> bool,
+                float_is_normal_64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_normal()
             }
@@ -736,8 +767,8 @@ impl_builtins! {
         /// Takes the reciprocal (inverse) of a number, 1/x.
         recip(self: Self) -> Self {
             fn <
-                float_recip_32<T: u32>(this: f32) -> f32,
-                float_recip_64<T: u64>(this: f64) -> f64,
+                float_recip_32<T: f32>(this: f32) -> f32,
+                float_recip_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.recip()
             }
@@ -746,8 +777,8 @@ impl_builtins! {
         /// Converts radians to degrees.
         to_degrees(self: Self) -> Self {
             fn <
-                float_to_degrees_32<T: u32>(this: f32) -> f32,
-                float_to_degrees_64<T: u64>(this: f64) -> f64,
+                float_to_degrees_32<T: f32>(this: f32) -> f32,
+                float_to_degrees_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.to_degrees()
             }
@@ -756,8 +787,8 @@ impl_builtins! {
         /// Converts degrees to radians.
         to_radians(self: Self) -> Self {
             fn <
-                float_to_radians_32<T: u32>(this: f32) -> f32,
-                float_to_radians_64<T: u64>(this: f64) -> f64,
+                float_to_radians_32<T: f32>(this: f32) -> f32,
+                float_to_radians_64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.to_radians()
             }
@@ -766,8 +797,8 @@ impl_builtins! {
         /// Returns the minimum of the two numbers.
         min(self: Self, other: Self) -> Self {
             fn <
-                float_min_32<T: u32>(this: f32, other: f32) -> f32,
-                float_min_64<T: u64>(this: f64, other: f64) -> f64,
+                float_min_32<T: f32>(this: f32, other: f32) -> f32,
+                float_min_64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.min(other)
             }
@@ -776,8 +807,8 @@ impl_builtins! {
         /// Returns the maximum of the two numbers.
         max(self: Self, other: Self) -> Self {
             fn <
-                float_max_32<T: u32>(this: f32, other: f32) -> f32,
-                float_max_64<T: u64>(this: f64, other: f64) -> f64,
+                float_max_32<T: f32>(this: f32, other: f32) -> f32,
+                float_max_64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.max(other)
             }
@@ -790,8 +821,8 @@ impl_builtins! {
         /// Returns 0.0 and halts the VM if `min > max`, `min` is NaN, or `max` is NaN. The VM is resumable.
         clamp(self: Self, min: Self, max: Self) -> Self {
             fn <
-                float_clamp_32<T: u32>(this: f32, min: f32, max: f32) -> f32,
-                float_clamp_64<T: u64>(this: f64, min: f64, max: f64) -> f64,
+                float_clamp_32<T: f32>(this: f32, min: f32, max: f32) -> f32,
+                float_clamp_64<T: f64>(this: f64, min: f64, max: f64) -> f64,
             >(&mut vm) {
                 if min.is_nan() || max.is_nan() || min > max {
                     vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
