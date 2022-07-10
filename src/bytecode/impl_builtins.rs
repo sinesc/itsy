@@ -73,6 +73,9 @@ macro_rules! impl_builtins {
     } };
     // Main definition block
     (
+        $( [
+            $( #[ $module_attr:meta ] )*
+        ] )?
         $(
             $( #[ $builtin_type_attr:meta ] )*
             $builtin_type:ident { $(
@@ -181,12 +184,8 @@ macro_rules! impl_builtins {
         }
 
         #[cfg(doc)]
+        $( $( #[ $module_attr ] )* )?
         pub mod documentation {
-            //! Generated documentation of builtin Itsy types.
-            //!
-            //! This module is only built with `cfg(doc)` enabled and used as a place to document the builtin types available in Itsy.
-            //!
-            //! Most of the builtins are thin wrappers over Rust `std` methods. Much of the documentation is copied from the standard library documentation.
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }

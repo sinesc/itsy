@@ -45,6 +45,22 @@ fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut St
 
 impl_builtins! {
 
+    [
+        /// Itsy builtin types.
+        ///
+        /// # Basic types
+        ///
+        /// Unsigned numbers: `u8`, `u16`, `u32`, `u64`.\
+        /// Signed numbers: `i8`, `i16`, `i32`, `i64`.\
+        /// Floating point numbers: [`f32`](crate::internals::documentation::Float), [`f64`](crate::internals::documentation::Float).\
+        /// Character strings: [`String`](crate::internals::documentation::String)
+        ///
+        /// # Compound types
+        ///
+        /// Arrays, variable-length lists of values of the same type: [`[ .. ]`](crate::internals::documentation::Array).\
+        /// Structs, fixed grouping of multiple types: `struct { .. }`.
+    ]
+
     /// Dynamically sized array type.
     ///
     /// Arrays store a variable amount of `Element`s of the same type. Arrays are a reference type,
@@ -276,6 +292,8 @@ impl_builtins! {
     /// ```
     ///
     /// This prints `π is approximately 3.1415929.`.
+    ///
+    /// Note: Much of this documentation is taken from the standard library documentation as these methods thinly wrap over their Rust counterparts.
     Float {
 
         /// Machine epsilon value for float type.

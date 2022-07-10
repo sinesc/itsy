@@ -5,7 +5,7 @@
 //!
 //! Look at the [build_str] or [itsy_api!] example to get started.
 //!
-//! Documentation for the builtin Itsy-types is available [here](crate::internals::documentation). These types and methods are available from Itsy (not Rust).
+//! Documentation of the types available to Itsy code is available [here](crate::internals::documentation).
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
