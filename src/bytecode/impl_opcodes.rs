@@ -39,9 +39,16 @@ macro_rules! impl_opcodes {
     (map_writer_type RustFn) => ( T );
     (map_writer_type String) => ( &str );
     (map_writer_type $ty:tt) => ( $ty );
-    (@flag $self:ident, return) => { return };
-    (@flag $self:ident, check) => { match $self.state {
-        VMState::Error(_) => { return; },
+    // Handle opcode flag setup (before running the opcode)
+    (@setup_flag $self:ident, $prev_pc:ident, check) => { let $prev_pc = $self.pc; };
+    (@setup_flag $self:ident, $prev_pc:ident, $any:ident) => { };
+    // Handle opcode flag (perform action after opcode)
+    (@flag $self:ident, $prev_pc:ident, return) => { return };
+    (@flag $self:ident, $prev_pc:ident, check) => { match $self.state {
+        VMState::Error(_) => {
+            $self.pc = $prev_pc - 1; // opcode was already read
+            return;
+        },
         _ => { },
     } };
     // main definition block
@@ -168,10 +175,11 @@ macro_rules! impl_opcodes {
                             // single opcode
                             $(
                                 opcodes::$name => {
+                                    $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
                                     let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
-                                    $( impl_opcodes!(@flag self, $flag); )?
+                                    $( impl_opcodes!(@flag self, prev_pc, $flag); )?
                                 }
                             )?
                             // opcode variants
@@ -179,11 +187,12 @@ macro_rules! impl_opcodes {
                                 $(
                                     $( #[$variant_attr] )*
                                     opcodes::$variant_name => {
+                                        $( impl_opcodes!(@setup_flag self, prev_pc, $variant_flag); )?
                                         $(
                                             let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                         )*
                                         self.$variant_name( $( $variant_arg ),* );
-                                        $( impl_opcodes!(@flag self, $variant_flag); )?
+                                        $( impl_opcodes!(@flag self, prev_pc, $variant_flag); )?
                                     }
                                 )+
                             )?
@@ -208,10 +217,11 @@ macro_rules! impl_opcodes {
                         // single opcode
                         $(
                             opcodes::$name => {
+                                $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
                                 let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(read $arg_type, self, self.pc) ),* );
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
-                                $( impl_opcodes!(@flag self, $flag); )?
+                                $( impl_opcodes!(@flag self, prev_pc, $flag); )?
                             }
                         )?
                         // opcode variants
@@ -219,11 +229,12 @@ macro_rules! impl_opcodes {
                             $(
                                 $( #[$variant_attr] )*
                                 opcodes::$variant_name => {
+                                    $( impl_opcodes!(@setup_flag self, prev_pc, $variant_flag); )?
                                     $(
                                         let $variant_arg: $variant_type = impl_opcodes!(read $variant_type, self, self.pc);
                                     )*
                                     self.$variant_name( $( $variant_arg ),* );
-                                    $( impl_opcodes!(@flag self, $variant_flag); )?
+                                    $( impl_opcodes!(@flag self, prev_pc, $variant_flag); )?
                                 }
                             )+
                         )?

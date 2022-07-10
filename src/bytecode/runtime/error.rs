@@ -8,6 +8,7 @@ pub enum RuntimeErrorKind {
     UnexpectedReady,
     HeapCorruption,
     Panic,
+    IntegerOverflow,
 }
 
 /// An error reported by the runtime.
@@ -15,11 +16,12 @@ pub enum RuntimeErrorKind {
 pub struct RuntimeError {
     kind: RuntimeErrorKind,
     offset: StackAddress, // TODO: pc/sp here
+    opcode: Option<String>,
 }
 
 impl RuntimeError {
-    pub(crate) fn new(offset: StackAddress, kind: RuntimeErrorKind) -> RuntimeError {
-        Self { kind, offset }
+    pub(crate) fn new(offset: StackAddress, kind: RuntimeErrorKind, opcode: Option<String>) -> RuntimeError {
+        Self { kind, offset, opcode }
     }
     /// The kind of the error.
     pub fn kind(self: &Self) -> &RuntimeErrorKind {
@@ -33,11 +35,18 @@ impl RuntimeError {
 
 impl Display for RuntimeError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let opcode = if let Some(opcode) = &self.opcode {
+            opcode.clone()
+        } else {
+            self.offset.to_string()
+        };
         #[allow(unreachable_patterns)]
         match &self.kind {
-            RuntimeErrorKind::NotReady => write!(f, "VM state is not ready."),
+            RuntimeErrorKind::NotReady => write!(f, "VM is not ready."),
+            RuntimeErrorKind::UnexpectedReady => write!(f, "VM unexpectedly ready after program termination."),
             RuntimeErrorKind::HeapCorruption => write!(f, "Heap elements remaining after program termination."),
-            RuntimeErrorKind::Panic => write!(f, "Panic at opcode offset {}.", self.offset),
+            RuntimeErrorKind::Panic => write!(f, "Panic at opcode {opcode}"),
+            RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),
             _ => write!(f, "{:?}", self.kind),
         }
     }

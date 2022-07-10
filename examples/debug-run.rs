@@ -50,6 +50,7 @@ fn run(program: Program<MyAPI>, write_logs: bool) {
             println!("\nRuntime error: {e}");
             println!("Stack: {:?}", vm.stack.data());
             println!("Heap: {:?}", vm.heap.data());
+            break;
         }
         if let Some(instruction_label) = opcode_label {
             if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {

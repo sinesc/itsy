@@ -56,15 +56,15 @@ impl<T, U> VM<T, U> {
     /// Executes bytecode until it terminates.
     pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
-            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
+            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
         self.exec(context);
         match self.state {
             VMState::Terminated if self.heap.len() > 1 => {
-                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption))
+                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None))
             },
-            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind)),
-            VMState::Ready => Err(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady)),
+            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind, None)),
+            VMState::Ready => Err(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady, None)),
             VMState::Terminated | VMState::Yielded => Ok(()),
         }
     }
@@ -226,14 +226,17 @@ impl<T, U> VM<T, U> {
     /// Executes single bytecode instruction.
     pub fn step(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
-            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady));
+            return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
         self.exec_step(context);
         match self.state {
             VMState::Terminated if self.heap.len() > 1 => {
-                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption))
+                Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None))
             },
-            VMState::Error(kind) => Err(RuntimeError::new(self.pc, kind)),
+            VMState::Error(kind) => {
+                let opcode = self.describe_instruction(self.pc).map(|result| result.0);
+                Err(RuntimeError::new(self.pc, kind, opcode))
+            },
             VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(()),
         }
     }
