@@ -56,7 +56,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Executes bytecode until it terminates.
-    pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
+    pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult<VMState> where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
@@ -69,7 +69,7 @@ impl<T, U> VM<T, U> {
                 self.state = VMState::Error(kind);
                 Err(RuntimeError::new(self.pc, kind, None))
             },
-            VMState::Terminated | VMState::Yielded => Ok(()),
+            VMState::Terminated | VMState::Yielded => Ok(self.state),
         }
     }
 
@@ -243,7 +243,7 @@ impl<T, U> VM<T, U> {
 #[cfg(feature="debugging")]
 impl<T, U> VM<T, U> {
     /// Executes single bytecode instruction.
-    pub fn step(self: &mut Self, context: &mut U) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
+    pub fn step(self: &mut Self, context: &mut U) -> RuntimeResult<VMState> where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
@@ -254,7 +254,7 @@ impl<T, U> VM<T, U> {
                 let opcode = self.describe_instruction(self.error_pc).map(|result| result.0);
                 Err(RuntimeError::new(self.pc, kind, opcode))
             },
-            VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(()),
+            VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(self.state),
         }
     }
 
