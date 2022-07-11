@@ -287,12 +287,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match item.op {
             BO::Assign => {
                 self.compile_expression(&item.right)?;
-                self.write_store(loc, self.ty(&item.left), Some(binding_id));
+                self.write_store(self.ty(&item.left), loc, Some(binding_id));
                 self.init_state.initialize(binding_id);
             },
             _ => {
                 self.check_initialized(&item.left.as_variable().unwrap())?;
-                self.write_load(loc, self.ty(&item.left)); // stack: left
+                self.write_load(self.ty(&item.left), loc); // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.ty(&item.left);
                 match item.op { // stack: result
@@ -303,7 +303,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::RemAssign => self.write_rem(ty),
                     op @ _ => unreachable!("Invalid assignment operator {}", op),
                 };
-                self.write_store(loc, self.ty(&item.left), Some(binding_id)); // stack --
+                self.write_store(self.ty(&item.left), loc, Some(binding_id)); // stack --
             },
         };
         Ok(())
@@ -372,7 +372,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             FunctionKind::Builtin(type_id, builtin_type) => {
                 self.compile_call_args(&function, item)?;
                 comment!(self, "call {}()", item.ident.name);
-                self.write_builtin(builtin_type, self.ty(&type_id));
+                self.write_builtin(self.ty(&type_id), builtin_type);
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(&function, item)?;
@@ -395,7 +395,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
-                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
+                self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64));
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.expect("Unresolved function encountered");
                 let arg_size = self.id_mappings.function_arg_size(function_id) as StackAddress;
@@ -415,7 +415,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if !(expr.is_zero_literal() && self.init_state.len() == 2) {
                 self.compile_expression(expr)?;
                 let local = self.locals.lookup(binding_id);
-                self.write_store(local, self.ty(item), Some(binding_id));
+                self.write_store(self.ty(item), local, Some(binding_id));
             }
             self.init_state.initialize(binding_id);
         }
@@ -430,7 +430,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let binding_id = item.binding_id.expect("Unresolved binding encountered");
             self.locals.lookup(binding_id)
         };
-        self.write_load(load_index, self.ty(item));
+        self.write_load(self.ty(item), load_index);
         Ok(())
     }
 
@@ -558,7 +558,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().unwrap();
         self.compile_expression(&binary_op.left)?;          // stack current=lower
-        self.write_store(iter_loc, self.ty(&iter_type_id), None);                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
+        self.write_store(self.ty(&iter_type_id), iter_loc, None);                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
         // push upper range bound
         self.compile_expression(&binary_op.right)?;             // stack upper
         // precheck bounds
@@ -566,7 +566,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
             let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
+            self.write_load(iter_ty, iter_loc);                   // stack: upper upper lower
             self.write_lte(iter_ty);                                         // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123);                // stack: upper
             self.write_dec(iter_ty);                                        // stack: upper=upper-1
@@ -575,7 +575,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // inclusive range: check if lower bound greater than upper bound.
             let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_loc, iter_ty);                   // stack: upper upper lower
+            self.write_load(iter_ty, iter_loc);                   // stack: upper upper lower
             self.write_lt(iter_ty);                                         // stack: upper upper_lte_lower
             self.writer.jn0(123)                                    // stack: upper
         };
@@ -588,7 +588,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let iter_ty = self.ty(&iter_type_id);
         //let increment_target = self.write_while(iter_loc as FrameOffset, -(iter_ty.primitive_size() as FrameOffset), start_target, iter_ty);    // stack: upper
         let increment_target = self.write_clone(iter_ty);       // stack upper upper
-        self.write_preinc(iter_loc, iter_ty);      // stack upper upper new_current(=current+1)
+        self.write_preinc(iter_ty, iter_loc);      // stack upper upper new_current(=current+1)
         self.write_lt(iter_ty);                                                    // stack upper new_current>upper
         self.writer.j0(start_target);                                              // stack upper        // fix jump addresses
         // exit loop
@@ -612,7 +612,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let array_ty = self.ty(&item.expr);
         self.write_cnt(array_ty, true, HeapRefOp::Inc);
         self.write_clone_ref();                                         // stack &array &array
-        self.write_builtin(BuiltinType::Array(builtin_types::Array::len), array_ty);             // stack &array len
+        self.write_builtin(array_ty, BuiltinType::Array(builtin_types::Array::len));             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE);        // stack &array index (indexing from the end to be able to count downwards from len)
 
@@ -624,7 +624,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_cnt(element_ty, true, HeapRefOp::Inc);
         }
 
-        self.write_store(element_loc, element_ty, None);                        // stack &array index <is_ref ? element>  // TODO: this doesn't do storex, why does it work?
+        self.write_store(element_ty, element_loc, None);                        // stack &array index <is_ref ? element>  // TODO: this doesn't do storex, why does it work?
         self.loop_control.push();
         self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
         let loop_controls = self.loop_control.pop();
@@ -765,7 +765,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let ty = self.ty(item);
         match &item.value {
             LiteralValue::Void => { },
-            LiteralValue::Numeric(numeric) => { self.write_immediate(*numeric, ty); }
+            LiteralValue::Numeric(numeric) => { self.write_immediate(ty, *numeric); }
             LiteralValue::Bool(v) =>  {
                 match ty {
                     Type::bool => { if *v { self.writer.immediate8(1); } else { self.writer.immediate8(0); } },
@@ -777,7 +777,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
                 let enum_ty = self.ty(&enum_def.primitive.unwrap().0);
                 let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
-                self.write_immediate(variant_value, enum_ty);
+                self.write_immediate(enum_ty, variant_value);
             },
             LiteralValue::String(ref string_literal) => {
                 // store string on const pool and write instruction to load it from const pool directly onto th heap
@@ -815,7 +815,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let enum_def = self.ty(item).as_enum().expect("Encountered non-enum type on enum variant");
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
-                self.write_immediate(Numeric::Unsigned(variant_index as u64), &index_type);
+                self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64));
                 let size = index_type.primitive_size() as StackAddress;
                 let type_id = item.type_id(self).unwrap();
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
@@ -851,10 +851,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     };
                     let exp_type = self.ty(&item.expr);
                     match item.op {
-                        UO::IncBefore => self.write_preinc(load_index, &exp_type),
-                        UO::DecBefore => self.write_predec(load_index, &exp_type),
-                        UO::IncAfter => self.write_postinc(load_index, &exp_type),
-                        UO::DecAfter => self.write_postdec(load_index, &exp_type),
+                        UO::IncBefore => self.write_preinc(&exp_type, load_index),
+                        UO::DecBefore => self.write_predec(&exp_type, load_index),
+                        UO::IncAfter => self.write_postinc(&exp_type, load_index),
+                        UO::DecAfter => self.write_postdec(&exp_type, load_index),
                         _ => panic!("Internal error in operator handling"),
                     };
                 } else if let ast::Expression::BinaryOp(binary_op) = &item.expr {
@@ -1250,10 +1250,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     if ty.is_ref() {
                         comment!(self, "freeing local {}", local);
                         if state == BranchingState::Initialized {
-                            self.write_load(local, ty);
+                            self.write_load(ty, local);
                             self.write_cnt(ty, false, HeapRefOp::Dec);
                         } else if state == BranchingState::MaybeInitialized {
-                            self.write_load(local, ty);
+                            self.write_load(ty, local);
                             let init_jump = self.writer.jn0_sa_nc(123);
                             self.write_discard(ty);
                             let uninit_jump = self.writer.jmp(123);
@@ -1270,7 +1270,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes given numeric as an immediate value. // FIXME: this will cause endianess issues when compiled/run on different endianess
-    fn write_immediate(self: &Self, numeric: Numeric, ty: &Type) -> StackAddress {
+    fn write_immediate(self: &Self, ty: &Type, numeric: Numeric) -> StackAddress {
         let small_immediate = |value: u8, ty: &Type| -> StackAddress {
             match ty.primitive_size() {
                 1 => self.writer.immediate8(value),
@@ -1516,7 +1516,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
-    fn write_store(self: &Self, loc: FrameAddress, ty: &Type, binding_id: Option<BindingId>) -> StackAddress {
+    fn write_store(self: &Self, ty: &Type, loc: FrameAddress, binding_id: Option<BindingId>) -> StackAddress {
         if ty.is_ref() && binding_id.is_some() {
             let constructor = self.constructor(ty);
             match self.init_state.initialized(binding_id.unwrap()) {
@@ -1536,7 +1536,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes an appropriate variant of the load instruction.
-    fn write_load(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
+    fn write_load(self: &Self, ty: &Type, loc: FrameAddress) -> StackAddress {
         match ty.primitive_size() {
             1 => select_unsigned_opcode!(self, load8_8, load8_16, none, loc),
             2 => select_unsigned_opcode!(self, load16_8, load16_16, none, loc),
@@ -1584,7 +1584,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes instructions for build-in len method.
-    fn write_builtin(self: &Self, builtin: BuiltinType, ty: &Type) {
+    fn write_builtin(self: &Self, ty: &Type, builtin: BuiltinType) {
         let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
         #[allow(unreachable_patterns)]
         match (ty, builtin) {
@@ -1629,7 +1629,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
+    fn write_preinc(self: &Self, ty: &Type, loc: FrameAddress) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(loc, -1),
             Type::i32 | Type::u32 => self.writer.predeci32(loc, -1),
@@ -1640,7 +1640,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write pre-decrement instruction.
-    fn write_predec(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
+    fn write_predec(self: &Self, ty: &Type, loc: FrameAddress) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.predeci64(loc, 1),
             Type::i32 | Type::u32 => self.writer.predeci32(loc, 1),
@@ -1651,7 +1651,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write post-increment instruction.
-    fn write_postinc(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
+    fn write_postinc(self: &Self, ty: &Type, loc: FrameAddress) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(loc, -1),
             Type::i32 | Type::u32 => self.writer.postdeci32(loc, -1),
@@ -1662,7 +1662,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write post-decrement instruction.
-    fn write_postdec(self: &Self, loc: FrameAddress, ty: &Type) -> StackAddress {
+    fn write_postdec(self: &Self, ty: &Type, loc: FrameAddress) -> StackAddress {
         match ty {
             Type::i64 | Type::u64 => self.writer.postdeci64(loc, 1),
             Type::i32 | Type::u32 => self.writer.postdeci32(loc, 1),
