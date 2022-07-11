@@ -456,6 +456,148 @@ impl_builtins! {
             }
         }
 
+        /// Returns a number representing sign of self.
+        /// - `0` if the number is zero
+        /// - `1` if the number is positive
+        /// - `-1` if the number is negative
+        signum(self: Self) -> Self {
+            fn <
+                int_signumi8<T: i8>(this: i8) -> i8,
+                int_signumi16<T: i16>(this: i16) -> i16,
+                int_signumi32<T: i32>(this: i32) -> i32,
+                int_signumi64<T: i64>(this: i64) -> i64,
+            >(&mut vm) {
+                this.signum()
+            }
+        }
+
+        /// Returns the number of zeros in the binary representation of self.
+        count_zeros(self: Self) -> u32 {
+            fn <
+                int_count_zerosi8<T: i8>(this: i8) -> u32,
+                int_count_zerosi16<T: i16>(this: i16) -> u32,
+                int_count_zerosi32<T: i32>(this: i32) -> u32,
+                int_count_zerosi64<T: i64>(this: i64) -> u32,
+                int_count_zerosu8<T: u8>(this: u8) -> u32,
+                int_count_zerosu16<T: u16>(this: u16) -> u32,
+                int_count_zerosu32<T: u32>(this: u32) -> u32,
+                int_count_zerosu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.count_zeros()
+            }
+        }
+
+        /// Returns the number of ones in the binary representation of self.
+        count_ones(self: Self) -> u32 {
+            fn <
+                int_count_onesi8<T: i8>(this: i8) -> u32,
+                int_count_onesi16<T: i16>(this: i16) -> u32,
+                int_count_onesi32<T: i32>(this: i32) -> u32,
+                int_count_onesi64<T: i64>(this: i64) -> u32,
+                int_count_onesu8<T: u8>(this: u8) -> u32,
+                int_count_onesu16<T: u16>(this: u16) -> u32,
+                int_count_onesu32<T: u32>(this: u32) -> u32,
+                int_count_onesu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.count_ones()
+            }
+        }
+
+        /// Returns the number of leading zeros in the binary representation of self.
+        leading_zeros(self: Self) -> u32 {
+            fn <
+                int_leading_zerosi8<T: i8>(this: i8) -> u32,
+                int_leading_zerosi16<T: i16>(this: i16) -> u32,
+                int_leading_zerosi32<T: i32>(this: i32) -> u32,
+                int_leading_zerosi64<T: i64>(this: i64) -> u32,
+                int_leading_zerosu8<T: u8>(this: u8) -> u32,
+                int_leading_zerosu16<T: u16>(this: u16) -> u32,
+                int_leading_zerosu32<T: u32>(this: u32) -> u32,
+                int_leading_zerosu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.leading_zeros()
+            }
+        }
+
+        /// Returns the number of leading ones in the binary representation of self.
+        leading_ones(self: Self) -> u32 {
+            fn <
+                int_leading_onesi8<T: i8>(this: i8) -> u32,
+                int_leading_onesi16<T: i16>(this: i16) -> u32,
+                int_leading_onesi32<T: i32>(this: i32) -> u32,
+                int_leading_onesi64<T: i64>(this: i64) -> u32,
+                int_leading_onesu8<T: u8>(this: u8) -> u32,
+                int_leading_onesu16<T: u16>(this: u16) -> u32,
+                int_leading_onesu32<T: u32>(this: u32) -> u32,
+                int_leading_onesu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.leading_ones()
+            }
+        }
+
+        /// Returns the number of trailing zeros in the binary representation of self.
+        trailing_zeros(self: Self) -> u32 {
+            fn <
+                int_trailing_zerosi8<T: i8>(this: i8) -> u32,
+                int_trailing_zerosi16<T: i16>(this: i16) -> u32,
+                int_trailing_zerosi32<T: i32>(this: i32) -> u32,
+                int_trailing_zerosi64<T: i64>(this: i64) -> u32,
+                int_trailing_zerosu8<T: u8>(this: u8) -> u32,
+                int_trailing_zerosu16<T: u16>(this: u16) -> u32,
+                int_trailing_zerosu32<T: u32>(this: u32) -> u32,
+                int_trailing_zerosu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.trailing_zeros()
+            }
+        }
+
+        /// Returns the number of trailing ones in the binary representation of self.
+        trailing_ones(self: Self) -> u32 {
+            fn <
+                int_trailing_onesi8<T: i8>(this: i8) -> u32,
+                int_trailing_onesi16<T: i16>(this: i16) -> u32,
+                int_trailing_onesi32<T: i32>(this: i32) -> u32,
+                int_trailing_onesi64<T: i64>(this: i64) -> u32,
+                int_trailing_onesu8<T: u8>(this: u8) -> u32,
+                int_trailing_onesu16<T: u16>(this: u16) -> u32,
+                int_trailing_onesu32<T: u32>(this: u32) -> u32,
+                int_trailing_onesu64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                this.trailing_ones()
+            }
+        }
+
+        /// Shifts the bits to the left by a specified amount, n, wrapping the truncated bits to the end of the resulting integer.
+        rotate_left(self: Self, n: u32) -> Self {
+            fn <
+                int_rotate_lefti8<T: i8>(this: i8, n: u32) -> i8,
+                int_rotate_lefti16<T: i16>(this: i16, n: u32) -> i16,
+                int_rotate_lefti32<T: i32>(this: i32, n: u32) -> i32,
+                int_rotate_lefti64<T: i64>(this: i64, n: u32) -> i64,
+                int_rotate_leftu8<T: u8>(this: u8, n: u32) -> u8,
+                int_rotate_leftu16<T: u16>(this: u16, n: u32) -> u16,
+                int_rotate_leftu32<T: u32>(this: u32, n: u32) -> u32,
+                int_rotate_leftu64<T: u64>(this: u64, n: u32) -> u64,
+            >(&mut vm) {
+                this.rotate_left(n)
+            }
+        }
+
+        /// Shifts the bits to the right by a specified amount, n, wrapping the truncated bits to the beginning of the resulting integer.
+        rotate_right(self: Self, n: u32) -> Self {
+            fn <
+                int_rotate_righti8<T: i8>(this: i8, n: u32) -> i8,
+                int_rotate_righti16<T: i16>(this: i16, n: u32) -> i16,
+                int_rotate_righti32<T: i32>(this: i32, n: u32) -> i32,
+                int_rotate_righti64<T: i64>(this: i64, n: u32) -> i64,
+                int_rotate_rightu8<T: u8>(this: u8, n: u32) -> u8,
+                int_rotate_rightu16<T: u16>(this: u16, n: u32) -> u16,
+                int_rotate_rightu32<T: u32>(this: u32, n: u32) -> u32,
+                int_rotate_rightu64<T: u64>(this: u64, n: u32) -> u64,
+            >(&mut vm) {
+                this.rotate_right(n)
+            }
+        }
     }
 
     /// The `f32` and `f64` floating point types.
