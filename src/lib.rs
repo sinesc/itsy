@@ -10,13 +10,12 @@
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
 mod frontend;
-
+#[path="shared/shared.rs"]
+#[cfg(feature="compiler")]
+mod shared;
 #[macro_use]
 #[path="bytecode/bytecode.rs"]
 mod bytecode;
-
-#[path="shared/shared.rs"]
-mod shared;
 mod interface;
 mod prelude;
 mod config;
@@ -25,7 +24,6 @@ pub use interface::*;
 
 use config::*;
 mod config_derived {
-    use crate::{shared::meta::Type, prelude::size_of, StackAddress};
     /// Type used to index RustFns.
     pub type RustFnIndex = crate::ItemIndex;
     /// Type used to index builtins.
@@ -33,7 +31,11 @@ mod config_derived {
     /// Type used to index enum variants.
     pub type VariantIndex = crate::ItemIndex;
     /// Itsy type used to store stack addresses and vector indices.
+    #[cfg(feature="compiler")]
+    use crate::{shared::meta::Type, prelude::size_of, StackAddress};
+    #[cfg(feature="compiler")]
     pub const STACK_ADDRESS_TYPE: Type = Type::unsigned(size_of::<StackAddress>());
+    #[cfg(feature="compiler")]
     pub const STACK_OFFSET_TYPE: Type = Type::signed(size_of::<StackAddress>());
 }
 use config_derived::*;

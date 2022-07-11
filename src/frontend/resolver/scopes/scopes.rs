@@ -119,7 +119,7 @@ impl Scopes {
             Some(FunctionKind::Builtin(type_id, _)) => type_id,
             _ => TypeId::void(),
         };
-        self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type: result_type_id, arg_type: arg_type_ids, kind: kind })
+        self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type_id: result_type_id, arg_type_ids, kind: kind })
     }
 
     /// Aliases an existing function into the given scope, returning a function id.

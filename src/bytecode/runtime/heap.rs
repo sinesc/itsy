@@ -1,7 +1,6 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex};
 use crate::bytecode::{HeapRef, HeapRefOp};
-use crate::shared::index_twice;
 
 // Asserts that a heap item exists when debug_assertions are enabled
 macro_rules! debug_assert_index {
@@ -379,3 +378,20 @@ impl_heap!(multi, i32);
 impl_heap!(multi, i64);
 impl_heap!(multi, usize);
 impl_heap!(multi, HeapRef);
+
+/// References two elements of a slice mutably
+pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+    if a == b {
+        panic!("tried to index element {} twice", a);
+    } else if a >= slice.len() || b >= slice.len() {
+        panic!("index ({}, {}) out of bounds", a, b);
+    } else {
+        if a > b {
+            let (left, right) = slice.split_at_mut(a);
+            (&mut right[0], &mut left[b])
+        } else {
+            let (left, right) = slice.split_at_mut(b);
+            (&mut left[a], &mut right[0])
+        }
+    }
+}

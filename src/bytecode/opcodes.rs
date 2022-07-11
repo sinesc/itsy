@@ -5,7 +5,7 @@ use crate::{FrameAddress, StackAddress, ItemIndex};
 use crate::bytecode::{HeapRefOp, builtins::Builtin};
 #[cfg(feature="runtime")]
 use crate::{
-    StackOffset, STACK_ADDRESS_TYPE,
+    StackOffset, HeapAddress,
     bytecode::{
         HeapRef,
         runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState}
@@ -994,7 +994,7 @@ impl_opcodes!{
         heap_tail_element64_nc<T: Data64>(constructor: StackAddress),
     >(&mut self) {
         let element_index: StackAddress = self.stack.top();
-        let item: HeapRef = self.stack.load_sp((STACK_ADDRESS_TYPE.primitive_size() + HeapRef::primitive_size()) as StackAddress);
+        let item: HeapRef = self.stack.load_sp((size_of::<StackAddress>() + size_of::<HeapAddress>()) as StackAddress);
         let offset = self.heap.item(item.index()).data.len() as StackAddress - size_of::<T>() as StackAddress * (element_index + 1);
         let data: T = self.heap.read(item.with_offset(offset as StackOffset));
         self.refcount_value(item, constructor, HeapRefOp::Free);
@@ -1017,33 +1017,3 @@ impl_opcodes!{
     fn comment(&mut self, text: String) {
     }
 }
-
-
-/*
-
-    /// Loads and increments the variable at counter_loc and compares the result against the variable at max_loc.
-    /// Jumps to given target if the counter is less than or equal to the top stack value.
-    fn <
-        whileu8<T: u8>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whileu16<T: u16>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whileu32<T: u32>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whileu64<T: u64>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whiles8<T: i8>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whiles16<T: i16>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whiles32<T: i32>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-        whiles64<T: i64>(counter_loc: FrameOffset, max_loc: FrameOffset, target_addr: StackAddress),
-    >(&mut self) {
-        // load upper bound
-        let max: T = self.stack.load(if max_loc >= 0 { self.stack.fp + max_loc as StackAddress } else { self.stack.sp() - (-max_loc) as StackAddress });
-        // load and increment counter
-        let counter_loc = if counter_loc >= 0 { self.stack.fp + counter_loc as StackAddress } else { self.stack.sp() - (-counter_loc) as StackAddress };
-        let mut counter: T = self.stack.load(counter_loc);
-        counter = T::wrapping_add(counter, 1);
-        self.stack.store(counter_loc, counter);
-        // if counter less than or equal upper bound, jump to target
-        if counter <= max {
-            self.pc = target_addr;
-        }
-    }
-
-*/

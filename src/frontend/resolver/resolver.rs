@@ -723,7 +723,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
         if let Some(function_id) = item.function_id {
-            let ret_type = self.scopes.function_ref(function_id).ret_type;
+            let ret_type = self.scopes.function_ref(function_id).ret_type_id;
             if let Some(block) = &mut item.block {
                 self.resolve_block(block, ret_type)?;
             }
@@ -739,7 +739,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
-        let ret_type_id = self.scopes.function_ref(function_id).ret_type;
+        let ret_type_id = self.scopes.function_ref(function_id).ret_type_id;
         self.resolved_or_err(&mut item.expr, None)?;
         self.resolve_expression(&mut item.expr, ret_type_id)?;
         // check return type matches function result type
@@ -820,7 +820,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // return value
             let function_info = self.scopes.function_ref(function_id).clone();
 
-            if let Some(ret_type_id) = function_info.ret_type {
+            if let Some(ret_type_id) = function_info.ret_type_id {
                 self.set_type_id(item, ret_type_id)?;
             }
 
@@ -829,12 +829,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
 
             // argument count
-            if function_info.arg_type.len() != item.args.len() {
-                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(item.ident.name.clone(), function_info.arg_type.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
+            if function_info.arg_type_ids.len() != item.args.len() {
+                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(item.ident.name.clone(), function_info.arg_type_ids.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
             }
 
             // arguments
-            for (index, &expected_type_id) in function_info.arg_type.iter().enumerate() {
+            for (index, &expected_type_id) in function_info.arg_type_ids.iter().enumerate() {
                 self.resolve_expression(&mut item.args[index], expected_type_id)?;
                 let actual_type_id = item.args[index].type_id(self);
                 // infer arguments

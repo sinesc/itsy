@@ -3,11 +3,9 @@
 pub mod numeric;
 pub mod typed_ids;
 pub mod meta;
-#[cfg(feature="compiler")]
 pub mod error;
 
 use crate::shared::{typed_ids::TypeId, meta::{Type, Array}};
-#[cfg(feature="compiler")]
 use crate::{prelude::*, shared::{typed_ids::BindingId, meta::Binding}};
 
 /// A container holding type id to type mappings
@@ -68,7 +66,6 @@ pub(crate) trait TypeContainer {
 }
 
 /// A container holding binding id to Binding mappings
-#[cfg(feature="compiler")]
 pub(crate) trait BindingContainer {
     /// Returns a reference to the type id.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
@@ -77,13 +74,11 @@ pub(crate) trait BindingContainer {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-#[cfg(feature="compiler")]
 pub(crate) struct Progress {
     pub current: usize,
     pub total: usize,
 }
 
-#[cfg(feature="compiler")]
 impl Progress {
     pub fn new(current: usize, total: usize) -> Self {
         Self { current, total }
@@ -96,14 +91,12 @@ impl Progress {
     }
 }
 
-#[cfg(feature="compiler")]
 impl fmt::Debug for Progress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.current, self.total)
     }
 }
 
-#[cfg(feature="compiler")]
 impl Add for Progress {
     type Output = Self;
     fn add(self, other: Self) -> Self {
@@ -114,26 +107,7 @@ impl Add for Progress {
     }
 }
 
-/// References two elements of a slice mutably
-#[cfg(feature="runtime")]
-pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
-    if a == b {
-        panic!("tried to index element {} twice", a);
-    } else if a >= slice.len() || b >= slice.len() {
-        panic!("index ({}, {}) out of bounds", a, b);
-    } else {
-        if a > b {
-            let (left, right) = slice.split_at_mut(a);
-            (&mut right[0], &mut left[b])
-        } else {
-            let (left, right) = slice.split_at_mut(b);
-            (&mut left[a], &mut right[0])
-        }
-    }
-}
-
 /// Splits a path string into its constituent parts.
-#[cfg(feature="compiler")]
 pub fn path_to_parts<T: AsRef<str>>(path: T) -> Vec<String> {
     let path = path.as_ref();
     match path {
@@ -143,41 +117,7 @@ pub fn path_to_parts<T: AsRef<str>>(path: T) -> Vec<String> {
 }
 
 /// Joins parts of a path into a string.
-#[cfg(feature="compiler")]
 pub fn parts_to_path<T: AsRef<str>>(parts: &[T]) -> String {
     let parts = parts.iter().map(|p| p.as_ref()).collect::<Vec<_>>(); // todo: lame to have to collect first
     parts.join("::")
-}
-
-#[test]
-fn test_index_twice() {
-    let mut data = [ 1i32, 2, 3, 4, 5];
-
-    {
-        let (a, b) = index_twice(&mut data, 0, 4);  // b > a at bounds
-        *a = -1;
-        *b = -5;
-    }
-    assert!(data == [ -1i32, 2, 3, 4, -5 ]);
-
-    {
-        let (a, b) = index_twice(&mut data, 4, 0);  // a > b at bounds
-        *a = -10;
-        *b = -5;
-    }
-    assert!(data == [ -5i32, 2, 3, 4, -10 ]);
-
-    {
-        let (a, b) = index_twice(&mut data, 3, 2);  // a > b adjacent
-        *a = 11;
-        *b = 22;
-    }
-    assert!(data == [ -5i32, 2, 22, 11, -10 ]);
-
-    {
-        let (a, b) = index_twice(&mut data, 1, 2);  // b > a adjacent
-        *a = 33;
-        *b = 44;
-    }
-    assert!(data == [ -5i32, 33, 44, 11, -10 ]);
 }

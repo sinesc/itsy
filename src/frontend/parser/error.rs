@@ -35,7 +35,6 @@ pub struct ParseError {
     module_path: String,
 }
 
-#[cfg(feature="compiler")]
 impl From<IOError> for ParseError {
     fn from(error: IOError) -> ParseError {
         ParseError {

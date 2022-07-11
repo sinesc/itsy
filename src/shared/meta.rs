@@ -2,11 +2,9 @@ use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex};
 use crate::shared::typed_ids::{TypeId, FunctionId};
 use crate::shared::numeric::{Numeric, Signed, Unsigned};
-#[cfg(feature="compiler")]
 use crate::{RustFnIndex, bytecode::builtins::BuiltinType};
 
 /// Binding meta information.
-#[cfg(feature="compiler")]
 pub struct Binding {
     pub mutable: bool,
     pub type_id: Option<TypeId>,
@@ -96,14 +94,12 @@ pub struct Trait {
 
 /// Function mata information.
 #[derive(Clone)]
-#[cfg(feature="compiler")]
 pub struct Function {
-    pub kind    : Option<FunctionKind>,
-    pub arg_type: Vec<Option<TypeId>>,
-    pub ret_type: Option<TypeId>,
+    pub kind        : Option<FunctionKind>,
+    pub arg_type_ids: Vec<Option<TypeId>>,
+    pub ret_type_id : Option<TypeId>,
 }
 
-#[cfg(feature="compiler")]
 impl Function {
     pub fn rust_fn_index(self: &Self) -> Option<RustFnIndex> {
         match self.kind {
@@ -112,13 +108,12 @@ impl Function {
         }
     }
     pub fn is_resolved(self: &Self) -> bool {
-        self.ret_type.is_some() && self.kind.is_some() && self.arg_type.iter().all(|arg| arg.is_some())
+        self.ret_type_id.is_some() && self.kind.is_some() && self.arg_type_ids.iter().all(|arg| arg.is_some())
     }
 }
 
 /// The kind of a function described by a Function.
 #[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg(feature="compiler")]
 pub enum FunctionKind {
     Function,
     Method(TypeId),

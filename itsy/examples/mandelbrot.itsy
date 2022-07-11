@@ -8,20 +8,21 @@ struct Frame {
     interp: f64,
 }
 
-fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64) -> String {
+struct Coordinate {
+    x: f64,
+    y: f64,
+}
 
-    let chars = [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "$", "#", "X", "O", "*" ];
+fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64) -> String {
+
     let start_depth = if depth > chars.len() as u32 { depth - chars.len() as u32 } else { 0 };
-    let result = "";
-    let max_x = columns as f64;
-    let max_y = rows as f64;
     let x0 = -2.0f64 + ((2.0 + center_x) * (1.0 - zoom));
     let y0 = -1.4f64 + ((1.4 + center_y) * (1.0 - zoom));
+    let result = "";
 
     let y = y0;
     for _ in 0..rows {
         let x = x0;
-        let line = "";
         for _ in 0..columns {
             let r = 0f64;
             let i = 0f64;
@@ -29,43 +30,38 @@ fn mandelbrot(columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, cen
             let rx = (x - center_x) * angle.cos() - (y - center_y) * angle.sin() + center_x;
             let ry = (x - center_x) * angle.sin() + (y - center_y) * angle.cos() + center_y;
             while n < depth {
-                let r_tmp = r * r - i * i;
-                if r_tmp > 4.0 { // actual mandelbrot should check r² + i², but we check r² - i² because it looks cooler and allows reuse of r_tmp
+                let i_tmp = i * i;
+                if 4.0 < r * r + i_tmp {
                     break;
                 }
                 i = 2.0 * r * i + ry;
-                r = r_tmp + rx;
+                r = r * r - i_tmp + rx;
                 n += 1;
             }
-            line += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
-            x += 4.0 / max_x * zoom;
+            result += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
+            x += 4.0 / columns as f64 * zoom;
         }
-        result += line + "\n";
-        y += 2.80 / max_y * zoom;
+        result += "\n";
+        y += 2.80 / rows as f64 * zoom;
     }
 
     result
 }
 
 /*
- * Compute zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
- * them later.
- * Any point that requires less than max_iterations - 15 iterations to fall into the set is rendered as
- * whitespace by mandelbrot(). This gives the set a clearly defined boundary. The values generated below
- * were tweaked to keep 'narrowing' the set boundary slightly slower than they are magnified by the zoom.
- * The result is a trail or flame like effect during the later stages of the zoom.
- * In other words, these values were picked because they looked cool and there is really no math involved.
+ * Generate zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
+ * them later. There is no math involed, the values were simply tweaked to look good.
  */
-fn compute_frame_parameters() -> [ Frame ] {
+fn generate_frame_parameters() -> [ Frame ] {
 
-    let zoom = 2.0;
+    let zoom = 1.0;
     let zoom_multiplier = 0.99;
     let num_frames = 690;
     let frames: [ Frame ] = [ ];
 
     for i in 0..num_frames {
         // adjust max_iterations while zooming to keep a narrow boundary
-        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
+        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.9) * 200.0) as u32;
         frames.push(Frame { max_iterations: max_iterations, zoom: zoom, interp: 1.0 });
         // adjut zoom level ever faster
         zoom = zoom * zoom_multiplier;
@@ -85,41 +81,37 @@ fn compute_frame_parameters() -> [ Frame ] {
     frames
 }
 
-fn clear() {
-    let esc = String::from_ascii(27);
-    print("{esc}[2J");
-}
-
-fn render(frame: Frame, coordinate: [ f64 ], angle: f64, runtime: u64, width: u32, height: u32) {
+fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32) {
     // move cursor to top left position and print fractal
     let esc = String::from_ascii(27);
-    let x = coordinate[0] * frame.interp;
-    let y = coordinate[1] * frame.interp;
-    print("{esc}[1;1H" + mandelbrot(width, height, frame.max_iterations, frame.zoom, x, y, angle));
-    print("{esc}[1;1HModified Mandelbrot set");
+    let x = coordinate.x * frame.interp;
+    let y = coordinate.y * frame.interp;
+    print("{esc}[1;1H" + mandelbrot(chars, width, height, frame.max_iterations, frame.zoom, x, y, angle));
+    print("{esc}[1;1HMandelbrot set");
     let exit_str = "{runtime}ms/f, CTRL+C to exit";
     print("{esc}[1;{width-exit_str.len() as u32+1}H{exit_str}");
     print("{esc}[{height};1H{x.fmt(14)} {y.fmt(14)}i, max. iter {frame.max_iterations}, zoom {(1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 })}x, {angle.to_degrees().rem_euclid(360.0).floor()}°");
 }
 
 fn main() {
-    clear();
+    print("{String::from_ascii(27)}[2J");
 
     let runtime = 0;
-    let frames = compute_frame_parameters();
     let angle = 0.0;
+    let frames = generate_frame_parameters();
+    let chars = [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ];
     let coordinates = [
-        [ 0.32570659879f64, 0.0470399495155 ],
-        [ -0.1081742949375, 0.905426290979918 ],
-        [ -0.7491799739999038, 0.100100499971 ],
+        Coordinate { x: 0.32570659879f64, y: 0.0470399495155 },
+        Coordinate { x: -0.1081742949375, y: 0.905426290979918 },
+        Coordinate { x: -0.7491799739999038, y: 0.100100499971 },
     ];
 
     while true {
         for coordinate in coordinates {
             for _ in 0..2 {
                 for frame in frames {
-                    render(frame, coordinate, angle, runtime, 80, 24);
-                    runtime = wait_frame(1000 / 33);
+                    render(chars, frame, coordinate, angle, runtime, 80, 24);
+                    runtime = wait_frame(1000 / 60);
                     angle += 0.015;
                 }
                 frames.reverse();

@@ -15,7 +15,6 @@ pub enum Error {
     RuntimeError(RuntimeError),
 }
 
-#[cfg(feature="compiler")]
 impl Error {
     /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {

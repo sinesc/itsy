@@ -1026,13 +1026,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if discriminant(&target.kind.unwrap()) != discriminant(&other.kind.unwrap()) {
             return false;
         }
-        if target.ret_type != other.ret_type {
+        if target.ret_type_id != other.ret_type_id {
             return false;
         }
-        if target.arg_type.len() != other.arg_type.len() {
+        if target.arg_type_ids.len() != other.arg_type_ids.len() {
             return false;
         }
-        for (target_arg, other_arg) in target.arg_type.iter().zip(other.arg_type.iter()) {
+        for (target_arg, other_arg) in target.arg_type_ids.iter().zip(other.arg_type_ids.iter()) {
             if !self.type_accepted_for(other_arg.unwrap(), target_arg.unwrap()) {
                 return false;
             }
@@ -2018,7 +2018,6 @@ impl<T> TypeContainer for Compiler<T> {
 }
 
 /// A container holding binding id to Binding mappings
-#[cfg(feature="compiler")]
 impl<T> BindingContainer for Compiler<T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         let binding_index = Into::<usize>::into(binding_id);
