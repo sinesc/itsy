@@ -7,7 +7,7 @@ pub enum CompileErrorKind {
     IncompatibleTraitMethod(String),
     Uninitialized(String),
     MaybeInitialized(String),
-    Internal,
+    Internal(String),
 }
 
 /// An error reported by the compiler.
@@ -19,8 +19,11 @@ pub struct CompileError {
 }
 
 impl CompileError {
-    pub(crate) fn new(item: &impl Positioned, kind: CompileErrorKind, module_path: &str) -> CompileError {
+    pub(crate) fn new(item: &dyn Positioned, kind: CompileErrorKind, module_path: &str) -> CompileError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
+    }
+    pub(crate) fn unpositioned(kind: CompileErrorKind, module_path: &str) -> CompileError {
+        Self { kind, position: Position(0), module_path: module_path.to_string() }
     }
     /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
@@ -39,10 +42,10 @@ impl CompileError {
 impl Display for CompileError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method '{}'", method),
-            CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable '{}'", variable),
-            CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable '{}' might not be initialized", variable),
-            CompileErrorKind::Internal => write!(f, "Internal compiler error"),
+            CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method '{method}'"),
+            CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable '{variable}'"),
+            CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable '{variable}' might not be initialized"),
+            CompileErrorKind::Internal(msg) => write!(f, "Internal compiler error: {msg}"),
         }
     }
 }

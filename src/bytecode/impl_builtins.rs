@@ -226,9 +226,10 @@ macro_rules! impl_builtins {
                         }
                     }
                     #[allow(unused_variables)]
-                    pub(crate) fn write<T>(self: &Self, compiler: &Compiler<T>, type_id: TypeId, inner_type_id: Option<TypeId>) where T: VMFunc<T> {
+                    pub(crate) fn write<T>(self: &Self, compiler: &Compiler<T>, type_id: TypeId, inner_type_id: Option<TypeId>) -> crate::StackAddress where T: VMFunc<T> {
                         let ty = compiler.type_by_id(type_id);
                         let element_ty = inner_type_id.map(|type_id| compiler.type_by_id(type_id));
+                        let position = compiler.writer.position();
                         match self {
                             $( // function
                                 Self::$builtin_function => {
@@ -247,6 +248,7 @@ macro_rules! impl_builtins {
                                 }
                             )+
                         }
+                        position
                     }
                 }
             )+
