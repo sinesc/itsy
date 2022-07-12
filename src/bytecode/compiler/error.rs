@@ -38,13 +38,11 @@ impl CompileError {
 
 impl Display for CompileError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[allow(unreachable_patterns)]
         match &self.kind {
             CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method '{}'", method),
             CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable '{}'", variable),
             CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable '{}' might not be initialized", variable),
             CompileErrorKind::Internal => write!(f, "Internal compiler error"),
-            _ => write!(f, "{:?}", self.kind),
         }
     }
 }

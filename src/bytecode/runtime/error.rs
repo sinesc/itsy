@@ -43,7 +43,6 @@ impl Display for RuntimeError {
         } else {
             self.offset.to_string()
         };
-        #[allow(unreachable_patterns)]
         match &self.kind {
             RuntimeErrorKind::NotReady => write!(f, "VM is not ready."),
             RuntimeErrorKind::CannotClear => write!(f, "Cannot clear VM error. VM is not in a resumable state."),
@@ -53,7 +52,6 @@ impl Display for RuntimeError {
             RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),
             RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}"),
             RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}"),
-            _ => write!(f, "{:?}", self.kind),
         }
     }
 }

@@ -199,7 +199,6 @@ where
             ranges.sort_by(|&a, &b| a.left.partial_cmp(&b.left).unwrap_or(Ordering::Equal));
             ranges
         };
-        println!("{:?}", &ranges);
         // check if left is covered
         let first = *ranges.first().unwrap();
         if first.left > self.left {

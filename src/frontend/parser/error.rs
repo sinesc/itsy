@@ -82,10 +82,9 @@ impl Display for ParseError {
             ParseErrorKind::IllegalWhileLoop => write!(f, "While-loops are not allowed outside of functions"),
             ParseErrorKind::IllegalBreak => write!(f, "Break-statements are not allowed outside of loops"),
             ParseErrorKind::IllegalContinue => write!(f, "Continue-statements are not allowed outside of loops"),
+            ParseErrorKind::IllegalClosure => write!(f, "Closure not allowed in this position"),
+            ParseErrorKind::DisabledFeature(s) => write!(f, "{}", s),
             ParseErrorKind::IOError(e) => write!(f, "{}", e),
-
-            // Todo: handle the others
-            _ => write!(f, "{:?}", self.kind),
         }
     }
 }

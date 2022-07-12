@@ -4,7 +4,7 @@ use crate::util::*;
 fn heap_compound_assign() {
     let sa_type = STACK_ADDRESS_TYPE;
     let result = run(&format!("
-        fn left() -> {sa_type:?} {{
+        fn left() -> {sa_type} {{
             ret_u8(9);
             0
         }}
@@ -26,7 +26,7 @@ fn heap_compound_assign() {
 fn heap_compound_assign64() {
     let sa_type = STACK_ADDRESS_TYPE;
     let result = run(&format!("
-        fn left() -> {sa_type:?} {{
+        fn left() -> {sa_type} {{
             ret_u64(9);
             0
         }}

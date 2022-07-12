@@ -1085,7 +1085,7 @@ impl Display for Literal {
         match &self.value {
             LiteralValue::Void => write!(f, "void"),
             LiteralValue::Bool(v) => write!(f, "{:?}", v),
-            LiteralValue::Numeric(v) => write!(f, "{:}", v),
+            LiteralValue::Numeric(v) => write!(f, "{}", v),
             LiteralValue::String(v) => write!(f, "{:?}", v),
             LiteralValue::Array(_) => write!(f, "[ ]"),
             LiteralValue::Struct(_) => write!(f, "struct {}", &self.type_name.as_ref().unwrap().path),

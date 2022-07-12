@@ -76,13 +76,13 @@ impl Display for ResolveError {
             ResolveErrorKind::UndefinedItem(i) => write!(f, "Undefined item '{}'", i),
             ResolveErrorKind::DuplicateVariantValue(numeric) => write!(f, "Duplicate enum variant discriminant {numeric}"),
             ResolveErrorKind::InvalidVariantValue(numeric) => write!(f, "Invalid enum variant discriminant {numeric}. Discriminants must be integer types"),
+            ResolveErrorKind::InvalidVariantLiteral => write!(f, "Invalid enum variant literal"),
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
             ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
-            _ => write!(f, "{:?}", self.kind),
         }
     }
 }

@@ -170,9 +170,9 @@ fn array_len() {
     let result = run(&format!("
         let array_u16: [ u16 ] = [ 1, 2, 3, 4 ];
         let array_u8: [ u8 ] = [ 4, 3, 2, 1, 0 ];
-        ret_{sa_type:?}(array_u16.len());
-        ret_{sa_type:?}(array_u8.len());
-        ret_{sa_type:?}([ 5, 4, 3, 2, 1, 0 ].len());
+        ret_{sa_type}(array_u16.len());
+        ret_{sa_type}(array_u8.len());
+        ret_{sa_type}([ 5, 4, 3, 2, 1, 0 ].len());
     "));
     assert_all_sa(&result, &[ 4, 5, 6 ]);
 }
@@ -183,8 +183,8 @@ fn array_push() {
     let result = run(&format!("
         let dynamic_array = [ 1u16, 2, 3 ];
         dynamic_array.push(4u16);
-        ret_{sa_type:?}(dynamic_array.len());
-        ret_{sa_type:?}(dynamic_array[3] as {sa_type:?});
+        ret_{sa_type}(dynamic_array.len());
+        ret_{sa_type}(dynamic_array[3] as {sa_type});
     "));
     assert_all_sa(&result, &[ 4, 4 ]);
 }
