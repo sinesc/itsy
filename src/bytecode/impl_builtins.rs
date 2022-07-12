@@ -55,11 +55,11 @@ macro_rules! impl_builtins {
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
         let $element_ty = $element_ty.unwrap();
         if $element_ty.is_ref() {
-            let constructor = $compiler.constructor($ty);
-            let element_constructor = $compiler.constructor($element_ty);
+            let constructor = $compiler.constructor($ty).unwrap();
+            let element_constructor = $compiler.constructor($element_ty).unwrap();
             $compiler.writer.builtincallx(Builtin::$variant_x, constructor, element_constructor);
         } else {
-            let constructor = $compiler.constructor($ty);
+            let constructor = $compiler.constructor($ty).unwrap();
             match $element_ty.primitive_size() {
                 8 => $compiler.writer.builtincallx(Builtin::$variant_64, constructor, 0),
                 4 => $compiler.writer.builtincallx(Builtin::$variant_32, constructor, 0),

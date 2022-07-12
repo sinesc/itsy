@@ -13,7 +13,7 @@ use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Ty
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, IdMappings}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
-use error::{CompileError, CompileErrorKind, CompileResult};
+use error::{CompileError, CompileErrorKind, CompileResult, UnwrapOrICE};
 use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 
@@ -99,7 +99,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
-        trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&trait_functions, &trait_implementors),
+        trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&trait_functions, &trait_implementors)?,
         id_mappings                 : id_mappings,
     };
 
@@ -138,14 +138,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     // write actual function offsets to vtable
     for (implementor_index, selected_function_id) in trait_function_implementations {
         if let Some(selected_function_id) = selected_function_id {
-            let selected_function_offset = compiler.functions.get(selected_function_id).expect("Missing function callinfo").addr;
-            let vtable_function_offset = compiler.vtable_function_offset(selected_function_id);
+            let selected_function_offset = compiler.functions.get(selected_function_id).or_ice_msg("Missing function callinfo")?.addr;
+            let vtable_function_offset = compiler.vtable_function_offset(selected_function_id)?;
             compiler.writer.update_const(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
     // overwrite placeholder with actual entry position
-    let &entry_call = compiler.functions.get(entry_fn).expect("Failed to locate entry function in generated code.");
+    let &entry_call = compiler.functions.get(entry_fn).or_ice_msg("Failed to locate entry function in generated code.")?;
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
 
     // return generated program
@@ -169,15 +169,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.compile_function(function)?;
                     // if this is a trait impl check compatibility to trait
                     if let Some(TypeName { type_id, .. }) = impl_block.trt {
-                        let trait_type_id = type_id.expect("Unresolved trait encountered");
-                        let trt = self.ty(&trait_type_id).as_trait().unwrap();
+                        let trait_type_id = type_id.or_ice()?;
+                        let trt = self.ty(&trait_type_id).as_trait().or_ice()?;
                         let function_id = function.function_id;
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
-                        let trait_function_id = trt.provided.get(function_name).or(trt.required.get(function_name)).unwrap();
-                        let trait_function = self.id_mappings.function(trait_function_id.unwrap());
-                        let impl_function = self.id_mappings.function(function_id.unwrap());
-                        if !self.is_compatible_function(trait_function, impl_function) {
+                        let trait_function_id = trt.provided.get(function_name).or(trt.required.get(function_name)).or_ice()?;
+                        let trait_function = self.id_mappings.function(trait_function_id.or_ice()?);
+                        let impl_function = self.id_mappings.function(function_id.or_ice()?);
+                        if !self.is_compatible_function(trait_function, impl_function)? {
                             return Err(CompileError::new(function, CompileErrorKind::IncompatibleTraitMethod(function_name.clone()), &self.module_path));
                         }
                     }
@@ -198,7 +198,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if let Some(result) = &if_block.if_block.result {
                     let result_type = self.ty(result);
                     comment!(self, "discarding result");
-                    self.write_discard(result_type);
+                    self.write_discard(result_type)?;
                 }
                 Ok(())
             },
@@ -209,7 +209,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if let Some(result) = &block.result {
                     let result_type = self.ty(result);
                     comment!(self, "discarding result");
-                    self.write_discard(result_type);
+                    self.write_discard(result_type)?;
                 }
                 Ok(())
             },
@@ -217,7 +217,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_expression(expression)?;
                 let result_type = self.ty(expression);
                 comment!(self, "discarding result");
-                self.write_discard(result_type);
+                self.write_discard(result_type)?;
                 Ok(())
             },
             S::Break(_) => {
@@ -240,9 +240,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 comment!(self, "block returning");
                 self.compile_expression(expr)?;
                 // inc result, then dec everything
-                self.write_cnt(self.ty(expr), true, HeapRefOp::Inc);
+                self.write_cnt(self.ty(expr), true, HeapRefOp::Inc)?;
                 self.write_scope_destructor(BranchingScope::Function)?;
-                self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree);
+                self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree)?;
                 self.write_ret()?;
                 Ok(())
             },
@@ -282,7 +282,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_assignment_to_var(self: &mut Self, item: &ast::Assignment) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
-        let binding_id = item.left.as_variable().unwrap().binding_id.unwrap();
+        let binding_id = item.left.as_variable().or_ice()?.binding_id.or_ice()?;
         let loc = self.locals.lookup(binding_id);
         match item.op {
             BO::Assign => {
@@ -291,7 +291,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.init_state.initialize(binding_id);
             },
             _ => {
-                self.check_initialized(&item.left.as_variable().unwrap())?;
+                self.check_initialized(item.left.as_variable().or_ice()?)?;
                 self.write_load(self.ty(&item.left), loc)?; // stack: left
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.ty(&item.left);
@@ -348,9 +348,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, arg);
             self.compile_expression(arg)?;
-            match function.kind.unwrap() {
+            match function.kind.or_ice()? {
                 FunctionKind::Method(_) | FunctionKind::Function => {
-                    self.write_cnt(self.ty(arg), true, HeapRefOp::Inc);
+                    self.write_cnt(self.ty(arg), true, HeapRefOp::Inc)?;
                 },
                 _ => { }
             }
@@ -361,9 +361,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given call.
     fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
         comment!(self, "prepare {}() args", item.ident.name);
-        let function_id = item.function_id.expect("Unresolved function encountered");
+        let function_id = item.function_id.or_ice_msg("Unresolved function")?;
         let function = self.id_mappings.function(function_id).clone();
-        match function.kind.unwrap() {
+        match function.kind.or_ice()? {
             FunctionKind::Rust(rust_fn_index) => {
                 self.compile_call_args(&function, item)?;
                 comment!(self, "call {}()", item.ident.name);
@@ -378,7 +378,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_call_args(&function, item)?;
                 if self.ty(&object_type_id).as_trait().is_some() {
                     // dynamic dispatch
-                    let function_offset = self.vtable_function_offset(function_id);
+                    let function_offset = self.vtable_function_offset(function_id)?;
                     let function_arg_size = self.id_mappings.function_arg_size(function_id);
                     comment!(self, "call {}()", item.ident.name);
                     self.writer.vcall(function_offset, function_arg_size);
@@ -397,7 +397,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                 self.compile_call_args(&function, item)?;
-                let function_id = item.function_id.expect("Unresolved function encountered");
+                let function_id = item.function_id.or_ice_msg("Unresolved function encountered")?;
                 let arg_size = self.id_mappings.function_arg_size(function_id) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
@@ -407,7 +407,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &mut Self, item: &ast::Binding) -> CompileResult {
-        let binding_id = item.binding_id.expect("Unresolved binding encountered");
+        let binding_id = item.binding_id.or_ice_msg("Unresolved binding")?;
         self.init_state.declare(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
@@ -427,7 +427,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "variable {}", item);
         let load_index = {
             self.check_initialized(item)?;
-            let binding_id = item.binding_id.expect("Unresolved binding encountered");
+            let binding_id = item.binding_id.or_ice_msg("Unresolved binding encountered")?;
             self.locals.lookup(binding_id)
         };
         self.write_load(self.ty(item), load_index)?;
@@ -485,7 +485,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if item.else_block.is_none() {
             self.compile_if_only_block(item)
         } else {
-            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().unwrap())
+            self.compile_if_else_block(&item.if_block, item.else_block.as_ref().or_ice()?)
         }
     }
 
@@ -556,7 +556,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_loc: FrameAddress, iter_type_id: TypeId) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
-        let binary_op = item.expr.as_binary_op().unwrap();
+        let binary_op = item.expr.as_binary_op().or_ice()?;
         self.compile_expression(&binary_op.left)?;          // stack current=lower
         self.write_store(self.ty(&iter_type_id), iter_loc, None)?;                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
         // push upper range bound
@@ -601,7 +601,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         }
         // discard counter
-        self.write_discard(iter_ty);
+        self.write_discard(iter_ty)?;
         Ok(())
     }
 
@@ -610,7 +610,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         self.compile_expression(&item.expr)?;                       // stack &array
         let array_ty = self.ty(&item.expr);
-        self.write_cnt(array_ty, true, HeapRefOp::Inc);
+        self.write_cnt(array_ty, true, HeapRefOp::Inc)?;
         self.write_clone_ref();                                         // stack &array &array
         self.write_builtin(array_ty, BuiltinType::Array(builtin_types::Array::len))?;             // stack &array len
         let exit_jump = self.writer.j0_sa_nc(123);
@@ -621,7 +621,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         if element_ty.is_ref() {
             self.write_clone(element_ty);                                   // stack &array index element element
-            self.write_cnt(element_ty, true, HeapRefOp::Inc);
+            self.write_cnt(element_ty, true, HeapRefOp::Inc)?;
         }
 
         self.write_store(element_ty, element_loc, None)?;                        // stack &array index <is_ref ? element>  // TODO: this doesn't do storex, why does it work?
@@ -632,7 +632,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let element_ty = self.ty(&element_type_id);
 
         let cnt_target = if element_ty.is_ref() {
-            Some(self.write_cnt(element_ty, false, HeapRefOp::Dec))
+            Some(self.write_cnt(element_ty, false, HeapRefOp::Dec)?)
         } else {                                                          // stack &array index
             None
         };
@@ -643,7 +643,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // reference but doesn't jump back to the start of the loop. the normal loop exit has to jump over this.
         let break_target = if element_ty.is_ref() && loop_controls.iter().find(|&lc| matches!(lc, LoopControl::Break(_))).is_some() {
             let exit_skip_target = self.writer.jmp(123);
-            let break_target = self.write_cnt(element_ty, false, HeapRefOp::Dec);
+            let break_target = self.write_cnt(element_ty, false, HeapRefOp::Dec)?;
             let exit_target = self.writer.position();
             self.writer.overwrite(exit_skip_target, |w| w.jmp(exit_target));
             Some(break_target)
@@ -661,8 +661,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         }
         // discard counter
-        self.write_discard(&STACK_ADDRESS_TYPE);    // stack &array
-        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec);         // stack --
+        self.write_discard(&STACK_ADDRESS_TYPE)?;    // stack &array
+        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;         // stack --
         Ok(())
     }
 
@@ -670,11 +670,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_for_loop(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
         use ast::{Expression, BinaryOperator as Op};
         // initialize iter variable
-        let binding_id = item.iter.binding_id.expect("Unresolved binding encountered");
+        let binding_id = item.iter.binding_id.or_ice_msg("Unresolved binding")?;
         self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
-        let iter_type_id = item.iter.type_id(self).unwrap();
+        let iter_type_id = item.iter.type_id(self).or_ice()?;
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
             Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
@@ -702,22 +702,22 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let mut frame = StackFrame::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.ty(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.insert(arg.binding_id.unwrap(), frame.arg_pos);
-            self.init_state.declare(arg.binding_id.unwrap());
-            self.init_state.initialize(arg.binding_id.unwrap());
+            frame.insert(arg.binding_id.or_ice()?, frame.arg_pos);
+            self.init_state.declare(arg.binding_id.or_ice()?);
+            self.init_state.initialize(arg.binding_id.or_ice()?);
             frame.arg_pos += self.ty(arg).primitive_size() as FrameAddress;
         }
 
         // create variables in local environment and reserve space on the stack
         frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2;
-        self.create_stack_frame_block(item.block.as_ref().unwrap(), &mut frame);
+        self.create_stack_frame_block(item.block.as_ref().or_ice()?, &mut frame)?;
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2);
         if var_size > 0 {
             self.writer.reserve(var_size as u16);
         }
 
         // store call info required to compile calls to this function and fix calls that were made before the function address was known
-        let function_id = item.function_id.unwrap();
+        let function_id = item.function_id.or_ice()?;
         let arg_size = frame.arg_pos;
         if let Some(calls) = self.functions.register_function(function_id, arg_size, position) {
             let backup_position = self.writer.position();
@@ -730,7 +730,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         // push local environment on the locals stack so that it is accessible from nested compile_*
         self.locals.push(frame);
-        self.compile_block(item.block.as_ref().unwrap())?;
+        self.compile_block(item.block.as_ref().or_ice()?)?;
         self.locals.pop();
         self.init_state.pop();
         Ok(())
@@ -746,9 +746,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             comment!(self, "block resulting");
             self.compile_expression(result)?;
             // inc result, then dec everything
-            self.write_cnt(self.ty(result), true, HeapRefOp::Inc);
+            self.write_cnt(self.ty(result), true, HeapRefOp::Inc)?;
             self.write_scope_destructor(BranchingScope::Block)?;
-            self.write_cnt(self.ty(result), true, HeapRefOp::DecNoFree);
+            self.write_cnt(self.ty(result), true, HeapRefOp::DecNoFree)?;
         } else if item.control_flow() == None {
             comment!(self, "block ending");
             self.write_scope_destructor(BranchingScope::Block)?;
@@ -775,9 +775,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
                 // primitive enums don't need to be heap allocated
-                let enum_def = ty.as_enum().expect("Encountered non-enum type on enum variant");
-                let enum_ty = self.ty(&enum_def.primitive.unwrap().0);
-                let variant_value = enum_def.variant_value(&variant.ident.name).unwrap();
+                let enum_def = ty.as_enum().or_ice_msg("Non-enum type on enum variant")?;
+                let enum_ty = self.ty(&enum_def.primitive.or_ice()?.0);
+                let variant_value = enum_def.variant_value(&variant.ident.name).or_ice()?;
                 self.write_immediate(enum_ty, variant_value)?;
             },
             LiteralValue::String(ref string_literal) => {
@@ -793,32 +793,32 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 for element in &array_literal.elements {
                     self.compile_expression(element)?;
                 }
-                let array_ty = self.ty(item).as_array().expect("Expected array type, got something else");
+                let array_ty = self.ty(item).as_array().or_ice_msg("Expected array type, got something else")?;
                 let size = array_literal.elements.len() as StackAddress * self.ty(&array_ty.type_id).primitive_size() as StackAddress;
-                let type_id = item.type_id(self).unwrap();
+                let type_id = item.type_id(self).or_ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
             LiteralValue::Struct(struct_literal) => {
                 // write instructions to construct the struct on the stack and once complete, upload it to the heap
-                let struct_def = ty.as_struct().expect("Expected struct, got something else");
+                let struct_def = ty.as_struct().or_ice_msg("Expected struct, got something else")?;
                 // collect fields first to avoid borrow checker
                 let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
                 for field in fields {
                     self.compile_expression(field)?;
                 }
-                let struct_ty = self.ty(item).as_struct().expect("Expected struct type, got something else");
+                let struct_ty = self.ty(item).as_struct().or_ice_msg("Expected struct type, got something else")?;
                 let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.ty(f.1).primitive_size() as StackAddress);
-                let type_id = item.type_id(self).unwrap();
+                let type_id = item.type_id(self).or_ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
             LiteralValue::Variant(variant) => {
                 // write instructions to construct the data-variant enum on the stack and once complete, upload it to the heap
-                let enum_def = self.ty(item).as_enum().expect("Encountered non-enum type on enum variant");
+                let enum_def = self.ty(item).as_enum().or_ice_msg("Encountered non-enum type on enum variant")?;
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
-                let variant_index = enum_def.variant_index(&variant.ident.name).unwrap();
+                let variant_index = enum_def.variant_index(&variant.ident.name).or_ice()?;
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                 let size = index_type.primitive_size() as StackAddress;
-                let type_id = item.type_id(self).unwrap();
+                let type_id = item.type_id(self).or_ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
@@ -847,7 +847,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if let ast::Expression::Variable(var) = &item.expr {
                     comment!(self, "{}", item);
                     let load_index = {
-                        let binding_id = var.binding_id.expect("Unresolved binding encountered");
+                        let binding_id = var.binding_id.or_ice_msg("Unresolved binding encountered")?;
                         self.locals.lookup(binding_id)
                     };
                     let exp_type = self.ty(&item.expr);
@@ -871,7 +871,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         _ => self.ice(item, "Invalid binary operator")?,
                     };
                 } else {
-                    panic!("Operator {:?} can not be used here", item.op);
+                    self.ice(item, &format!("Operator {} can not be used here", item.op))?
                 }
             },
         }
@@ -952,15 +952,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::Access => {
                 comment!(self, ".{}", &item.right);
                 // fetch heap value at reference-target
-                let struct_ = compare_type.as_struct().unwrap();
-                let offset = self.compute_member_offset(struct_, &item.right.as_member().unwrap().ident.name);
+                let struct_ = compare_type.as_struct().or_ice()?;
+                let offset = self.compute_member_offset(struct_, &item.right.as_member().or_ice()?.ident.name);
                 self.write_heap_fetch_member(compare_type, result_type, offset)?;
             },
             BO::AccessWrite => {
                 comment!(self, ".{} (writing)", &item.right);
                 // compute and push the address of the reference-target
-                let struct_ = compare_type.as_struct().unwrap();
-                let offset = self.compute_member_offset(struct_, &item.right.as_member().unwrap().ident.name);
+                let struct_ = compare_type.as_struct().or_ice()?;
+                let offset = self.compute_member_offset(struct_, &item.right.as_member().or_ice()?.ident.name);
                 self.write_member_offset(offset);
 
             },
@@ -1018,9 +1018,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Returns constructor index for given type or 0.
-    pub(super) fn constructor(self: &Self, ty: &Type) -> StackAddress {
-        let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
-        *self.constructors.get(&type_id).unwrap_or(&0)
+    pub(super) fn constructor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        let type_id = self.id_mappings.types().find(|m| m.1 == ty).or_ice()?.0;
+        Ok(*self.constructors.get(&type_id).unwrap_or(&0))
     }
 
     /// Generates an internal compiler error.
@@ -1040,22 +1040,22 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Checks if the given functions are compatible.
-    fn is_compatible_function(self: &Self, target: &Function, other: &Function) -> bool {
-        if discriminant(&target.kind.unwrap()) != discriminant(&other.kind.unwrap()) {
-            return false;
+    fn is_compatible_function(self: &Self, target: &Function, other: &Function) -> CompileResult<bool> {
+        if discriminant(&target.kind.or_ice()?) != discriminant(&other.kind.or_ice()?) {
+            return Ok(false);
         }
         if target.ret_type_id != other.ret_type_id {
-            return false;
+            return Ok(false);
         }
         if target.arg_type_ids.len() != other.arg_type_ids.len() {
-            return false;
+            return Ok(false);
         }
         for (target_arg, other_arg) in target.arg_type_ids.iter().zip(other.arg_type_ids.iter()) {
-            if !self.type_accepted_for(other_arg.unwrap(), target_arg.unwrap()) {
-                return false;
+            if !self.type_accepted_for(other_arg.or_ice()?, target_arg.or_ice()?) {
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     /// Computes struct member offset in bytes.
@@ -1073,73 +1073,75 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Creates stack frame variables for expressions. // FIXME move this into AST
-    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression, frame: &mut StackFrame) {
+    fn create_stack_frame_exp(self: &Self, expression: &ast::Expression, frame: &mut StackFrame) -> CompileResult {
         if let ast::Expression::Block(block) = expression {
-            self.create_stack_frame_block(block, frame);
+            self.create_stack_frame_block(block, frame)?;
         } else if let ast::Expression::Call(call) = expression {
             for arg in &call.args {
                 if let ast::Expression::Block(block) = arg {
-                    self.create_stack_frame_block(block, frame);
+                    self.create_stack_frame_block(block, frame)?;
                 }
             }
         } else if let ast::Expression::Assignment(assignment) = expression {
             if let ast::Expression::Block(block) = &assignment.right {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(block, frame)?;
             }
         } else if let ast::Expression::BinaryOp(binary_op) = expression {
             if let ast::Expression::Block(block) = &binary_op.left {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(block, frame)?;
             }
             if let ast::Expression::Block(block) = &binary_op.right {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(block, frame)?;
             }
         } else if let ast::Expression::UnaryOp(unary_op) = expression {
             if let ast::Expression::Block(block) = &unary_op.expr {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(block, frame)?;
             }
         } else if let ast::Expression::IfBlock(if_block) = expression {
-            self.create_stack_frame_block(&if_block.if_block, frame);
+            self.create_stack_frame_block(&if_block.if_block, frame)?;
             if let Some(block) = &if_block.else_block {
-                self.create_stack_frame_block(block, frame);
+                self.create_stack_frame_block(block, frame)?;
             }
         }
+        Ok(())
     }
 
     /// Creates stack frame variables for blocks. // FIXME move this into AST
-    fn create_stack_frame_block(self: &Self, item: &ast::Block, frame: &mut StackFrame) {
+    fn create_stack_frame_block(self: &Self, item: &ast::Block, frame: &mut StackFrame) -> CompileResult {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::Binding(binding) = statement {
-                frame.insert(binding.binding_id.unwrap(), frame.var_pos);
+                frame.insert(binding.binding_id.or_ice()?, frame.var_pos);
                 frame.var_pos += self.ty(binding).primitive_size() as FrameAddress;
                 if let Some(expression) = &binding.expr {
-                    self.create_stack_frame_exp(expression, frame);
+                    self.create_stack_frame_exp(expression, frame)?;
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.insert(for_loop.iter.binding_id.unwrap(), frame.var_pos);
+                frame.insert(for_loop.iter.binding_id.or_ice()?, frame.var_pos);
                 frame.var_pos += self.ty(&for_loop.iter).primitive_size() as FrameAddress;
-                self.create_stack_frame_block(&for_loop.block, frame);
+                self.create_stack_frame_block(&for_loop.block, frame)?;
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
-                self.create_stack_frame_block(&while_loop.block, frame);
+                self.create_stack_frame_block(&while_loop.block, frame)?;
             } else if let ast::Statement::Block(block) = statement {
-                self.create_stack_frame_block(&block, frame);
+                self.create_stack_frame_block(&block, frame)?;
             } else if let ast::Statement::IfBlock(if_block) = statement {
-                self.create_stack_frame_block(&if_block.if_block, frame);
+                self.create_stack_frame_block(&if_block.if_block, frame)?;
                 if let Some(block) = &if_block.else_block {
-                    self.create_stack_frame_block(block, frame);
+                    self.create_stack_frame_block(block, frame)?;
                 }
             } else if let ast::Statement::Expression(expression) = statement {
-                self.create_stack_frame_exp(&expression, frame);
+                self.create_stack_frame_exp(&expression, frame)?;
             }
         }
         if let Some(result) = &item.result {
-            self.create_stack_frame_exp(result, frame);
+            self.create_stack_frame_exp(result, frame)?;
         }
+        Ok(())
     }
 
     /// Checks whether the given variable is initialized
     fn check_initialized(self: &Self, item: &ast::Variable) -> CompileResult {
-        let binding_id = item.binding_id.expect("Unresolved binding encountered");
+        let binding_id = item.binding_id.or_ice_msg("Unresolved binding")?;
         let state = self.init_state.initialized(binding_id);
         if state == BranchingState::Uninitialized || state == BranchingState::MaybeInitialized {
             let variable = item.ident.name.clone();
@@ -1166,7 +1168,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Array);
                 store_len(&mut || {
-                    self.store_constructor(array.type_id.expect("Unresolved array element type"), &mut None, &mut 0)
+                    self.store_constructor(array.type_id.or_ice_msg("Unresolved array element type")?, &mut None, &mut 0)
                 })?;
                 *prev_primitive = None;
             }
@@ -1179,7 +1181,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     let mut fields_merged = 0;
                     let mut prev_primitive = None;
                     for field in &structure.fields {
-                        self.store_constructor(field.1.expect("Unresolved struct field type"), &mut prev_primitive, &mut fields_merged)?;
+                        self.store_constructor(field.1.or_ice_msg("Unresolved struct field type")?, &mut prev_primitive, &mut fields_merged)?;
                     }
                     self.writer.update_const(field_size_offset, structure.fields.len() as ItemIndex - fields_merged);
                     Ok(0)
@@ -1208,8 +1210,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         variant_offsets.push(variant_offset);
                         if num_fields > 0 {
                             // TODO: implement primitive field merge (see Struct case)
-                            for field in fields.as_data().unwrap() {
-                                self.store_constructor(field.expect("Unresolved enum field type"), &mut None, &mut 0)?;
+                            for field in fields.as_data().or_ice()? {
+                                self.store_constructor(field.or_ice_msg("Unresolved enum field type")?, &mut None, &mut 0)?;
                             }
                         }
                     }
@@ -1266,19 +1268,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if self.init_state.declared(binding_id, Some(target_scope)) {
                 let state = self.init_state.initialized(binding_id);
                 if state != BranchingState::Uninitialized {
-                    let type_id = self.binding_by_id(binding_id).type_id.unwrap();
+                    let type_id = self.binding_by_id(binding_id).type_id.or_ice()?;
                     let ty = self.ty(&type_id);
                     if ty.is_ref() {
                         comment!(self, "freeing local {}", local);
                         if state == BranchingState::Initialized {
                             self.write_load(ty, local)?;
-                            self.write_cnt(ty, false, HeapRefOp::Dec);
+                            self.write_cnt(ty, false, HeapRefOp::Dec)?;
                         } else if state == BranchingState::MaybeInitialized {
                             self.write_load(ty, local)?;
                             let init_jump = self.writer.jn0_sa_nc(123);
-                            self.write_discard(ty);
+                            self.write_discard(ty)?;
                             let uninit_jump = self.writer.jmp(123);
-                            let init_target = self.write_cnt(ty, false, HeapRefOp::Dec);
+                            let init_target = self.write_cnt(ty, false, HeapRefOp::Dec)?;
                             self.writer.overwrite(init_jump, |w| w.jn0_sa_nc(init_target));
                             let done_target = self.writer.position();
                             self.writer.overwrite(uninit_jump, |w| w.jmp(done_target));
@@ -1441,16 +1443,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes reference counting operation for given Typeable.
-    fn write_cnt(self: &Self, ty: &Type, nc: bool, op: HeapRefOp) -> StackAddress {
-        if ty.is_ref() {
-            let constructor = self.constructor(ty);
+    fn write_cnt(self: &Self, ty: &Type, nc: bool, op: HeapRefOp) -> CompileResult<StackAddress> {
+        Ok(if ty.is_ref() {
+            let constructor = self.constructor(ty)?;
             match nc {
                 true => select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op),
                 false => select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op),
             }
         } else {
             self.writer.position()
-        }
+        })
     }
 
     /// Writes instructions to compute member offset for access on a struct.
@@ -1477,7 +1479,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// and the replaced value will have its refcount decreased.
     fn write_heap_put(self: &Self, ty: &Type, is_new_heap_ref: bool) -> CompileResult<StackAddress> {
         Ok(if ty.is_ref() {
-            let constructor = self.constructor(ty);
+            let constructor = self.constructor(ty)?;
             if !is_new_heap_ref {
                 self.writer.heap_putx_replace(constructor)
             } else {
@@ -1496,7 +1498,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch a member of the struct whose reference is at the top of the stack.
     fn write_heap_fetch_member(self: &Self, container_type: &Type, result_type: &Type, offset: StackAddress) -> CompileResult<StackAddress> {
-        let constructor = self.constructor(container_type);
+        let constructor = self.constructor(container_type)?;
         Ok(if result_type.is_ref() {
             self.writer.heap_fetch_memberx(offset, constructor)
         } else {
@@ -1513,7 +1515,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch an element of the array whose reference is at the top of the stack.
     fn write_heap_fetch_element(self: &Self, container_type: &Type, result_type: &Type) -> CompileResult<StackAddress> {
-        let constructor = self.constructor(container_type);
+        let constructor = self.constructor(container_type)?;
         Ok(if result_type.is_ref() {
             self.writer.heap_fetch_elementx(constructor)
         } else {
@@ -1530,7 +1532,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch an element from the end of the array whose reference is at the top of the stack.
     fn write_heap_tail_element_nc(self: &Self, container_type: &Type, result_type: &Type) -> CompileResult<StackAddress> {
-        let constructor = self.constructor(container_type);
+        let constructor = self.constructor(container_type)?;
         Ok(match result_type.primitive_size() {
             1 => self.writer.heap_tail_element8_nc(constructor),
             2 => self.writer.heap_tail_element16_nc(constructor),
@@ -1545,8 +1547,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// and the replaced value will have its refcount decreased.
     fn write_store(self: &Self, ty: &Type, loc: FrameAddress, binding_id: Option<BindingId>) -> CompileResult<StackAddress> {
         Ok(if ty.is_ref() && binding_id.is_some() {
-            let constructor = self.constructor(ty);
-            match self.init_state.initialized(binding_id.unwrap()) {
+            let constructor = self.constructor(ty)?;
+            match self.init_state.initialized(binding_id.or_ice()?) {
                 BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
                 BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
                 BranchingState::MaybeInitialized => self.writer.storex_replace(loc, constructor), // used to be separate instruction, replace now handles both
@@ -1574,13 +1576,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Discard topmost stack value and drop temporaries for reference types.
-    fn write_discard(self: &Self, ty: &Type) {
+    fn write_discard(self: &Self, ty: &Type) -> CompileResult {
         if ty.is_ref() {
-            self.write_cnt(ty, true, HeapRefOp::Free);
+            self.write_cnt(ty, true, HeapRefOp::Free)?;
         }
         if ty.primitive_size() > 0 {
             self.writer.discard(ty.primitive_size());
         }
+        Ok(())
     }
 
     /// Swap topmost 2 stack values.
@@ -1612,7 +1615,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions for build-in len method.
     fn write_builtin(self: &Self, ty: &Type, builtin: BuiltinType) -> CompileResult<StackAddress>{
-        let type_id = self.id_mappings.types().find(|m| m.1 == ty).unwrap().0;
+        let type_id = self.id_mappings.types().find(|m| m.1 == ty).or_ice()?.0;
         #[allow(unreachable_patterns)]
         Ok(match (ty, builtin) {
             (&Type::Array(Array { type_id: inner_type_id @ Some(_) }), BuiltinType::Array(array_builtin)) => {
@@ -1907,12 +1910,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Type::u64 => self.writer.cltu64(),
                 Type::f32 => self.writer.cltf32(),
                 Type::f64 => self.writer.cltf64(),
-                _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+                _ => self.ice_ty(&format!("Unsupported operation for type {ty}"))?,
             }
         } else if ty.is_string() {
             self.writer.string_clt()
         } else {
-            panic!("unsupported type")
+            self.ice_ty(&format!("Unsupported type {ty} for lt operation"))?
         })
     }
 
@@ -1935,19 +1938,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_clte()
         } else {
-            panic!("unsupported type")
+            self.ice_ty(&format!("Unsupported type {ty} for lt operation"))?
         })
     }
 }
 
-/// Itsy-trait support functions.
+/// Itsy-trait support functions. // TODO: holy crap those signatures need some custom types
 impl<T> Compiler<T> {
 
     /// Computes the vtable function base-offset for the given function. To get the final offset the dynamic types trait_implementor_index * sizeof(StackAddress) has to be added.
-    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> StackAddress {
+    fn vtable_function_offset(self: &Self, function_id: FunctionId) -> CompileResult<StackAddress> {
         let trait_function_id = *self.trait_function_implementors.get(&function_id).unwrap_or(&function_id);
-        let function_index = *self.trait_function_indices.get(&trait_function_id).expect("Invalid trait function id");
-        self.trait_vtable_base + (function_index as usize * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress
+        let function_index = *self.trait_function_indices.get(&trait_function_id).or_ice_msg("Invalid trait function id")?;
+        Ok(self.trait_vtable_base + (function_index as usize * size_of::<StackAddress>() * self.trait_implementor_indices.len()) as StackAddress)
     }
 
     /// Generate flat list of all traits and their functions
@@ -1979,18 +1982,18 @@ impl<T> Compiler<T> {
     }
 
     /// Map trait implementor function ids to trait function ids
-    fn map_trait_function_implementors(trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> UnorderedMap<FunctionId, FunctionId> {
+    fn map_trait_function_implementors(trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> CompileResult<UnorderedMap<FunctionId, FunctionId>> {
         let mut trait_function_implementors = UnorderedMap::new();
         for &(trait_type_id, function_name, trait_function_id) in trait_functions.iter() {
             for &(_, implementor_traits) in trait_implementors.iter() {
                 if let Some(impl_trait) = implementor_traits.get(&trait_type_id) {
                     if let Some(&implementor_function_id) = impl_trait.functions.get(function_name) {
-                        trait_function_implementors.insert(implementor_function_id.expect("Unresolved implementor function"), trait_function_id);
+                        trait_function_implementors.insert(implementor_function_id.or_ice_msg("Unresolved implementor function")?, trait_function_id);
                     }
                 }
             }
         }
-        trait_function_implementors
+        Ok(trait_function_implementors)
     }
 
     /// Create table of all trait implementors/concrete function id permutations (implementor or trait-provided).
