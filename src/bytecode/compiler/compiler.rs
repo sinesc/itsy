@@ -1025,11 +1025,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Generates an internal compiler error.
     fn ice<R>(self: &Self, item: &dyn Positioned, message: &str) -> CompileResult<R> {
+        #[cfg(feature="ice_panics")]
+        panic!("Internal compiler error: {} at position {:?}", message, item.position());
+        #[cfg(not(feature="ice_panics"))]
         Err(CompileError::new(item, CompileErrorKind::Internal(message.to_string()), &self.module_path))
     }
 
     /// Generates an internal compiler error.
     fn ice_ty<R>(self: &Self, message: &str) -> CompileResult<R> {
+        #[cfg(feature="ice_panics")]
+        panic!("Internal compiler error: {}", message);
+        #[cfg(not(feature="ice_panics"))]
         Err(CompileError::unpositioned(CompileErrorKind::Internal(message.to_string()), &self.module_path))
     }
 

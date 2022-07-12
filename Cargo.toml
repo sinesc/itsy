@@ -16,6 +16,7 @@ compiler = [ "nom" ]
 runtime = [ ]
 debugging = [ ]
 symbols = [ ]
+ice_panics = [ ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }

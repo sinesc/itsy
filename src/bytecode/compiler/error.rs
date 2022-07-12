@@ -51,3 +51,40 @@ impl Display for CompileError {
 }
 
 pub type CompileResult<T = ()> = Result<T, CompileError>;
+
+/// Trait to convert an Option to a Result compatible with ResolveResult
+pub(crate) trait UnwrapOrICE<T> {
+    fn or_ice_msg(self: Self, message: &str) -> CompileResult<T>;
+    fn or_ice(self: Self) -> CompileResult<T>;
+}
+
+impl<T> UnwrapOrICE<T> for Option<T> {
+    fn or_ice_msg(self: Self, message: &str) -> CompileResult<T> {
+        if let Some(result) = self {
+            Ok(result)
+        } else {
+            #[cfg(feature="ice_panics")]
+            panic!("Internal compiler error: {}", message);
+            #[cfg(not(feature="ice_panics"))]
+            Err(CompileError {
+                kind: CompileErrorKind::Internal(message.to_string()),
+                position: Position(0),
+                module_path: "".to_string(),
+            })
+        }
+    }
+    fn or_ice(self: Self) -> CompileResult<T> {
+        if let Some(result) = self {
+            Ok(result)
+        } else {
+            #[cfg(feature="ice_panics")]
+            panic!("Internal compiler error: Expectation failed");
+            #[cfg(not(feature="ice_panics"))]
+            Err(CompileError {
+                kind: CompileErrorKind::Internal("Expectation failed".to_string()),
+                position: Position(0),
+                module_path: "".to_string(),
+            })
+        }
+    }
+}
