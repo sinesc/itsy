@@ -713,7 +713,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.create_stack_frame_block(item.block.as_ref().or_ice()?, &mut frame)?;
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2);
         if var_size > 0 {
-            self.writer.reserve(var_size as u16);
+            self.writer.reserve(var_size as FrameAddress);
         }
 
         // store call info required to compile calls to this function and fix calls that were made before the function address was known

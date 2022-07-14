@@ -212,9 +212,9 @@ impl Heap {
     /// Free a chunk of memory.
     pub fn free_item(self: &mut Self, index: StackAddress) {
         debug_assert_index!(self, index);
-        if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_SMALL {
+        if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_SMALL as usize {
             self.free_small.push(index);
-        } else if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_LARGE {
+        } else if self.objects[index as usize].data.capacity() <= Self::MAX_SIZE_LARGE as usize {
             self.free_medium.push(index);
         } else {
             self.free_large.push(index);

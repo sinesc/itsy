@@ -2,7 +2,7 @@
 macro_rules! impl_opcodes {
     // Read from slice, either one or multiple bytes
     (@read_bytes u8, $from:expr, $counter:expr) => ( {
-        let dest = $from.instructions[$counter];
+        let dest = $from.instructions[$counter as usize];
         $counter += 1;
         dest
     });
@@ -76,8 +76,10 @@ macro_rules! impl_opcodes {
         )+
     ) => {
 
+        type OpCodeType = u16;
+
         #[allow(non_camel_case_types)]
-        #[repr(u8)]
+        #[repr(u16)]
         #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         $( $( #[ $enum_attr ] )* )?
         pub enum OpCode {
@@ -100,17 +102,18 @@ macro_rules! impl_opcodes {
         #[allow(non_upper_case_globals)]
         #[cfg(feature="runtime")]
         mod opcodes {
+            use super::OpCodeType;
             $(
                 $( #[ $attr ] )*
                 // single opcode
                 $(
-                    pub(super) const $name: u8 = super::OpCode::$name as u8;
+                    pub(super) const $name: OpCodeType = super::OpCode::$name as OpCodeType;
                 )?
                 // opcode variants
                 $(
                     $(
                         $( #[$vattr] )*
-                        pub(super) const $vname: u8 = super::OpCode::$vname as u8;
+                        pub(super) const $vname: OpCodeType = super::OpCode::$vname as OpCodeType;
                     )+
                 )?
             )+
@@ -125,7 +128,7 @@ macro_rules! impl_opcodes {
                 $(
                     pub fn $name(self: &Self, $($arg_name: impl_opcodes!(@map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
-                        impl_opcodes!(@write_arg u8, OpCode::$name as u8, self);
+                        impl_opcodes!(@write_arg OpCodeType, OpCode::$name as OpCodeType, self);
                         $( impl_opcodes!(@write_arg $arg_type, $arg_name, self); )*
                         insert_pos as StackAddress
                     }
@@ -137,7 +140,7 @@ macro_rules! impl_opcodes {
                         $( #[ $vattr ] )*
                         pub fn $vname(self: &Self, $( $varg_name: impl_opcodes!(@map_writer_type $vtype_name) ),* ) -> StackAddress {
                             let insert_pos = self.position();
-                            impl_opcodes!(@write_arg u8, OpCode::$vname as u8, self);
+                            impl_opcodes!(@write_arg OpCodeType, OpCode::$vname as OpCodeType, self);
                             $(
                                 impl_opcodes!(@write_arg $vtype_name, $varg_name, self);
                             )*
@@ -155,7 +158,7 @@ macro_rules! impl_opcodes {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex};
                 loop {
-                    let instruction = impl_opcodes!(@read_arg u8, self, self.pc);
+                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, self.pc);
                     #[allow(unused_doc_comments)]
                     match instruction {
                         $(
@@ -197,7 +200,7 @@ macro_rules! impl_opcodes {
             /// Execute the next bytecode from the VMs code buffer.
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex};
-                let instruction = impl_opcodes!(@read_arg u8, self, self.pc);
+                let instruction = impl_opcodes!(@read_arg OpCodeType, self, self.pc);
                 #[allow(unused_doc_comments)]
                 match instruction {
                     $(
@@ -237,7 +240,7 @@ macro_rules! impl_opcodes {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg u8, self, position);
+                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, position);
                     match instruction {
                         $(
                             $( #[ $attr ] )*
@@ -267,13 +270,13 @@ macro_rules! impl_opcodes {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg u8, self, position);
+                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, position);
                     #[allow(unreachable_patterns)]
                     #[allow(unused_doc_comments)]
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::rustcall => {
-                            let mut result = format!("{:?} {} ", position - 1, stringify!(rustcall));
+                            let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(rustcall));
                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
                             Some((result, position))
                         }

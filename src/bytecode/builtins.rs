@@ -192,7 +192,7 @@ impl_builtins! {
                 data.resize(data_len + ELEMENT_SIZE, 0);
                 let index = index as usize;
                 data.copy_within(index * ELEMENT_SIZE .. data_len, (index + 1) * ELEMENT_SIZE);
-                vm.heap.store(heap_index, index * ELEMENT_SIZE, value);
+                vm.heap.store(heap_index, (index * ELEMENT_SIZE) as StackAddress, value);
             }
 
             fn array_insertx(&mut vm + constructor, this: Array, index: u64, value: HeapRef) {
@@ -203,7 +203,7 @@ impl_builtins! {
                 data.resize(data_len + ELEMENT_SIZE, 0);
                 let index = index as usize;
                 data.copy_within(index * ELEMENT_SIZE .. data_len, (index + 1) * ELEMENT_SIZE);
-                vm.heap.store(heap_index, index * ELEMENT_SIZE, value);
+                vm.heap.store(heap_index, (index * ELEMENT_SIZE) as StackAddress, value);
                 vm.refcount_value(value, constructor, HeapRefOp::Inc);
             }
         }
@@ -251,8 +251,8 @@ impl_builtins! {
                 let index = this.index();
                 let num_elements = vm.heap.item(index).data.len() / ELEMENT_SIZE;
                 for i in 0..num_elements/2 {
-                    let left_offset = i * ELEMENT_SIZE;
-                    let right_offset = (num_elements - i - 1) * ELEMENT_SIZE;
+                    let left_offset = (i * ELEMENT_SIZE) as StackAddress;
+                    let right_offset = ((num_elements - i - 1) * ELEMENT_SIZE) as StackAddress;
                     let left: T = vm.heap.load(index, left_offset);
                     let right: T = vm.heap.load(index, right_offset);
                     vm.heap.store(index, left_offset, right);
@@ -265,8 +265,8 @@ impl_builtins! {
                 let index = this.index();
                 let num_elements = vm.heap.item(index).data.len() / ELEMENT_SIZE;
                 for i in 0..num_elements/2 {
-                    let left_offset = i * ELEMENT_SIZE;
-                    let right_offset = (num_elements - i - 1) * ELEMENT_SIZE;
+                    let left_offset = (i * ELEMENT_SIZE) as StackAddress;
+                    let right_offset = ((num_elements - i - 1) * ELEMENT_SIZE) as StackAddress;
                     let left: HeapRef = vm.heap.load(index, left_offset);
                     let right: HeapRef = vm.heap.load(index, right_offset);
                     vm.heap.store(index, left_offset, right);
