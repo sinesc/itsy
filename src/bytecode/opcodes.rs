@@ -185,18 +185,6 @@ impl_opcodes!{
         self.stack.push(value);
     }
 
-    /// Decrements the stackvalue at given stackframe-offset and pushes the previous value onto the stack.
-    fn <
-        postdeci8<T: i8>(loc: FrameAddress, decr: i8),
-        postdeci16<T: i16>(loc: FrameAddress, decr: i8),
-        postdeci32<T: i32>(loc: FrameAddress, decr: i8),
-        postdeci64<T: i64>(loc: FrameAddress, decr: i8)
-    >(&mut self) {
-        let value: T = self.stack.load_fp(loc);
-        self.stack.store_fp(loc, T::wrapping_sub(value, decr as T));
-        self.stack.push(value);
-    }
-
     /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
     fn index(&mut self, element_size: u8) {
         let element_index: StackAddress = self.stack.pop();
@@ -456,8 +444,8 @@ impl_opcodes!{
 
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
-        divf32<T: f32>() [ check ],
-        divf64<T: f64>() [ check ],
+        divf32<T: f32>(),
+        divf64<T: f64>(),
     >(&mut self) {
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
@@ -863,34 +851,6 @@ impl_opcodes!{
         self.refcount_value(a, constructor, HeapRefOp::Free);
         self.refcount_value(b, constructor, HeapRefOp::Free);
     }*/
-
-    /// Decrements the stackvalue at given stackframe-offset and pushes the result onto the stack.
-    fn <
-        heap_predeci8<T: i8>(decr: i8),
-        heap_predeci16<T: i16>(decr: i8),
-        heap_predeci32<T: i32>(decr: i8),
-        heap_predeci64<T: i64>(decr: i8)
-    >(&mut self) {
-        let item: HeapRef = self.stack.pop();
-        let mut value: T = self.heap.read(item);
-        value = T::wrapping_sub(value, decr as T);
-        self.heap.write(item, value);
-        self.stack.push(value); // push after inc/dec
-    }
-
-    /// Decrements the stackvalue at given stackframe-offset and pushes the result onto the stack.
-    fn <
-        heap_postdeci8<T: i8>(decr: i8),
-        heap_postdeci16<T: i16>(decr: i8),
-        heap_postdeci32<T: i32>(decr: i8),
-        heap_postdeci64<T: i64>(decr: i8)
-    >(&mut self) {
-        let item: HeapRef = self.stack.pop();
-        let mut value: T = self.heap.read(item);
-        self.stack.push(value); // push before inc/dec
-        value = T::wrapping_sub(value, decr as T);
-        self.heap.write(item, value);
-    }
 
     /// Pop a heap reference and push the heap value at its current offset onto the stack.
     fn <

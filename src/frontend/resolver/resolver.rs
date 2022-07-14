@@ -1151,7 +1151,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
                 self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
             },
-            UO::Plus | UO::Minus | UO::IncBefore | UO::DecBefore | UO::IncAfter | UO::DecAfter => {
+            UO::Plus | UO::Minus => {
                 if let Some(type_id) = item.expr.type_id(self) {
                     self.set_type_id(item, type_id)?;
                 }

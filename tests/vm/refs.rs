@@ -79,38 +79,6 @@ fn assign_heap_var_target() {
 }
 
 #[test]
-fn heap_postfix_suffix() {
-    let result = run("
-        struct Test {
-            field: u8,
-        }
-        fn main() {
-            let x = [ 0u8 ];
-            let y = x[0]++;     // used result
-            let z = ++x[0];
-            x[0]++;             // unused result
-            ++x[0];
-            ret_u8(x[0]);
-            ret_u8(y);
-            ret_u8(z);
-
-            let a = Test { field: 0 };
-            let b = a.field++;  // used result
-            let c = ++a.field;
-            a.field++;          // unused result
-            ++a.field;
-            ret_u8(a.field);
-            ret_u8(b);
-            ret_u8(c);
-        }
-    ");
-    assert_all(&result, &[
-        4u8, 0, 2,
-        4u8, 0, 2,
-    ]);
-}
-
-#[test]
 fn heap_return() {
     let result = run(stringify!(
         struct Inner {

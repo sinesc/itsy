@@ -1405,10 +1405,7 @@ impl Resolvable for UnaryOp {
 
 impl Display for UnaryOp {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.op {
-            UnaryOperator::DecAfter | UnaryOperator::DecBefore => write!(f, "{}{}", self.expr, self.op),
-            _ => write!(f, "{}{}", self.op, self.expr),
-        }
+        write!(f, "{}{}", self.op, self.expr)
     }
 }
 
@@ -1426,24 +1423,17 @@ pub enum UnaryOperator {
     // positive/negavtive
     Plus,
     Minus,
-    // inc/dec
-    IncBefore, DecBefore,
-    IncAfter, DecAfter,
 }
 
 impl UnaryOperator {
     pub fn prefix_from_string(op: &str) -> Self {
         match op {
             "!" => UnaryOperator::Not,
-            "++" => UnaryOperator::IncBefore,
-            "--" => UnaryOperator::DecBefore,
             _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
         }
     }
     pub fn suffix_from_string(op: &str) -> Self {
         match op {
-            "++" => UnaryOperator::IncAfter,
-            "--" => UnaryOperator::DecAfter,
             _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
         }
     }
@@ -1455,8 +1445,6 @@ impl Display for UnaryOperator {
             UnaryOperator::Not => "!",
             UnaryOperator::Plus => "+",
             UnaryOperator::Minus => "-",
-            UnaryOperator::IncBefore | UnaryOperator::IncAfter => "++",
-            UnaryOperator::DecBefore | UnaryOperator::DecAfter => "--",
         })
     }
 }

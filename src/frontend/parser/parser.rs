@@ -538,30 +538,6 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     fn parens(i: Input<'_>) -> Output<Expression> {
         ws(delimited(char('('), expression, char(')')))(i)
     }
-    fn prefix(i: Input<'_>) -> Output<UnaryOp> {
-        let position = i.position();
-        map(
-            pair(ws(alt((tag("++"), tag("--")))), ws(assignable)),
-            move |m| UnaryOp {
-                position: position,
-                op      : UnaryOperator::prefix_from_string(*m.0),
-                expr    : m.1,
-                type_id : None,
-            }
-        )(i)
-    }
-    fn suffix(i: Input<'_>) -> Output<UnaryOp> {
-        let position = i.position();
-        map(
-            pair(ws(assignable), ws(alt((tag("++"), tag("--"))))),
-            move |m| UnaryOp {
-                position: position,
-                op      : UnaryOperator::suffix_from_string(*m.1),
-                expr    : m.0,
-                type_id : None,
-            }
-        )(i)
-    }
     fn operand(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         ws(alt((
@@ -570,8 +546,6 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
             parens,
-            map(suffix, |m| Expression::UnaryOp(Box::new(m))),
-            map(prefix, |m| Expression::UnaryOp(Box::new(m))),
             map(call_ident, |m| Expression::Call(m)),
             map(call_path, |m| Expression::Call(m)),
             map(variant_literal, |m| Expression::Literal(m)),

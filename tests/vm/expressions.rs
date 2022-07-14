@@ -125,23 +125,42 @@ fn numerics() {
 }
 
 #[test]
-fn op_order_gt() {
+fn unsigned_comparisons() {
     let result = run("
         let x = 1u8;
-        ret_bool(x*3 > --x*3);
+        ret_bool(x*3 > 1+x*3);
+        ret_bool(x*3 < 1+x*3);
+        ret_bool(x*3 < x*3);
+        ret_bool(x*3 > x*3);
+        ret_bool(x*3 >= x*3);
+        ret_bool(x*3 <= x*3);
         ret_bool(x == 0);
     ");
-    assert_all(&result, &[ true, true ]);
+    assert_all(&result, &[ false, true, false, false, true, true, false ]);
 }
 
 #[test]
-fn op_order_lt() {
+fn signed_comparisons() {
     let result = run("
-        let y = 1u8;
-        ret_bool(y*3 < ++y*3);
-        ret_bool(y == 2);
+        let x = 1i8;
+        ret_bool(x*3 > 1+x*3);
+        ret_bool(x*3 < 1+x*3);
+        ret_bool(x*-1 < x);
+        ret_bool(x < x*-1);
+        ret_bool(x == 0);
+        x *= -1;
+        ret_bool(x*3 > 1+x*3);
+        ret_bool(x*3 >= 1+x*3);
+        ret_bool(x*3 < 1+x*3);
+        ret_bool(x*3 <= 1+x*3);
+        ret_bool(x*-1 < x);
+        ret_bool(x < x*-1);
+        ret_bool(x == 0);
     ");
-    assert_all(&result, &[ true, true ]);
+    assert_all(&result, &[
+        false,       true,         true, false, false,
+        false, false, true, true, false, true, false,
+    ]);
 }
 
 #[test]
@@ -171,16 +190,4 @@ fn assign_stack_target() {
         ret_u8(value);
     ));
     assert_all(&result, &[ 2u8, 10, 12, 22 ]);
-}
-
-#[test]
-fn postfix_suffix() {
-    let result = run("
-        let val = 0i8;
-        ret_i8(val++);
-        ret_i8(val--);
-        ret_i8(++val);
-        ret_i8(--val);
-    ");
-    assert_all(&result, &[ 0i8, 1, 1, 0 ]);
 }
