@@ -285,14 +285,14 @@ impl_builtins! {
         /// The smallest value that can be represented by this integer type.
         MIN() -> Self {
             fn <
-                int_mini8<T: i8>() -> i8,
-                int_mini16<T: i16>() -> i16,
-                int_mini32<T: i32>() -> i32,
-                int_mini64<T: i64>() -> i64,
-                int_minu8<T: u8>() -> u8,
-                int_minu16<T: u16>() -> u16,
-                int_minu32<T: u32>() -> u32,
-                int_minu64<T: u64>() -> u64,
+                int_MINi8<T: i8>() -> i8,
+                int_MINi16<T: i16>() -> i16,
+                int_MINi32<T: i32>() -> i32,
+                int_MINi64<T: i64>() -> i64,
+                int_MINu8<T: u8>() -> u8,
+                int_MINu16<T: u16>() -> u16,
+                int_MINu32<T: u32>() -> u32,
+                int_MINu64<T: u64>() -> u64,
             >(&mut vm) {
                 T::MIN
             }
@@ -301,14 +301,14 @@ impl_builtins! {
         /// The largest value that can be represented by this integer type.
         MAX() -> Self {
             fn <
-                int_maxi8<T: i8>() -> i8,
-                int_maxi16<T: i16>() -> i16,
-                int_maxi32<T: i32>() -> i32,
-                int_maxi64<T: i64>() -> i64,
-                int_maxu8<T: u8>() -> u8,
-                int_maxu16<T: u16>() -> u16,
-                int_maxu32<T: u32>() -> u32,
-                int_maxu64<T: u64>() -> u64,
+                int_MAXi8<T: i8>() -> i8,
+                int_MAXi16<T: i16>() -> i16,
+                int_MAXi32<T: i32>() -> i32,
+                int_MAXi64<T: i64>() -> i64,
+                int_MAXu8<T: u8>() -> u8,
+                int_MAXu16<T: u16>() -> u16,
+                int_MAXu32<T: u32>() -> u32,
+                int_MAXu64<T: u64>() -> u64,
             >(&mut vm) {
                 T::MAX
             }
@@ -317,14 +317,14 @@ impl_builtins! {
         /// The size of this integer type in bits.
         BITS() -> u32 {
             fn <
-                int_bitsi8<T: i8>() -> u32,
-                int_bitsi16<T: i16>() -> u32,
-                int_bitsi32<T: i32>() -> u32,
-                int_bitsi64<T: i64>() -> u32,
-                int_bitsu8<T: u8>() -> u32,
-                int_bitsu16<T: u16>() -> u32,
-                int_bitsu32<T: u32>() -> u32,
-                int_bitsu64<T: u64>() -> u32,
+                int_BITSi8<T: i8>() -> u32,
+                int_BITSi16<T: i16>() -> u32,
+                int_BITSi32<T: i32>() -> u32,
+                int_BITSi64<T: i64>() -> u32,
+                int_BITSu8<T: u8>() -> u32,
+                int_BITSu16<T: u16>() -> u32,
+                int_BITSu32<T: u32>() -> u32,
+                int_BITSu64<T: u64>() -> u32,
             >(&mut vm) {
                 T::BITS
             }
@@ -468,6 +468,38 @@ impl_builtins! {
                 int_signumi64<T: i64>(this: i64) -> i64,
             >(&mut vm) {
                 this.signum()
+            }
+        }
+
+        /// Returns the minimum of the two numbers.
+        min(self: Self, other: Self) -> Self {
+            fn <
+                int_mini8<T: i8>(this: i8, other: i8) -> i8,
+                int_mini16<T: i16>(this: i16, other: i16) -> i16,
+                int_mini32<T: i32>(this: i32, other: i32) -> i32,
+                int_mini64<T: i64>(this: i64, other: i64) -> i64,
+                int_minu8<T: u8>(this: u8, other: u8) -> u8,
+                int_minu16<T: u16>(this: u16, other: u16) -> u16,
+                int_minu32<T: u32>(this: u32, other: u32) -> u32,
+                int_minu64<T: u64>(this: u64, other: u64) -> u64,
+            >(&mut vm) {
+                this.min(other)
+            }
+        }
+
+        /// Returns the maximum of the two numbers.
+        max(self: Self, other: Self) -> Self {
+            fn <
+                int_maxi8<T: i8>(this: i8, other: i8) -> i8,
+                int_maxi16<T: i16>(this: i16, other: i16) -> i16,
+                int_maxi32<T: i32>(this: i32, other: i32) -> i32,
+                int_maxi64<T: i64>(this: i64, other: i64) -> i64,
+                int_maxu8<T: u8>(this: u8, other: u8) -> u8,
+                int_maxu16<T: u16>(this: u16, other: u16) -> u16,
+                int_maxu32<T: u32>(this: u32, other: u32) -> u32,
+                int_maxu64<T: u64>(this: u64, other: u64) -> u64,
+            >(&mut vm) {
+                this.max(other)
             }
         }
 
@@ -623,8 +655,8 @@ impl_builtins! {
         /// Machine epsilon value for float type.
         EPSILON() -> Self {
             fn <
-                float_epsilon32<T: f32>() -> f32,
-                float_epsilon64<T: f64>() -> f64,
+                float_EPSILON32<T: f32>() -> f32,
+                float_EPSILON64<T: f64>() -> f64,
             >(&mut vm) {
                 T::EPSILON
             }
@@ -633,8 +665,8 @@ impl_builtins! {
         /// Smallest finite float value.
         MIN() -> Self {
             fn <
-                float_min32<T: f32>() -> f32,
-                float_min64<T: f64>() -> f64,
+                float_MIN32<T: f32>() -> f32,
+                float_MIN64<T: f64>() -> f64,
             >(&mut vm) {
                 T::MIN
             }
@@ -643,8 +675,8 @@ impl_builtins! {
         /// Smallest positive normal float value.
         MIN_POSITIVE() -> Self {
             fn <
-                float_min_positive32<T: f32>() -> f32,
-                float_min_positive64<T: f64>() -> f64,
+                float_MIN_POSITIVE32<T: f32>() -> f32,
+                float_MIN_POSITIVE64<T: f64>() -> f64,
             >(&mut vm) {
                 T::MIN_POSITIVE
             }
@@ -653,8 +685,8 @@ impl_builtins! {
         /// Largest finite float value.
         MAX() -> Self {
             fn <
-                float_max32<T: f32>() -> f32,
-                float_max64<T: f64>() -> f64,
+                float_MAX32<T: f32>() -> f32,
+                float_MAX64<T: f64>() -> f64,
             >(&mut vm) {
                 T::MAX
             }
@@ -663,8 +695,8 @@ impl_builtins! {
         /// Not a Number (NaN).
         NAN() -> Self {
             fn <
-                float_nan32<T: f32>() -> f32,
-                float_nan64<T: f64>() -> f64,
+                float_NAN32<T: f32>() -> f32,
+                float_NAN64<T: f64>() -> f64,
             >(&mut vm) {
                 T::NAN
             }
@@ -673,8 +705,8 @@ impl_builtins! {
         /// Infinity (∞).
         INFINITY() -> Self {
             fn <
-                float_infinity32<T: f32>() -> f32,
-                float_infinity64<T: f64>() -> f64,
+                float_INFINITY32<T: f32>() -> f32,
+                float_INFINITY64<T: f64>() -> f64,
             >(&mut vm) {
                 T::INFINITY
             }
@@ -683,8 +715,8 @@ impl_builtins! {
         /// Negative infinity (−∞).
         NEG_INFINITY() -> Self {
             fn <
-                float_neg_infinity32<T: f32>() -> f32,
-                float_neg_infinity64<T: f64>() -> f64,
+                float_NEG_INFINITY32<T: f32>() -> f32,
+                float_NEG_INFINITY64<T: f64>() -> f64,
             >(&mut vm) {
                 T::NEG_INFINITY
             }
@@ -973,8 +1005,8 @@ impl_builtins! {
         /// Returns true if this value is NaN.
         is_nan(self: Self) -> bool {
             fn <
-                float_is_nan_32<T: f32>(this: f32) -> bool,
-                float_is_nan_64<T: f64>(this: f64) -> bool,
+                float_is_nan32<T: f32>(this: f32) -> bool,
+                float_is_nan64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_nan()
             }
@@ -983,8 +1015,8 @@ impl_builtins! {
         /// Returns true if this value is positive infinity or negative infinity, and false otherwise.
         is_infinite(self: Self) -> bool {
             fn <
-                float_is_infinite_32<T: f32>(this: f32) -> bool,
-                float_is_infinite_64<T: f64>(this: f64) -> bool,
+                float_is_infinite32<T: f32>(this: f32) -> bool,
+                float_is_infinite64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_infinite()
             }
@@ -993,8 +1025,8 @@ impl_builtins! {
         /// Returns true if this number is neither infinite nor NaN.
         is_finite(self: Self) -> bool {
             fn <
-                float_is_finite_32<T: f32>(this: f32) -> bool,
-                float_is_finite_64<T: f64>(this: f64) -> bool,
+                float_is_finite32<T: f32>(this: f32) -> bool,
+                float_is_finite64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_finite()
             }
@@ -1003,8 +1035,8 @@ impl_builtins! {
         /// Returns true if the number is subnormal.
         is_subnormal(self: Self) -> bool {
             fn <
-                float_is_subnormal_32<T: f32>(this: f32) -> bool,
-                float_is_subnormal_64<T: f64>(this: f64) -> bool,
+                float_is_subnormal32<T: f32>(this: f32) -> bool,
+                float_is_subnormal64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_subnormal()
             }
@@ -1013,8 +1045,8 @@ impl_builtins! {
         /// Returns true if the number is neither zero, infinite, subnormal, or NaN.
         is_normal(self: Self) -> bool {
             fn <
-                float_is_normal_32<T: f32>(this: f32) -> bool,
-                float_is_normal_64<T: f64>(this: f64) -> bool,
+                float_is_normal32<T: f32>(this: f32) -> bool,
+                float_is_normal64<T: f64>(this: f64) -> bool,
             >(&mut vm) {
                 this.is_normal()
             }
@@ -1023,8 +1055,8 @@ impl_builtins! {
         /// Takes the reciprocal (inverse) of a number, 1/x.
         recip(self: Self) -> Self {
             fn <
-                float_recip_32<T: f32>(this: f32) -> f32,
-                float_recip_64<T: f64>(this: f64) -> f64,
+                float_recip32<T: f32>(this: f32) -> f32,
+                float_recip64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.recip()
             }
@@ -1033,8 +1065,8 @@ impl_builtins! {
         /// Converts radians to degrees.
         to_degrees(self: Self) -> Self {
             fn <
-                float_to_degrees_32<T: f32>(this: f32) -> f32,
-                float_to_degrees_64<T: f64>(this: f64) -> f64,
+                float_to_degrees32<T: f32>(this: f32) -> f32,
+                float_to_degrees64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.to_degrees()
             }
@@ -1043,8 +1075,8 @@ impl_builtins! {
         /// Converts degrees to radians.
         to_radians(self: Self) -> Self {
             fn <
-                float_to_radians_32<T: f32>(this: f32) -> f32,
-                float_to_radians_64<T: f64>(this: f64) -> f64,
+                float_to_radians32<T: f32>(this: f32) -> f32,
+                float_to_radians64<T: f64>(this: f64) -> f64,
             >(&mut vm) {
                 this.to_radians()
             }
@@ -1053,8 +1085,8 @@ impl_builtins! {
         /// Returns the minimum of the two numbers.
         min(self: Self, other: Self) -> Self {
             fn <
-                float_min_32<T: f32>(this: f32, other: f32) -> f32,
-                float_min_64<T: f64>(this: f64, other: f64) -> f64,
+                float_min32<T: f32>(this: f32, other: f32) -> f32,
+                float_min64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.min(other)
             }
@@ -1063,8 +1095,8 @@ impl_builtins! {
         /// Returns the maximum of the two numbers.
         max(self: Self, other: Self) -> Self {
             fn <
-                float_max_32<T: f32>(this: f32, other: f32) -> f32,
-                float_max_64<T: f64>(this: f64, other: f64) -> f64,
+                float_max32<T: f32>(this: f32, other: f32) -> f32,
+                float_max64<T: f64>(this: f64, other: f64) -> f64,
             >(&mut vm) {
                 this.max(other)
             }
@@ -1077,8 +1109,8 @@ impl_builtins! {
         /// Returns 0.0 and halts the VM if `min > max`, `min` is NaN, or `max` is NaN. The VM is resumable.
         clamp(self: Self, min: Self, max: Self) -> Self {
             fn <
-                float_clamp_32<T: f32>(this: f32, min: f32, max: f32) -> f32,
-                float_clamp_64<T: f64>(this: f64, min: f64, max: f64) -> f64,
+                float_clamp32<T: f32>(this: f32, min: f32, max: f32) -> f32,
+                float_clamp64<T: f64>(this: f64, min: f64, max: f64) -> f64,
             >(&mut vm) {
                 if min.is_nan() || max.is_nan() || min > max {
                     vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);

@@ -387,7 +387,7 @@ macro_rules! impl_builtins {
 
                         $( // builtin variants
                             $(
-                                #[allow(unused_variables, unused_assignments, unused_imports)]
+                                #[allow(unused_variables, unused_imports, non_snake_case)]
                                 #[cfg(feature="runtime")]
                                 pub(super) fn $vname<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $varg_name : impl_builtins!(@map_ref_type $varg_type) ),* ) $( -> impl_builtins!(@map_ref_type $vret_type) )? {
                                     use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};

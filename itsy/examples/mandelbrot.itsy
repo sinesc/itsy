@@ -1,18 +1,55 @@
-/**
- * Mandelbrot fractal example. CTRL+C to exit.
+/*
+ * Mandelbrot fractal example.
  */
 
+// Mandelbrot parameters for a single frame.
 struct Frame {
     max_iterations: u32,
     zoom: f64,
     interp: f64,
 }
 
+// A target coordinate to zoom into.
 struct Coordinate {
     x: f64,
     y: f64,
 }
 
+fn main() {
+    // clear screen
+    let escape = String::from_ascii(27);
+    print("{escape}[2J"); // print is provided by userdefined rust api examples/shared/mod.rs
+
+    let runtime = 0;
+    let angle = 0.0;
+    let frames = generate_frame_parameters();
+    let chars = [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ];
+
+    let coordinates = [
+        Coordinate { x: 0.32570659879, y: 0.0470399495155 },
+        Coordinate { x: -0.1081742949375, y: 0.905426290979918 },
+        Coordinate { x: -0.749179973998915, y: 0.100100499971 },
+    ];
+
+    while true {
+        for coordinate in coordinates {
+            for _ in 0..2 {
+                for frame in frames {
+                    render(chars, frame, coordinate, angle, runtime, 80, 24);
+                    runtime = wait_frame(1000 / 60); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
+                    angle += 0.015;
+                }
+                frames.reverse();
+            }
+        }
+    }
+}
+
+/*
+ * Render mandelbrot set for the given parameters into a string. Points that fall into the set in less than
+ * max_iterations - chars.len() iterations will be rendered as whitespace, the remaining points with a character based
+ * on the number of required iterations.
+ */
 fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64) -> String {
 
     let start_depth = if depth > chars.len() as u32 { depth - chars.len() as u32 } else { 0 };
@@ -31,7 +68,7 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64,
             let ry = (x - center_x) * angle.sin() + (y - center_y) * angle.cos() + center_y;
             while n < depth {
                 let i_tmp = i * i;
-                if 4.0 < r * r + i_tmp {
+                if 4.0 <= r * r + i_tmp {
                     break;
                 }
                 i = 2.0 * r * i + ry;
@@ -49,6 +86,26 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64,
 }
 
 /*
+ * Renders the mandelbrot set with some additional information to the console.
+ */
+fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32) {
+    // move cursor to top left position and print fractal
+    let esc = String::from_ascii(27);
+    let x = coordinate.x * frame.interp;
+    let y = coordinate.y * frame.interp;
+    print("{esc}[1;1H" + mandelbrot(chars, width, height, frame.max_iterations, frame.zoom, x, y, angle));
+    print("{esc}[1;1HMandelbrot set {x.fmt(14)} {y.fmt(14)}i");
+    let exit_str = "{runtime}ms/f, CTRL+C to exit";
+    print("{esc}[1;{width-exit_str.len() as u32+1}H{exit_str}");
+    let zoom_str = (1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 });
+    let num_epsilon = frame.zoom / f64::EPSILON();
+    let epsilon_str = num_epsilon.fmt(if num_epsilon < 10.0 { 2 } else { 0 });
+    let render_low = i32::max(frame.max_iterations as i32 - chars.len() as i32, 0);
+    print("{esc}[{height};1Hmax. iter. {frame.max_iterations} (whitespace < {render_low}), zoom {zoom_str}x ({epsilon_str}×f64::EPSILON)");
+    print("{esc}[{height-1};1H");
+}
+
+/*
  * Generate zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
  * them later. There is no math involed, the values were simply tweaked to look good.
  */
@@ -61,7 +118,7 @@ fn generate_frame_parameters() -> [ Frame ] {
 
     for i in 0..num_frames {
         // adjust max_iterations while zooming to keep a narrow boundary
-        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.9) * 200.0) as u32;
+        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
         frames.push(Frame { max_iterations: max_iterations, zoom: zoom, interp: 1.0 });
         // adjut zoom level ever faster
         zoom = zoom * zoom_multiplier;
@@ -79,43 +136,4 @@ fn generate_frame_parameters() -> [ Frame ] {
     }
 
     frames
-}
-
-fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32) {
-    // move cursor to top left position and print fractal
-    let esc = String::from_ascii(27);
-    let x = coordinate.x * frame.interp;
-    let y = coordinate.y * frame.interp;
-    print("{esc}[1;1H" + mandelbrot(chars, width, height, frame.max_iterations, frame.zoom, x, y, angle));
-    print("{esc}[1;1HMandelbrot set");
-    let exit_str = "{runtime}ms/f, CTRL+C to exit";
-    print("{esc}[1;{width-exit_str.len() as u32+1}H{exit_str}");
-    print("{esc}[{height};1H{x.fmt(14)} {y.fmt(14)}i, max. iter {frame.max_iterations}, zoom {(1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 })}x, {angle.to_degrees().rem_euclid(360.0).floor()}°");
-}
-
-fn main() {
-    print("{String::from_ascii(27)}[2J");
-
-    let runtime = 0;
-    let angle = 0.0;
-    let frames = generate_frame_parameters();
-    let chars = [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ];
-    let coordinates = [
-        Coordinate { x: 0.32570659879f64, y: 0.0470399495155 },
-        Coordinate { x: -0.1081742949375, y: 0.905426290979918 },
-        Coordinate { x: -0.7491799739999038, y: 0.100100499971 },
-    ];
-
-    while true {
-        for coordinate in coordinates {
-            for _ in 0..2 {
-                for frame in frames {
-                    render(chars, frame, coordinate, angle, runtime, 80, 24);
-                    runtime = wait_frame(1000 / 60);
-                    angle += 0.015;
-                }
-                frames.reverse();
-            }
-        }
-    }
 }
