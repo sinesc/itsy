@@ -323,8 +323,11 @@ pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: by
 #[cfg(feature="compiler")]
 fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::HashMap<String, (std::path::PathBuf, String)>) -> Result<Program<F>, Error> where F: bytecode::VMFunc<F> {
     let parsed = parser::parse(|module_path| {
-        let filename = parser::module_filename(source_file, module_path);
-        let file = std::fs::read_to_string(&filename)?;
+        let mut filename = parser::module_filename(source_file, module_path, false);
+        let file = std::fs::read_to_string(&filename).or_else(|_| {
+            filename = parser::module_filename(source_file, module_path, true);
+            std::fs::read_to_string(&filename)
+        })?;
         let module = parser::parse_module(&file, module_path);
         files.insert(module_path.to_string(), (filename, file));
         module

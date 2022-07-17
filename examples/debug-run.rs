@@ -77,8 +77,11 @@ fn log(filename: &str, append: bool, data: &str) {
 fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<Program<MyAPI>, Error> {
     let source_file = source_file.as_ref();
     let parsed = parser::parse(|module_path| {
-        let filename = parser::module_filename(source_file, module_path);
-        let file = std::fs::read_to_string(&filename)?;
+        let mut filename = parser::module_filename(source_file, module_path, false);
+        let file = std::fs::read_to_string(&filename).or_else(|_| {
+            filename = parser::module_filename(source_file, module_path, true);
+            std::fs::read_to_string(&filename)
+        })?;
         let module = parser::parse_module(&file, module_path);
         files.insert(module_path.to_string(), (filename, file));
         module

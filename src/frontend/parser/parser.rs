@@ -1266,13 +1266,11 @@ pub fn parse(mut loader: impl FnMut(&str) -> ParseResult<ParsedModule>) -> Parse
 fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult {
     let module = loader(module_path)?;
     for submodule_ast in module.modules() {
-        let submodule_path = if module_path != "" { module_path.to_string() + "::" + submodule_ast.name() } else { submodule_ast.name().to_string() } ;
+        let submodule_path = if module_path != "" { module_path.to_string() + "::" + submodule_ast.name() } else { submodule_ast.name().to_string() };
         match parse_recurse(&submodule_path, program, loader) {
             Ok(module) => Ok(module),
             Err(err) => Err(match err.kind {
-                ParseErrorKind::IOError(_) => {
-                    ParseError::new(err.kind, submodule_ast.position, module_path)
-                },
+                ParseErrorKind::IOError(_) => ParseError::new(ParseErrorKind::ModuleNotFound(submodule_path), submodule_ast.position, module_path),
                 _ => err,
             }),
         }?;
@@ -1282,7 +1280,7 @@ fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut im
 }
 
 /// Given the filename to an itsy program main module and an Itsy module path, returns the filename of the Itsy module.
-pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &str) -> std::path::PathBuf {
+pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &str, subdirectory: bool) -> std::path::PathBuf {
     if module_path == "" {
         main_file.into()
     } else {
@@ -1290,6 +1288,9 @@ pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &
         if path.pop() {
             for module_name in path_to_parts(module_path) {
                 path.push(module_name);
+            }
+            if subdirectory {
+                path.push("mod");
             }
         } else {
             panic!("Invalid filename");

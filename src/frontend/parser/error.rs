@@ -22,6 +22,7 @@ pub enum ParseErrorKind {
     IllegalBreak,
     IllegalContinue,
     IllegalClosure,
+    ModuleNotFound(String),
     DisabledFeature(&'static str),
     IOError(Rc<IOError>), // io::Error fails to implement clone
 }
@@ -83,7 +84,8 @@ impl Display for ParseError {
             ParseErrorKind::IllegalBreak => write!(f, "Break-statements are not allowed outside of loops"),
             ParseErrorKind::IllegalContinue => write!(f, "Continue-statements are not allowed outside of loops"),
             ParseErrorKind::IllegalClosure => write!(f, "Closure not allowed in this position"),
-            ParseErrorKind::DisabledFeature(s) => write!(f, "{}", s),
+            ParseErrorKind::ModuleNotFound(m) => write!(f, "Failed to load module {m}"),
+            &ParseErrorKind::DisabledFeature(s) => write!(f, "{}", s),
             ParseErrorKind::IOError(e) => write!(f, "{}", e),
         }
     }
