@@ -10,6 +10,7 @@ pub struct Binding {
     pub type_id: Option<TypeId>,
 }
 
+/// Single variant of an enum.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EnumVariant {
     Simple(Option<Numeric>),

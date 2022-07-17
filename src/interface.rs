@@ -21,7 +21,7 @@ pub mod internals {
     #[cfg(feature="compiler")]
     pub mod resolved {
         //! Resolved program type information.
-        pub use crate::shared::meta::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind, Binding};
+        pub use crate::shared::meta::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind, Binding, EnumVariant};
         pub use crate::shared::numeric::Numeric;
         pub mod ids {
             //! Typed ids used to refer to specific program elements.
