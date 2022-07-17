@@ -2,7 +2,7 @@ mod repository;
 
 use crate::prelude::*;
 use crate::shared::Progress;
-use crate::frontend::resolver::resolved::IdMappings;
+use crate::frontend::resolver::resolved::Resolved;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
 use crate::shared::meta::{Type, Function, FunctionKind, Binding};
 use repository::Repository;
@@ -21,13 +21,13 @@ pub(crate) struct Scopes {
     parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
 }
 
-impl Into<IdMappings> for Scopes {
+impl Into<Resolved> for Scopes {
     /// convert scopes into type vector
-    fn into(self: Self) -> IdMappings {
+    fn into(self: Self) -> Resolved {
         let binding_map = self.bindings.into();
         let type_map = self.types.into();
         let function_map = self.functions.into();
-        IdMappings::new(binding_map, type_map, function_map)
+        Resolved::new(binding_map, type_map, function_map)
     }
 }
 

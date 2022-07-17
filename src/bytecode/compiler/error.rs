@@ -22,6 +22,7 @@ impl CompileError {
     pub(crate) fn new(item: &dyn Positioned, kind: CompileErrorKind, module_path: &str) -> CompileError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
     }
+    #[cfg_attr(feature="ice_panics", allow(dead_code))]
     pub(crate) fn unpositioned(kind: CompileErrorKind, module_path: &str) -> CompileError {
         Self { kind, position: Position(0), module_path: module_path.to_string() }
     }
@@ -53,7 +54,7 @@ impl Display for CompileError {
 pub type CompileResult<T = ()> = Result<T, CompileError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
-pub(crate) trait UnwrapOrICE<T> {
+pub(super) trait UnwrapOrICE<T> {
     fn or_ice_msg(self: Self, message: &str) -> CompileResult<T>;
     fn or_ice(self: Self) -> CompileResult<T>;
 }

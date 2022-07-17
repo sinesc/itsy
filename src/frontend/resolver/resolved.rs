@@ -12,22 +12,22 @@ pub struct ResolvedProgram<T> {
     /// AST of all program modules.
     pub modules: Vec<ParsedModule>,
     /// Maps typed ids to program meta data.
-    pub id_mappings: IdMappings,
+    pub resolved: Resolved,
     /// `FunctionId` of the entry/main function.
     pub entry_fn: FunctionId,
 }
 
 /// Resolved program meta data.
-pub struct IdMappings {
+pub struct Resolved {
     /// Maps binding ids to binding info descriptors.
-    pub(crate) binding_map : Vec<Binding>,
+    binding_map : Vec<Binding>,
     /// Maps type ids to types.
-    pub(crate) type_map    : Vec<Type>,
+    type_map    : Vec<Type>,
     /// Maps function ids to functions.
-    pub(crate) function_map: Vec<Function>,
+    function_map: Vec<Function>,
 }
 
-impl IdMappings {
+impl Resolved {
     pub(crate) fn new(binding_map: Vec<Binding>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
         for info in binding_map.iter() {
             info.type_id.expect("Unresolved binding type encountered.");

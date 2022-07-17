@@ -26,7 +26,7 @@ pub mod internals {
         pub mod ids {
             //! Typed ids used to refer to specific program elements.
             pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
-            pub use crate::frontend::resolver::resolved::IdMappings;
+            pub use crate::frontend::resolver::resolved::Resolved;
         }
     }
     pub mod binary {

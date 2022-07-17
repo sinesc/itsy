@@ -199,7 +199,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         ty              : PhantomData,
         modules         : program.0,
         entry_fn        : entry_fn,
-        id_mappings     : scopes.into(),
+        resolved        : scopes.into(),
     })
 }
 

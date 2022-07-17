@@ -10,7 +10,7 @@ use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, IdMappings}};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, UnwrapOrICE};
@@ -21,8 +21,8 @@ use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, Branch
 pub(crate) struct Compiler<T> {
     /// Bytecode writer used to output to.
     pub(crate) writer: Writer<T>,
-    /// Type and mutability data.
-    id_mappings: IdMappings,
+    /// Program metadata, e.g. types, functions,...
+    resolved: Resolved,
     /// Maps from binding id to load-argument for each frame.
     locals: StackFrames,
     /// Non-primitive type constructors.
@@ -78,11 +78,11 @@ pub(crate) struct Compiler<T> {
 /// The returned [Program] is now ready to be run by [run](crate::run) or [VM::run](crate::runtime::VM::run).
 pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> where T: VMFunc<T> {
 
-    let ResolvedProgram { modules, id_mappings, entry_fn, .. } = program;
+    let ResolvedProgram { modules, resolved, entry_fn, .. } = program;
 
     // find all trait functions and all trait implementors
-    let trait_functions = Compiler::<T>::filter_trait_functions(&id_mappings);
-    let trait_implementors: Vec<_> = id_mappings.implementors().collect();
+    let trait_functions = Compiler::<T>::filter_trait_functions(&resolved);
+    let trait_implementors: Vec<_> = resolved.implementors().collect();
 
     // save flattened list of trait implementations and their concrete function ids for later serialization (once compilation is done and absolute function addresses are known)
     let trait_function_implementations = Compiler::<T>::select_trait_function_implementations(&trait_functions, &trait_implementors);
@@ -100,7 +100,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
         trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&trait_functions, &trait_implementors)?,
-        id_mappings                 : id_mappings,
+        resolved,
     };
 
     // reserve space for the trait vtable as well as an implementor-index => constructor mapping (required for trait object reference counting) in const pool
@@ -111,7 +111,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     if compiler.writer.position() == 0 {
         compiler.writer.store_const(101 as u8);
     }
-    for (type_id, ty) in compiler.id_mappings.types() {
+    for (type_id, ty) in compiler.resolved.types() {
         if !ty.is_primitive() && !ty.as_trait().is_some() {
             // store constructor, remember position
             let position = compiler.store_constructor(type_id, &mut None, &mut 0)?;
@@ -175,8 +175,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
                         let trait_function_id = trt.provided.get(function_name).or(trt.required.get(function_name)).or_ice()?;
-                        let trait_function = self.id_mappings.function(trait_function_id.or_ice()?);
-                        let impl_function = self.id_mappings.function(function_id.or_ice()?);
+                        let trait_function = self.resolved.function(trait_function_id.or_ice()?);
+                        let impl_function = self.resolved.function(function_id.or_ice()?);
                         if !self.is_compatible_function(trait_function, impl_function)? {
                             return Err(CompileError::new(function, CompileErrorKind::IncompatibleTraitMethod(function_name.clone()), &self.module_path));
                         }
@@ -274,7 +274,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match item.left {
             ast::Expression::Variable(_) => self.compile_assignment_to_var(item),
             ast::Expression::BinaryOp(_) => self.compile_assignment_to_offset(item),
-            _ => self.ice(item, "Attempted to assign to non-assignable"),
+            _ => self.ice_at(item, "Attempted to assign to non-assignable"),
         }
     }
 
@@ -301,7 +301,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::MulAssign => self.write_mul(ty)?,
                     BO::DivAssign => self.write_div(ty)?,
                     BO::RemAssign => self.write_rem(ty)?,
-                    _ => self.ice(item, "Invalid assignment operator while assigning to var")?,
+                    _ => self.ice_at(item, "Invalid assignment operator while assigning to var")?,
                 };
                 self.write_store(self.ty(&item.left), loc, Some(binding_id))?; // stack --
             },
@@ -333,7 +333,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::MulAssign => self.write_mul(ty)?,
                     BO::DivAssign => self.write_div(ty)?,
                     BO::RemAssign => self.write_rem(ty)?,
-                    _ => self.ice(item, "Invalid assignment operator while assigning to offset")?,
+                    _ => self.ice_at(item, "Invalid assignment operator while assigning to offset")?,
                 };
                 self.write_heap_put(ty, false)?; // stack -
             },
@@ -362,7 +362,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
         comment!(self, "prepare {}() args", item.ident.name);
         let function_id = item.function_id.or_ice_msg("Unresolved function")?;
-        let function = self.id_mappings.function(function_id).clone();
+        let function = self.resolved.function(function_id).clone();
         match function.kind.or_ice()? {
             FunctionKind::Rust(rust_fn_index) => {
                 self.compile_call_args(&function, item)?;
@@ -379,7 +379,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if self.ty(&object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id)?;
-                    let function_arg_size = self.id_mappings.function_arg_size(function_id);
+                    let function_arg_size = self.resolved.function_arg_size(function_id);
                     comment!(self, "call {}()", item.ident.name);
                     self.writer.vcall(function_offset, function_arg_size);
                 } else {
@@ -398,7 +398,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.or_ice_msg("Unresolved function encountered")?;
-                let arg_size = self.id_mappings.function_arg_size(function_id) as StackAddress;
+                let arg_size = self.resolved.function_arg_size(function_id) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
@@ -683,7 +683,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
                 self.compile_for_loop_array(item, iter_local, iter_type_id)
             },
-            _ => self.ice(item, "Invalid for loop expression"),
+            _ => self.ice_at(item, "Invalid for loop expression"),
 
         };
         self.init_state.pop();
@@ -770,7 +770,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             LiteralValue::Bool(v) =>  {
                 match ty {
                     Type::bool => { if *v { self.writer.immediate8(1); } else { self.writer.immediate8(0); } },
-                    _ => self.ice(item, "Unexpected boolean literal type")?,
+                    _ => self.ice_at(item, "Unexpected boolean literal type")?,
                 };
             },
             LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
@@ -870,7 +870,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::LessOrEq    => self.write_lte(ty_left)?,
             BO::Equal       => self.write_eq(ty_left)?,
             BO::NotEqual    => self.write_neq(ty_left)?,
-            _ => self.ice(item, "Invalid simple-operation")?,
+            _ => self.ice_at(item, "Invalid simple-operation")?,
         };
         Ok(())
     }
@@ -895,7 +895,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.jn0_nc(exit_target));
             },
-            _ => self.ice(item, "Invalid shortcircuit-operation")?,
+            _ => self.ice_at(item, "Invalid shortcircuit-operation")?,
         }
         Ok(())
     }
@@ -933,7 +933,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_member_offset(offset);
 
             },
-            _ => self.ice(item, "Invalid offset-operation")?,
+            _ => self.ice_at(item, "Invalid offset-operation")?,
 
         }
         Ok(())
@@ -988,12 +988,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns constructor index for given type or 0.
     pub(super) fn constructor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        let type_id = self.id_mappings.types().find(|m| m.1 == ty).or_ice()?.0;
+        let type_id = self.resolved.types().find(|m| m.1 == ty).or_ice()?.0;
         Ok(*self.constructors.get(&type_id).unwrap_or(&0))
     }
 
-    /// Generates an internal compiler error.
-    fn ice<R>(self: &Self, item: &dyn Positioned, message: &str) -> CompileResult<R> {
+    /// Generates an internal compiler error at the given item.
+    fn ice_at<R>(self: &Self, item: &dyn Positioned, message: &str) -> CompileResult<R> {
         #[cfg(feature="ice_panics")]
         panic!("Internal compiler error: {} at position {:?}", message, item.position());
         #[cfg(not(feature="ice_panics"))]
@@ -1001,7 +1001,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Generates an internal compiler error.
-    fn ice_ty<R>(self: &Self, message: &str) -> CompileResult<R> {
+    fn ice<R>(self: &Self, message: &str) -> CompileResult<R> {
         #[cfg(feature="ice_panics")]
         panic!("Internal compiler error: {}", message);
         #[cfg(not(feature="ice_panics"))]
@@ -1208,7 +1208,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.writer.store_const(primitive_size);
                 }
             },
-            ty @ _ => self.ice_ty(&format!("Unsupported type {:?} in constructor serialization", ty))?,
+            ty @ _ => self.ice(&format!("Unsupported type {:?} in constructor serialization", ty))?,
         }
         Ok(position)
     }
@@ -1226,7 +1226,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             2 => self.writer.ret16(arg_size),
             4 => self.writer.ret32(arg_size),
             8 => self.writer.ret64(arg_size),
-            _ => self.ice_ty(&format!("Unsupported arg_size {:?} for ret instruction", arg_size))?,
+            _ => self.ice(&format!("Unsupported arg_size {:?} for ret instruction", arg_size))?,
         })
     }
 
@@ -1270,7 +1270,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.immediate16_8(value),
                 4 => self.writer.immediate32_8(value),
                 8 => self.writer.immediate64_8(value),
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             })
         };
         Ok(match numeric {
@@ -1282,7 +1282,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     Type::i16 => self.writer.immediate16(v as u16),
                     Type::i32 => self.writer.immediate32(v as u32),
                     Type::i64 => self.writer.immediate64(v as u64),
-                    _ => self.ice_ty(&format!("Unexpected signed integer literal type: {:?}", ty))?,
+                    _ => self.ice(&format!("Unexpected signed integer literal type: {:?}", ty))?,
                 }
             },
             Numeric::Unsigned(v) => {
@@ -1291,14 +1291,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     Type::i16 | Type::u16 => self.writer.immediate16(v as u16),
                     Type::i32 | Type::u32 => self.writer.immediate32(v as u32),
                     Type::i64 | Type::u64 => self.writer.immediate64(v as u64),
-                    _ => self.ice_ty(&format!("Unexpected unsigned integer literal type: {:?}", ty))?,
+                    _ => self.ice(&format!("Unexpected unsigned integer literal type: {:?}", ty))?,
                 }
             },
             Numeric::Float(v) => {
                 match ty {
                     Type::f32 => self.writer.immediate32(u32::from_ne_bytes((v as f32).to_ne_bytes())),
                     Type::f64 => self.writer.immediate64(u64::from_ne_bytes(v.to_ne_bytes())),
-                    _ => self.ice_ty(&format!("Unexpected float literal type: {:?}", ty))?,
+                    _ => self.ice(&format!("Unexpected float literal type: {:?}", ty))?,
                 }
             },
         })
@@ -1365,7 +1365,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
             (Type::f32, Type::u64) => self.writer.f32_to_u64(),
             (Type::f64, Type::u64) => self.writer.f64_to_u64(),
-            _ => self.ice_ty(&format!("Invalid float/int cast {:?} to {:?}", from, to))?,
+            _ => self.ice(&format!("Invalid float/int cast {:?} to {:?}", from, to))?,
         })
     }
 
@@ -1379,14 +1379,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     64 => self.writer.trims64(to_size),
                     32 => self.writer.trims32(to_size),
                     16 => self.writer.trims16(to_size),
-                    _ => self.ice_ty(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
+                    _ => self.ice(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
                 }
             } else {
                 match from_size {
                     64 => self.writer.trimu64(to_size),
                     32 => self.writer.trimu32(to_size),
                     16 => self.writer.trimu16(to_size),
-                    _ => self.ice_ty(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
+                    _ => self.ice(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
                 }
             }
         } else if to_size > from_size {
@@ -1395,14 +1395,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     32 => self.writer.extends32(to_size),
                     16 => self.writer.extends16(to_size),
                     8 => self.writer.extends8(to_size),
-                    _ => self.ice_ty(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
+                    _ => self.ice(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
                 }
             } else {
                 match from_size {
                     32 => self.writer.extendu32(to_size),
                     16 => self.writer.extendu16(to_size),
                     8 => self.writer.extendu8(to_size),
-                    _ => self.ice_ty(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
+                    _ => self.ice(&format!("Invalid integer cast {:?} to {:?}", from, to))?,
                 }
             }
         } else {
@@ -1439,7 +1439,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             4 => self.writer.heap_fetch32(),
             8 => self.writer.heap_fetch64(),
             //16 => { self.writer.heap_fetch128(); },
-            size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+            size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
         })
     }
 
@@ -1460,7 +1460,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.heap_put16(),
                 4 => self.writer.heap_put32(),
                 8 => self.writer.heap_put64(),
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             }
         })
     }
@@ -1477,7 +1477,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 4 => self.writer.heap_fetch_member32(offset, constructor),
                 8 => self.writer.heap_fetch_member64(offset, constructor),
                 //16 => { self.writer.heap_fetch_member128(offset); },
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, result_type))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
             }
         })
     }
@@ -1494,7 +1494,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 4 => self.writer.heap_fetch_element32(constructor),
                 8 => self.writer.heap_fetch_element64(constructor),
                 //16 => { self.writer.heap_fetch_element128(); },
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, result_type))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
             }
         })
     }
@@ -1507,7 +1507,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             2 => self.writer.heap_tail_element16_nc(constructor),
             4 => self.writer.heap_tail_element32_nc(constructor),
             8 => self.writer.heap_tail_element64_nc(constructor),
-            size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, result_type))?,
+            size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
         })
     }
 
@@ -1528,7 +1528,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => select_unsigned_opcode!(self, store16_8, store16_16, none, loc),
                 4 => select_unsigned_opcode!(self, store32_8, store32_16, none, loc),
                 8 => select_unsigned_opcode!(self, store64_8, store64_16, none, loc),
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             }
         })
     }
@@ -1540,7 +1540,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             2 => select_unsigned_opcode!(self, load16_8, load16_16, none, loc),
             4 => select_unsigned_opcode!(self, load32_8, load32_16, none, loc),
             8 => select_unsigned_opcode!(self, load64_8, load64_16, none, loc),
-            size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+            size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
         })
     }
 
@@ -1563,7 +1563,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             4 => self.writer.swap32(),
             8 => self.writer.swap64(),
             //16 => self.writer.swap128(),
-            size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+            size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
         })
     }
 
@@ -1584,7 +1584,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions for build-in len method.
     fn write_builtin(self: &Self, ty: &Type, builtin: BuiltinType) -> CompileResult<StackAddress>{
-        let type_id = self.id_mappings.types().find(|m| m.1 == ty).or_ice()?.0;
+        let type_id = self.resolved.types().find(|m| m.1 == ty).or_ice()?.0;
         #[allow(unreachable_patterns)]
         Ok(match (ty, builtin) {
             (&Type::Array(Array { type_id: inner_type_id @ Some(_) }), BuiltinType::Array(array_builtin)) => {
@@ -1599,7 +1599,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             (Type::String, BuiltinType::String(string_builtin)) => {
                 string_builtin.write(self, type_id, None)
             },
-            _ => self.ice_ty(&format!("Builtin {builtin:?} not implemented for {ty}"))?,
+            _ => self.ice(&format!("Builtin {builtin:?} not implemented for {ty}"))?,
         })
     }
 
@@ -1612,7 +1612,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i16 => self.writer.zclampi16(),
             Type::i32 => self.writer.zclampi32(),
             Type::i64 => self.writer.zclampi64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1623,7 +1623,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i32 | Type::u32 => self.writer.deci32(1),
             Type::i16 | Type::u16 => self.writer.deci16(1),
             Type::i8 | Type::u8 => self.writer.deci8(1),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1634,7 +1634,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i32 | Type::u32 => self.writer.predeci32(loc, -1),
             Type::i16 | Type::u16 => self.writer.predeci16(loc, -1),
             Type::i8 | Type::u8 => self.writer.predeci8(loc, -1),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1651,7 +1651,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.subu64(),
             Type::f32 => self.writer.subf32(),
             Type::f64 => self.writer.subf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1669,7 +1669,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::f32 => self.writer.addf32(),
             Type::f64 => self.writer.addf64(),
             Type::String => self.writer.string_concatx(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1686,7 +1686,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.mulu64(),
             Type::f32 => self.writer.mulf32(),
             Type::f64 => self.writer.mulf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1703,7 +1703,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.squ64(),
             Type::f32 => self.writer.sqf32(),
             Type::f64 => self.writer.sqf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1720,7 +1720,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.divu64(),
             Type::f32 => self.writer.divf32(),
             Type::f64 => self.writer.divf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1737,7 +1737,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.remu64(),
             Type::f32 => self.writer.remf32(),
             Type::f64 => self.writer.remf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1750,7 +1750,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i64 => self.writer.negs64(),
             Type::f32 => self.writer.negf32(),
             Type::f64 => self.writer.negf64(),
-            _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 
@@ -1762,7 +1762,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.ceq16(),
                 4 => self.writer.ceq32(),
                 8 => self.writer.ceq64(),
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             }
         } else if ty.is_string() {
             self.writer.string_ceq()
@@ -1779,7 +1779,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.cneq16(),
                 4 => self.writer.cneq32(),
                 8 => self.writer.cneq64(),
-                size @ _ => self.ice_ty(&format!("Unsupported size {} for type {:?}", size, ty))?,
+                size @ _ => self.ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             }
         } else if ty.is_string() {
             self.writer.string_cneq()
@@ -1802,12 +1802,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Type::u64 => self.writer.cltu64(),
                 Type::f32 => self.writer.cltf32(),
                 Type::f64 => self.writer.cltf64(),
-                _ => self.ice_ty(&format!("Unsupported operation for type {ty}"))?,
+                _ => self.ice(&format!("Unsupported operation for type {ty}"))?,
             }
         } else if ty.is_string() {
             self.writer.string_clt()
         } else {
-            self.ice_ty(&format!("Unsupported type {ty} for lt operation"))?
+            self.ice(&format!("Unsupported type {ty} for lt operation"))?
         })
     }
 
@@ -1825,12 +1825,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Type::u64 => self.writer.clteu64(),
                 Type::f32 => self.writer.cltef32(),
                 Type::f64 => self.writer.cltef64(),
-                _ => self.ice_ty(&format!("Unsupported operation for type {:?}", ty))?,
+                _ => self.ice(&format!("Unsupported operation for type {:?}", ty))?,
             }
         } else if ty.is_string() {
             self.writer.string_clte()
         } else {
-            self.ice_ty(&format!("Unsupported type {ty} for lt operation"))?
+            self.ice(&format!("Unsupported type {ty} for lt operation"))?
         })
     }
 }
@@ -1846,8 +1846,8 @@ impl<T> Compiler<T> {
     }
 
     /// Generate flat list of all traits and their functions
-    fn filter_trait_functions(id_mappings: &IdMappings) -> Vec<(TypeId, &String, FunctionId)> {
-        id_mappings.traits()
+    fn filter_trait_functions(resolved: &Resolved) -> Vec<(TypeId, &String, FunctionId)> {
+        resolved.traits()
             .flat_map(|(type_id, trt)| {
                 trt.provided.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap()))
                 .chain(trt.required.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap())))
@@ -1911,12 +1911,10 @@ impl<T> Compiler<T> {
 /// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
 impl<T> TypeContainer for Compiler<T> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
-        let index: usize = type_id.into();
-        &self.id_mappings.type_map[index]
+        self.resolved.ty(type_id)
     }
-    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
-        let index: usize = type_id.into();
-        &mut self.id_mappings.type_map[index]
+    fn type_by_id_mut(self: &mut Self, _type_id: TypeId) -> &mut Type {
+        unreachable!("Compiler should not mutate types")
     }
     fn type_flat_name(self: &Self, _type_id: TypeId) -> Option<&String> {
         None // TODO
@@ -1926,11 +1924,9 @@ impl<T> TypeContainer for Compiler<T> {
 /// A container holding binding id to Binding mappings
 impl<T> BindingContainer for Compiler<T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
-        let binding_index = Into::<usize>::into(binding_id);
-        &self.id_mappings.binding_map[binding_index]
+        self.resolved.binding(binding_id)
     }
-    fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
-        let binding_index = Into::<usize>::into(binding_id);
-        &mut self.id_mappings.binding_map[binding_index]
+    fn binding_by_id_mut(self: &mut Self, _binding_id: BindingId) -> &mut Binding {
+        unreachable!("Compiler should not mutate bindings")
     }
 }
