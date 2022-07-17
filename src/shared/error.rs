@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use crate::prelude::*;
-use crate::frontend::{parser::error::{ParseError, ParseErrorKind}, resolver::error::ResolveError};
+use crate::frontend::{parser::error::ParseError, resolver::error::ResolveError};
 use crate::bytecode::compiler::error::CompileError;
 #[cfg(feature="runtime")]
 use crate::bytecode::runtime::error::RuntimeError;
@@ -116,7 +116,7 @@ impl Display for BuildError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.loc();
         match &self.error {
-            Error::ParseError(ParseError { kind: ParseErrorKind::IOError(_), .. }) => write!(f, "{}", self.error),
+            //Error::ParseError(ParseError { kind: ParseErrorKind::IOError(_), .. }) => write!(f, "{}", self.error),
             _ => write!(f, "{} in line {}, column {} in file {}", self.error, loc.0, loc.1, self.filename.to_string_lossy()),
         }
     }

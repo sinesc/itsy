@@ -13,6 +13,14 @@ pub struct ParsedModule {
 }
 
 impl ParsedModule {
+    /// Creates a new ParsedModule from a vector of Statements.
+    pub fn new<S: Into<String>>(path: S, ast: Vec<Statement>) -> Self {
+        Self {
+            path: path.into(),
+            ast,
+            scope_id: None,
+        }
+    }
     /// Returns an iterator over all submodules of the module.
     pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&Module> {
         self.ast

@@ -1211,14 +1211,14 @@ fn root(i: Input<'_>) -> Output<Vec<Statement>> {
 }
 
 /// Parses Itsy source code into a program AST structure.
-pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {  // also return list of modules used by this source, rename ParsedProgram to ParsedModule or similar
+pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
     let input = Input::new(src);
     let result = root(input.clone());
     match result {
         Ok(result) => {
-            Ok(ParsedModule { path: module_path.to_string(), ast: result.1, scope_id: None })
+            Ok(ParsedModule::new(module_path, result.1))
         },
-        Err(err) => {
+        Err(err) => { // TODO: compute position from start here, change Position to be relative to start
             match err {
                 nom::Err::Incomplete(_) => unreachable!("No parser should return Incomplete"),
                 nom::Err::Failure(failure) => {
@@ -1267,20 +1267,32 @@ fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut im
     let module = loader(module_path)?;
     for submodule_ast in module.modules() {
         let submodule_path = if module_path != "" { module_path.to_string() + "::" + submodule_ast.name() } else { submodule_ast.name().to_string() } ;
-        parse_recurse(&submodule_path, program, loader)?;
+        match parse_recurse(&submodule_path, program, loader) {
+            Ok(module) => Ok(module),
+            Err(err) => Err(match err.kind {
+                ParseErrorKind::IOError(_) => {
+                    ParseError::new(err.kind, submodule_ast.position, module_path)
+                },
+                _ => err,
+            }),
+        }?;
     }
     program.add_module(module);
     Ok(())
 }
 
 /// Given the filename to an itsy program main module and an Itsy module path, returns the filename of the Itsy module.
-pub fn module_filename<P: AsRef<std::path::Path>>(main_file: P, module_path: &str) -> std::path::PathBuf {
+pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &str) -> std::path::PathBuf {
     if module_path == "" {
-        main_file.as_ref().to_path_buf()
+        main_file.into()
     } else {
-        let mut path = main_file.as_ref().parent().expect("Invalid filename").to_path_buf();
-        for module_name in path_to_parts(module_path) {
-            path.push(module_name);
+        let mut path: std::path::PathBuf = main_file.into();
+        if path.pop() {
+            for module_name in path_to_parts(module_path) {
+                path.push(module_name);
+            }
+        } else {
+            panic!("Invalid filename");
         }
         path.set_extension("itsy");
         path
