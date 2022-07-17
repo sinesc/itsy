@@ -173,7 +173,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         }
 
         prev_resolved = now_resolved;
-        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.iter()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
+        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
 
         if !now_resolved.done() {
             if now_resolved == prev_resolved {

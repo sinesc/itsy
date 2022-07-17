@@ -1,6 +1,5 @@
 
 use crate::prelude::*;
-use crate::FrameAddress;
 use crate::shared::meta::{Type, Trait, ImplTrait, Function, Binding};
 use crate::shared::typed_ids::{BindingId, TypeId, FunctionId};
 use crate::frontend::parser::types::ParsedModule;
@@ -78,21 +77,5 @@ impl Resolved {
     /// Returns type information for given type id.
     pub fn ty(self: &Self, type_id: TypeId) -> &Type {
         &self.type_map[Into::<usize>::into(type_id)]
-    }
-    /// Computes the total primitive size of the function parameters.
-    pub fn function_arg_size(self: &Self, function_id: FunctionId) -> FrameAddress {
-        let function = self.function(function_id);
-        let mut arg_size = 0;
-        for arg in &function.arg_type_ids {
-            let arg_type_id = arg.expect("Function arg is not resolved");
-            arg_size += self.ty(arg_type_id).primitive_size() as FrameAddress;
-        }
-        arg_size
-    }
-    /// Returns the primitive size of the function return type.
-    pub fn function_ret_size(self: &Self, function_id: FunctionId) -> u8 {
-        let function = self.function(function_id);
-        let ret_type_id = function.ret_type_id.expect("Function result is not resolved");
-        self.ty(ret_type_id).primitive_size()
     }
 }

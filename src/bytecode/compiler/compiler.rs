@@ -130,7 +130,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     // compile program
     for module in modules {
         compiler.module_path = module.path.clone();
-        for statement in module.iter() {
+        for statement in module.statements() {
             compiler.compile_statement(statement)?;
         }
     }
@@ -379,7 +379,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if self.ty(&object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id)?;
-                    let function_arg_size = self.resolved.function_arg_size(function_id);
+                    let function_arg_size = self.resolved.function(function_id).arg_size(self);
                     comment!(self, "call {}()", item.ident.name);
                     self.writer.vcall(function_offset, function_arg_size);
                 } else {
@@ -398,7 +398,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                 self.compile_call_args(&function, item)?;
                 let function_id = item.function_id.or_ice_msg("Unresolved function encountered")?;
-                let arg_size = self.resolved.function_arg_size(function_id) as StackAddress;
+                let arg_size = self.resolved.function(function_id).arg_size(self) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }

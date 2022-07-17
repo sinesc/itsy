@@ -21,12 +21,13 @@ pub mod internals {
     #[cfg(feature="compiler")]
     pub mod resolved {
         //! Resolved program type information.
+        pub use crate::shared::{BindingContainer, TypeContainer};
         pub use crate::shared::meta::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind, Binding, EnumVariant};
         pub use crate::shared::numeric::Numeric;
+        pub use crate::frontend::resolver::resolved::Resolved;
         pub mod ids {
             //! Typed ids used to refer to specific program elements.
             pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
-            pub use crate::frontend::resolver::resolved::Resolved;
         }
     }
     pub mod binary {

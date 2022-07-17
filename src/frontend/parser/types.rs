@@ -41,7 +41,7 @@ impl ParsedModule {
             .flatten()
     }
     /// Returns an iterator over all statements in the source.
-    pub fn iter<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {
+    pub fn statements<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {
         self.ast.iter()
     }
 }

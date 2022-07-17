@@ -9,7 +9,7 @@ use crate::shared::{typed_ids::TypeId, meta::{Type, Array}};
 use crate::{prelude::*, shared::{typed_ids::BindingId, meta::Binding}};
 
 /// A container holding type id to type mappings
-pub(crate) trait TypeContainer {
+pub trait TypeContainer {
     /// Returns a reference to the type.
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     /// Returns a mutable reference to the type.
@@ -66,7 +66,7 @@ pub(crate) trait TypeContainer {
 }
 
 /// A container holding binding id to Binding mappings
-pub(crate) trait BindingContainer {
+pub trait BindingContainer {
     /// Returns a reference to the type id.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
     /// Returns a mutable reference to the type id.

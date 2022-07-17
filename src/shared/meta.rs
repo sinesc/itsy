@@ -1,8 +1,7 @@
 use crate::prelude::*;
-use crate::{HeapAddress, VariantIndex};
-use crate::shared::typed_ids::{TypeId, FunctionId};
-use crate::shared::numeric::{Numeric, Signed, Unsigned};
-use crate::{RustFnIndex, bytecode::builtins::BuiltinType};
+use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
+use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId}, numeric::{Numeric, Signed, Unsigned}};
+use crate::bytecode::builtins::BuiltinType;
 
 /// Binding meta information.
 pub struct Binding {
@@ -110,6 +109,20 @@ impl Function {
     }
     pub fn is_resolved(self: &Self) -> bool {
         self.ret_type_id.is_some() && self.kind.is_some() && self.arg_type_ids.iter().all(|arg| arg.is_some())
+    }
+    /// Computes the total primitive size of the function parameters.
+    pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
+        let mut arg_size = 0;
+        for arg in &self.arg_type_ids {
+            let arg_type_id = arg.expect("Function arg is not resolved");
+            arg_size += container.type_by_id(arg_type_id).primitive_size() as FrameAddress;
+        }
+        arg_size
+    }
+    /// Returns the primitive size of the function return type.
+    pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
+        let ret_type_id = self.ret_type_id.expect("Function result is not resolved");
+        container.type_by_id(ret_type_id).primitive_size()
     }
 }
 
