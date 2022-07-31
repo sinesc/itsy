@@ -1248,7 +1248,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 /// fn main() {
 ///     let source_file = "itsy/rustdoc/parse.itsy";
 ///     let parsed = parser::parse(|module_path| {
-///         let filename = parser::module_filename(source_file, module_path);
+///         let filename = parser::module_filename(source_file, module_path, false);
 ///         let file = fs::read_to_string(filename)?;
 ///         parser::parse_module(&file, module_path)
 ///     }).unwrap();
