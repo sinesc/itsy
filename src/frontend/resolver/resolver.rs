@@ -11,7 +11,6 @@ use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable, Resolvable, CallSyntax};
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
-use crate::frontend::resolver::scopes::Scopes;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
@@ -106,7 +105,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
-    let root_scope_id = scopes::Scopes::root_id();
+    let root_scope_id = ScopeId::ROOT;
 
     let mut primitives = UnorderedMap::new();
     primitives.insert(&Type::void, scopes.insert_type(root_scope_id, None, Type::void));
@@ -192,7 +191,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
-    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::void()))
+    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::VOID))
         .unwrap_or_err(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()), "")?;
 
     Ok(ResolvedProgram {
@@ -226,7 +225,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 None => None,
                 Some((builtin_type, result_type_id, arg_type_ids)) => {
                     Some(self.scopes.insert_function(
-                        scopes::Scopes::root_id(),
+                        ScopeId::ROOT,
                         name,
                         Some(result_type_id),
                         arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
@@ -253,7 +252,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
                 Some(self.scopes.insert_function(
-                    scopes::Scopes::root_id(),
+                    ScopeId::ROOT,
                     name,
                     Some(result_type_id),
                     arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
@@ -408,7 +407,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             } else if let Some(type_id) = self.scopes.lookup_type_id(self.scope_id, path) {
                 self.scopes.alias_type(self.scope_id, name, type_id); // TODO should probably be prefixed with module name
                 *resolved = true;
-            } else if let Some(function_id) = self.scopes.lookup_function_id(self.scope_id, (path, TypeId::void())) {
+            } else if let Some(function_id) = self.scopes.lookup_function_id(self.scope_id, (path, TypeId::VOID)) {
                 self.scopes.alias_function(self.scope_id, name, function_id); // TODO should probably be prefixed with module name
                 *resolved = true;
             } else if unresolved == None {
@@ -498,7 +497,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Struct(Struct { fields: fields, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         self.resolved_or_err(item, None)
@@ -573,7 +572,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         // create variant constructors
@@ -655,7 +654,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // create aliases
             self.scopes.alias_type(self.scope_id, "Self", type_id);
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(Scopes::root_id(), &qualified, type_id);
+                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         // try to resolve functions
@@ -717,7 +716,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             let function_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
             if item.sig.vis == Visibility::Public {
-                self.scopes.alias_function(Scopes::root_id(), &qualified, function_id);
+                self.scopes.alias_function(ScopeId::ROOT, &qualified, function_id);
             }
             item.function_id = Some(function_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
@@ -796,16 +795,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 },
                 CallSyntax::Ident => {
                     path = self.make_path(&[ &item.ident.name ]);
-                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
+                    item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::VOID));
                 },
                 CallSyntax::Path(static_path) => {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
                     // todo fix this hack: path handling needs a rework
-                    let if_let_chain_where_are_you_type_id = self.scopes.type_id(scopes::Scopes::root_id(), &static_path.name[0].name);
+                    let if_let_chain_where_are_you_type_id = self.scopes.type_id(ScopeId::ROOT, &static_path.name[0].name);
                     if static_path.name.len() == 1 && if_let_chain_where_are_you_type_id.is_some() {
                         item.function_id = self.try_create_scalar_builtin(&item.ident.name, if_let_chain_where_are_you_type_id.unwrap())?;
                     } else {
-                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::void()));
+                        item.function_id = self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::VOID));
                     }
                 },
             }
@@ -901,7 +900,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         } else if let Some(if_type_id) = item.if_block.type_id(self) {
             // if block with a non-void result but no else block
-            self.check_type_accepted_for(item, if_type_id, TypeId::void())?; // Todo: meh, using this to generate an error when we already know there is an error.
+            self.check_type_accepted_for(item, if_type_id, TypeId::VOID)?; // Todo: meh, using this to generate an error when we already know there is an error.
         }
         self.scope_id = parent_scope_id;
         Ok(())
@@ -984,7 +983,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.left, right_type_id)?;
         let left_type_id = item.left.type_id(self);
         self.resolve_expression(&mut item.right, left_type_id)?;
-        item.type_id = Some(TypeId::void());
+        item.type_id = Some(TypeId::VOID);
         Ok(())
     }
 

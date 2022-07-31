@@ -35,13 +35,12 @@ impl Scopes {
 
     /// Creates and returns a new Scopes instance.
     pub fn new() -> Self {
-        let root_id = Self::root_id();
         Scopes {
             types           : Repository::new(),
             bindings        : Repository::new(),
             functions       : Repository::new(),
             scopefunction   : UnorderedMap::new(),
-            parent_map      : vec![ root_id ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
+            parent_map      : vec![ ScopeId::ROOT ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
     }
 
@@ -61,11 +60,6 @@ impl Scopes {
             + self.types.len()
             + self.functions.len(),
         )
-    }
-
-    /// Returns the root scope id.
-    pub fn root_id() -> ScopeId {
-        (0).into()
     }
 
     /// Returns the parent scope id of the given scope id.
@@ -117,14 +111,14 @@ impl Scopes {
         let type_id = match kind {
             Some(FunctionKind::Method(type_id)) => type_id,
             Some(FunctionKind::Builtin(type_id, _)) => type_id,
-            _ => TypeId::void(),
+            _ => TypeId::VOID,
         };
         self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type_id: result_type_id, arg_type_ids, kind: kind })
     }
 
     /// Aliases an existing function into the given scope, returning a function id.
     pub fn alias_function(self: &mut Self, scope_id: ScopeId, name: &str, function_id: FunctionId) -> FunctionId {
-        self.functions.alias(scope_id, (name.into(), TypeId::void()), function_id)
+        self.functions.alias(scope_id, (name.into(), TypeId::VOID), function_id)
     }
 
     /// Returns the id of the named function originating in exactly this scope.

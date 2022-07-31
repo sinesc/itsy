@@ -420,7 +420,7 @@ impl Signature {
         self.ret.as_ref().map_or(true, |ret| ret.type_id(bindings).is_some())
     }
     pub(crate) fn ret_type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.ret.as_ref().map_or(Some(TypeId::void()), |ret| ret.type_id(bindings))
+        self.ret.as_ref().map_or(Some(TypeId::VOID), |ret| ret.type_id(bindings))
     }
     pub(crate) fn args_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
         self.args.iter().all(|arg| arg.ty.as_ref().map_or(false, |type_name| type_name.type_id(bindings).is_some()))
@@ -834,7 +834,7 @@ impl ControlFlow for IfBlock {
 
 impl Typeable for IfBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.if_block.result.as_ref().map_or(Some(TypeId::void()), |e| e.type_id(bindings))
+        self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         if let Some(result) = &mut self.if_block.result {
@@ -887,7 +887,7 @@ impl Resolvable for Block {
 
 impl Typeable for Block {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        self.result.as_ref().map_or(Some(TypeId::void()), |e| e.type_id(bindings))
+        self.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         if let Some(result) = &mut self.result {
@@ -937,7 +937,7 @@ impl Expression {
             position,
             value       : LiteralValue::Void,
             type_name   : None,
-            type_id     : Some(TypeId::void()),
+            type_id     : Some(TypeId::VOID),
         })
     }
     pub fn is_literal(self: &Self) -> bool {

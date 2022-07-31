@@ -49,7 +49,7 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackOffset) => { $resolver.primitive_type_id(crate::STACK_OFFSET_TYPE).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, HeapRef) => { $inner_type_id.expect("Generic type not defined but used.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
-    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::void() };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::VOID };
     // Compiler: Write implementation variants
     // TODO these cases are super ugly. maybe a muncher could make this better?
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {

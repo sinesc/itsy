@@ -12,6 +12,13 @@ macro_rules! impl_typed_id {
             pub fn into_usize(self: Self) -> usize {
                 self.into()
             }
+            /// Creates a new typed id from given usize.
+            pub const fn new(input: usize) -> Self {
+                Self(match NonZeroUsize::new(input + 1) {
+                    Some(v) => v,
+                    None => panic!("Input usize overflowed"),
+                })
+            }
         }
         impl From<$name> for usize {
             fn from(input: $name) -> usize {
@@ -20,7 +27,7 @@ macro_rules! impl_typed_id {
         }
         impl From<usize> for $name {
             fn from(input: usize) -> $name {
-                $name(NonZeroUsize::new(input + 1).expect("Expected non-zero input id"))
+                Self(NonZeroUsize::new(input + 1).expect("Input usize overflowed"))
             }
         }
         impl Debug for $name {
@@ -37,13 +44,14 @@ macro_rules! impl_typed_id {
 impl_typed_id!(TypeId, "Unique numeric id of a type");
 
 impl TypeId {
-    pub fn void() -> TypeId {
-        0.into()
-    }
+    pub const VOID: TypeId = TypeId::new(0);
 }
 
 impl_typed_id!(ScopeId, "Unique numeric id of a scope.");
 
-impl_typed_id!(BindingId, "Unique numeric id of a variable binding.");
+impl ScopeId {
+    pub const ROOT: ScopeId = ScopeId::new(0);
+}
 
+impl_typed_id!(BindingId, "Unique numeric id of a variable binding.");
 impl_typed_id!(FunctionId, "Unique numeric id of a function.");
