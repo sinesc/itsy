@@ -31,8 +31,9 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "test"/*,
-                "--no-fail-fast"*/
+                "test",
+                //"--no-fail-fast",
+                "--features=\"ice_panics\"",
             ],
             "options": {
                 "env": {

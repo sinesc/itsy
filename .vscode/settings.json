@@ -3,7 +3,7 @@
     //"lldb.dereferencePointers": true,
     //"lldb.showDisassembly": "always",
     "rust-analyzer.files.excludeDirs": [
-        "./itsy"
+        "./itsy", "./logs"
     ],
     "rust-analyzer.cargo.features": [
         "runtime", "compiler", "debugging", "symbols"
