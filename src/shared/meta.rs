@@ -341,6 +341,13 @@ impl Type {
             _ => true
         }
     }
+    /// Whether a type can be constructed.
+    pub fn is_constructible(self: &Self) -> bool {
+        match self {
+            Type::Trait(_) => false,
+            _ => !self.is_primitive(),
+        }
+    }
     /// Returns the type as an array.
     pub const fn as_array(self: &Self) -> Option<&Array> {
         match self {

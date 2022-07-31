@@ -108,18 +108,16 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress); // FIXME: this does not consider endianess
 
     // serialize constructors onto const pool, ensure position 0 is not used as that indicates a virtual constructor
-    if compiler.writer.position() == 0 {
+    if compiler.writer.const_len() == 0 {
         compiler.writer.store_const(101 as u8);
     }
-    for (type_id, ty) in compiler.resolved.types() {
-        if !ty.is_primitive() && !ty.as_trait().is_some() {
-            // store constructor, remember position
-            let position = compiler.store_constructor(type_id, &mut None, &mut 0)?;
-            compiler.constructors.insert(type_id, position);
-            // for trait implementing types, link constructor to trait implementor (trait objects still need proper reference counting, which requires the constructor of the concrete type)
-            if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
-                compiler.writer.update_const((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
-            }
+    for (type_id, _) in compiler.resolved.types().filter(|ty| ty.1.is_constructible()) {
+        // store constructor, remember position
+        let position = compiler.store_constructor(type_id, &mut None, &mut 0)?;
+        compiler.constructors.insert(type_id, position);
+        // for trait implementing types, link constructor to trait implementor (trait objects still need proper reference counting, which requires the constructor of the concrete type)
+        if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
+            compiler.writer.update_const((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
         }
     }
 
@@ -397,7 +395,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                 self.compile_call_args(&function, item)?;
-                let function_id = item.function_id.or_ice_msg("Unresolved function encountered")?;
                 let arg_size = self.resolved.function(function_id).arg_size(self) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
