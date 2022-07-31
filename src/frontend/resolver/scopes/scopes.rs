@@ -1,21 +1,23 @@
 mod repository;
 
 use crate::prelude::*;
-use crate::shared::Progress;
 use crate::frontend::resolver::resolved::Resolved;
-use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId};
-use crate::shared::meta::{Type, Function, FunctionKind, Binding};
+use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId, ConstantId};
+use crate::shared::meta::{Type, Function, FunctionKind, Binding, Constant, ConstantValue};
+use crate::shared::{TypeContainer, Progress};
 use repository::Repository;
 
 /// Flat lists of types and bindings and which scope the belong to.
 pub(crate) struct Scopes {
-    /// Flat bytecode type data, lookup via TypeId or ScopeId and name
+    /// Flat type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings        : Repository<String, BindingId, Binding>,
+    /// Flat constant data, lookup via ConstantId or ScopeId and name
+    constants       : Repository<String, ConstantId, Constant>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<(String, TypeId), FunctionId, Function>,
-    /// Function scopes (the function containing this scope)
+    /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
     parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
@@ -26,8 +28,9 @@ impl Into<Resolved> for Scopes {
     fn into(self: Self) -> Resolved {
         let binding_map = self.bindings.into();
         let type_map = self.types.into();
+        let constant_map = self.constants.into();
         let function_map = self.functions.into();
-        Resolved::new(binding_map, type_map, function_map)
+        Resolved::new(binding_map, type_map, constant_map, function_map)
     }
 }
 
@@ -38,6 +41,7 @@ impl Scopes {
         Scopes {
             types           : Repository::new(),
             bindings        : Repository::new(),
+            constants       : Repository::new(),
             functions       : Repository::new(),
             scopefunction   : UnorderedMap::new(),
             parent_map      : vec![ ScopeId::ROOT ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
@@ -169,14 +173,14 @@ impl Scopes {
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
-    pub fn binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
+    pub fn local_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
         self.bindings.id_by_name(scope_id, name.to_string())
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn lookup_binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> {
+    pub fn lookup_binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> { // todo: rename to binding_id()
         loop {
-            if let Some(index) = self.binding_id(scope_id, name) {
+            if let Some(index) = self.local_binding_id(scope_id, name) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -197,6 +201,43 @@ impl Scopes {
     }
 }
 
+/// Constant handling
+impl Scopes {
+
+    /// Insert a constant into the given scope, returning a constant id. Its type might not be resolved yet.
+    pub fn insert_constant(self: &mut Self, scope_id: ScopeId, name: &str, type_id: Option<TypeId>, value: ConstantValue) -> ConstantId {
+        self.constants.insert(scope_id, Some(name.into()), Constant { value, type_id })
+    }
+
+    /// Returns the id of the named constant originating in exactly this scope.
+    pub fn local_constant_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<ConstantId> {
+        self.constants.id_by_name(scope_id, name.to_string())
+    }
+
+    /// Finds the id of the named constant within the scope or its parent scopes.
+    pub fn constant_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<ConstantId> {
+        loop {
+            if let Some(index) = self.local_constant_id(scope_id, name) {
+                return Some(index);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
+            } else {
+                return None;
+            }
+        }
+    }
+
+    /// Returns a mutable reference to the constant info of the given constant id.
+    pub fn constant_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant {
+        self.constants.value_by_id_mut(constant_id)
+    }
+
+    /// Returns a reference to the constant info of the given constant id.
+    pub fn constant_ref(self: &Self, constant_id: ConstantId) -> &Constant {
+        self.constants.value_by_id(constant_id)
+    }
+}
+
 /// Type handling
 impl Scopes {
 
@@ -205,20 +246,29 @@ impl Scopes {
         self.types.insert(scope_id, name.map(|n| n.into()), ty)
     }
 
+    /// Inserts an anonymous type into the root scope and returns a type id.
+    pub fn insert_anonymous_type(self: &mut Self, reuse_existing: bool, ty: Type) -> TypeId {
+        if let (true, Some(type_id)) = (reuse_existing, self.types.id_by_value(&ty)) {
+            type_id
+        } else {
+            self.types.insert(ScopeId::ROOT, None, ty)
+        }
+    }
+
     /// Aliases an existing type into the given scope, returning a type id.
     pub fn alias_type(self: &mut Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> TypeId {
         self.types.alias(scope_id, name.into(), type_id)
     }
 
     /// Returns the id of the named type originating in exactly this scope.
-    pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
+    pub fn local_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
         self.types.id_by_name(scope_id, name.to_string())
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
     pub fn lookup_type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
         loop {
-            if let Some(index) = self.type_id(scope_id, name) {
+            if let Some(index) = self.local_type_id(scope_id, name) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -241,5 +291,17 @@ impl Scopes {
     /// Returns a reference to the type of the given type id.
     pub fn type_ref(self: &Self, type_id: TypeId) -> &Type {
         self.types.value_by_id(type_id)
+    }
+}
+
+impl TypeContainer for Scopes {
+    fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
+        self.type_ref(type_id)
+    }
+    fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type {
+        self.type_mut(type_id)
+    }
+    fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String> {
+        self.type_name(type_id)
     }
 }

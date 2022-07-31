@@ -10,6 +10,15 @@ pub struct Binding {
     pub type_id: Option<TypeId>,
 }
 
+pub enum ConstantValue {
+    Function(FunctionId),
+}
+
+pub struct Constant {
+    pub value: ConstantValue,
+    pub type_id: Option<TypeId>,
+}
+
 /// Single variant of an enum.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EnumVariant {
@@ -139,7 +148,7 @@ pub enum FunctionKind {
 
 /// Information about a data type in a resolved program.
 #[allow(non_camel_case_types)]
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub enum Type {
     void,
     u8, u16, u32, u64,
@@ -264,13 +273,13 @@ impl Type {
             _ => false,
         }
     }
-    /// Whether the type is a copy type.
+    /*/// Whether the type is a copy type.
     pub const fn is_copy(self: &Self) -> bool {
         match self {
             Type::String => true,
             _ => self.is_primitive(),
         }
-    }
+    }*/
     /// Whether the type is a primitive.
     pub const fn is_primitive(self: &Self) -> bool {
         !self.is_ref()
@@ -282,13 +291,13 @@ impl Type {
             _ => false,
         }
     }
-    /// Whether the type is void.
+    /*/// Whether the type is void.
     pub const fn is_void(self: &Self) -> bool {
         match self {
             Type::void => true,
             _ => false
         }
-    }
+    }*/
     /// Whether the type is unsigned
     pub const fn is_unsigned(self: &Self) -> bool {
         match self {
@@ -332,7 +341,7 @@ impl Type {
             _ => false
         }
     }
-    /// Whether the type is a concrete type. This includes all types but traits.
+    /* /// Whether the type is a concrete type. This includes all types but traits.
     /// Traits are not concrete because they can potentially be narrowed to a specific trait implementor.
     /// A binding for a concrete implementor would not accept the generic trait but the inverse is acceptable
     pub fn is_concrete(self: &Self) -> bool {
@@ -340,7 +349,7 @@ impl Type {
             Type::Trait(_) => false,
             _ => true
         }
-    }
+    }*/
     /// Whether a type can be constructed.
     pub fn is_constructible(self: &Self) -> bool {
         match self {

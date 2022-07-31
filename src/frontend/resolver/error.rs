@@ -2,7 +2,6 @@
 use crate::prelude::*;
 use crate::ItemIndex;
 use crate::frontend::ast::{Position, Positioned};
-use crate::shared::meta::Type;
 use crate::shared::numeric::Numeric;
 
 pub const ICE: &'static str = "Internal compiler error";
@@ -12,7 +11,7 @@ pub const ICE: &'static str = "Internal compiler error";
 pub enum ResolveErrorKind {
     TypeMismatch(String, String),
     InvalidCast(String, String),
-    IncompatibleNumeric(Type, Numeric),
+    IncompatibleNumeric(String, Numeric),
     UndefinedVariable(String),
     UndefinedMember(String),
     NumberOfArguments(String, ItemIndex, ItemIndex),

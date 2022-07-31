@@ -9,7 +9,7 @@ mod init_state;
 use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding}, typed_ids::{BindingId, FunctionId, TypeId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
@@ -252,7 +252,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use self::ast::Expression as E;
         match item {
             E::Literal(literal)         => self.compile_literal(literal),
-            E::Variable(variable)       => self.compile_variable(variable),
+            E::Value(value) => match value {
+                ast::Value::Variable(variable) => self.compile_variable(variable),
+                ast::Value::Constant(_constant) => Ok(()), // TODO
+                _ => unreachable!("Unknown value"),
+            },
             E::Member(_)                => Ok(()),
             E::Call(call)               => self.compile_call(call),
             E::Assignment(assignment)   => self.compile_assignment(assignment),
@@ -269,8 +273,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the assignment operation.
     fn compile_assignment(self: &mut Self, item: &ast::Assignment) -> CompileResult {
         comment!(self, "{}", item);
-        match item.left {
-            ast::Expression::Variable(_) => self.compile_assignment_to_var(item),
+        match &item.left {
+            ast::Expression::Value(value) => match value {
+                ast::Value::Variable(_) => self.compile_assignment_to_var(item),
+                ast::Value::Constant(_) => self.ice_at(item, "Attempted to assign to non-assignable"),
+                ast::Value::Unknown { .. } => self.ice_at(item, "Value::Unknown encountered"),
+            }
             ast::Expression::BinaryOp(_) => self.compile_assignment_to_offset(item),
             _ => self.ice_at(item, "Attempted to assign to non-assignable"),
         }
@@ -677,7 +685,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
                 self.compile_for_loop_range(item, iter_local, iter_type_id)
             },
-            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
+            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Value(_) => {
                 self.compile_for_loop_array(item, iter_local, iter_type_id)
             },
             _ => self.ice_at(item, "Invalid for loop expression"),
@@ -941,8 +949,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         fn equals(a: &ast::Expression, b: &ast::Expression) -> bool {
             use ast::Expression as E;
             use ast::Variable as V;
+            use ast::Value;
             match (a, b) {
-                (E::Variable(V { binding_id: Some(a_binding_id), .. }), E::Variable(V { binding_id: Some(b_binding_id), .. })) => a_binding_id == b_binding_id,
+                (
+                    E::Value(Value::Variable(V { binding_id: Some(a_binding_id), .. })),
+                    E::Value(Value::Variable(V { binding_id: Some(b_binding_id), .. }))
+                ) => a_binding_id == b_binding_id,
                 _ => false,
             }
         }
@@ -1925,5 +1937,11 @@ impl<T> BindingContainer for Compiler<T> {
     }
     fn binding_by_id_mut(self: &mut Self, _binding_id: BindingId) -> &mut Binding {
         unreachable!("Compiler should not mutate bindings")
+    }
+    fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant {
+        self.resolved.constant(constant_id)
+    }
+    fn constant_by_id_mut(self: &mut Self, _: ConstantId) -> &mut Constant {
+        unreachable!("Compiler should not mutate constants")
     }
 }

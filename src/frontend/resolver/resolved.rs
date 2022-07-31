@@ -1,7 +1,7 @@
 
 use crate::prelude::*;
-use crate::shared::meta::{Type, Trait, ImplTrait, Function, Binding};
-use crate::shared::typed_ids::{BindingId, TypeId, FunctionId};
+use crate::shared::meta::{Type, Trait, ImplTrait, Function, Binding, Constant};
+use crate::shared::typed_ids::{BindingId, TypeId, FunctionId, ConstantId};
 use crate::frontend::parser::types::ParsedModule;
 
 /// Parsed program AST with all types, bindings and other language structures resolved.
@@ -22,6 +22,8 @@ pub struct Resolved {
     binding_map : Vec<Binding>,
     /// Maps type ids to types.
     type_map    : Vec<Type>,
+    /// Maps constant ids to constants.
+    constant_map: Vec<Constant>,
     /// Maps function ids to functions.
     function_map: Vec<Function>,
 }
@@ -37,16 +39,11 @@ impl Debug for Resolved {
 }
 
 impl Resolved {
-    pub(crate) fn new(binding_map: Vec<Binding>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
-        for info in binding_map.iter() {
-            info.type_id.expect("Unresolved binding type encountered.");
-        }
-        for info in function_map.iter() {
-            if !info.is_resolved() { panic!("Unresolved binding type encountered."); }
-        }
+    pub(crate) fn new(binding_map: Vec<Binding>, type_map: Vec<Type>, constant_map: Vec<Constant>, function_map: Vec<Function>) -> Self {
         Self {
             binding_map,
             type_map,
+            constant_map,
             function_map,
         }
     }
@@ -87,5 +84,9 @@ impl Resolved {
     /// Returns type information for given type id.
     pub fn ty(self: &Self, type_id: TypeId) -> &Type {
         &self.type_map[Into::<usize>::into(type_id)]
+    }
+    /// Returns constant information for given constant id.
+    pub fn constant(self: &Self, constant_id: ConstantId) -> &Constant {
+        &self.constant_map[Into::<usize>::into(constant_id)]
     }
 }

@@ -55,3 +55,4 @@ impl ScopeId {
 
 impl_typed_id!(BindingId, "Unique numeric id of a variable binding.");
 impl_typed_id!(FunctionId, "Unique numeric id of a function.");
+impl_typed_id!(ConstantId, "Unique numeric id of a constant value.");

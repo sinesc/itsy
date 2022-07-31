@@ -5,8 +5,8 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::TypeId, meta::{Type, Array}};
-use crate::{prelude::*, shared::{typed_ids::BindingId, meta::Binding}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId}, meta::{Type, Binding, Constant, Array}};
+use crate::prelude::*;
 
 /// A container holding type id to type mappings
 pub trait TypeContainer {
@@ -16,7 +16,7 @@ pub trait TypeContainer {
     fn type_by_id_mut(self: &mut Self, type_id: TypeId) -> &mut Type;
     /// Returns the flat type name or None if that cannot represent a type (e.g. an array)
     fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String>;
-    /// Returns whether given_type_id is acceptable to a binding of the accepted_type_id, e.g. [ u8; 3 ] is acceptable to a [ u8 ] binding, but not the inverse.
+    /// Returns whether given_type_id is acceptable to a binding of the accepted_type_id
     fn type_accepted_for(self: &Self, given_type_id: TypeId, accepted_type_id: TypeId) -> bool {
         if given_type_id == accepted_type_id {
             true
@@ -67,10 +67,14 @@ pub trait TypeContainer {
 
 /// A container holding binding id to Binding mappings
 pub trait BindingContainer {
-    /// Returns a reference to the type id.
+    /// Returns a reference to the Binding.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
-    /// Returns a mutable reference to the type id.
+    /// Returns a mutable reference to the Binding.
     fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding;
+    /// Returns a reference to the Binding.
+    fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant;
+    /// Returns a mutable reference to the Binding.
+    fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant;
 }
 
 #[derive(Copy, Clone, PartialEq)]

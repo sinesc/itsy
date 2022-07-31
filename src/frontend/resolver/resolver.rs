@@ -12,12 +12,10 @@ use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable,
 use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding};
-use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant};
+use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId, ConstantId};
 use crate::shared::numeric::Numeric;
-use crate::bytecode::builtins::builtin_types;
-
-use crate::bytecode::VMFunc;
+use crate::bytecode::{VMFunc, builtins::builtin_types};
 
 #[derive(Copy, Clone, Debug)]
 struct Stage(u8);
@@ -127,13 +125,13 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         let ret_type = if *ret_type_name == "" {
             Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
         } else {
-            Some(scopes.type_id(root_scope_id, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
+            Some(scopes.local_type_id(root_scope_id, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_type_names
             .iter()
             .map(|arg_type_name| {
                 let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
-                scopes.type_id(root_scope_id, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
+                scopes.local_type_id(root_scope_id, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
@@ -423,10 +421,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves types and bindings used in an expression.
     fn resolve_expression(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
-        use self::ast::Expression as E;
+        use ast::Expression as E;
         match item { // todo: these all need to check expected_result since the caller might depend on an error result on type mismatch
             E::Literal(literal)         => self.resolve_literal(literal, expected_result),
-            E::Variable(variable)       => self.resolve_variable(variable, expected_result),
+            E::Value(value) => match value {
+                ast::Value::Variable(variable) => self.resolve_variable(variable, expected_result),
+                ast::Value::Constant(constant) => self.resolve_constant(constant, expected_result),
+                ast::Value::Unknown { position, ident } => {
+                    if self.scopes.constant_id(self.scope_id, &ident.name).is_some() {
+                        let mut constant = ast::Constant {
+                            position: *position,
+                            ident: ident.clone(),
+                            constant_id: None,
+                        };
+                        self.resolve_constant(&mut constant, expected_result)?;
+                        *item = E::Value(ast::Value::Constant(constant));
+                    } else if self.scopes.lookup_binding_id(self.scope_id, &ident.name).is_some() {
+                        let mut variable = ast::Variable {
+                            position: *position,
+                            ident: ident.clone(),
+                            binding_id: None,
+                        };
+                        self.resolve_variable(&mut variable, expected_result)?;
+                        *item = E::Value(ast::Value::Variable(variable));
+                    }
+                    Ok(())
+                },
+            },
             E::Call(call)               => self.resolve_call(call, expected_result),
             E::Member(_)                => { Ok(()) /* nothing to do here */ },
             E::Assignment(assignment)   => self.resolve_assignment(assignment),
@@ -469,7 +490,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
             });
-            let new_type_id = self.scopes.insert_type(self.scope_id, None, ty);
+            let new_type_id = self.scopes.insert_anonymous_type(false, ty);
             item.type_id = Some(new_type_id);
         }
         self.resolved_or_err(item, None)?;
@@ -608,7 +629,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         };
         if let Some(type_id) = item.ty.type_id(self) {
             let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-            if self.scopes.type_id(self.scope_id, "Self").is_none() {
+            if self.scopes.local_type_id(self.scope_id, "Self").is_none() {
                 self.scopes.alias_type(self.scope_id, "Self", type_id);
             }
             for function in &mut item.functions {
@@ -800,7 +821,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 CallSyntax::Path(static_path) => {
                     path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
                     // todo fix this hack: path handling needs a rework
-                    let if_let_chain_where_are_you_type_id = self.scopes.type_id(ScopeId::ROOT, &static_path.name[0].name);
+                    let if_let_chain_where_are_you_type_id = self.scopes.local_type_id(ScopeId::ROOT, &static_path.name[0].name);
                     if static_path.name.len() == 1 && if_let_chain_where_are_you_type_id.is_some() {
                         item.function_id = self.try_create_scalar_builtin(&item.ident.name, if_let_chain_where_are_you_type_id.unwrap())?;
                     } else {
@@ -866,7 +887,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(item.type_id)
     }
 
-    /// Resolves an occurance of a variable.
+    /// Resolves a variable name to a variable.
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable, expected_result: Option<TypeId>) -> ResolveResult {
         // resolve binding
         if item.binding_id.is_none() {
@@ -875,6 +896,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.ident.name.to_string()), self.module_path));
             }
         }
+        // set expected type, if any
+        if item.type_id(self).is_none() {
+            if let Some(expected_result) = expected_result {
+                if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).as_trait().is_some() {
+                    self.set_type_id(item, expected_result)?;
+                }
+            }
+        }
+        self.resolved_or_err(item, expected_result)
+    }
+
+    /// Resolves a constant name to a constant.
+    fn resolve_constant(self: &mut Self, item: &mut ast::Constant, expected_result: Option<TypeId>) -> ResolveResult {
+        // TODO Resolve constants
+        /*if item.binding_id.is_none() {
+            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, &item.ident.name);
+            if item.binding_id.is_none() {
+                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.ident.name.to_string()), self.module_path));
+            }
+        }*/
         // set expected type, if any
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
@@ -931,7 +972,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(&mut item.iter, type_id)?;
                 }
             },
-            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Variable(_) => {
+            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Value(_) => {
                 self.resolve_expression(&mut item.expr, None)?;
                 if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
                     // infer iter type from array element type
@@ -1104,7 +1145,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // create binding id if we don't have one yet
         if item.binding_id.is_none() {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
-            if self.scopes.binding_id(self.scope_id, &item.ident.name).is_some() {
+            if self.scopes.local_binding_id(self.scope_id, &item.ident.name).is_some() {
                 unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, Some(&item.ident.name), item.mutable, None);
@@ -1191,7 +1232,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else if let (&LV::Numeric(numeric), Some(expected_type)) = (&item.value, expected_type) {
             let ty = self.type_by_id(expected_type);
             if !ty.is_compatible_numeric(numeric) {
-                return Err(ResolveError::new(item, ResolveErrorKind::IncompatibleNumeric(ty.clone(), numeric), self.module_path));
+                return Err(ResolveError::new(item, ResolveErrorKind::IncompatibleNumeric(format!("{}", ty), numeric), self.module_path));
             }
             self.set_type_id(item, expected_type)?;
         } else if self.stage.infer_literals() {
@@ -1276,7 +1317,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // if we don't yet have one, create type based on the inner type, otherwise check types all match
         if type_id.is_none() {
-            let new_type_id = self.scopes.insert_type(self.scope_id, None, Type::Array(Array {
+            let new_type_id = self.scopes.insert_anonymous_type(false, Type::Array(Array {
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);
@@ -1315,5 +1356,11 @@ impl<'ctx> BindingContainer for Resolver<'ctx> {
     }
     fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
         self.scopes.binding_mut(binding_id)
+    }
+    fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant {
+        self.scopes.constant_ref(constant_id)
+    }
+    fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant {
+        self.scopes.constant_mut(constant_id)
     }
 }

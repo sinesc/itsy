@@ -4,7 +4,7 @@ use crate::shared::typed_ids::ScopeId;
 /// A datastructure that stores items by name and index.
 pub(crate) struct Repository<K, I, V> {
     map     : UnorderedMap<(K, ScopeId), I>,
-    data    : Vec<(V, ScopeId)>,
+    data    : Vec<(V, ScopeId)>, // TODO: scope_id on data not required anymore. remove ScopeId and commented functions that used it
 }
 
 impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: Hash + Eq {
@@ -52,6 +52,10 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
     /// Returns the number of items in this Repository.
     pub fn len(self: &Self) -> usize  {
         self.data.len()
+    }
+    /// Returns the id of the given value.
+    pub fn id_by_value(self: &Self, value: &V) -> Option<I> where V: Eq {
+        self.data.iter().enumerate().find_map(|item| if &item.1.0 == value { Some(item.0.into()) } else { None })
     }
     /*
     /// Sets a name for given index or removes it.
