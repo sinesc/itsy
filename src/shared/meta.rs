@@ -4,6 +4,7 @@ use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId}, numeric::{Nu
 use crate::bytecode::builtins::BuiltinType;
 
 /// Binding meta information.
+#[derive(Debug)]
 pub struct Binding {
     pub mutable: bool,
     pub type_id: Option<TypeId>,
@@ -93,7 +94,7 @@ pub struct Trait {
 }
 
 /// Function mata information.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Function {
     pub kind        : Option<FunctionKind>,
     pub arg_type_ids: Vec<Option<TypeId>>,

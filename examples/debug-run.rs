@@ -87,11 +87,12 @@ fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, 
         module
     })?;
     if write_logs {
-        log("logs/ast.c", false, &format!("{:?}", parsed.modules().collect::<Vec<_>>()));
+        log("logs/ast.rs", false, &format!("{:?}", parsed.modules().collect::<Vec<_>>()));
     }
     let resolved = resolver::resolve::<MyAPI>(parsed, "main")?;
     if write_logs {
-        log("logs/ast.c", false, &format!("{:?}", resolved.modules));
+        log("logs/ast.rs", false, &format!("{:?}", resolved.modules));
+        log("logs/resolved.rs", false, &format!("{:#?}", resolved.resolved));
     }
     Ok(compiler::compile(resolved)?)
 }

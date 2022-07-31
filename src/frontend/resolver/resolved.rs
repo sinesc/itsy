@@ -26,6 +26,16 @@ pub struct Resolved {
     function_map: Vec<Function>,
 }
 
+impl Debug for Resolved {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Resolved")
+            .field("binding_map", &self.bindings().collect::<Map<_, _>>())
+            .field("type_map", &self.types().collect::<Map<_, _>>())
+            .field("function_map", &self.functions().collect::<Map<_, _>>())
+            .finish()
+    }
+}
+
 impl Resolved {
     pub(crate) fn new(binding_map: Vec<Binding>, type_map: Vec<Type>, function_map: Vec<Function>) -> Self {
         for info in binding_map.iter() {
