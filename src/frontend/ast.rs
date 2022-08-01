@@ -210,7 +210,7 @@ impl_positioned!(Path);
 
 /// An itsy statement.
 pub enum Statement {
-    Binding(Binding),
+    Binding(LetBinding),
     Function(Function),
     StructDef(StructDef),
     ImplBlock(ImplBlock),
@@ -319,7 +319,7 @@ impl Resolvable for Use {
 
 /// A let binding, e.g. `let a = 1;`.
 #[derive(Debug)]
-pub struct Binding {
+pub struct LetBinding {
     pub position    : Position,
     pub ident       : Ident,
     pub mutable     : bool,
@@ -328,9 +328,9 @@ pub struct Binding {
     pub binding_id  : Option<BindingId>,
 }
 
-impl_positioned!(Binding);
+impl_positioned!(LetBinding);
 
-impl Typeable for Binding {
+impl Typeable for LetBinding {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match self.binding_id {
             Some(binding_id) => bindings.binding_by_id(binding_id).type_id,
@@ -345,7 +345,7 @@ impl Typeable for Binding {
     }
 }
 
-impl Resolvable for Binding {
+impl Resolvable for LetBinding {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.as_ref().map_or(Progress::zero(), |expr| expr.num_resolved())
         + self.ty.as_ref().map_or(Progress::zero(), |ty| ty.num_resolved())
@@ -360,7 +360,7 @@ impl Resolvable for Binding {
 #[derive(Debug)]
 pub struct Closure {
     pub position    : Position,
-    pub args        : Vec<Binding>,
+    pub args        : Vec<LetBinding>,
     pub ret         : Option<InlineType>,
     pub expr        : Expression,
     pub type_id     : Option<TypeId>,
@@ -414,7 +414,7 @@ impl Resolvable for Function {
 #[derive(Debug)]
 pub struct Signature {
     pub ident   : Ident,
-    pub args    : Vec<Binding>,
+    pub args    : Vec<LetBinding>,
     pub ret     : Option<InlineType>,
     pub vis     : Visibility,
 }
@@ -664,7 +664,7 @@ impl Resolvable for TraitDef {
 #[derive(Debug)]
 pub struct ForLoop {
     pub position: Position,
-    pub iter    : Binding,
+    pub iter    : LetBinding,
     pub expr    : Expression,
     pub block   : Block,
     pub scope_id: Option<ScopeId>,

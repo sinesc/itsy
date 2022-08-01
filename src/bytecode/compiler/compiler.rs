@@ -411,7 +411,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &mut Self, item: &ast::Binding) -> CompileResult {
+    fn compile_binding(self: &mut Self, item: &ast::LetBinding) -> CompileResult {
         let binding_id = item.binding_id.or_ice_msg("Unresolved binding")?;
         self.init_state.declare(binding_id);
         if let Some(expr) = &item.expr {

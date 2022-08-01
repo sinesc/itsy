@@ -1140,7 +1140,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a binding created by let, for or a signature.
-    fn resolve_binding(self: &mut Self, item: &mut ast::Binding) -> ResolveResult {
+    fn resolve_binding(self: &mut Self, item: &mut ast::LetBinding) -> ResolveResult {
 
         // create binding id if we don't have one yet
         if item.binding_id.is_none() {

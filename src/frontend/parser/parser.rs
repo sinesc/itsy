@@ -756,14 +756,14 @@ fn use_declaration(i: Input<'_>) -> Output<Use> {
 
 // let
 
-fn binding(i: Input<'_>) -> Output<Binding> {
+fn binding(i: Input<'_>) -> Output<LetBinding> {
     let position = i.position();
     ws(map(
         preceded(
             check_state(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
             tuple((opt(sepr(tag("mut"))), ident, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
         ),
-        move |m| Binding {
+        move |m| LetBinding {
             position    : position,
             ident       : m.1,
             mutable     : m.0.is_some(),
@@ -954,11 +954,11 @@ fn array(i: Input<'_>) -> Output<Array> {
 
 fn function(i: Input<'_>) -> Output<Function> {
     fn function_signature(i: Input<'_>) -> Output<Signature> {
-        fn argument(i: Input<'_>) -> Output<Binding> {
+        fn argument(i: Input<'_>) -> Output<LetBinding> {
             let position = i.position();
             ws(map(
                 tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-                move |tuple| Binding {
+                move |tuple| LetBinding {
                     position    : position,
                     ident       : tuple.1,
                     expr        : None,
@@ -968,7 +968,7 @@ fn function(i: Input<'_>) -> Output<Function> {
                 }
             ))(i)
         }
-        fn argument_list(i: Input<'_>) -> Output<Vec<Binding>> {
+        fn argument_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
             delimited(ws(char('(')), separated_list0(ws(char(',')), ws(argument)), ws(char(')')))(i)
         }
         fn return_part(i: Input<'_>) -> Output<InlineType> {
@@ -1024,12 +1024,12 @@ fn function(i: Input<'_>) -> Output<Function> {
 // closure
 
 fn closure(i: Input<'_>) -> Output<Closure> {
-    fn signature(i: Input<'_>) -> Output<(Vec<Binding>, Option<InlineType>)> {
-        fn argument(i: Input<'_>) -> Output<Binding> {
+    fn signature(i: Input<'_>) -> Output<(Vec<LetBinding>, Option<InlineType>)> {
+        fn argument(i: Input<'_>) -> Output<LetBinding> {
             let position = i.position();
             ws(map(
                 tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-                move |tuple| Binding {
+                move |tuple| LetBinding {
                     position    : position,
                     ident       : tuple.1,
                     expr        : None,
@@ -1101,7 +1101,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
         ),
         move |m| ForLoop {
             position: position,
-            iter: Binding {
+            iter: LetBinding {
                 position    : position,
                 ident       : m.0,
                 mutable     : true,
