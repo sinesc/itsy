@@ -131,7 +131,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Value, Call, Member, Assignment, BinaryOp, UnaryOp, Cast, Block, IfBlock, MatchBlock, Closure)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], Binding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
+        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
     };
     ($self:ident, Value, $val_name:ident, $code:tt, $pattern:pat => $default:tt) => {
         impl_matchall!(@match $self, Value, $val_name, $code, [ $pattern => $default ], Constant, Variable)
@@ -210,7 +210,7 @@ impl_positioned!(Path);
 
 /// An itsy statement.
 pub enum Statement {
-    Binding(LetBinding),
+    LetBinding(LetBinding),
     Function(Function),
     StructDef(StructDef),
     ImplBlock(ImplBlock),

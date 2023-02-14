@@ -190,7 +190,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
                 Ok(())
             },
-            S::Binding(binding) => self.compile_binding(binding),
+            S::LetBinding(binding) => self.compile_binding(binding),
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
@@ -1088,7 +1088,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn create_stack_frame_block(self: &Self, item: &ast::Block, frame: &mut StackFrame) -> CompileResult {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
-            if let ast::Statement::Binding(binding) = statement {
+            if let ast::Statement::LetBinding(binding) = statement {
                 frame.insert(binding.binding_id.or_ice()?, frame.var_pos);
                 frame.var_pos += self.ty(binding).primitive_size() as FrameAddress;
                 if let Some(expression) = &binding.expr {

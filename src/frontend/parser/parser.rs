@@ -1179,7 +1179,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 fn statement(i: Input<'_>) -> Output<Statement> {
     ws(alt((
         root_items,
-        map(binding,|m| Statement::Binding(m)),
+        map(binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),

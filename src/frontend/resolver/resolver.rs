@@ -382,7 +382,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             S::StructDef(structure)     => self.resolve_struct_def(structure),
             S::ImplBlock(impl_block)     => self.resolve_impl_block(impl_block),
             S::TraitDef(trait_def)     => self.resolve_trait_def(trait_def),
-            S::Binding(binding)         => self.resolve_binding(binding),
+            S::LetBinding(binding)         => self.resolve_let_binding(binding),
             S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
             S::WhileLoop(while_loop)    => self.resolve_while_loop(while_loop),
@@ -701,7 +701,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature) -> ResolveResult {
         // resolve arguments
         for arg in item.args.iter_mut() {
-            self.resolve_binding(arg)?; // checks resolved_or_err
+            self.resolve_let_binding(arg)?; // checks resolved_or_err
         }
         // resolve return type
         if let Some(ret) = &mut item.ret {
@@ -963,7 +963,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use ast::{Expression, BinaryOperator as Op};
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
-        self.resolve_binding(&mut item.iter)?;
+        self.resolve_let_binding(&mut item.iter)?;
         match &item.expr { // NOTE: these need to match Compiler::compile_for_loop
             Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
                 let type_id = item.iter.type_id(self);
@@ -1140,7 +1140,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a binding created by let, for or a signature.
-    fn resolve_binding(self: &mut Self, item: &mut ast::LetBinding) -> ResolveResult {
+    fn resolve_let_binding(self: &mut Self, item: &mut ast::LetBinding) -> ResolveResult {
 
         // create binding id if we don't have one yet
         if item.binding_id.is_none() {
