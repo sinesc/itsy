@@ -59,7 +59,7 @@ pub(crate) trait Resolvable {
 }
 
 /// A position in the source code.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct Position(pub(crate) usize);
 
 impl Position {
@@ -86,6 +86,12 @@ impl Position {
             }
         } {}
         (line, parsed.len() as u32 + 1)
+    }
+}
+
+impl Debug for Position {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Position({})", self.0)
     }
 }
 
