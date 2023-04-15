@@ -366,8 +366,7 @@ impl Resolvable for LetBinding {
 #[derive(Debug)]
 pub struct Closure {
     pub position    : Position,
-    pub args        : Vec<LetBinding>,
-    pub ret         : Option<InlineType>,
+    pub sig         : Signature,
     pub expr        : Expression,
     pub type_id     : Option<TypeId>,
     pub function_id : Option<FunctionId>,
@@ -379,8 +378,7 @@ impl_positioned!(Closure);
 
 impl Resolvable for Closure {
     fn num_resolved(self: &Self) -> Progress {
-        self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
-        + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
+        self.sig.num_resolved()
         + self.expr.num_resolved()
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -648,12 +646,12 @@ impl Resolvable for ImplBlock {
 /// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } }`.
 #[derive(Debug)]
 pub struct TraitDef {
-    pub position: Position,
-    pub functions: Vec<Function>,
-    pub scope_id: Option<ScopeId>,
-    pub ident   : Ident,
-    pub type_id : Option<TypeId>,
-    pub vis     : Visibility,
+    pub position    : Position,
+    pub functions   : Vec<Function>,
+    pub scope_id    : Option<ScopeId>,
+    pub ident       : Ident,
+    pub type_id     : Option<TypeId>,
+    pub vis         : Visibility,
 }
 
 impl_positioned!(TraitDef);

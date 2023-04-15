@@ -1024,7 +1024,8 @@ fn function(i: Input<'_>) -> Output<Function> {
 // closure
 
 fn closure(i: Input<'_>) -> Output<Closure> {
-    fn signature(i: Input<'_>) -> Output<(Vec<LetBinding>, Option<InlineType>)> {
+    fn signature(i: Input<'_>) -> Output<Signature> {
+        let position = i.position();
         fn argument(i: Input<'_>) -> Output<LetBinding> {
             let position = i.position();
             ws(map(
@@ -1039,9 +1040,17 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 }
             ))(i)
         }
-        ws(preceded(
-            check_state(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-            pair(terminated(separated_list0(ws(char(',')), ws(argument)), char('|')), opt(preceded(ws(tag("->")), inline_type)))
+        ws(map(
+            preceded(
+                check_state(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                pair(terminated(separated_list0(ws(char(',')), ws(argument)), char('|')), opt(preceded(ws(tag("->")), inline_type)))
+            ),
+            move |sig| Signature {
+                ident   : Ident { name: "closure".to_string(), position }, // TODO: better ident handling
+                args    : sig.0,
+                ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
+                vis     : Visibility::Private,
+            }
         ))(i)
     }
     let position = i.position();
@@ -1066,8 +1075,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
             }
             Closure {
                 position    : position,
-                args        : sig.0,
-                ret         : sig.1,
+                sig         : sig,
                 expr        : expr,
                 function_id : None,
                 scope_id    : None,
