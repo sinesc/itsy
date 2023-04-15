@@ -687,11 +687,11 @@ impl_opcodes!{
     }
 
     /// Virtual function call. Resolves concrete call address from vtable and invokes call().
-    fn vcall(&mut self, function_base_address: StackAddress, arg_size: FrameAddress) {
+    fn virtualcall(&mut self, function_base_address: StackAddress, arg_size: FrameAddress) {
         let item: HeapRef = self.stack.load_sp(arg_size as StackAddress);
         let implementor_index = self.heap.item_implementor_index(item.index());
-        let address: StackAddress = self.stack.load(function_base_address + ((implementor_index as usize) * size_of::<StackAddress>()) as StackAddress);
-        self.call(address, arg_size);
+        let addr: StackAddress = self.stack.load(function_base_address + ((implementor_index as usize) * size_of::<StackAddress>()) as StackAddress);
+        self.call(addr, arg_size);
     }
 
     /// Function return. Restores state, removes arguments left on stack by caller.

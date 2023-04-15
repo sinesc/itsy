@@ -387,7 +387,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     let function_offset = self.vtable_function_offset(function_id)?;
                     let function_arg_size = self.resolved.function(function_id).arg_size(self);
                     comment!(self, "call {}()", item.ident.name);
-                    self.writer.vcall(function_offset, function_arg_size);
+                    self.writer.virtualcall(function_offset, function_arg_size);
                 } else {
                     // static dispatch
                     comment!(self, "call {}()", item.ident.name);
