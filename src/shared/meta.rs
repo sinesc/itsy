@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
-use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId}, numeric::{Numeric, Signed, Unsigned}};
+use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
 
 /// Binding meta information.
@@ -10,10 +10,36 @@ pub struct Binding {
     pub type_id: Option<TypeId>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConstantValue {
     Function(FunctionId),
 }
 
+macro_rules! impl_as_getter {
+    (@ref_type * $ident:ident) => { *$ident };
+    (@ref_type & $ident:ident) => { $ident };
+    ($enum:ident {
+        $( $vis:vis $label:ident ( $variant:ident $ref_type:tt $ty:ty ) ),+
+    }) => {
+        impl $enum {
+            $(
+            $vis fn $label (self: &Self) -> Option<$ty> {
+                match self {
+                    Self::$variant(v) => Some(impl_as_getter!(@ref_type $ref_type v)),
+                    _ => None,
+                }
+            }
+            )+
+        }
+    };
+}
+
+impl_as_getter!(ConstantValue {
+    pub as_function_id ( Function * FunctionId )
+});
+
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Constant {
     pub value: ConstantValue,
     pub type_id: Option<TypeId>,
@@ -86,7 +112,7 @@ pub struct Array {
 /// Information about a trait-implementation for a type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImplTrait {
-    pub functions: Map<String, Option<FunctionId>>,
+    pub functions: Map<String, Option<ConstantId>>,
 }
 
 impl ImplTrait {
@@ -98,16 +124,22 @@ impl ImplTrait {
 /// Information about a trait definition in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
-    pub provided: Map<String, Option<FunctionId>>,
-    pub required: Map<String, Option<FunctionId>>,
+    pub provided: Map<String, Option<ConstantId>>,
+    pub required: Map<String, Option<ConstantId>>,
+}
+
+/// Callable type (closure or function in type position).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Callable {
+    pub arg_type_ids: Vec<Option<TypeId>>,
+    pub ret_type_id : Option<TypeId>,
 }
 
 /// Function mata information.
 #[derive(Clone, Debug)]
 pub struct Function {
-    pub kind        : Option<FunctionKind>,
-    pub arg_type_ids: Vec<Option<TypeId>>,
-    pub ret_type_id : Option<TypeId>,
+    pub kind                : Option<FunctionKind>,
+    pub signature_type_id   : TypeId,
 }
 
 impl Function {
@@ -117,13 +149,25 @@ impl Function {
             _ => None,
         }
     }
-    pub fn is_resolved(self: &Self) -> bool {
-        self.ret_type_id.is_some() && self.kind.is_some() && self.arg_type_ids.iter().all(|arg| arg.is_some())
+    pub fn is_resolved(self: &Self, container: &dyn TypeContainer) -> bool {
+        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
+        callable.ret_type_id.is_some() && self.kind.is_some() && callable.arg_type_ids.iter().all(|arg| arg.is_some())
+    }
+    /// Returns function argument type ids.
+    pub fn arg_type_ids<'a>(self: &Self, container: &'a dyn TypeContainer) -> &'a Vec<Option<TypeId>> {
+        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
+        &callable.arg_type_ids
+    }
+    /// Returns function return type ids.
+    pub fn ret_type_id<'a>(self: &Self, container: &'a dyn TypeContainer) -> Option<TypeId> {
+        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
+        callable.ret_type_id
     }
     /// Computes the total primitive size of the function parameters.
     pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
+        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         let mut arg_size = 0;
-        for arg in &self.arg_type_ids {
+        for arg in &callable.arg_type_ids {
             let arg_type_id = arg.expect("Function arg is not resolved");
             arg_size += container.type_by_id(arg_type_id).primitive_size() as FrameAddress;
         }
@@ -131,7 +175,8 @@ impl Function {
     }
     /// Returns the primitive size of the function return type.
     pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
-        let ret_type_id = self.ret_type_id.expect("Function result is not resolved");
+        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
+        let ret_type_id = callable.ret_type_id.expect("Function result is not resolved");
         container.type_by_id(ret_type_id).primitive_size()
     }
 }
@@ -160,6 +205,7 @@ pub enum Type {
     Enum(Enum),
     Struct(Struct),
     Trait(Trait),
+    Callable(Callable),
 }
 
 impl Debug for Type {
@@ -182,6 +228,7 @@ impl Debug for Type {
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
             Type::Trait(_) => write!(f, "<Trait>"),
+            Type::Callable(v) => write!(f,"{:?}", v),
         }
     }
 }
@@ -206,6 +253,7 @@ impl Display for Type {
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
             Type::Trait(_) => write!(f, "trait"),
+            Type::Callable(_) => write!(f, "callable"),
         }
     }
 }
@@ -220,7 +268,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
@@ -269,7 +317,7 @@ impl Type {
     pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) => true,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::Callable(_) => true,
             _ => false,
         }
     }
@@ -354,7 +402,15 @@ impl Type {
     pub fn is_constructible(self: &Self) -> bool {
         match self {
             Type::Trait(_) => false,
+            Type::Callable(_) => false,
             _ => !self.is_primitive(),
+        }
+    }
+    /// Returns the type as a callable.
+    pub const fn as_callable(self: &Self) -> Option<&Callable> {
+        match self {
+            Type::Callable(callable) => Some(callable),
+            _ => None
         }
     }
     /// Returns the type as an array.

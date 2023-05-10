@@ -10,7 +10,7 @@ use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned, CallTargetType}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, UnwrapOrICE};
@@ -85,7 +85,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let trait_implementors: Vec<_> = resolved.implementors().collect();
 
     // save flattened list of trait implementations and their concrete function ids for later serialization (once compilation is done and absolute function addresses are known)
-    let trait_function_implementations = Compiler::<T>::select_trait_function_implementations(&trait_functions, &trait_implementors);
+    let trait_function_implementations = Compiler::<T>::select_trait_function_implementations(&resolved, &trait_functions, &trait_implementors);
 
     // initialize compiler struct used while visiting every ast node
     let mut compiler = Compiler {
@@ -99,7 +99,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
-        trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&trait_functions, &trait_implementors)?,
+        trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&resolved, &trait_functions, &trait_implementors)?,
         resolved,
     };
 
@@ -172,8 +172,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         let function_id = function.function_id;
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
-                        let trait_function_id = trt.provided.get(function_name).or(trt.required.get(function_name)).or_ice()?;
-                        let trait_function = self.resolved.function(trait_function_id.or_ice()?);
+                        let trait_constant_id = trt.provided.get(function_name).or(trt.required.get(function_name)).or_ice()?;
+                        let trait_function_id = self.resolved.constant(trait_constant_id.or_ice()?).value.as_function_id().or_ice()?;
+                        let trait_function = self.resolved.function(trait_function_id);
                         let impl_function = self.resolved.function(function_id.or_ice()?);
                         if !self.is_compatible_function(trait_function, impl_function)? {
                             return Err(CompileError::new(function, CompileErrorKind::IncompatibleTraitMethod(function_name.clone()), &self.module_path));
@@ -367,7 +368,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given call.
     fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
         comment!(self, "prepare {}() args", item.ident.name);
-        let function_id = item.function_id.or_ice_msg("Unresolved function")?;
+        let function_id = match item.target {
+            CallTargetType::Constant(constant_id) => self.resolved.constant(constant_id).value.as_function_id().or_ice()?,
+            _ => panic!("todo"),
+        };
         let function = self.resolved.function(function_id).clone();
         match function.kind.or_ice()? {
             FunctionKind::Rust(rust_fn_index) => {
@@ -1022,13 +1026,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if discriminant(&target.kind.or_ice()?) != discriminant(&other.kind.or_ice()?) {
             return Ok(false);
         }
-        if target.ret_type_id != other.ret_type_id {
+        let target_type = self.ty(&target.signature_type_id).as_callable().or_ice()?;
+        let other_type = self.ty(&other.signature_type_id).as_callable().or_ice()?;
+        if target_type.ret_type_id != other_type.ret_type_id {
             return Ok(false);
         }
-        if target.arg_type_ids.len() != other.arg_type_ids.len() {
+        if target_type.arg_type_ids.len() != other_type.arg_type_ids.len() {
             return Ok(false);
         }
-        for (target_arg, other_arg) in target.arg_type_ids.iter().zip(other.arg_type_ids.iter()) {
+        for (target_arg, other_arg) in target_type.arg_type_ids.iter().zip(other_type.arg_type_ids.iter()) {
             if !self.type_accepted_for(other_arg.or_ice()?, target_arg.or_ice()?) {
                 return Ok(false);
             }
@@ -1858,8 +1864,8 @@ impl<T> Compiler<T> {
     fn filter_trait_functions(resolved: &Resolved) -> Vec<(TypeId, &String, FunctionId)> {
         resolved.traits()
             .flat_map(|(type_id, trt)| {
-                trt.provided.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap()))
-                .chain(trt.required.iter().map(move |(function_name, function_id)| (type_id, function_name, function_id.unwrap())))
+                trt.provided.iter().map(move |(function_name, function_id)| (type_id, function_name, resolved.constant(function_id.unwrap()).value.as_function_id().unwrap()))
+                .chain(trt.required.iter().map(move |(function_name, function_id)| (type_id, function_name, resolved.constant(function_id.unwrap()).value.as_function_id().unwrap())))
             })
             .collect()
     }
@@ -1883,13 +1889,14 @@ impl<T> Compiler<T> {
     }
 
     /// Map trait implementor function ids to trait function ids
-    fn map_trait_function_implementors(trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> CompileResult<UnorderedMap<FunctionId, FunctionId>> {
+    fn map_trait_function_implementors(resolved: &Resolved, trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> CompileResult<UnorderedMap<FunctionId, FunctionId>> {
         let mut trait_function_implementors = UnorderedMap::new();
         for &(trait_type_id, function_name, trait_function_id) in trait_functions.iter() {
             for &(_, implementor_traits) in trait_implementors.iter() {
                 if let Some(impl_trait) = implementor_traits.get(&trait_type_id) {
                     if let Some(&implementor_function_id) = impl_trait.functions.get(function_name) {
-                        trait_function_implementors.insert(implementor_function_id.or_ice_msg("Unresolved implementor function")?, trait_function_id);
+                        let implementor_function_id = resolved.constant(implementor_function_id.or_ice_msg("Unresolved implementor function")?).value.as_function_id().unwrap();
+                        trait_function_implementors.insert(implementor_function_id, trait_function_id);
                     }
                 }
             }
@@ -1900,14 +1907,21 @@ impl<T> Compiler<T> {
     /// Create table of all trait implementors/concrete function id permutations (implementor or trait-provided).
     /// To facility direct lookups, this table contains *all* implementor/trait permuations, including those that are not implemented.
     /// This allows for the lookup position to be computed as `table_start + function_index * num_trait_implementors + trait_implementor_index` (sizeof<ItemIndex> multipliers omitted)
-    /// Since the first three components are statically known their result can be statically supplied to vcall. The implementor index is stored
+    /// Since the first three components are statically known their result can be statically supplied to virtualcall. The implementor index is stored
     /// on the heap object the function is being called on.
-    fn select_trait_function_implementations(trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> Vec<(usize, Option<FunctionId>)> {
+    fn select_trait_function_implementations(resolved: &Resolved, trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> Vec<(usize, Option<FunctionId>)> {
         let mut trait_implementation_mapping = Vec::new();
         for &(trait_type_id, function_name, trait_function_id) in trait_functions.iter() {
             for (implementor_index, &(_, implementor_traits)) in trait_implementors.iter().enumerate() {
                 trait_implementation_mapping.push((implementor_index, match implementor_traits.get(&trait_type_id) {
-                    Some(impl_trait) => *impl_trait.functions.get(function_name).unwrap_or(&Some(trait_function_id)),
+                    Some(impl_trait) => {
+                        impl_trait.functions.get(function_name).map_or(Some(trait_function_id), |c|
+                            resolved.constant(c.unwrap()).value.as_function_id()
+                        )
+
+
+                        //.unwrap_or(&Some(trait_function_id))
+                    },
                     None => None,
                 }));
             }

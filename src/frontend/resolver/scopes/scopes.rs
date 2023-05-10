@@ -3,7 +3,7 @@ mod repository;
 use crate::prelude::*;
 use crate::frontend::resolver::resolved::Resolved;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId, ConstantId};
-use crate::shared::meta::{Type, Function, FunctionKind, Binding, Constant, ConstantValue};
+use crate::shared::meta::{Type, Function, FunctionKind, Binding, Callable, Constant, ConstantValue};
 use crate::shared::{TypeContainer, Progress};
 use repository::Repository;
 
@@ -14,7 +14,7 @@ pub(crate) struct Scopes {
     /// Flat binding data, lookup via BindingId or ScopeId and name
     bindings        : Repository<String, BindingId, Binding>,
     /// Flat constant data, lookup via ConstantId or ScopeId and name
-    constants       : Repository<String, ConstantId, Constant>,
+    constants       : Repository<(String, TypeId), ConstantId, Constant>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
     functions       : Repository<(String, TypeId), FunctionId, Function>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
@@ -49,6 +49,7 @@ impl Scopes {
     }
 
     /// Returns the number of resolved and total items in the Scopes.
+    // TODO: remove this and TypeContainer from Scopes, have ast trait Resolvable take a type container
     pub fn resolved(self: &Self) -> Progress {
         Progress::new(
             // resolved counts
@@ -57,7 +58,7 @@ impl Scopes {
                 Type::Array(array) => if array.type_id.is_some() { 1 } else { 0 },
                 _ => 1,
             })
-            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved() as usize),
+            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved(self) as usize),
 
             // total counts
             self.bindings.len()
@@ -88,16 +89,18 @@ impl Scopes {
         self.scopefunction.insert(scope_id, Some(function_id));
     }
 
-    /// Gets the id of the function containing this scope.
-    pub fn scopefunction_id(self: &Self, scope_id: ScopeId) -> Option<FunctionId> {
-        *self.scopefunction.get(&scope_id).unwrap_or(&None)
+    /// Registers that this scope has a function attached to it but its id is not known yet.
+    /// Does nothing if the scope already has a known function id.
+    pub fn register_scopefunction(self: &mut Self, scope_id: ScopeId) {
+        self.scopefunction.entry(scope_id).or_insert(None);
     }
 
     /// Finds the id of the closest function containing this scope.
     pub fn lookup_scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
         loop {
-            if let Some(function_id) = self.scopefunction_id(scope_id) {
-                return Some(function_id);
+            // Check if we have a resolved or unresolved scope id. Don't look in parent if we have one that is just not resolved yet.
+            if let Some(&function_id) = self.scopefunction.get(&scope_id) {
+                return function_id;
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
             } else {
@@ -111,29 +114,29 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &str, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> FunctionId {
+    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &str, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> ConstantId {
         let type_id = match kind {
             Some(FunctionKind::Method(type_id)) => type_id,
             Some(FunctionKind::Builtin(type_id, _)) => type_id,
             _ => TypeId::VOID,
         };
-        self.functions.insert(scope_id, Some((name.into(), type_id)), Function { ret_type_id: result_type_id, arg_type_ids, kind: kind })
+        let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
+        let function_id = self.functions.insert(scope_id, Some((name.into(), type_id)), Function { signature_type_id, kind });
+        self.insert_constant(scope_id, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
-    /// Aliases an existing function into the given scope, returning a function id.
-    pub fn alias_function(self: &mut Self, scope_id: ScopeId, name: &str, function_id: FunctionId) -> FunctionId {
-        self.functions.alias(scope_id, (name.into(), TypeId::VOID), function_id)
-    }
-
-    /// Returns the id of the named function originating in exactly this scope.
-    pub fn function_id(self: &Self, scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> {
-        self.functions.id_by_name(scope_id, (name.0.to_string(), name.1))
+    /// Looks up an existing constant_id for the given function_id.
+    pub fn function_constant_id(self: &Self, function_id: FunctionId) -> Option<ConstantId> {
+        self.constants.id_search(|c| match c.value {
+            ConstantValue::Function(f) => f == function_id,
+            _ => false,
+        })
     }
 
     /// Finds the id of the named function within the scope or its parent scopes.
-    pub fn lookup_function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> {
+    pub fn lookup_function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> { // todo: rename to function_id()
         loop {
-            if let Some(index) = self.function_id(scope_id, name) {
+            if let Some(index) = self.functions.id_by_name(scope_id, (name.0.to_string(), name.1)) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -143,15 +146,15 @@ impl Scopes {
         }
     }
 
-    /// Returns the id of the named function implemented by a trait for the given type_id.
-    pub fn trait_function_id(self: &Self, _scope_id: ScopeId, name: &str, type_id: TypeId) -> Option<FunctionId> {
+    /// Returns the id of the named constant implemented by a trait for the given type_id.
+    pub fn trait_function_id(self: &Self, _scope_id: ScopeId, name: &str, type_id: TypeId) -> Option<ConstantId> {
         // todo: think about scoping
         let ty = self.types.value_by_id(type_id);
         if let Some(trait_type_ids) = ty.impl_trait_ids() {
             for &trait_type_id in trait_type_ids {
                 let trt = self.types.value_by_id(trait_type_id).as_trait().expect("Implemented type expected to be a trait, got something else");
-                if let Some(&function_id) = trt.provided.get(name) {
-                    return function_id;
+                if let Some(&constant_id) = trt.provided.get(name) {
+                    return constant_id;
                 }
             }
         }
@@ -205,19 +208,24 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a constant into the given scope, returning a constant id. Its type might not be resolved yet.
-    pub fn insert_constant(self: &mut Self, scope_id: ScopeId, name: &str, type_id: Option<TypeId>, value: ConstantValue) -> ConstantId {
-        self.constants.insert(scope_id, Some(name.into()), Constant { value, type_id })
+    pub fn insert_constant(self: &mut Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId, value_type_id: Option<TypeId>, value: ConstantValue) -> ConstantId {
+        self.constants.insert(scope_id, Some((name.into(), owning_type_id)), Constant { value, type_id: value_type_id })
+    }
+
+    /// Aliases an existing constant into the given scope, returning a constant id.
+    pub fn alias_constant(self: &mut Self, scope_id: ScopeId, name: &str, constant_id: ConstantId) -> ConstantId {
+        self.constants.alias(scope_id, (name.into(), TypeId::VOID), constant_id) // FIXME: VOID seems wrong here
     }
 
     /// Returns the id of the named constant originating in exactly this scope.
-    pub fn local_constant_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<ConstantId> {
-        self.constants.id_by_name(scope_id, name.to_string())
+    pub fn local_constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
+        self.constants.id_by_name(scope_id, (name.to_string(), owning_type_id))
     }
 
     /// Finds the id of the named constant within the scope or its parent scopes.
-    pub fn constant_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<ConstantId> {
+    pub fn constant_id(self: &Self, mut scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
         loop {
-            if let Some(index) = self.local_constant_id(scope_id, name) {
+            if let Some(index) = self.local_constant_id(scope_id, name, owning_type_id) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -235,6 +243,14 @@ impl Scopes {
     /// Returns a reference to the constant info of the given constant id.
     pub fn constant_ref(self: &Self, constant_id: ConstantId) -> &Constant {
         self.constants.value_by_id(constant_id)
+    }
+
+    pub fn constant_function_id(self: &Self, constant_id: ConstantId) -> Option<FunctionId> {
+        let constant = self.constant_ref(constant_id);
+        match constant.value {
+            ConstantValue::Function(function_id) => Some(function_id),
+            _ => None,
+        }
     }
 }
 

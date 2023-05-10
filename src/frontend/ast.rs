@@ -544,7 +544,7 @@ impl Resolvable for Array {
 #[derive(Debug)]
 pub enum VariantKind {
     Simple(Option<Literal>),
-    Data(Option<FunctionId>, Vec<InlineType>),
+    Data(Option<ConstantId>, Vec<InlineType>),
 }
 
 /// An enum variant definition, e.g. `MyVariant(u16, f32)` or `MySimpleVariant`.
@@ -1356,6 +1356,32 @@ pub enum CallSyntax {
     Method,
 }
 
+impl CallSyntax {
+    pub fn as_path(self: &Self) -> Option<&Path> {
+        match self {
+            Self::Path(path) => Some(path),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the call refers to a constant or variable.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CallTargetType {
+    Unresolved,
+    Constant(ConstantId),
+    Variable(TypeId),
+}
+
+impl Resolvable for CallTargetType {
+    fn num_resolved(self: &Self) -> Progress {
+        match self {
+            Self::Unresolved => Progress::new(0, 0),
+            _ => Progress::new(1, 1),
+        }
+    }
+}
+
 /// A function or method call or an enum variant constructor (variant with data).
 #[derive(Debug)]
 pub struct Call {
@@ -1363,7 +1389,7 @@ pub struct Call {
     pub ident           : Ident,
     pub args            : Vec<Expression>,
     pub call_syntax     : CallSyntax,
-    pub function_id     : Option<FunctionId>,
+    pub target          : CallTargetType,
     pub type_id         : Option<TypeId>,
 }
 
@@ -1385,7 +1411,7 @@ impl Display for Call {
 impl Resolvable for Call {
     fn num_resolved(self: &Self) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
-        + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.target.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }

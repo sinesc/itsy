@@ -428,7 +428,7 @@ fn call_ident(i: Input<'_>) -> Output<Call> {
             ident       : m.0,
             args        : m.2,
             call_syntax : CallSyntax::Ident,
-            function_id : None,
+            target      : CallTargetType::Unresolved,
             type_id     : None,
         }
     )(i)
@@ -443,7 +443,7 @@ fn call_path(i: Input<'_>) -> Output<Call> {
             ident       : m.0.pop(),
             args        : m.2,
             call_syntax : CallSyntax::Path(m.0),
-            function_id : None,
+            target      : CallTargetType::Unresolved,
             type_id     : None,
         }
     )(i)

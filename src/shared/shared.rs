@@ -5,7 +5,7 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId}, meta::{Type, Binding, Constant, Array}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId}, meta::{Type, Binding, Constant, Array, Callable}};
 use crate::prelude::*;
 
 /// A container holding type id to type mappings
@@ -25,6 +25,17 @@ pub trait TypeContainer {
                 (&Type::Array(Array { type_id: Some(given_type_id), .. }), &Type::Array(Array { type_id: Some(accepted_type_id), .. })) => {
                     self.type_accepted_for(given_type_id, accepted_type_id)
                 },
+                (Type::Callable(Callable { arg_type_ids: given_arg_type_ids, ret_type_id: Some(given_ret_type_id) }), Type::Callable(Callable { arg_type_ids: accepted_arg_type_ids, ret_type_id: Some(accepted_ret_type_id) })) => {
+                    self.type_accepted_for(*given_ret_type_id, *accepted_ret_type_id) &&
+                        given_arg_type_ids.len() == accepted_arg_type_ids.len() &&
+                        given_arg_type_ids.iter().zip(accepted_arg_type_ids.iter()).all(|item| {
+                            if let (Some(given_arg_type_id), Some(accepted_arg_type_id)) = item {
+                                self.type_accepted_for(*given_arg_type_id, *accepted_arg_type_id)
+                            } else {
+                                false
+                            }
+                        })
+                },
                 (Type::Struct(struct_), Type::Trait(_)) => {
                     struct_.impl_traits.contains_key(&accepted_type_id)
                 },
@@ -40,6 +51,17 @@ pub trait TypeContainer {
             match (self.type_by_id(first_type_id), self.type_by_id(second_type_id)) {
                 (&Type::Array(Array { type_id: Some(first_type_id), .. }), &Type::Array(Array { type_id: Some(second_type_id), .. })) => {
                     self.type_equals(first_type_id, second_type_id)
+                },
+                (Type::Callable(Callable { arg_type_ids: given_arg_type_ids, ret_type_id: Some(given_ret_type_id) }), Type::Callable(Callable { arg_type_ids: accepted_arg_type_ids, ret_type_id: Some(accepted_ret_type_id) })) => {
+                    self.type_equals(*given_ret_type_id, *accepted_ret_type_id) &&
+                        given_arg_type_ids.len() == accepted_arg_type_ids.len() &&
+                        given_arg_type_ids.iter().zip(accepted_arg_type_ids.iter()).all(|item| {
+                            if let (Some(given_arg_type_id), Some(accepted_arg_type_id)) = item {
+                                self.type_equals(*given_arg_type_id, *accepted_arg_type_id)
+                            } else {
+                                false
+                            }
+                        })
                 },
                 _ => false,
             }
@@ -57,7 +79,7 @@ pub trait TypeContainer {
                     format!("[ {} ]", self.type_name(type_id))
                 }
                 Type::Array(Array { type_id: None }) => {
-                    "[ _ ]".to_string()
+                    "[ ? ]".to_string()
                 }
                 _ => "?".to_string()
             }
