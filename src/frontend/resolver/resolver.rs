@@ -189,7 +189,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
-    let entry_fn = scopes.lookup_function_id(entry_scope_id, (entry_function, TypeId::VOID))
+    let entry_fn = scopes.function_id(entry_scope_id, (entry_function, TypeId::VOID))
         .unwrap_or_err(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()), "")?;
 
     Ok(ResolvedProgram {
@@ -411,7 +411,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if self.module_paths.contains(path) {
                 *resolved = true;
                 return Err(ResolveError::new(item, ResolveErrorKind::Unsupported("importing entire module not yet implemented".to_string()), self.module_path));
-            } else if let Some(type_id) = self.scopes.lookup_type_id(self.scope_id, path) {
+            } else if let Some(type_id) = self.scopes.type_id(self.scope_id, path) {
                 self.scopes.alias_type(self.scope_id, name, type_id); // TODO should probably be prefixed with module name
                 *resolved = true;
             } else if let Some(constant_id) = self.scopes.constant_id(self.scope_id, path, TypeId::VOID) {
@@ -445,7 +445,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         };
                         self.resolve_constant(&mut constant, expected_result)?;
                         *item = E::Value(ast::Value::Constant(constant));
-                    } else if self.scopes.lookup_binding_id(self.scope_id, &ident.name).is_some() {
+                    } else if self.scopes.binding_id(self.scope_id, &ident.name).is_some() {
                         let mut variable = ast::Variable {
                             position: *position,
                             ident: ident.clone(),
@@ -481,7 +481,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a type (name) to a type_id.
     fn resolve_type_name(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_none() {
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&item.path.name)) {
+            if let Some(new_type_id) = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.name)) {
                 item.type_id = Some(new_type_id);
             }
         }
@@ -541,7 +541,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // check whether at least one enum variant specifies a type, default to i32 if none do
         let simple_type_id = if let Some(named_type) = item.named_type() {
-            named_type.type_id.or(self.scopes.lookup_type_id(self.scope_id, &self.make_path(&named_type.path.name))).unwrap_or_ice("Invalid variant type")?
+            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.name))).unwrap_or_ice("Invalid variant type")?
         } else {
             self.primitive_type_id(Type::i32)?
         };
@@ -771,7 +771,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
-        let function_id = self.scopes.lookup_scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
+        let function_id = self.scopes.scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
         self.resolved_or_err(&mut item.expr, None)?;
         self.resolve_expression(&mut item.expr, ret_type_id)?;
@@ -822,7 +822,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(constant_id) = self.scopes.constant_id(self.scope_id, name, TypeId::VOID) {
             // constant function
             item.target = CallTargetType::Constant(constant_id);
-        } else if let Some(binding_id) = self.scopes.lookup_binding_id(self.scope_id, name) {
+        } else if let Some(binding_id) = self.scopes.binding_id(self.scope_id, name) {
             // variable holding a function
             if let Some(type_id) = self.scopes.binding_ref(binding_id).type_id {
                 item.target = CallTargetType::Variable(type_id);
@@ -1005,7 +1005,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 LiteralValue::Variant(v) => v,
                 _ => unreachable!("expected variant literal"),
             };
-            if let Some(new_type_id) = self.scopes.lookup_type_id(self.scope_id, &self.make_path(&variant.path.name)) {
+            if let Some(new_type_id) = self.scopes.type_id(self.scope_id, &self.make_path(&variant.path.name)) {
                 item.type_id = Some(new_type_id);
             }
         }
@@ -1020,7 +1020,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable, expected_result: Option<TypeId>) -> ResolveResult {
         // resolve binding
         if item.binding_id.is_none() {
-            item.binding_id = self.scopes.lookup_binding_id(self.scope_id, &item.ident.name);
+            item.binding_id = self.scopes.binding_id(self.scope_id, &item.ident.name);
             if item.binding_id.is_none() {
                 return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.ident.name.to_string()), self.module_path));
             }

@@ -96,7 +96,7 @@ impl Scopes {
     }
 
     /// Finds the id of the closest function containing this scope.
-    pub fn lookup_scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
+    pub fn scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
         loop {
             // Check if we have a resolved or unresolved scope id. Don't look in parent if we have one that is just not resolved yet.
             if let Some(&function_id) = self.scopefunction.get(&scope_id) {
@@ -134,7 +134,7 @@ impl Scopes {
     }
 
     /// Finds the id of the named function within the scope or its parent scopes.
-    pub fn lookup_function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> { // todo: rename to function_id()
+    pub fn function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> { // todo: rename to function_id()
         loop {
             if let Some(index) = self.functions.id_by_name(scope_id, (name.0.to_string(), name.1)) {
                 return Some(index);
@@ -181,7 +181,7 @@ impl Scopes {
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn lookup_binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> { // todo: rename to binding_id()
+    pub fn binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> { // todo: rename to binding_id()
         loop {
             if let Some(index) = self.local_binding_id(scope_id, name) {
                 return Some(index);
@@ -282,7 +282,7 @@ impl Scopes {
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
-    pub fn lookup_type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
+    pub fn type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
         loop {
             if let Some(index) = self.local_type_id(scope_id, name) {
                 return Some(index);
