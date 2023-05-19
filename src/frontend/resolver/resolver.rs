@@ -2,6 +2,7 @@
 
 #[path="scopes/scopes.rs"]
 mod scopes;
+mod stage;
 pub mod error;
 pub mod resolved;
 
@@ -17,44 +18,10 @@ use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 
-#[derive(Copy, Clone, Debug)]
-struct Stage(u8);
-
-impl Stage {
-    /// Construct stage.
-    fn new() -> Self {
-        Stage(0)
-    }
-    /// Proceed to next stage.
-    fn next(self: &mut Self) {
-        self.0 += 1;
-    }
-    /// Resets back to first stage.
-    fn reset(self: &mut Self) {
-        self.0 = 0;
-    }
-    /// Assume paths to be absolute.
-    fn absolute_paths(self: &Self) -> bool {
-        self.0 == 1
-    }
-    /// Assume unresolved numeric literals to be their default types.
-    fn infer_literals(self: &Self) -> bool {
-        self.0 == 2
-    }
-    /// Allow unresolved types to be inferred from inconcrete types.
-    fn infer_as_concrete(self: &Self) -> bool {
-        self.0 == 3
-    }
-    /// Previous stages failed, next resolution failure must trigger a resolution error.
-    fn must_resolve(self: &Self) -> bool {
-        self.0 >= 4
-    }
-}
-
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
-    stage           : Stage,
+    stage           : stage::Stage,
     /// Scope id this state operates in.
     scope_id        : ScopeId,
     /// Repository of all scopes.
@@ -149,7 +116,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // repeatedly try to resolve items until no more progress is made
     let mut now_resolved = Progress::zero();
     let mut prev_resolved;
-    let mut stage = Stage::new();
+    let mut stage = stage::Stage::new();
 
     loop {
         let mut resolver = Resolver {
