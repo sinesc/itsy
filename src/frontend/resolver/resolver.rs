@@ -70,44 +70,42 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
-    let root_scope_id = ScopeId::ROOT;
-
     let mut primitives = UnorderedMap::new();
-    primitives.insert(&Type::void, scopes.insert_type(root_scope_id, None, Type::void));
-    primitives.insert(&Type::bool, scopes.insert_type(root_scope_id, Some("bool"), Type::bool));
-    primitives.insert(&Type::u8, scopes.insert_type(root_scope_id, Some("u8"), Type::u8));
-    primitives.insert(&Type::u16, scopes.insert_type(root_scope_id, Some("u16"), Type::u16));
-    primitives.insert(&Type::u32, scopes.insert_type(root_scope_id, Some("u32"), Type::u32));
-    primitives.insert(&Type::u64, scopes.insert_type(root_scope_id, Some("u64"), Type::u64));
-    primitives.insert(&Type::i8, scopes.insert_type(root_scope_id, Some("i8"), Type::i8));
-    primitives.insert(&Type::i16, scopes.insert_type(root_scope_id, Some("i16"), Type::i16));
-    primitives.insert(&Type::i32, scopes.insert_type(root_scope_id, Some("i32"), Type::i32));
-    primitives.insert(&Type::i64, scopes.insert_type(root_scope_id, Some("i64"), Type::i64));
-    primitives.insert(&Type::f32, scopes.insert_type(root_scope_id, Some("f32"), Type::f32));
-    primitives.insert(&Type::f64, scopes.insert_type(root_scope_id, Some("f64"), Type::f64));
-    primitives.insert(&Type::String, scopes.insert_type(root_scope_id, Some("String"), Type::String));
+    primitives.insert(&Type::void, scopes.insert_type(ScopeId::ROOT, None, Type::void));
+    primitives.insert(&Type::bool, scopes.insert_type(ScopeId::ROOT, Some("bool"), Type::bool));
+    primitives.insert(&Type::u8, scopes.insert_type(ScopeId::ROOT, Some("u8"), Type::u8));
+    primitives.insert(&Type::u16, scopes.insert_type(ScopeId::ROOT, Some("u16"), Type::u16));
+    primitives.insert(&Type::u32, scopes.insert_type(ScopeId::ROOT, Some("u32"), Type::u32));
+    primitives.insert(&Type::u64, scopes.insert_type(ScopeId::ROOT, Some("u64"), Type::u64));
+    primitives.insert(&Type::i8, scopes.insert_type(ScopeId::ROOT, Some("i8"), Type::i8));
+    primitives.insert(&Type::i16, scopes.insert_type(ScopeId::ROOT, Some("i16"), Type::i16));
+    primitives.insert(&Type::i32, scopes.insert_type(ScopeId::ROOT, Some("i32"), Type::i32));
+    primitives.insert(&Type::i64, scopes.insert_type(ScopeId::ROOT, Some("i64"), Type::i64));
+    primitives.insert(&Type::f32, scopes.insert_type(ScopeId::ROOT, Some("f32"), Type::f32));
+    primitives.insert(&Type::f64, scopes.insert_type(ScopeId::ROOT, Some("f64"), Type::f64));
+    primitives.insert(&Type::String, scopes.insert_type(ScopeId::ROOT, Some("String"), Type::String));
 
     // insert rust functions into root scope
-    for (&name, (index, ret_type_name, arg_type_names)) in T::resolve_info().iter() {
-        let ret_type = if *ret_type_name == "" {
+    for (name, (index, ret_type_name, arg_type_names)) in T::resolve_info().into_iter() {
+        let ret_type = if ret_type_name == "" {
             Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
         } else {
-            Some(scopes.local_type_id(root_scope_id, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
+            Some(scopes.local_type_id(ScopeId::ROOT, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_type_names
             .iter()
             .map(|arg_type_name| {
                 let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
-                scopes.local_type_id(root_scope_id, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
+                scopes.local_type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
-        scopes.insert_function(root_scope_id, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(*index)));
+        scopes.insert_function(ScopeId::ROOT, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
 
     // create scopes for each module
     for module in &mut program.0 {
-        module.scope_id = Some(scopes.create_scope(root_scope_id));
+        module.scope_id = Some(scopes.create_scope(ScopeId::ROOT));
     }
 
     // assemble set of module paths to check use declarations against
@@ -121,7 +119,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     loop {
         let mut resolver = Resolver {
             stage,
-            scope_id        : root_scope_id,
+            scope_id        : ScopeId::ROOT,
             scopes          : &mut scopes,
             primitives      : &primitives,
             module_paths    : &module_paths,
@@ -144,7 +142,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
                 if !stage.must_resolve() {
                     stage.next();
                 } else {
-                    return ice("Unresolved types remaining but no errors were triggered in error run");
+                    return ice("Unresolved types remaining but no errors were triggered during must_resolve stage");
                 }
             } else {
                 stage.reset();
@@ -155,14 +153,19 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     }
 
     // find entry module (empty path) and main function within
-    let entry_scope_id = program.modules().find(|&m| m.path == "").unwrap().scope_id.unwrap();
-    let entry_fn = scopes.function_id(entry_scope_id, (entry_function, TypeId::VOID))
-        .unwrap_or_err(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()), "")?;
+    let entry_scope_id = program.modules()
+        .find(|&m| m.path == "").unwrap_or_ice(ICE)?
+        .scope_id.unwrap_or_ice(ICE)?;
+
+    let entry_fn = match scopes.constant_id(entry_scope_id, &entry_function, TypeId::VOID) {
+        Some(constant_id) => scopes.constant_function_id(constant_id),
+        None => None,
+    };
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
         modules         : program.0,
-        entry_fn        : entry_fn,
+        entry_fn        : entry_fn.unwrap_or_err(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()), "")?,
         resolved        : scopes.into(),
     })
 }

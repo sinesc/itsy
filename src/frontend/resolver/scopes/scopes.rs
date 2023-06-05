@@ -133,19 +133,6 @@ impl Scopes {
         })
     }
 
-    /// Finds the id of the named function within the scope or its parent scopes.
-    pub fn function_id(self: &Self, mut scope_id: ScopeId, name: (&str, TypeId)) -> Option<FunctionId> { // todo: rename to function_id()
-        loop {
-            if let Some(index) = self.functions.id_by_name(scope_id, (name.0.to_string(), name.1)) {
-                return Some(index);
-            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
-                scope_id = parent_scope_id;
-            } else {
-                return None;
-            }
-        }
-    }
-
     /// Returns the id of the named constant implemented by a trait for the given type_id.
     pub fn trait_function_id(self: &Self, _scope_id: ScopeId, name: &str, type_id: TypeId) -> Option<ConstantId> {
         // todo: think about scoping
@@ -249,7 +236,7 @@ impl Scopes {
         let constant = self.constant_ref(constant_id);
         match constant.value {
             ConstantValue::Function(function_id) => Some(function_id),
-            _ => None,
+            //_ => None,
         }
     }
 }
