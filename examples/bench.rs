@@ -5,34 +5,36 @@ struct BenchContext {
     time: Option<Instant>,
 }
 
-itsy_api!(BenchAPI, BenchContext, {
-    fn print(&mut context, value: &str) {
-        print!("{}", value);
-        io::stdout().flush().unwrap();
+itsy_api! {
+    BenchAPI<BenchContext> {
+        fn print(&mut context, value: &str) {
+            print!("{}", value);
+            io::stdout().flush().unwrap();
+        }
+        fn println(&mut context, value: &str) {
+            println!("{}", value);
+        }
+        fn start_time(&mut context) {
+            context.time = Some(Instant::now());
+        }
+        fn stop_time(&mut context) -> f64 {
+            let elapsed = context.time.expect("time started").elapsed();
+            elapsed.as_secs_f64()
+        }
+        fn rust_fib_r(&mut context, n: i32) -> i32 {
+            fib_r(n)
+        }
+        fn rust_mandelbrot(&mut context, columns: u32, rows: u32) -> String {
+            mandelbrot(columns, rows)
+        }
+        fn rust_stringcat(&mut context, n: i32) -> String {
+            stringcat(n)
+        }
+        fn heap_purge(&mut context, &mut vm) {
+            vm.heap.purge();
+        }
     }
-    fn println(&mut context, value: &str) {
-        println!("{}", value);
-    }
-    fn start_time(&mut context) {
-        context.time = Some(Instant::now());
-    }
-    fn stop_time(&mut context) -> f64 {
-        let elapsed = context.time.expect("time started").elapsed();
-        elapsed.as_secs_f64()
-    }
-    fn rust_fib_r(&mut context, n: i32) -> i32 {
-        fib_r(n)
-    }
-    fn rust_mandelbrot(&mut context, columns: u32, rows: u32) -> String {
-        mandelbrot(columns, rows)
-    }
-    fn rust_stringcat(&mut context, n: i32) -> String {
-        stringcat(n)
-    }
-    fn heap_purge(&mut context, &mut vm) {
-        vm.heap.purge();
-    }
-});
+}
 
 fn main() {
     let mut context = BenchContext { time: None };

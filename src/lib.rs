@@ -62,7 +62,7 @@ use config_derived::*;
 /// }
 ///
 /// // Define an API of Rust functions that are callable from the Itsy script.
-/// itsy_api!(MyAPI, MyContext, {
+/// itsy_api!(MyAPI<MyContext> {
 ///     fn intense_computation(&mut context, a: i16, b: i16) -> i16 {
 ///         a * b
 ///     }
@@ -165,7 +165,7 @@ macro_rules! itsy_api {
     // Main definition block
     (
         $(#[$globalmeta:meta])*
-        $vis:vis $type_name:ident, $context_type:ty, { $(
+        $vis:vis $type_name:ident < $context_type:ty > { $(
             $( #[ $attr:meta ] )*
             // FIXME: ret_type is simple ident only (ambiguity issues)
             // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
@@ -265,7 +265,7 @@ macro_rules! itsy_api {
 /// use itsy::{itsy_api, build_str, run};
 ///
 /// // Define an API of Rust functions that are callable from the Itsy script.
-/// itsy_api!(MyAPI, (), {
+/// itsy_api!(MyAPI<()> {
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }

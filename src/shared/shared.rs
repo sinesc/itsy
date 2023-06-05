@@ -93,9 +93,9 @@ pub trait BindingContainer {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
     /// Returns a mutable reference to the Binding.
     fn binding_by_id_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding;
-    /// Returns a reference to the Binding.
+    /// Returns a reference to the Constant.
     fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant;
-    /// Returns a mutable reference to the Binding.
+    /// Returns a mutable reference to the Constant.
     fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant;
 }
 

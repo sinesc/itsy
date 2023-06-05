@@ -42,47 +42,49 @@ pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
 }
 
 // Implement some VM methods to write values of specific types to the VM context.
-itsy_api!(TestFns, Context, {
-    fn ret_u8(&mut context, value: u8) {
-        context.push(Box::new(value));
+itsy_api! {
+    TestFns<Context> {
+        fn ret_u8(&mut context, value: u8) {
+            context.push(Box::new(value));
+        }
+        fn ret_u16(&mut context, value: u16) {
+            context.push(Box::new(value));
+        }
+        fn ret_u32(&mut context, value: u32) {
+            context.push(Box::new(value));
+        }
+        fn ret_u64(&mut context, value: u64) {
+            context.push(Box::new(value));
+        }
+        fn ret_i8(&mut context, value: i8) {
+            context.push(Box::new(value));
+        }
+        fn ret_i16(&mut context, value: i16) {
+            context.push(Box::new(value));
+        }
+        fn ret_i32(&mut context, value: i32) {
+            context.push(Box::new(value));
+        }
+        fn ret_i64(&mut context, value: i64) {
+            context.push(Box::new(value));
+        }
+        fn ret_f32(&mut context, value: f32) {
+            context.push(Box::new(value));
+        }
+        fn ret_f64(&mut context, value: f64) {
+            context.push(Box::new(value));
+        }
+        fn ret_bool(&mut context, value: bool) {
+            context.push(Box::new(value));
+        }
+        fn ret_string(&mut context, value: String) {
+            context.push(Box::new(value));
+        }
+        fn ret_str(&mut context, value: &str) {
+            context.push(Box::new(value.to_string()));
+        }
     }
-    fn ret_u16(&mut context, value: u16) {
-        context.push(Box::new(value));
-    }
-    fn ret_u32(&mut context, value: u32) {
-        context.push(Box::new(value));
-    }
-    fn ret_u64(&mut context, value: u64) {
-        context.push(Box::new(value));
-    }
-    fn ret_i8(&mut context, value: i8) {
-        context.push(Box::new(value));
-    }
-    fn ret_i16(&mut context, value: i16) {
-        context.push(Box::new(value));
-    }
-    fn ret_i32(&mut context, value: i32) {
-        context.push(Box::new(value));
-    }
-    fn ret_i64(&mut context, value: i64) {
-        context.push(Box::new(value));
-    }
-    fn ret_f32(&mut context, value: f32) {
-        context.push(Box::new(value));
-    }
-    fn ret_f64(&mut context, value: f64) {
-        context.push(Box::new(value));
-    }
-    fn ret_bool(&mut context, value: bool) {
-        context.push(Box::new(value));
-    }
-    fn ret_string(&mut context, value: String) {
-        context.push(Box::new(value));
-    }
-    fn ret_str(&mut context, value: &str) {
-        context.push(Box::new(value.to_string()));
-    }
-});
+}
 
 /// Run a bit of itsy code and return the vm's custom field (populated by the code).
 #[allow(dead_code)]

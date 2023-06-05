@@ -1,4 +1,4 @@
-use itsy::*;
+use itsy::itsy_api;
 #[allow(unused_imports)]
 use std::{thread, time::{Instant, Duration}, io::{self, Write}};
 
@@ -19,17 +19,20 @@ impl Context {
     }
 }
 
-itsy_api!(
+itsy_api! {
     /// Demo API providing some basic functionality
-    pub MyAPI, Context, {
+    pub MyAPI<Context> {
         /// Prints the given string to standard output.
         fn print(&mut context, value: String) {
             print!("{}", value);
-            io::stdout().flush().unwrap();
         }
         /// Prints the given string followed by a newline to standard output.
         fn println(&mut context, value: String) {
             println!("{}", value);
+        }
+        /// Flushes standard output.
+        fn flush(&mut context) {
+            io::stdout().flush().unwrap();
         }
         /// Returns a random number between 0.0 and non-inclusive 1.0
         fn random(&mut context) -> f64 {
@@ -52,4 +55,4 @@ itsy_api!(
             already_expired
         }
     }
-);
+}

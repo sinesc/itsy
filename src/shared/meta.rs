@@ -24,6 +24,7 @@ macro_rules! impl_as_getter {
         impl $enum {
             $(
             $vis fn $label (self: &Self) -> Option<$ty> {
+                #[allow(unreachable_patterns)]
                 match self {
                     Self::$variant(v) => Some(impl_as_getter!(@ref_type $ref_type v)),
                     _ => None,

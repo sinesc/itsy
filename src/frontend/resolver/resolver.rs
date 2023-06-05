@@ -44,7 +44,7 @@ pub(crate) struct Resolver<'ctx> {
 /// use itsy::{itsy_api, parser, resolver};
 ///
 /// // Define an API of Rust functions that are callable from the Itsy script.
-/// itsy_api!(MyAPI, (), {
+/// itsy_api!(MyAPI<()> {
 ///     fn print(&mut context, value: &str) {
 ///         println!("print: {}", value);
 ///     }

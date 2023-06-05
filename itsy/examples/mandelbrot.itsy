@@ -19,6 +19,7 @@ fn main() {
     // clear screen
     let escape = String::from_ascii(27);
     print("{escape}[2J"); // print is provided by userdefined rust api examples/shared/mod.rs
+    flush();
 
     let runtime = 0;
     let angle = 0.0;
@@ -102,6 +103,7 @@ fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, r
     let epsilon_str = num_epsilon.fmt(if num_epsilon < 10.0 { 2 } else { 0 });
     let render_low = i32::max(frame.max_iterations as i32 - chars.len() as i32, 0);
     print("{esc}[{height};1Hmax. iter. {frame.max_iterations} (whitespace < {render_low}), zoom {zoom_str}x ({epsilon_str}×f64::EPSILON)");
+    flush();
 }
 
 /*
