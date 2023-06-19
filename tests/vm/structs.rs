@@ -192,3 +192,26 @@ fn index_assign_primitive() {
     assert(&result[4], 12345678902u64);
     assert(&result[5], 12345678903u64);
 }
+
+#[test]
+fn struct_self() {
+    let result = run(stringify!(
+        struct Test {
+            current: i32,
+        }
+        impl Test {
+            fn max() -> i32 {
+                123
+            }
+            fn get(self: Self) {
+                ret_i32(Self::max());
+                ret_i32(self.current);
+            }
+        }
+        fn main() {
+            let test = Test { current: 37 };
+            test.get();
+        }
+    ));
+    assert_all(&result, &[ 123i32, 37 ]);
+}
