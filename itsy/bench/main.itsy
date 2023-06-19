@@ -1,6 +1,7 @@
 /*
  * Basic ballpark benchmarking. TODO: super clunky due to lack of closures and hashmaps.
  */
+use BenchAPI::{print, println, start_time, stop_time, heap_purge, rust_mandelbrot, rust_fib_r, rust_stringcat};
 
 struct Test {
     name: String,

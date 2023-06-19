@@ -7,6 +7,8 @@ pub type Context = Vec<ContextElement>;
 
 use itsy::itsy_api;
 
+const TEST_PRELUDE: &str = "use TestFns::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str};";
+
 /// Compare a ContextElement with given value.
 #[allow(dead_code)]
 pub fn assert<T>(result: &ContextElement, expected: T) where T: PartialEq+Debug+'static {
@@ -89,9 +91,12 @@ itsy_api! {
 /// Run a bit of itsy code and return the vm's custom field (populated by the code).
 #[allow(dead_code)]
 pub fn run(code: &str) -> Context {
-    let tmp;
-    let input = if code.find("main()").is_some() { code } else { tmp = format!("fn main() {{ {} }}", code); &tmp };
-    let program = match build_str::<TestFns>(input) {
+    let input = if code.find("main()").is_some() {
+        format!("{} {}", TEST_PRELUDE, code)
+    } else {
+        format!("{} fn main() {{ {} }}", TEST_PRELUDE, code)
+    };
+    let program = match build_str::<TestFns>(&input) {
         Ok(program) => program,
         Err(err) => {
             let loc =  err.loc(&input);

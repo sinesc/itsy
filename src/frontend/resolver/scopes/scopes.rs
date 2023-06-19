@@ -7,8 +7,10 @@ use crate::shared::meta::{Type, Function, FunctionKind, Binding, Callable, Const
 use crate::shared::{TypeContainer, Progress};
 use repository::Repository;
 
-/// Flat lists of types and bindings and which scope the belong to.
+/// Flat lists of types and bindings and which scope they belong to.
 pub(crate) struct Scopes {
+    /// Aliases
+    aliases         : UnorderedMap<(ScopeId, String), String>,
     /// Flat type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
     /// Flat binding data, lookup via BindingId or ScopeId and name
@@ -16,7 +18,7 @@ pub(crate) struct Scopes {
     /// Flat constant data, lookup via ConstantId or ScopeId and name
     constants       : Repository<(String, TypeId), ConstantId, Constant>,
     /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions       : Repository<(String, TypeId), FunctionId, Function>,
+    functions       : Repository<(), FunctionId, Function>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -39,6 +41,7 @@ impl Scopes {
     /// Creates and returns a new Scopes instance.
     pub fn new() -> Self {
         Scopes {
+            aliases         : UnorderedMap::new(),
             types           : Repository::new(),
             bindings        : Repository::new(),
             constants       : Repository::new(),
@@ -78,6 +81,24 @@ impl Scopes {
         let index = self.parent_map.len();
         self.parent_map.push(parent);
         index.into()
+    }
+
+    /// Inserts a general alias into the given scope.
+    pub fn insert_alias(self: &mut Self, scope_id: ScopeId, name: &str, alias: &str) {
+        self.aliases.insert((scope_id, alias.to_string()), name.to_string());
+    }
+
+    /// Resolves given alias.
+    pub fn alias(self: &Self, mut scope_id: ScopeId, alias: &str) -> Option<&str> {
+        loop {
+            if let Some(name) = self.aliases.get(&(scope_id, alias.to_string())) {
+                return Some(name);
+            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
+            } else {
+                return None;
+            }
+        }
     }
 }
 
@@ -121,7 +142,7 @@ impl Scopes {
             _ => TypeId::VOID,
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
-        let function_id = self.functions.insert(scope_id, Some((name.into(), type_id)), Function { signature_type_id, kind });
+        let function_id = self.functions.insert(scope_id, None, Function { signature_type_id, kind });
         self.insert_constant(scope_id, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
@@ -129,7 +150,7 @@ impl Scopes {
     pub fn function_constant_id(self: &Self, function_id: FunctionId) -> Option<ConstantId> {
         self.constants.id_search(|c| match c.value {
             ConstantValue::Function(f) => f == function_id,
-            _ => false,
+            //_ => false,
         })
     }
 
@@ -199,20 +220,17 @@ impl Scopes {
         self.constants.insert(scope_id, Some((name.into(), owning_type_id)), Constant { value, type_id: value_type_id })
     }
 
-    /// Aliases an existing constant into the given scope, returning a constant id.
-    pub fn alias_constant(self: &mut Self, scope_id: ScopeId, name: &str, constant_id: ConstantId) -> ConstantId {
-        self.constants.alias(scope_id, (name.into(), TypeId::VOID), constant_id) // FIXME: VOID seems wrong here
-    }
-
     /// Returns the id of the named constant originating in exactly this scope.
     pub fn local_constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
-        self.constants.id_by_name(scope_id, (name.to_string(), owning_type_id))
+        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
+        self.constants.id_by_name(scope_id, (name, owning_type_id))
     }
 
     /// Finds the id of the named constant within the scope or its parent scopes.
     pub fn constant_id(self: &Self, mut scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
+        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
         loop {
-            if let Some(index) = self.local_constant_id(scope_id, name, owning_type_id) {
+            if let Some(index) = self.local_constant_id(scope_id, &name, owning_type_id) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -258,20 +276,17 @@ impl Scopes {
         }
     }
 
-    /// Aliases an existing type into the given scope, returning a type id.
-    pub fn alias_type(self: &mut Self, scope_id: ScopeId, name: &str, type_id: TypeId) -> TypeId {
-        self.types.alias(scope_id, name.into(), type_id)
-    }
-
     /// Returns the id of the named type originating in exactly this scope.
     pub fn local_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        self.types.id_by_name(scope_id, name.to_string())
+        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
+        self.types.id_by_name(scope_id, name)
     }
 
     /// Finds the id of the named type within the scope or its parent scopes.
     pub fn type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
+        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
         loop {
-            if let Some(index) = self.local_type_id(scope_id, name) {
+            if let Some(index) = self.local_type_id(scope_id, &name) {
                 return Some(index);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;

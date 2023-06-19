@@ -65,7 +65,7 @@ pub(crate) struct Compiler<T> {
 ///     let module = parser::parse_module("
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
-///             print(\"Hello from Itsy!\");
+///             MyAPI::print(\"Hello from Itsy!\");
 ///         }
 ///     ", "").unwrap();
 ///     let mut parsed = parser::ParsedProgram::new();
@@ -370,6 +370,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "prepare {}() args", item.ident.name);
         let function_id = match item.target {
             CallTargetType::Constant(constant_id) => self.resolved.constant(constant_id).value.as_function_id().or_ice()?,
+            CallTargetType::Unresolved => {
+                return Ok(());
+            },
             _ => panic!("todo"),
         };
         let function = self.resolved.function(function_id).clone();

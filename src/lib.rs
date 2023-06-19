@@ -77,7 +77,7 @@ use config_derived::*;
 ///     // Compile a short Itsy program and bind it to our MyAPI.
 ///     let program = build_str::<MyAPI>(stringify!(
 ///         fn main() {
-///             print(intense_computation(4, 5));
+///             MyAPI::print(MyAPI::intense_computation(4, 5));
 ///         }
 ///     )).unwrap();
 ///
@@ -207,7 +207,7 @@ macro_rules! itsy_api {
             fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::internals::binary::sizes::RustFnIndex, &'static str, Vec<&'static str>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(stringify!($name), ($type_name::$name.to_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
+                    map.insert(concat!(stringify!($type_name), "::", stringify!($name)), ($type_name::$name.to_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
                 )*
                 map
             }
@@ -277,7 +277,7 @@ macro_rules! itsy_api {
 ///     let program = build_str::<MyAPI>(stringify!(
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
-///             print("Hello from Itsy!");
+///             MyAPI::print("Hello from Itsy!");
 ///         }
 ///     )).unwrap();
 ///

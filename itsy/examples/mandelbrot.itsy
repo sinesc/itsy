@@ -1,6 +1,7 @@
 /*
  * Mandelbrot fractal example.
  */
+use MyAPI::{print, println, flush, wait_frame};  // MyAPI provided by userdefined rust api examples/shared/mod.rs
 
 // Mandelbrot parameters for a single frame.
 struct Frame {
@@ -18,7 +19,7 @@ struct Coordinate {
 fn main() {
     // clear screen
     let escape = String::from_ascii(27);
-    print("{escape}[2J"); // print is provided by userdefined rust api examples/shared/mod.rs
+    print("{escape}[2J");
     flush();
 
     let runtime = 0;

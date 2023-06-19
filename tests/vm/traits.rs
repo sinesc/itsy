@@ -26,7 +26,7 @@ fn trait_resolution() {
         struct StructB {
             b: u64,
         }
-        pub trait TestTrait {
+        trait TestTrait {
             fn required(self: Self, value: u8) -> String;
             fn provided(self: Self, value: u8) -> String {
                 self.required(value) + " provided"
@@ -78,7 +78,7 @@ fn temporary_traitobject() {
         struct Outer {
             inner: Inner,
         }
-        pub trait Trait {
+        trait Trait {
             fn get(self: Self) -> u8;
             fn double(self: Self) -> u8 {
                 self.get() * 2

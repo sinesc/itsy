@@ -55,7 +55,7 @@ pub(crate) struct Resolver<'ctx> {
 ///     let module = parser::parse_module("
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
-///             print(\"Hello from Itsy!\");
+///             MyAPI::print(\"Hello from Itsy!\");
 ///         }
 ///     ", "").unwrap();
 ///     let mut parsed = parser::ParsedProgram::new();
@@ -103,9 +103,17 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         scopes.insert_function(ScopeId::ROOT, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
 
-    // create scopes for each module
+    // create scopes for each module, import builtin types into module namespace
     for module in &mut program.0 {
-        module.scope_id = Some(scopes.create_scope(ScopeId::ROOT));
+        let module_scope_id = scopes.create_scope(ScopeId::ROOT);
+        let module_path = module.path.clone() + "::";
+        for (_, &type_id) in &primitives {
+            if let Some(name) = scopes.type_name(type_id) {
+                let name = name.clone();
+                scopes.insert_alias(module_scope_id, &name, &(module_path.clone() + &name));
+            }
+        }
+        module.scope_id = Some(module_scope_id);
     }
 
     // assemble set of module paths to check use declarations against
@@ -331,21 +339,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Returns an absolute or relative path string (depending on stage) built from current module and additional path segments.
+    /// Returns an absolute path built from current module and additional path segments.
     fn make_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
-        if self.module_path == "" || !self.stage.absolute_paths() {
-            parts_to_path(&parts)
+        let parts_str = parts_to_path(&parts);
+        if self.module_path == "" || parts_str == "Self"  {
+            parts_str
         } else {
-            self.module_path.to_string() + "::" + &parts_to_path(&parts)
-        }
-    }
-
-    /// Returns absolute path string built from current module path and additional path segments.
-    fn abs_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
-        if self.module_path == "" {
-            parts_to_path(&parts)
-        } else {
-            self.module_path.to_string() + "::" + &parts_to_path(&parts)
+            self.module_path.to_string() + "::" + &parts_str
         }
     }
 }
@@ -380,12 +380,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for (name, (path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
             if self.module_paths.contains(path) {
                 *resolved = true;
-                return Err(ResolveError::new(item, ResolveErrorKind::Unsupported("importing entire module not yet implemented".to_string()), self.module_path));
-            } else if let Some(type_id) = self.scopes.type_id(self.scope_id, path) {
-                self.scopes.alias_type(self.scope_id, name, type_id); // TODO should probably be prefixed with module name
+                self.scopes.insert_alias(self.scope_id, path, name);
+            } else if let Some(_) = self.scopes.type_id(self.scope_id, path) {
                 *resolved = true;
-            } else if let Some(constant_id) = self.scopes.constant_id(self.scope_id, path, TypeId::VOID) {
-                self.scopes.alias_constant(self.scope_id, name, constant_id); // TODO should probably be prefixed with module name
+                self.scopes.insert_alias(self.scope_id, path, name);
+            } else if let Some(_) = self.scopes.constant_id(self.scope_id, path, TypeId::VOID) {
+                self.scopes.insert_alias(self.scope_id, path, name);
                 *resolved = true;
             } else if unresolved == None {
                 unresolved = Some(path.clone());
@@ -451,9 +451,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a type (name) to a type_id.
     fn resolve_type_name(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_none() {
-            if let Some(new_type_id) = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.name)) {
-                item.type_id = Some(new_type_id);
-            }
+            item.type_id = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.name));
         }
         if let (Some(item_type_id), Some(expected_result)) = (item.type_id, expected_result) {
             self.check_type_accepted_for(item, item_type_id, expected_result)?;
@@ -464,12 +462,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an array definition
     fn resolve_array(self: &mut Self, item: &mut ast::Array) -> ResolveResult<Option<TypeId>> {
-        let inner_type_id = self.resolve_inline_type(&mut item.element_type)?;
-        if item.type_id.is_none() && inner_type_id.is_some() {
+        if let (None, inner_type_id @ Some(_)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
             });
-            let new_type_id = self.scopes.insert_anonymous_type(false, ty);
+            let new_type_id = self.scopes.insert_type(ScopeId::ROOT, None, ty);
             item.type_id = Some(new_type_id);
         }
         self.resolved_or_err(item, None)?;
@@ -493,11 +490,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(type_id) = item.type_id {
             self.type_by_id_mut(type_id).as_struct_mut().unwrap().fields = fields;
         } else {
-            let qualified = self.abs_path(&[ &item.ident.name ]);
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Struct(Struct { fields: fields, impl_traits: Map::new() }));
+            let qualified = self.make_path(&[ &item.ident.name ]);
+            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Struct(Struct { fields, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
+                // TODO: public visibility
+                //self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         self.resolved_or_err(item, None)
@@ -563,7 +561,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(type_id) = item.type_id {
             self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
         } else {
-            let qualified = self.abs_path(&[ &item.ident.name ]);
+            let qualified = self.make_path(&[ &item.ident.name ]);
             let primitive = if item.is_primitive() {
                 Some((simple_type_id, self.type_by_id(simple_type_id).primitive_size()))
             } else {
@@ -572,7 +570,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
+                // TODO: public visibility
+                //self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         // create variant constructors
@@ -582,7 +581,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 match &mut variant.kind {
                     ast::VariantKind::Data(function_id @ None, fields) => {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
-                        let path = self.abs_path(&[ &item.ident.name, &variant.ident.name ]);
+                        let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
                         let kind = FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex);
                         *function_id = Some(self.scopes.insert_function(self.scope_id, &path, item.type_id, arg_type_ids, Some(kind)));
                     },
@@ -609,26 +608,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(type_id) = item.ty.type_id(self) {
             let parent_scope_id = self.try_create_scope(&mut item.scope_id);
             if self.scopes.local_type_id(self.scope_id, "Self").is_none() {
-                self.scopes.alias_type(self.scope_id, "Self", type_id);
+                let type_name = self.type_name(type_id);
+                self.scopes.insert_alias(self.scope_id, &type_name, "Self");
             }
             for function in &mut item.functions {
                 self.resolve_function(function, Some((parent_scope_id, type_id)))?;
                 // if this is a trait impl and the trait is resolved
-                if let Some(trait_type_id) = trait_type_id {
-                    if let Some(trait_type_id) = trait_type_id {
-                        let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
-                        let function_name = &function.sig.ident.name;
-                        // check if function is defined in trait
-                        if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
-                            let trait_name = format!("{}", &item.trt.as_ref().unwrap().path);
-                            return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
-                        }
-                        if let Some(function_id) = function.function_id {
-                            let constant_id = self.scopes.function_constant_id(function_id).unwrap_or_ice(ICE)?;
-                            if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
-                                let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
-                                impl_trait.functions.insert(function_name.clone(), Some(constant_id));
-                            }
+                if let Some(Some(trait_type_id)) = trait_type_id {
+                    let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
+                    let function_name = &function.sig.ident.name;
+                    // check if function is defined in trait
+                    if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
+                        let trait_name = format!("{}", &item.trt.as_ref().unwrap().path);
+                        return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
+                    }
+                    if let Some(function_id) = function.function_id {
+                        let constant_id = self.scopes.function_constant_id(function_id).unwrap_or_ice(ICE)?;
+                        if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
+                            let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
+                            impl_trait.functions.insert(function_name.clone(), Some(constant_id));
                         }
                     }
                 }
@@ -650,13 +648,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     None => trt.required.insert(name, None),
                 };
             }
-            let qualified = self.abs_path(&[ &item.ident.name ]);
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Trait(trt));
+            let qualified = self.make_path(&[ &item.ident.name ]);
+            let type_id = self.scopes.insert_type(parent_scope_id, Some(&qualified), Type::Trait(trt));
             item.type_id = Some(type_id);
             // create aliases
-            self.scopes.alias_type(self.scope_id, "Self", type_id);
+            self.scopes.insert_alias(self.scope_id, &qualified, "Self");
             if item.vis == Visibility::Public {
-                self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
+                // TODO: public visibility
+                //self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
         // try to resolve functions
@@ -706,20 +705,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // function/method switch
             let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
                 let type_name = self.scopes.type_name(scope.1).unwrap();
-                let path = self.abs_path(&[ type_name, &item.sig.ident.name ]);
+                let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
                     (scope.0, FunctionKind::Function, path)
                 } else {
                     (scope.0, FunctionKind::Method(scope.1), path)
                 }
             } else {
-                let path = self.abs_path(&[ &item.sig.ident.name ]);
+                let path = self.make_path(&[ &item.sig.ident.name ]);
                 (parent_scope_id, FunctionKind::Function, path)
             };
 
             let constant_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
             if item.sig.vis == Visibility::Public {
-                self.scopes.alias_constant(ScopeId::ROOT, &qualified, constant_id);
+                // TODO: public visibility
+                //self.scopes.alias_constant(ScopeId::ROOT, &qualified, constant_id);
             }
             let function_id = self.scopes.constant_ref(constant_id).value.as_function_id().unwrap();
             item.function_id = Some(function_id);
@@ -802,17 +802,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     fn resolve_call_path(self: &mut Self, item: &mut ast::Call, _expected_result: Option<TypeId>) -> ResolveResult {
-        let path = item.call_syntax.as_path().unwrap_or_ice(ICE)?;
-        let full_name = self.make_path(&[ &parts_to_path(&path.name), &item.ident.name ]);
-        if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &full_name, TypeId::VOID) {
+        // get call path
+        let path = item.call_syntax.as_path().unwrap_or_ice(ICE)?.to_string();
+        // if path is an alias, resolve it
+        let path = self.scopes.alias(self.scope_id, &path).unwrap_or_else(|| &path).to_string();
+
+        if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &self.make_path(&[ &path, &item.ident.name ]), TypeId::VOID) {
             // constant function
             item.target = CallTargetType::Constant(constant_id);
-        } else {
-            let path_name = self.make_path(&[ &parts_to_path(&path.name) ]);
-            if let Some(path_type_id) = self.scopes.local_type_id(ScopeId::ROOT, &path_name) {
-                if let Some(constant_id) = self.try_create_scalar_builtin(&item.ident.name, path_type_id)? {
-                    item.target = CallTargetType::Constant(constant_id);
-                }
+        } else if let Some(type_id) = self.scopes.local_type_id(ScopeId::ROOT, &self.make_path(&[ &path ])) {
+            // builtin function
+            if let Some(constant_id) = self.try_create_scalar_builtin(&item.ident.name, type_id)? {
+                item.target = CallTargetType::Constant(constant_id);
             }
         }
         Ok(())
@@ -864,7 +865,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
                 Ok(())
             },
-            CallTargetType::Variable(type_id) => {
+            CallTargetType::Variable(_type_id) => {
                 // TODO
                 Ok(())
             }
@@ -878,96 +879,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
     }
-/*
-    /// Resolves an occurance of a function call.
-    fn resolve_call_old(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
-        // locate function definition
-        if item.target == CallTargetType::Unresolved {
-            let path;
-            let function_id = match &item.call_syntax {
-                CallSyntax::Method => {
-                    let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
-                    let type_name = if let Some(type_id) = arg.type_id(self) {
-                        self.scopes.type_name(type_id).map_or(format!("{}::{}", self.type_by_id(type_id), &item.ident.name), |t| t.to_string())
-                    } else {
-                        "<unknown>".to_string()
-                    };
-                    path = self.make_path(&[ type_name, item.ident.name.clone() ]);// TODO: this should be lazy on error
-                    self.resolve_call_method(item, expected_result)?
-                },
-                CallSyntax::Ident => {
-                    path = self.make_path(&[ &item.ident.name ]);
-                    let constant_id = self.scopes.constant_id(self.scope_id, &item.ident.name);
-                    if let Some(constant_id) = constant_id {
-                        let constant = self.scopes.constant_ref(constant_id);
-                        match constant.value {
-                            ConstantValue::Function(function_id) => Some(function_id),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
-                },
-                CallSyntax::Path(static_path) => {
-                    path = self.make_path(&[ &parts_to_path(&static_path.name), &item.ident.name ]);
-                    // todo fix this hack: path handling needs a rework
-                    let if_let_chain_where_are_you_type_id = self.scopes.local_type_id(ScopeId::ROOT, &static_path.name[0].name);
-                    if static_path.name.len() == 1 && if_let_chain_where_are_you_type_id.is_some() {
-                        self.try_create_scalar_builtin(&item.ident.name, if_let_chain_where_are_you_type_id.unwrap())?
-                    } else {
-                        self.scopes.lookup_function_id(self.scope_id, (&path, TypeId::VOID))
-                    }
-                },
-            };
-            // needs refactoring because we won't have a function_id if ident is a variable
-            if let Some(function_id) = function_id {
-                item.target = CallTargetType::Constant(function_id);
-            }
-            if item.target == CallTargetType::Unresolved && self.stage.must_resolve() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedFunction(path), self.module_path));
-            }
-        }
 
-
-
-
-        // found a function, resolve return type and arguments
-        if let CallTargetType::Constant(function_id) = item.target {
-
-            // return value
-            let function_info = self.scopes.function_ref(function_id).clone();
-
-            if let Some(ret_type_id) = function_info.ret_type_id(self) {
-                self.set_type_id(item, ret_type_id)?;
-            }
-
-            if let (Some(item_type_id), Some(expected_result)) = (item.type_id(self), expected_result) {
-                self.check_type_accepted_for(item, item_type_id, expected_result)?;
-            }
-
-            // argument count
-            let args = function_info.arg_type_ids(self).clone();
-
-            if args.len() != item.args.len() {
-                return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(item.ident.name.clone(), args.len() as ItemIndex, item.args.len() as ItemIndex), self.module_path));
-            }
-
-            // arguments
-            for (index, &expected_type_id) in args.iter().enumerate() {
-                self.resolve_expression(&mut item.args[index], expected_type_id)?;
-                let actual_type_id = item.args[index].type_id(self);
-                // infer arguments
-                if actual_type_id.is_none() && expected_type_id.is_some() {
-                    *item.args[index].type_id_mut(self) = expected_type_id;
-                } else if let (Some(actual_type_id), Some(expected_type_id)) = (actual_type_id, expected_type_id) {
-                    self.check_type_accepted_for(&item.args[index], actual_type_id, expected_type_id)?;
-                }
-            }
-        }
-
-        self.resolved_or_err(item, expected_result)
-    }
-*/
     /// Resolves a simple enum variant. (Data variants are handled by resolve_call.)
     fn resolve_variant_literal(self: &mut Self, item: &mut ast::Literal, expected_type: Option<TypeId>) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_none() {
@@ -1416,7 +1328,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // if we don't yet have one, create type based on the inner type, otherwise check types all match
         if type_id.is_none() {
-            let new_type_id = self.scopes.insert_anonymous_type(false, Type::Array(Array {
+            let new_type_id = self.scopes.insert_type(ScopeId::ROOT, None, Type::Array(Array {
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);
