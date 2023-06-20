@@ -9,7 +9,7 @@ use repository::Repository;
 
 /// Flat lists of types and bindings and which scope they belong to.
 pub(crate) struct Scopes {
-    /// Aliases point from a scoped name to an unscoped path
+    /// Aliases point from a scoped name to an unscoped path (e.g. Self -> mymod::MyStruct)
     aliases         : UnorderedMap<(ScopeId, String), String>,
     /// Flat type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
@@ -17,8 +17,8 @@ pub(crate) struct Scopes {
     bindings        : Repository<String, BindingId, Binding>,
     /// Flat constant data, lookup via ConstantId or ScopeId and name
     constants       : Repository<(String, TypeId), ConstantId, Constant>,
-    /// Flat function data, lookup via FunctionId or ScopeId and name
-    functions       : Repository<(), FunctionId, Function>,
+    /// List of resolved functions. Vector index represents FunctionId
+    functions       : Vec<Function>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -31,8 +31,7 @@ impl Into<Resolved> for Scopes {
         let binding_map = self.bindings.into();
         let type_map = self.types.into();
         let constant_map = self.constants.into();
-        let function_map = self.functions.into();
-        Resolved::new(binding_map, type_map, constant_map, function_map)
+        Resolved::new(binding_map, type_map, constant_map, self.functions)
     }
 }
 
@@ -45,7 +44,7 @@ impl Scopes {
             types           : Repository::new(),
             bindings        : Repository::new(),
             constants       : Repository::new(),
-            functions       : Repository::new(),
+            functions       : Vec::new(),
             scopefunction   : UnorderedMap::new(),
             parent_map      : vec![ ScopeId::ROOT ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
@@ -61,7 +60,7 @@ impl Scopes {
                 Type::Array(array) => if array.type_id.is_some() { 1 } else { 0 },
                 _ => 1,
             })
-            + self.functions.values().fold(0, |acc, f| acc + f.is_resolved(self) as usize),
+            + self.functions.iter().fold(0, |acc, f| acc + f.is_resolved(self) as usize),
 
             // total counts
             self.bindings.len()
@@ -142,7 +141,8 @@ impl Scopes {
             _ => TypeId::VOID,
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
-        let function_id = self.functions.insert(ScopeId::ROOT, None, Function { signature_type_id, kind });
+        let function_id = FunctionId::from(self.functions.len());
+        self.functions.push(Function { signature_type_id, kind });
         self.insert_constant(ScopeId::ROOT, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
@@ -179,7 +179,7 @@ impl Scopes {
 
     /// Returns a reference to the signature of the given function id.
     pub fn function_ref(self: &Self, function_id: FunctionId) -> &Function {
-        self.functions.value_by_id(function_id)
+        &self.functions[function_id.into_usize()]
     }
 }
 
