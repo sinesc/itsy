@@ -44,8 +44,8 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
         self.map.get(&(name, scope_id)).map(|i| *i)
     }
     /// Returns the name of the given id.
-    pub fn name_by_id(self: &Self, index: I, exclude: K) -> Option<&K> where I: PartialEq  { // TODO: option exclude?
-        self.map.iter().find(|&item| *item.1 == index && item.0.0 != exclude).map(|item| &(item.0).0)
+    pub fn name_by_id(self: &Self, index: I) -> Option<&K> where I: PartialEq  {
+        self.map.iter().find(|&item| *item.1 == index).map(|item| &(item.0).0)
     }
     /// Returns an iterator over the items.
     pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {

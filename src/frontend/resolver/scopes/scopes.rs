@@ -284,7 +284,7 @@ impl Scopes {
 
     /// Returns the name of the given type id.
     pub fn type_name(self: &Self, type_id: TypeId) -> Option<&String> {
-        self.types.name_by_id(type_id, "Self".to_string())
+        self.types.name_by_id(type_id)
     }
 
     /// Returns a mutable reference to the type of the given type id.
