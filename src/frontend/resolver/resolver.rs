@@ -71,32 +71,32 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new();
     let mut primitives = UnorderedMap::new();
-    primitives.insert(&Type::void, scopes.insert_type(ScopeId::ROOT, None, Type::void));
-    primitives.insert(&Type::bool, scopes.insert_type(ScopeId::ROOT, Some("bool"), Type::bool));
-    primitives.insert(&Type::u8, scopes.insert_type(ScopeId::ROOT, Some("u8"), Type::u8));
-    primitives.insert(&Type::u16, scopes.insert_type(ScopeId::ROOT, Some("u16"), Type::u16));
-    primitives.insert(&Type::u32, scopes.insert_type(ScopeId::ROOT, Some("u32"), Type::u32));
-    primitives.insert(&Type::u64, scopes.insert_type(ScopeId::ROOT, Some("u64"), Type::u64));
-    primitives.insert(&Type::i8, scopes.insert_type(ScopeId::ROOT, Some("i8"), Type::i8));
-    primitives.insert(&Type::i16, scopes.insert_type(ScopeId::ROOT, Some("i16"), Type::i16));
-    primitives.insert(&Type::i32, scopes.insert_type(ScopeId::ROOT, Some("i32"), Type::i32));
-    primitives.insert(&Type::i64, scopes.insert_type(ScopeId::ROOT, Some("i64"), Type::i64));
-    primitives.insert(&Type::f32, scopes.insert_type(ScopeId::ROOT, Some("f32"), Type::f32));
-    primitives.insert(&Type::f64, scopes.insert_type(ScopeId::ROOT, Some("f64"), Type::f64));
-    primitives.insert(&Type::String, scopes.insert_type(ScopeId::ROOT, Some("String"), Type::String));
+    primitives.insert(&Type::void, scopes.insert_type(None, Type::void));
+    primitives.insert(&Type::bool, scopes.insert_type(Some("bool"), Type::bool));
+    primitives.insert(&Type::u8, scopes.insert_type(Some("u8"), Type::u8));
+    primitives.insert(&Type::u16, scopes.insert_type(Some("u16"), Type::u16));
+    primitives.insert(&Type::u32, scopes.insert_type(Some("u32"), Type::u32));
+    primitives.insert(&Type::u64, scopes.insert_type(Some("u64"), Type::u64));
+    primitives.insert(&Type::i8, scopes.insert_type(Some("i8"), Type::i8));
+    primitives.insert(&Type::i16, scopes.insert_type(Some("i16"), Type::i16));
+    primitives.insert(&Type::i32, scopes.insert_type(Some("i32"), Type::i32));
+    primitives.insert(&Type::i64, scopes.insert_type(Some("i64"), Type::i64));
+    primitives.insert(&Type::f32, scopes.insert_type(Some("f32"), Type::f32));
+    primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
+    primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
     // insert rust functions into root scope
     for (name, (index, ret_type_name, arg_type_names)) in T::resolve_info().into_iter() {
         let ret_type = if ret_type_name == "" {
             Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
         } else {
-            Some(scopes.local_type_id(ScopeId::ROOT, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
+            Some(scopes.type_id(ScopeId::ROOT, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_type_names
             .iter()
             .map(|arg_type_name| {
                 let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
-                scopes.local_type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
+                scopes.type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
@@ -466,7 +466,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
             });
-            let new_type_id = self.scopes.insert_type(ScopeId::ROOT, None, ty);
+            let new_type_id = self.scopes.insert_type(None, ty);
             item.type_id = Some(new_type_id);
         }
         self.resolved_or_err(item, None)?;
@@ -491,7 +491,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.type_by_id_mut(type_id).as_struct_mut().unwrap().fields = fields;
         } else {
             let qualified = self.make_path(&[ &item.ident.name ]);
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Struct(Struct { fields, impl_traits: Map::new() }));
+            let type_id = self.scopes.insert_type(Some(&qualified), Type::Struct(Struct { fields, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
                 // TODO: public visibility
@@ -567,7 +567,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             } else {
                 None
             };
-            let type_id = self.scopes.insert_type(self.scope_id, Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
+            let type_id = self.scopes.insert_type(Some(&qualified), Type::Enum(Enum { primitive, variants, impl_traits: Map::new() }));
             item.type_id = Some(type_id);
             if item.vis == Visibility::Public {
                 // TODO: public visibility
@@ -607,7 +607,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         };
         if let Some(type_id) = item.ty.type_id(self) {
             let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-            if self.scopes.local_type_id(self.scope_id, "Self").is_none() {
+            if self.scopes.alias(self.scope_id, "Self").is_none() {
                 let type_name = self.type_name(type_id);
                 self.scopes.insert_alias(self.scope_id, &type_name, "Self");
             }
@@ -649,7 +649,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 };
             }
             let qualified = self.make_path(&[ &item.ident.name ]);
-            let type_id = self.scopes.insert_type(parent_scope_id, Some(&qualified), Type::Trait(trt));
+            let type_id = self.scopes.insert_type(Some(&qualified), Type::Trait(trt));
             item.type_id = Some(type_id);
             // create aliases
             self.scopes.insert_alias(self.scope_id, &qualified, "Self");
@@ -810,7 +810,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &self.make_path(&[ &path, &item.ident.name ]), TypeId::VOID) {
             // constant function
             item.target = CallTargetType::Constant(constant_id);
-        } else if let Some(type_id) = self.scopes.local_type_id(ScopeId::ROOT, &self.make_path(&[ &path ])) {
+        } else if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &self.make_path(&[ &path ])) {
             // builtin function
             if let Some(constant_id) = self.try_create_scalar_builtin(&item.ident.name, type_id)? {
                 item.target = CallTargetType::Constant(constant_id);
@@ -1328,7 +1328,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // if we don't yet have one, create type based on the inner type, otherwise check types all match
         if type_id.is_none() {
-            let new_type_id = self.scopes.insert_type(ScopeId::ROOT, None, Type::Array(Array {
+            let new_type_id = self.scopes.insert_type(None, Type::Array(Array {
                 type_id : elements_type_id,
             }));
             *item.type_id_mut(self) = Some(new_type_id);

@@ -71,7 +71,7 @@ impl Scopes {
     }
 
     /// Returns the parent scope id of the given scope id.
-    pub fn parent_id(self: &Self, scope_id: ScopeId) -> Option<ScopeId> {
+    fn parent_id(self: &Self, scope_id: ScopeId) -> Option<ScopeId> {
         let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
         if parent_scope_id == scope_id { None } else { Some(parent_scope_id) }
     }
@@ -262,9 +262,9 @@ impl Scopes {
 /// Type handling
 impl Scopes {
 
-    /// Insert a type into the given scope, returning a type id.
-    pub fn insert_type(self: &mut Self, scope_id: ScopeId, name: Option<&str>, ty: Type) -> TypeId {
-        self.types.insert(scope_id, name.map(|n| n.into()), ty)
+    /// Insert a type into the root scope, returning a type id.
+    pub fn insert_type(self: &mut Self, name: Option<&str>, ty: Type) -> TypeId {
+        self.types.insert(ScopeId::ROOT, name.map(|n| n.into()), ty)
     }
 
     /// Inserts an anonymous type into the root scope and returns a type id.
@@ -276,24 +276,10 @@ impl Scopes {
         }
     }
 
-    /// Returns the id of the named type originating in exactly this scope.
-    pub fn local_type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
+    /// Returns the id of the named type or alias (the scope id is required for alias resolution).
+    pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
         let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        self.types.id_by_name(scope_id, name)
-    }
-
-    /// Finds the id of the named type within the scope or its parent scopes.
-    pub fn type_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        loop {
-            if let Some(index) = self.local_type_id(scope_id, &name) {
-                return Some(index);
-            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
-                scope_id = parent_scope_id;
-            } else {
-                return None;
-            }
-        }
+        self.types.id_by_name(ScopeId::ROOT, name)
     }
 
     /// Returns the name of the given type id.

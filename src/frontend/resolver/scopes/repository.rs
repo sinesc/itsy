@@ -24,11 +24,13 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
         }
         index
     }
+    /*
     /// Aliases an item with a new new.
     pub fn alias(self: &mut Self, alias_scope_id: ScopeId, alias_name: K, source_index: I) -> I {
         self.map.insert((alias_name, alias_scope_id), source_index);
         source_index
     }
+    */
     /// Fetches an item by its id.
     pub fn value_by_id(self: &Self, index: I) -> &V {
         &self.data[index.into()].0
