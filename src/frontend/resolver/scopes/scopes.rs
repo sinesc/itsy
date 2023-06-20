@@ -9,7 +9,7 @@ use repository::Repository;
 
 /// Flat lists of types and bindings and which scope they belong to.
 pub(crate) struct Scopes {
-    /// Aliases
+    /// Aliases point from a scoped name to an unscoped path
     aliases         : UnorderedMap<(ScopeId, String), String>,
     /// Flat type data, lookup via TypeId or ScopeId and name
     types           : Repository<String, TypeId, Type>,
@@ -135,15 +135,15 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a function into the given scope, returning a function id. Its types might not be resolved yet.
-    pub fn insert_function(self: &mut Self, scope_id: ScopeId, name: &str, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> ConstantId {
+    pub fn insert_function(self: &mut Self, name: &str, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>, kind: Option<FunctionKind>) -> ConstantId {
         let type_id = match kind {
             Some(FunctionKind::Method(type_id)) => type_id,
             Some(FunctionKind::Builtin(type_id, _)) => type_id,
             _ => TypeId::VOID,
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
-        let function_id = self.functions.insert(scope_id, None, Function { signature_type_id, kind });
-        self.insert_constant(scope_id, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
+        let function_id = self.functions.insert(ScopeId::ROOT, None, Function { signature_type_id, kind });
+        self.insert_constant(ScopeId::ROOT, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
     /// Looks up an existing constant_id for the given function_id.
@@ -154,9 +154,17 @@ impl Scopes {
         })
     }
 
+    /// Returns the function id for the given constant id, if the constant represents a function.
+    pub fn constant_function_id(self: &Self, constant_id: ConstantId) -> Option<FunctionId> {
+        let constant = self.constant_ref(constant_id);
+        match constant.value {
+            ConstantValue::Function(function_id) => Some(function_id),
+            //_ => None,
+        }
+    }
+
     /// Returns the id of the named constant implemented by a trait for the given type_id.
-    pub fn trait_function_id(self: &Self, _scope_id: ScopeId, name: &str, type_id: TypeId) -> Option<ConstantId> {
-        // todo: think about scoping
+    pub fn trait_provided_constant_id(self: &Self, name: &str, type_id: TypeId) -> Option<ConstantId> {
         let ty = self.types.value_by_id(type_id);
         if let Some(trait_type_ids) = ty.impl_trait_ids() {
             for &trait_type_id in trait_type_ids {
@@ -220,24 +228,10 @@ impl Scopes {
         self.constants.insert(scope_id, Some((name.into(), owning_type_id)), Constant { value, type_id: value_type_id })
     }
 
-    /// Returns the id of the named constant originating in exactly this scope.
-    pub fn local_constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
-        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        self.constants.id_by_name(scope_id, (name, owning_type_id))
-    }
-
     /// Finds the id of the named constant within the scope or its parent scopes.
-    pub fn constant_id(self: &Self, mut scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
+    pub fn constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
         let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        loop {
-            if let Some(index) = self.local_constant_id(scope_id, &name, owning_type_id) {
-                return Some(index);
-            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
-                scope_id = parent_scope_id;
-            } else {
-                return None;
-            }
-        }
+        self.constants.id_by_name(ScopeId::ROOT, (name, owning_type_id))
     }
 
     /// Returns a mutable reference to the constant info of the given constant id.
@@ -248,14 +242,6 @@ impl Scopes {
     /// Returns a reference to the constant info of the given constant id.
     pub fn constant_ref(self: &Self, constant_id: ConstantId) -> &Constant {
         self.constants.value_by_id(constant_id)
-    }
-
-    pub fn constant_function_id(self: &Self, constant_id: ConstantId) -> Option<FunctionId> {
-        let constant = self.constant_ref(constant_id);
-        match constant.value {
-            ConstantValue::Function(function_id) => Some(function_id),
-            //_ => None,
-        }
     }
 }
 

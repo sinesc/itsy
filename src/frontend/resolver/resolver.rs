@@ -100,7 +100,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
                     .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
             })
             .collect();
-        scopes.insert_function(ScopeId::ROOT, name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
+        scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
 
     // create scopes for each module, import builtin types into module namespace
@@ -206,7 +206,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 None => None,
                 Some((builtin_type, result_type_id, arg_type_ids)) => {
                     Some(self.scopes.insert_function(
-                        ScopeId::ROOT,
                         name,
                         Some(result_type_id),
                         arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
@@ -237,7 +236,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
                 Some(self.scopes.insert_function(
-                    ScopeId::ROOT,
                     name,
                     Some(result_type_id),
                     arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
@@ -583,7 +581,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
                         let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
                         let kind = FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex);
-                        *function_id = Some(self.scopes.insert_function(self.scope_id, &path, item.type_id, arg_type_ids, Some(kind)));
+                        *function_id = Some(self.scopes.insert_function(&path, item.type_id, arg_type_ids, Some(kind)));
                     },
                     _ => { },
                 }
@@ -612,7 +610,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.scopes.insert_alias(self.scope_id, &type_name, "Self");
             }
             for function in &mut item.functions {
-                self.resolve_function(function, Some((parent_scope_id, type_id)))?;
+                self.resolve_function(function, Some(type_id))?;
                 // if this is a trait impl and the trait is resolved
                 if let Some(Some(trait_type_id)) = trait_type_id {
                     let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
@@ -660,7 +658,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // try to resolve functions
         for function in &mut item.functions {
-            self.resolve_function(function, Some((parent_scope_id, item.type_id.unwrap())))?;
+            self.resolve_function(function, Some(item.type_id.unwrap()))?;
         }
         // update trait
         for function in &item.functions {
@@ -692,7 +690,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a function defintion.
-    fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<(ScopeId, TypeId)>) -> ResolveResult {
+    fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<TypeId>) -> ResolveResult {
 
         let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
@@ -703,20 +701,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let result_type_id = item.sig.ret_type_id(self);
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids(self);
             // function/method switch
-            let (target_scope_id, function_kind, qualified) = if let Some(scope) = struct_scope {
-                let type_name = self.scopes.type_name(scope.1).unwrap();
+            let (function_kind, qualified) = if let Some(type_id) = struct_scope {
+                let type_name = self.scopes.type_name(type_id).unwrap();
                 let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" {
-                    (scope.0, FunctionKind::Function, path)
+                    (FunctionKind::Function, path)
                 } else {
-                    (scope.0, FunctionKind::Method(scope.1), path)
+                    (FunctionKind::Method(type_id), path)
                 }
             } else {
                 let path = self.make_path(&[ &item.sig.ident.name ]);
-                (parent_scope_id, FunctionKind::Function, path)
+                (FunctionKind::Function, path)
             };
 
-            let constant_id = self.scopes.insert_function(target_scope_id, &qualified, result_type_id, arg_type_ids, Some(function_kind));
+            let constant_id = self.scopes.insert_function(&qualified, result_type_id, arg_type_ids, Some(function_kind));
             if item.sig.vis == Visibility::Public {
                 // TODO: public visibility
                 //self.scopes.alias_constant(ScopeId::ROOT, &qualified, constant_id);
@@ -767,7 +765,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let type_name = self.scopes.type_name(type_id).unwrap_or_ice("Unnamed type")?;
                 let path = self.make_path(&[ type_name, &item.ident.name ]);
                 self.scopes.constant_id(self.scope_id, &path, type_id)
-                    .or(self.scopes.trait_function_id(self.scope_id, &item.ident.name, type_id))
+                    .or(self.scopes.trait_provided_constant_id(&item.ident.name, type_id))
             };
 
             if let Some(constant_id) = constant_id {
