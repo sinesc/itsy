@@ -11,14 +11,14 @@ use repository::Repository;
 pub(crate) struct Scopes {
     /// Aliases point from a scoped name to an unscoped path (e.g. Self -> mymod::MyStruct)
     aliases         : UnorderedMap<(ScopeId, String), String>,
-    /// Flat type data, lookup via TypeId or ScopeId and name
-    types           : Repository<String, TypeId, Type>,
-    /// Flat binding data, lookup via BindingId or ScopeId and name
-    bindings        : Repository<String, BindingId, Binding>,
-    /// Flat constant data, lookup via ConstantId or ScopeId and name
+    /// Constants point from an unscoped path or a type id and a name to an item.
     constants       : Repository<(String, TypeId), ConstantId, Constant>,
-    /// List of resolved functions. Vector index represents FunctionId
+    /// List of types. Vector index represents TypeId
+    types           : Repository<String, TypeId, Type>,
+    /// List of functions. Vector index represents FunctionId
     functions       : Vec<Function>,
+    /// Scoped bindings.
+    bindings        : Repository<(ScopeId, String), BindingId, Binding>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
@@ -143,7 +143,7 @@ impl Scopes {
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
         let function_id = FunctionId::from(self.functions.len());
         self.functions.push(Function { signature_type_id, kind });
-        self.insert_constant(ScopeId::ROOT, name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
+        self.insert_constant(name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
     /// Looks up an existing constant_id for the given function_id.
@@ -187,13 +187,13 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: Option<&str>, mutable: bool, type_id: Option<TypeId>) -> BindingId {
-        self.bindings.insert(scope_id, name.map(|n| n.into()), Binding { mutable, type_id })
+    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &str, mutable: bool, type_id: Option<TypeId>) -> BindingId {
+        self.bindings.insert(Some((scope_id, name.into())), Binding { mutable, type_id })
     }
 
     /// Returns the id of the named binding originating in exactly this scope.
     pub fn local_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        self.bindings.id_by_name(scope_id, name.to_string())
+        self.bindings.id_by_name(&(scope_id, name.to_string()))
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
@@ -224,14 +224,14 @@ impl Scopes {
 impl Scopes {
 
     /// Insert a constant into the given scope, returning a constant id. Its type might not be resolved yet.
-    pub fn insert_constant(self: &mut Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId, value_type_id: Option<TypeId>, value: ConstantValue) -> ConstantId {
-        self.constants.insert(scope_id, Some((name.into(), owning_type_id)), Constant { value, type_id: value_type_id })
+    pub fn insert_constant(self: &mut Self, name: &str, owning_type_id: TypeId, value_type_id: Option<TypeId>, value: ConstantValue) -> ConstantId {
+        self.constants.insert(Some((name.into(), owning_type_id)), Constant { value, type_id: value_type_id })
     }
 
     /// Finds the id of the named constant within the scope or its parent scopes.
     pub fn constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
         let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        self.constants.id_by_name(ScopeId::ROOT, (name, owning_type_id))
+        self.constants.id_by_name(&(name, owning_type_id))
     }
 
     /// Returns a mutable reference to the constant info of the given constant id.
@@ -250,7 +250,7 @@ impl Scopes {
 
     /// Insert a type into the root scope, returning a type id.
     pub fn insert_type(self: &mut Self, name: Option<&str>, ty: Type) -> TypeId {
-        self.types.insert(ScopeId::ROOT, name.map(|n| n.into()), ty)
+        self.types.insert(name.map(|n| n.into()), ty)
     }
 
     /// Inserts an anonymous type into the root scope and returns a type id.
@@ -258,14 +258,14 @@ impl Scopes {
         if let (true, Some(type_id)) = (reuse_existing, self.types.id_by_value(&ty)) {
             type_id
         } else {
-            self.types.insert(ScopeId::ROOT, None, ty)
+            self.types.insert(None, ty)
         }
     }
 
     /// Returns the id of the named type or alias (the scope id is required for alias resolution).
     pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
-        self.types.id_by_name(ScopeId::ROOT, name)
+        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string(); // TODO annoying conversion requirement
+        self.types.id_by_name(&name)
     }
 
     /// Returns the name of the given type id.

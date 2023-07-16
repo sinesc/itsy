@@ -1157,7 +1157,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             if self.scopes.local_binding_id(self.scope_id, &item.ident.name).is_some() {
                 unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
             }
-            let binding_id = self.scopes.insert_binding(self.scope_id, Some(&item.ident.name), item.mutable, None);
+            let binding_id = self.scopes.insert_binding(self.scope_id, &item.ident.name, item.mutable, None);
             item.binding_id = Some(binding_id);
         }
 
