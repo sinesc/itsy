@@ -1,7 +1,9 @@
 /*
  * Mandelbrot fractal example.
+ *
+ * MyAPI provided by userdefined rust api examples/shared/mod.rs
  */
-use MyAPI::{print, println, flush, wait_frame};  // MyAPI provided by userdefined rust api examples/shared/mod.rs
+use MyAPI::{print, println, flush, wait_frame};
 
 // Mandelbrot parameters for a single frame.
 struct Frame {

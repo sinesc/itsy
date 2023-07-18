@@ -1,10 +1,9 @@
 /*
  * Hello World example.
  *
- * run.rs/debug-run.rs provided functions:
- *    print(s: String)
- *    println(s: String)
+ * MyAPI provided by userdefined rust api examples/shared/mod.rs
  */
+use MyAPI::println;
 
 fn main() {
     println("Hello World! \u{1F602}");
