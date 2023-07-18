@@ -1,4 +1,4 @@
-//! Built-in functions. These will be implemented on the Builtin enum and exec'd via vm::builtincall()
+//! Built-in functions. These will be implemented on the Builtin enum and exec'd via vm::call_builtin()
 
 use crate::prelude::*;
 #[cfg(feature="runtime")]

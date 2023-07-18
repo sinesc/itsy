@@ -275,8 +275,8 @@ macro_rules! impl_opcodes {
                     #[allow(unused_doc_comments)]
                     match instruction {
                         // implement special formatting for some opcodes
-                        opcodes::rustcall => {
-                            let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(rustcall));
+                        opcodes::call_rust => {
+                            let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(call_rust));
                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
                             Some((result, position))
                         }

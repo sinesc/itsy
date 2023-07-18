@@ -136,6 +136,23 @@ pub struct Callable {
     pub ret_type_id : Option<TypeId>,
 }
 
+impl Callable {
+    /// Computes the total primitive size of the callable's parameters.
+    pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
+        let mut arg_size = 0;
+        for arg in &self.arg_type_ids {
+            let arg_type_id = arg.expect("Function arg is not resolved");
+            arg_size += container.type_by_id(arg_type_id).primitive_size() as FrameAddress;
+        }
+        arg_size
+    }
+    /// Returns the primitive size of the callable's return type.
+    pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
+        let ret_type_id = self.ret_type_id.expect("Function result is not resolved");
+        container.type_by_id(ret_type_id).primitive_size()
+    }
+}
+
 /// Function mata information.
 #[derive(Clone, Debug)]
 pub struct Function {
@@ -167,18 +184,12 @@ impl Function {
     /// Computes the total primitive size of the function parameters.
     pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        let mut arg_size = 0;
-        for arg in &callable.arg_type_ids {
-            let arg_type_id = arg.expect("Function arg is not resolved");
-            arg_size += container.type_by_id(arg_type_id).primitive_size() as FrameAddress;
-        }
-        arg_size
+        callable.arg_size(container)
     }
     /// Returns the primitive size of the function return type.
     pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        let ret_type_id = callable.ret_type_id.expect("Function result is not resolved");
-        container.type_by_id(ret_type_id).primitive_size()
+        callable.ret_size(container)
     }
 }
 
@@ -318,7 +329,7 @@ impl Type {
     pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::Callable(_) => true,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) /*| Type::Callable(_)*/ => true,
             _ => false,
         }
     }

@@ -1370,7 +1370,7 @@ impl CallSyntax {
 pub enum CallTargetType {
     Unresolved,
     Constant(ConstantId),
-    Variable(TypeId),
+    Variable(BindingId),
 }
 
 impl Resolvable for CallTargetType {

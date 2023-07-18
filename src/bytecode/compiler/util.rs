@@ -8,25 +8,17 @@ use crate::shared::typed_ids::FunctionId;
 use std::cmp::Ordering;
 use core::fmt::Debug;
 
-#[derive(Clone, Copy)]
-pub struct CallInfo {
-    pub arg_size: FrameAddress,
-    pub addr: StackAddress,
-}
-
-impl CallInfo {
-    pub const PLACEHOLDER: Self = Self { addr: 123, arg_size: 0 };
-}
-
 /// Tracks call and function addresses so that calls made before the function address was known can be fixed.
 pub struct Functions {
-    // Maps functions to their call address (and arg_size required to write the call).
-    functions: UnorderedMap<FunctionId, CallInfo>,
+    // Maps functions to their call address.
+    functions: UnorderedMap<FunctionId, StackAddress>,
     /// Bytecode locations of function call instructions that need their target address fixed (because the target wasn't written yet).
-    call_placeholder: UnorderedMap<FunctionId, Vec<StackAddress>>,
+    call_placeholder: UnorderedMap<FunctionId, Vec<(StackAddress, bool)>>,
 }
 
 impl Functions {
+    const PLACEHOLDER: StackAddress = 123;
+
     /// Creates a new instance.
     pub fn new() -> Self {
         Self {
@@ -35,23 +27,22 @@ impl Functions {
         }
     }
     /// Registers an absolute function address and returns a list of placeholder positions that need to be replaced with calls to this function.
-    pub fn register_function(self: &mut Self, function_id: FunctionId, arg_size: FrameAddress, addr: StackAddress) -> Option<Vec<StackAddress>> {
-        let call_info = CallInfo { addr, arg_size };
-        self.functions.insert(function_id, call_info);
+    pub fn register_function(self: &mut Self, function_id: FunctionId, addr: StackAddress) -> Option<Vec<(StackAddress, bool)>> {
+        self.functions.insert(function_id, addr);
         self.call_placeholder.remove(&function_id)
     }
-    /// Either returns actual function address and arg_size or registers the call for later replacement and returns placeholder data.
-    pub fn register_call(self: &mut Self, function_id: FunctionId, writer_position: StackAddress) -> CallInfo {
+    /// Either returns actual function address or registers the call for later replacement and returns placeholder data.
+    pub fn register_call(self: &mut Self, function_id: FunctionId, writer_position: StackAddress, load_only: bool) -> StackAddress {
         if let Some(&target) = self.functions.get(&function_id) {
             target
         } else {
-            self.call_placeholder.entry(function_id).or_insert(Vec::new()).push(writer_position);
-            CallInfo::PLACEHOLDER
+            self.call_placeholder.entry(function_id).or_insert(Vec::new()).push((writer_position, load_only));
+            Self::PLACEHOLDER
         }
     }
-    /// Returns the call information for the given function, if available.
-    pub fn get(self: &Self, function_id: FunctionId) -> Option<&CallInfo> {
-        self.functions.get(&function_id)
+    /// Returns the address for the given function, if available.
+    pub fn get(self: &Self, function_id: FunctionId) -> Option<StackAddress> {
+        self.functions.get(&function_id).cloned()
     }
 }
 

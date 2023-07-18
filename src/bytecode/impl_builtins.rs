@@ -57,55 +57,55 @@ macro_rules! impl_builtins {
         if $element_ty.is_ref() {
             let constructor = $compiler.constructor($ty).unwrap();
             let element_constructor = $compiler.constructor($element_ty).unwrap();
-            $compiler.writer.builtincallx(Builtin::$variant_x, constructor, element_constructor);
+            $compiler.writer.call_builtinx(Builtin::$variant_x, constructor, element_constructor);
         } else {
             let constructor = $compiler.constructor($ty).unwrap();
             match $element_ty.primitive_size() {
-                8 => $compiler.writer.builtincallx(Builtin::$variant_64, constructor, 0),
-                4 => $compiler.writer.builtincallx(Builtin::$variant_32, constructor, 0),
-                2 => $compiler.writer.builtincallx(Builtin::$variant_16, constructor, 0),
-                1 => $compiler.writer.builtincallx(Builtin::$variant_8, constructor, 0),
+                8 => $compiler.writer.call_builtinx(Builtin::$variant_64, constructor, 0),
+                4 => $compiler.writer.call_builtinx(Builtin::$variant_32, constructor, 0),
+                2 => $compiler.writer.call_builtinx(Builtin::$variant_16, constructor, 0),
+                1 => $compiler.writer.call_builtinx(Builtin::$variant_8, constructor, 0),
                 _ => unreachable!("Invalid type size for builtin call"),
             };
         }
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_32:ident, $variant_64:ident) => { {
         match $ty.primitive_size() {
-            8 => $compiler.writer.builtincall(Builtin::$variant_64),
-            4 => $compiler.writer.builtincall(Builtin::$variant_32),
+            8 => $compiler.writer.call_builtin(Builtin::$variant_64),
+            4 => $compiler.writer.call_builtin(Builtin::$variant_32),
             _ => unreachable!("Invalid type size for builtin call"),
         };
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident) => { {
         match $ty.primitive_size() {
-            8 => $compiler.writer.builtincall(Builtin::$variant_64),
-            4 => $compiler.writer.builtincall(Builtin::$variant_32),
-            2 => $compiler.writer.builtincall(Builtin::$variant_16),
-            1 => $compiler.writer.builtincall(Builtin::$variant_8),
+            8 => $compiler.writer.call_builtin(Builtin::$variant_64),
+            4 => $compiler.writer.call_builtin(Builtin::$variant_32),
+            2 => $compiler.writer.call_builtin(Builtin::$variant_16),
+            1 => $compiler.writer.call_builtin(Builtin::$variant_8),
             _ => unreachable!("Invalid type size for builtin call"),
         };
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
         if $ty.is_signed() {
             match $ty.primitive_size() {
-                8 => $compiler.writer.builtincall(Builtin::$variant_i64),
-                4 => $compiler.writer.builtincall(Builtin::$variant_i32),
-                2 => $compiler.writer.builtincall(Builtin::$variant_i16),
-                1 => $compiler.writer.builtincall(Builtin::$variant_i8),
+                8 => $compiler.writer.call_builtin(Builtin::$variant_i64),
+                4 => $compiler.writer.call_builtin(Builtin::$variant_i32),
+                2 => $compiler.writer.call_builtin(Builtin::$variant_i16),
+                1 => $compiler.writer.call_builtin(Builtin::$variant_i8),
                 _ => unreachable!("Invalid type size for builtin call"),
             };
         } else {
             match $ty.primitive_size() {
-                8 => $compiler.writer.builtincall(Builtin::$variant_u64),
-                4 => $compiler.writer.builtincall(Builtin::$variant_u32),
-                2 => $compiler.writer.builtincall(Builtin::$variant_u16),
-                1 => $compiler.writer.builtincall(Builtin::$variant_u8),
+                8 => $compiler.writer.call_builtin(Builtin::$variant_u64),
+                4 => $compiler.writer.call_builtin(Builtin::$variant_u32),
+                2 => $compiler.writer.call_builtin(Builtin::$variant_u16),
+                1 => $compiler.writer.call_builtin(Builtin::$variant_u8),
                 _ => unreachable!("Invalid type size for builtin call"),
             };
         }
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
-        $compiler.writer.builtincall(Builtin::$variant)
+        $compiler.writer.call_builtin(Builtin::$variant)
     } };
     // Main definition block
     (
@@ -136,7 +136,7 @@ macro_rules! impl_builtins {
         )+
     ) => {
 
-        /// Builtin functions callable via the `builtincall` opcode. Generated from method signatures defined via the impl_builtins! macro.
+        /// Builtin functions callable via the `call_builtin` opcode. Generated from method signatures defined via the impl_builtins! macro.
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
         pub enum Builtin {

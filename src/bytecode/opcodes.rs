@@ -23,7 +23,9 @@ impl_opcodes!{
         /// Bytecode instructions. Generated from bytecode method signatures defined via the `impl_opcodes!` macro.
         /// # Naming
         ///
-        /// `<op><suffix1>[_<suffix2>[_nc]]`
+        /// Instructions with multiple variants use the following naming convention:
+        ///
+        /// `<op>[<suffix1>][_<suffix2>[_nc]]`
         ///
         /// `suffix1` refers to stack inputs/outputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
@@ -514,7 +516,7 @@ impl_opcodes!{
         self.stack.push(a % b);
     }
 
-    /// Pops 2 values from the stack and pushes their product.
+    /// Pops an integer value off the stack and pushes its square.
     fn <
         sqs8<T: i8>() [ check ],
         sqs16<T: i16>() [ check ],
@@ -533,7 +535,7 @@ impl_opcodes!{
         }
     }
 
-    /// Pops 2 values from the stack and pushes their product.
+    /// Pops a float value off the stack and pushes its square.
     fn <
         sqf32<T: f32>(),
         sqf64<T: f64>(),
@@ -661,21 +663,6 @@ impl_opcodes!{
         }
     }
 
-    /// Calls the given Rust function.
-    fn rustcall(&mut self, &mut context, rustfn: RustFn) {
-        rustfn.exec(self, context);
-    }
-
-    /// Calls the given builtin function.
-    fn builtincall(&mut self, builtin: Builtin) [ check ] {
-        builtin.exec(self, 0, 0);
-    }
-
-    /// Calls the given builtin function.
-    fn builtincallx(&mut self, builtin: Builtin, constructor: StackAddress, element_constructor: StackAddress) [ check ] {
-        builtin.exec(self, constructor, element_constructor);
-    }
-
     /// Function call. Creates a new stack frame at SP - arg_size and sets programm counter to given addr.
     fn call(&mut self, addr: StackAddress, arg_size: FrameAddress) {
         // stack: ... | ARGS
@@ -686,8 +673,29 @@ impl_opcodes!{
         // stack: ARGS | previous FP | previous PC | (local vars and dynamic stack follow here)
     }
 
+    /// Calls the given Rust function.
+    fn call_rust(&mut self, &mut context, rustfn: RustFn) {
+        rustfn.exec(self, context);
+    }
+
+    /// Calls the given builtin function.
+    fn call_builtin(&mut self, builtin: Builtin) [ check ] {
+        builtin.exec(self, 0, 0);
+    }
+
+    /// Calls the given builtin function.
+    fn call_builtinx(&mut self, builtin: Builtin, constructor: StackAddress, element_constructor: StackAddress) [ check ] {
+        builtin.exec(self, constructor, element_constructor);
+    }
+
+    /// Dynamic function call. Pops function address of stack, creates a new stack frame at SP - arg_size and sets programm counter to given addr.
+    fn call_dynamic(&mut self, arg_size: FrameAddress) {
+        let addr: StackAddress = self.stack.pop();
+        self.call(addr, arg_size);
+    }
+
     /// Virtual function call. Resolves concrete call address from vtable and invokes call().
-    fn virtualcall(&mut self, function_base_address: StackAddress, arg_size: FrameAddress) {
+    fn call_virtual(&mut self, function_base_address: StackAddress, arg_size: FrameAddress) {
         let item: HeapRef = self.stack.load_sp(arg_size as StackAddress);
         let implementor_index = self.heap.item_implementor_index(item.index());
         let addr: StackAddress = self.stack.load(function_base_address + ((implementor_index as usize) * size_of::<StackAddress>()) as StackAddress);
@@ -755,9 +763,9 @@ impl_opcodes!{
         let num_bytes: StackAddress = self.stack.load(const_offset);
         let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
         self.stack.push(heap_ref);
-        let string_offset = const_offset as usize + size_of_val(&num_bytes);
+        let data_offset = const_offset as usize + size_of_val(&num_bytes);
         let src = self.stack.data();
-        self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&src[string_offset..string_offset + num_bytes as usize]);
+        self.heap.item_mut(heap_ref.index()).data.extend_from_slice(&src[data_offset..data_offset + num_bytes as usize]);
     }
 
     /// Pops 2 heap references to strings, compares the strings for equality and pushes the result. Drops temporary references.

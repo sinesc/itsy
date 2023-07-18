@@ -9,7 +9,7 @@ mod init_state;
 use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
+use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned, CallTargetType}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
@@ -136,15 +136,16 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     // write actual function offsets to vtable
     for (implementor_index, selected_function_id) in trait_function_implementations {
         if let Some(selected_function_id) = selected_function_id {
-            let selected_function_offset = compiler.functions.get(selected_function_id).or_ice_msg("Missing function callinfo")?.addr;
+            let selected_function_offset = compiler.functions.get(selected_function_id).or_ice_msg("Missing function callinfo")?;
             let vtable_function_offset = compiler.vtable_function_offset(selected_function_id)?;
             compiler.writer.update_const(vtable_function_offset + (implementor_index * size_of::<StackAddress>()) as StackAddress, selected_function_offset);
         }
     }
 
     // overwrite placeholder with actual entry position
-    let &entry_call = compiler.functions.get(entry_fn).or_ice_msg("Failed to locate entry function in generated code.")?;
-    compiler.writer.overwrite(initial_pos, |w| w.call(entry_call.addr, entry_call.arg_size));
+    let entry_addr = compiler.functions.get(entry_fn).or_ice_msg("Failed to locate entry function in generated code.")?;
+    let entry_arg_size = compiler.resolved.function(entry_fn).arg_size(&compiler);
+    compiler.writer.overwrite(initial_pos, |w| w.call(entry_addr, entry_arg_size));
 
     // return generated program
     Ok(compiler.writer.into_program())
@@ -255,7 +256,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             E::Literal(literal)         => self.compile_literal(literal),
             E::Value(value) => match value {
                 ast::Value::Variable(variable) => self.compile_variable(variable),
-                ast::Value::Constant(_constant) => Ok(()), // TODO
+                ast::Value::Constant(constant) => self.compile_constant(constant),
                 _ => unreachable!("Unknown value"),
             },
             E::Member(_)                => Ok(()),
@@ -349,13 +350,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles function call arguments.
-    fn compile_call_args(self: &mut Self, function: &Function, item: &ast::Call) -> CompileResult {
+    fn compile_call_args(self: &mut Self, item: &ast::Call, function_kind: FunctionKind) -> CompileResult {
         // put args on stack, increase ref count to ensure temporaries won't be dropped after access
         // function is responsible for decrementing argument ref-count on exit
         for (_index, arg) in item.args.iter().enumerate() {
             comment!(self, "{}() arg {}", item.ident.name, arg);
             self.compile_expression(arg)?;
-            match function.kind.or_ice()? {
+            match function_kind {
                 FunctionKind::Method(_) | FunctionKind::Function => {
                     self.write_cnt(self.ty(arg), true, HeapRefOp::Inc)?;
                 },
@@ -367,34 +368,62 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given call.
     fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
-        comment!(self, "prepare {}() args", item.ident.name);
-        let function_id = match item.target {
-            CallTargetType::Constant(constant_id) => self.resolved.constant(constant_id).value.as_function_id().or_ice()?,
+        match item.target {
+            CallTargetType::Constant(constant_id) => self.compile_call_static(item, constant_id),
+            CallTargetType::Variable(binding_id) => self.compile_call_variable(item, binding_id),
             CallTargetType::Unresolved => {
                 return Ok(());
             },
-            _ => panic!("todo"),
+        }
+    }
+
+    /// Compiles a call to a dynamically determined address.
+    fn compile_call_variable(self: &mut Self, item: &ast::Call, binding_id: BindingId) -> CompileResult {
+        self.compile_call_args(item, FunctionKind::Function)?;
+        comment!(self, "call-variable {}", item);
+        // load function address from variable
+        // TODO: have resolver restructure AST to a variable/member access followed by a write call_dynamic, so that we can eliminate this specialcase
+        let load_index = {
+            let error_kind = match self.init_state.initialized(binding_id) {
+                BranchingState::Uninitialized => Some(CompileErrorKind::Uninitialized(item.ident.name.clone())),
+                BranchingState::MaybeInitialized => Some(CompileErrorKind::MaybeInitialized(item.ident.name.clone())),
+                _ => None,
+            };
+            if let Some(error_kind) = error_kind {
+                return Err(CompileError::new(item, error_kind, &self.module_path))
+            }
+            self.locals.lookup(binding_id)
         };
-        let function = self.resolved.function(function_id).clone();
-        match function.kind.or_ice()? {
+        self.write_load(self.ty(item), load_index)?;
+        let type_id = self.binding_by_id(binding_id).type_id.or_ice_msg("Unresolved function type")?;
+        self.write_call_dynamic(type_id);
+        Ok(())
+    }
+
+    /// Compiles the given statically resolved call.
+    fn compile_call_static(self: &mut Self, item: &ast::Call, constant_id: ConstantId) -> CompileResult {
+        comment!(self, "prepare {}() args", item.ident.name);
+        let function_id = self.resolved.constant(constant_id).value.as_function_id().or_ice()?;
+        let function_kind = self.resolved.function(function_id).kind.or_ice()?;
+        match function_kind {
             FunctionKind::Rust(rust_fn_index) => {
-                self.compile_call_args(&function, item)?;
+                self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", item.ident.name);
-                self.writer.rustcall(T::from_index(rust_fn_index));
+                self.writer.call_rust(T::from_index(rust_fn_index));
             },
             FunctionKind::Builtin(type_id, builtin_type) => {
-                self.compile_call_args(&function, item)?;
+                self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", item.ident.name);
                 self.write_builtin(self.ty(&type_id), builtin_type)?;
             },
             FunctionKind::Method(object_type_id) => {
-                self.compile_call_args(&function, item)?;
+                self.compile_call_args(item, function_kind)?;
                 if self.ty(&object_type_id).as_trait().is_some() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id)?;
                     let function_arg_size = self.resolved.function(function_id).arg_size(self);
                     comment!(self, "call {}()", item.ident.name);
-                    self.writer.virtualcall(function_offset, function_arg_size);
+                    self.writer.call_virtual(function_offset, function_arg_size);
                 } else {
                     // static dispatch
                     comment!(self, "call {}()", item.ident.name);
@@ -402,14 +431,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             FunctionKind::Function => {
-                self.compile_call_args(&function, item)?;
+                self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", item.ident.name);
                 self.write_call(function_id);
             },
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
                 self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
-                self.compile_call_args(&function, item)?;
+                self.compile_call_args(item, function_kind)?;
                 let arg_size = self.resolved.function(function_id).arg_size(self) as StackAddress;
                 self.writer.upload(arg_size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
@@ -443,6 +472,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.locals.lookup(binding_id)
         };
         self.write_load(self.ty(item), load_index)?;
+        Ok(())
+    }
+
+    /// Compiles the given constant.
+    fn compile_constant(self: &mut Self, item: &ast::Constant) -> CompileResult {
+        comment!(self, "constant {}", item);
+        let constant_id = item.constant_id.or_ice_msg("Unresolved constant encountered")?;
+        let constant = self.resolved.constant(constant_id);
+
+        match constant.value {
+            ConstantValue::Function(function_id) => {
+                let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
+                self.write_immediate(&STACK_ADDRESS_TYPE, Numeric::Unsigned(function_addr as u64))?;
+            },
+        }
         Ok(())
     }
 
@@ -731,11 +775,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store call info required to compile calls to this function and fix calls that were made before the function address was known
         let function_id = item.function_id.or_ice()?;
         let arg_size = frame.arg_pos;
-        if let Some(calls) = self.functions.register_function(function_id, arg_size, position) {
+        if let Some(calls) = self.functions.register_function(function_id, position) {
             let backup_position = self.writer.position();
-            for &call_address in calls.iter() {
+            for &(call_address, load_only) in calls.iter() {
                 self.writer.set_position(call_address);
-                self.writer.call(position, arg_size);
+                if load_only {
+                    self.write_immediate(&STACK_ADDRESS_TYPE, Numeric::Unsigned(position as u64))?;
+                } else {
+                    self.writer.call(position, arg_size);
+                }
             }
             self.writer.set_position(backup_position);
         }
@@ -1596,8 +1644,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
     fn write_call(self: &mut Self, function_id: FunctionId) -> StackAddress {
-        let target = self.functions.register_call(function_id, self.writer.position());
-        self.writer.call(target.addr, target.arg_size)
+        let function_addr = self.functions.register_call(function_id, self.writer.position(), false);
+        let function_arg_size = self.resolved.function(function_id).arg_size(self);
+        self.writer.call(function_addr, function_arg_size)
+    }
+
+    /// Writes a call_dynamic instruction.
+    fn write_call_dynamic(self: &mut Self, type_id: TypeId) -> StackAddress {
+        let arg_size = self.resolved.ty(type_id).as_callable().unwrap().arg_size(self);
+        self.writer.call_dynamic(arg_size)
     }
 
     /// Writes instructions for build-in len method.
@@ -1910,7 +1965,7 @@ impl<T> Compiler<T> {
     /// Create table of all trait implementors/concrete function id permutations (implementor or trait-provided).
     /// To facility direct lookups, this table contains *all* implementor/trait permuations, including those that are not implemented.
     /// This allows for the lookup position to be computed as `table_start + function_index * num_trait_implementors + trait_implementor_index` (sizeof<ItemIndex> multipliers omitted)
-    /// Since the first three components are statically known their result can be statically supplied to virtualcall. The implementor index is stored
+    /// Since the first three components are statically known their result can be statically supplied to call_virtual. The implementor index is stored
     /// on the heap object the function is being called on.
     fn select_trait_function_implementations(resolved: &Resolved, trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> Vec<(usize, Option<FunctionId>)> {
         let mut trait_implementation_mapping = Vec::new();

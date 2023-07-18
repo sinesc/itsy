@@ -81,6 +81,15 @@ pub trait TypeContainer {
                 Type::Array(Array { type_id: None }) => {
                     "[ ? ]".to_string()
                 }
+                Type::Callable(callable) => {
+                    let result_type_name = if let Some(type_id) = callable.ret_type_id { self.type_name(type_id) } else { "?".to_string() };
+                    let arg_type_names = callable.arg_type_ids
+                        .iter()
+                        .map(|type_id| if let Some(type_id) = type_id { self.type_name(*type_id) } else { "?".to_string() })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("fn({arg_type_names}) -> {result_type_name}")
+                }
                 _ => "?".to_string()
             }
         }

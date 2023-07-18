@@ -28,6 +28,7 @@ pub enum ResolveErrorKind {
     InvalidVariantLiteral,
     NotATraitMethod(String, String),
     NotIterable(String),
+    NotCallable(String),
     CannotResolve(String),
     InvalidOperation(String),
     Internal(String),
@@ -78,6 +79,7 @@ impl Display for ResolveError {
             ResolveErrorKind::InvalidVariantLiteral => write!(f, "Invalid enum variant literal"),
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
+            ResolveErrorKind::NotCallable(t) => write!(f, "Type {t} is not callable"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
