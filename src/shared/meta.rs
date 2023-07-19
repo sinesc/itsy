@@ -1,3 +1,4 @@
+use crate::config::StackAddress;
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
 use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
@@ -280,7 +281,8 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
+            Type::Callable(_) => size_of::<StackAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.

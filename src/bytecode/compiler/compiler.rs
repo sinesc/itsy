@@ -394,8 +394,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
             self.locals.lookup(binding_id)
         };
-        self.write_load(self.ty(item), load_index)?;
         let type_id = self.binding_by_id(binding_id).type_id.or_ice_msg("Unresolved function type")?;
+        self.write_load(self.ty(&type_id), load_index)?;
         self.write_call_dynamic(type_id);
         Ok(())
     }
@@ -1651,7 +1651,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes a call_dynamic instruction.
     fn write_call_dynamic(self: &mut Self, type_id: TypeId) -> StackAddress {
-        let arg_size = self.resolved.ty(type_id).as_callable().unwrap().arg_size(self);
+        let arg_size = self.ty(&type_id).as_callable().unwrap().arg_size(self);
         self.writer.call_dynamic(arg_size)
     }
 
