@@ -484,7 +484,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match constant.value {
             ConstantValue::Function(function_id) => {
                 let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
-                self.write_immediate(&STACK_ADDRESS_TYPE, Numeric::Unsigned(function_addr as u64))?;
+                self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
             },
         }
         Ok(())
@@ -780,7 +780,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             for &(call_address, load_only) in calls.iter() {
                 self.writer.set_position(call_address);
                 if load_only {
-                    self.write_immediate(&STACK_ADDRESS_TYPE, Numeric::Unsigned(position as u64))?;
+                    self.writer.immediate64(position as u64); // TODO: depends on stack address size but may not use small immediate optimization
                 } else {
                     self.writer.call(position, arg_size);
                 }

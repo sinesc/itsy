@@ -19,3 +19,5 @@ mod traits;
 mod controlflow;
 #[path="vm/enums.rs"]
 mod enums;
+#[path="vm/closure.rs"]
+mod closure;
