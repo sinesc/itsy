@@ -1097,6 +1097,13 @@ impl Resolvable for Value {
     fn num_resolved(self: &Self) -> Progress {
         impl_matchall!(self, Value, item, { item.num_resolved() }, _ => { Progress::zero() })
     }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve(match self {
+            Self::Unknown { ident, .. } => ident.to_string(),
+            Self::Constant(constant) => constant.ident.to_string(),
+            Self::Variable(variable) => variable.ident.to_string(),
+        })
+    }
 }
 
 impl Positioned for Value {
@@ -1413,6 +1420,14 @@ impl Resolvable for Call {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
         + self.target.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+    }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        let call_syntax = match &self.call_syntax {
+            CallSyntax::Ident => "".to_string(),
+            CallSyntax::Path(p) => p.to_string() + "::",
+            CallSyntax::Method => format!("{}", self.args[0]) + ".",
+        };
+        ResolveErrorKind::CannotResolve(format!("function {}{}", call_syntax, &self.ident.to_string()))
     }
 }
 

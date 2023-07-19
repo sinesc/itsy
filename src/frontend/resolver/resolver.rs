@@ -413,6 +413,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         };
                         self.resolve_constant(&mut constant, expected_result)?;
                         *item = E::Value(ast::Value::Constant(constant));
+                        Ok(())
                     } else if self.scopes.binding_id(self.scope_id, &ident.name).is_some() {
                         let mut variable = ast::Variable {
                             position: *position,
@@ -421,8 +422,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         };
                         self.resolve_variable(&mut variable, expected_result)?;
                         *item = E::Value(ast::Value::Variable(variable));
+                        Ok(())
+                    } else {
+                        self.resolved_or_err(value, expected_result)
                     }
-                    Ok(())
                 },
             },
             E::Call(call)               => self.resolve_call(call, expected_result),
@@ -747,7 +750,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved_or_err(&mut item.expr, ret_type_id)
     }
 
-    fn resolve_call_method(self: &mut Self, item: &mut ast::Call, _expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_call_method(self: &mut Self, item: &mut ast::Call, expected_result: Option<TypeId>) -> ResolveResult {
         let arg = item.args.get_mut(0).unwrap_or_ice(ICE)?;
         self.resolve_expression(arg, None)?;
         if let Some(type_id) = arg.type_id(self) {
@@ -781,7 +784,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
             Ok(())
         } else {
-            Ok(())
+            self.resolved_or_err(arg, expected_result)
         }
 
     }
@@ -873,7 +876,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
         }
-        Ok(())
+        self.resolved_or_err(item, expected_result)
     }
 
     /// Resolves a simple enum variant. (Data variants are handled by resolve_call.)
