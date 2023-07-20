@@ -276,13 +276,14 @@ macro_rules! impl_opcodes {
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::call_rust => {
-                            let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(call_rust));
+                            let mut result = format!("{} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(call_rust));
                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
                             Some((result, position))
                         }
                         opcodes::comment => {
+                            let start = position - size_of::<OpCodeType>() as StackAddress;
                             let message = impl_opcodes!(@read_arg String, self, position);
-                            let result = if &message[0..1] == "\n" { format!("\n[{}]", &message[1..]) } else { format!("[{}]", message) };
+                            let result = if &message[0..1] == "\n" { format!("\n{} [{}]", start, &message[1..]) } else { format!("{} [{}]", start, message) };
                             Some((result, position))
                         }
                         $(
