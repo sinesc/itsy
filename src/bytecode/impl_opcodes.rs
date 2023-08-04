@@ -291,7 +291,7 @@ macro_rules! impl_opcodes {
                             // single opcode
                             $(
                                 opcodes::$name => {
-                                    let mut result = format!("{:?} {} ", position - 1, stringify!($name));
+                                    let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>(), stringify!($name));
                                     $(
                                         result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $arg_type, self, position) ));
                                     )*
@@ -303,7 +303,7 @@ macro_rules! impl_opcodes {
                                 $(
                                     $( #[$vattr] )*
                                     opcodes::$vname => {
-                                        let mut result = format!("{:?} {} ", position - 1, stringify!($vname));
+                                        let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>(), stringify!($vname));
                                         $(
                                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $vtype_name, self, position) ));
                                         )*
