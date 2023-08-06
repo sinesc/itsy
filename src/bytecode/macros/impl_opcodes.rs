@@ -283,7 +283,7 @@ macro_rules! impl_opcodes {
                         opcodes::comment => {
                             let start = position - size_of::<OpCodeType>() as StackAddress;
                             let message = impl_opcodes!(@read_arg String, self, position);
-                            let result = if &message[0..1] == "\n" { format!("\n{} [{}]", start, &message[1..]) } else { format!("{} [{}]", start, message) };
+                            let result = if &message[0..1] == "\n" { format!("\n;{} {}", start, &message[1..]) } else { format!(";{} {}", start, message) };
                             Some((result, position))
                         }
                         $(
