@@ -10,7 +10,7 @@ use crate::{prelude::*, VariantIndex};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable, Resolvable};
-use crate::frontend::resolver::error::{SomeOrResolveError, ResolveResult, ResolveError, ResolveErrorKind, ice, ICE};
+use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
 use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable};
@@ -88,16 +88,20 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // insert rust functions into root scope
     for (name, (index, ret_type_name, arg_type_names)) in T::resolve_info().into_iter() {
         let ret_type = if ret_type_name == "" {
-            Some(*primitives.get(&Type::void).unwrap_or_ice(ICE)?)
+            Some(*primitives.get(&Type::void).ice()?)
         } else {
-            Some(scopes.type_id(ScopeId::ROOT, ret_type_name).unwrap_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
+            Some(scopes.type_id(ScopeId::ROOT, ret_type_name).ice_msg(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_type_names
             .iter()
             .map(|arg_type_name| {
                 let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
-                scopes.type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name }) // todo: fix string hack
-                    .some_or_ice(&format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name))
+                let type_id = scopes.type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name });
+                if type_id.is_some() {
+                    Ok(type_id)
+                } else {
+                    Err(ResolveError::ice(format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name)))
+                }
             })
             .collect();
         scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
@@ -138,7 +142,10 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             resolver.module_path = &module.path;
             resolver.scope_id = module.scope_id.unwrap();
             for mut statement in module.ast.iter_mut() {
-                resolver.resolve_statement(&mut statement)?;
+                if let Err(mut err) = resolver.resolve_statement(&mut statement) {
+                    err.module_path = module.path.clone();
+                    return Err(err);
+                }
             }
         }
 
@@ -150,7 +157,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
                 if !stage.must_resolve() {
                     stage.next();
                 } else {
-                    return ice("Unresolved types remaining but no errors were triggered during must_resolve stage");
+                    return Resolver::ice("Unresolved types remaining but no errors were triggered during must_resolve stage");
                 }
             } else {
                 stage.reset();
@@ -162,8 +169,8 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules()
-        .find(|&m| m.path == "").unwrap_or_ice(ICE)?
-        .scope_id.unwrap_or_ice(ICE)?;
+        .find(|&m| m.path == "").ice()?
+        .scope_id.ice()?;
 
     let entry_fn = match scopes.constant_id(entry_scope_id, &entry_function, TypeId::VOID) {
         Some(constant_id) => scopes.constant_function_id(constant_id),
@@ -173,7 +180,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     Ok(ResolvedProgram {
         ty              : PhantomData,
         modules         : program.0,
-        entry_fn        : entry_fn.unwrap_or_err(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()), "")?,
+        entry_fn        : entry_fn.usr(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()))?,
         resolved        : scopes.into(),
     })
 }
@@ -202,7 +209,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             return Ok(Some(constant_id));
         }
 
-        let array_ty = self.type_by_id(type_id).as_array().unwrap_or_ice(ICE)?;
+        let array_ty = self.type_by_id(type_id).as_array().ice()?;
         if let &Array { type_id: element_type_id @ Some(_) } = array_ty {
             Ok(match builtin_types::Array::resolve(self, name, type_id, element_type_id) {
                 None => None,
@@ -292,7 +299,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Returns the type-id for given primitive.
     pub(crate) fn primitive_type_id(self: &Self, ty: Type) -> ResolveResult<TypeId> {
-        self.primitives.get(&ty).cloned().unwrap_or_ice(ICE)
+        self.primitives.get(&ty).cloned().ice()
+    }
+
+    /// Returns an internal compiler error with positional information.
+    fn ice<R>(message: &str) -> ResolveResult<R> {
+        #[cfg(feature="ice_panics")]
+        panic!("Internal compiler error: {}", message);
+        #[cfg(not(feature="ice_panics"))]
+        Err(ResolveError::ice(message.to_string()))
     }
 
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
@@ -486,7 +501,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // check whether at least one enum variant specifies a type, default to i32 if none do
         let simple_type_id = if let Some(named_type) = item.named_type() {
-            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.name))).unwrap_or_ice("Invalid variant type")?
+            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.name))).ice_msg("Invalid variant type")?
         } else {
             self.primitive_type_id(Type::i32)?
         };
@@ -600,7 +615,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                     }
                     if let Some(function_id) = function.function_id {
-                        let constant_id = self.scopes.function_constant_id(function_id).unwrap_or_ice(ICE)?;
+                        let constant_id = self.scopes.function_constant_id(function_id).ice()?;
                         if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
                             let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
                             impl_trait.functions.insert(function_name.clone(), Some(constant_id));
@@ -644,7 +659,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for function in &item.functions {
             if let Some(function_id) = function.function_id {
                 let name = &function.sig.ident.name;
-                let constant_id = self.scopes.function_constant_id(function_id).unwrap_or_ice(ICE)?;
+                let constant_id = self.scopes.function_constant_id(function_id).ice()?;
                 let trt = self.type_by_id_mut(item.type_id.unwrap()).as_trait_mut().unwrap();
                 match function.block {
                     Some(_) => *trt.provided.get_mut(name).unwrap() = Some(constant_id),
@@ -722,7 +737,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
-        let function_id = self.scopes.scopefunction_id(self.scope_id).unwrap_or_err(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()), self.module_path)?;
+        let function_id = self.scopes.scopefunction_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
         self.resolved_or_err(&mut item.expr, None)?;
         self.resolve_expression(&mut item.expr, ret_type_id)?;
@@ -877,38 +892,38 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use crate::frontend::ast::BinaryOperator::*;
         match item.op {
             And | Or => {
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, Some(self.primitive_type_id(Type::bool)?))?;
-                self.resolve_expression(item.right.as_expression_mut().unwrap_or_ice(ICE)?, Some(self.primitive_type_id(Type::bool)?))?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
+                self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
                 *item.type_id_mut(self) = Some(self.primitive_type_id(Type::bool)?);
             }
             Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual => {
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, None)?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 let left_type_id = item.left.type_id(self);
-                self.resolve_expression(item.right.as_expression_mut().unwrap_or_ice(ICE)?, left_type_id)?;
+                self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
                 let right_type_id = item.right.type_id(self);
                 *item.type_id_mut(self) = Some(self.primitive_type_id(Type::bool)?);
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
-                    self.set_type_id(item.left.as_expression_mut().unwrap_or_ice(ICE)?, common_type_id)?;
-                    self.set_type_id(item.right.as_expression_mut().unwrap_or_ice(ICE)?, common_type_id)?;
+                    self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
+                    self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
                 }
             }
             Add | Sub | Mul | Div | Rem | Range | RangeInclusive => {
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, expected_result)?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
                 let left_type_id = item.left.type_id(self);
-                self.resolve_expression(item.right.as_expression_mut().unwrap_or_ice(ICE)?, left_type_id)?;
+                self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
                 let type_id = item.type_id(self);
                 let right_type_id = item.right.type_id(self);
                 if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
                     self.set_type_id(item, common_type_id)?;
-                    self.set_type_id(item.left.as_expression_mut().unwrap_or_ice(ICE)?, common_type_id)?;
-                    self.set_type_id(item.right.as_expression_mut().unwrap_or_ice(ICE)?, common_type_id)?;
+                    self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
+                    self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
                 }
             }
             Index | IndexWrite => {
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, None)?;
-                self.resolve_expression(item.right.as_expression_mut().unwrap_or_ice(ICE)?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
+                self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
                 // left[right] : item
-                self.set_type_id(item.right.as_expression_mut().unwrap_or_ice(ICE)?, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
+                self.set_type_id(item.right.as_expression_mut().ice()?, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
                 // if we expect the result to be of a particular type, set it now
                 if let Some(expected_result) = expected_result {
                     self.set_type_id(item, expected_result)?;
@@ -933,34 +948,34 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
             Access | AccessWrite => {
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, None)?;
-                //self.resolve_expression(item.right.as_member_mut().unwrap_or_ice(ICE)?, None)?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
+                //self.resolve_expression(item.right.as_member_mut().ice()?, None)?;
                 // left.right : item
                 if let Some(left_type_id) = item.left.type_id(self) {
                     // check if a built-in method is accessed
                     if item.right.type_id(self).is_none() { // TODO: Access only
-                        let owning_type_id = item.left.type_id(self).unwrap_or_ice(ICE)?;
-                        let member_name = &item.right.as_member().unwrap_or_ice(ICE)?.ident.name;
+                        let owning_type_id = item.left.type_id(self).ice()?;
+                        let member_name = &item.right.as_member().ice()?.ident.name;
                         let left_ty = self.type_by_id(left_type_id);
                         let constant_id = if left_ty.as_array().is_some() {
                             // lookup array builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
-                                .or(self.try_create_array_builtin(item.left.as_expression().unwrap_or_ice(ICE)?, member_name, owning_type_id)?)
+                                .or(self.try_create_array_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)
                         } else if left_ty.is_float() || left_ty.is_integer() || left_ty.is_string() {
                             // lookup scalar builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                                 .or(self.try_create_scalar_builtin(member_name, owning_type_id)?)
                         } else {
                             // try method on type or trait default implementation
-                            let type_name = self.type_flat_name(owning_type_id).unwrap_or_ice("Unnamed type")?;
+                            let type_name = self.type_flat_name(owning_type_id).ice_msg("Unnamed type")?;
                             let path = self.make_path(&[ type_name, member_name ]);
                             self.scopes.constant_id(self.scope_id, &path, owning_type_id)
                                 .or(self.scopes.trait_provided_constant_id(member_name, owning_type_id))
                         };
                         if let Some(constant_id) = constant_id {
-                            let function_id = self.scopes.constant_function_id(constant_id).unwrap_or_ice(ICE)?;
+                            let function_id = self.scopes.constant_function_id(constant_id).ice()?;
                             let function = self.scopes.function_ref(function_id);
-                            let member = item.right.as_member_mut().unwrap_or_ice(ICE)?;
+                            let member = item.right.as_member_mut().ice()?;
                             member.constant_id = Some(constant_id);
                             self.set_type_id(member, function.signature_type_id)?;
                         }
@@ -970,8 +985,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         match self.type_by_id(left_type_id) {
                             Type::Struct(struct_) => {
                                 // TODO: struct methods
-                                let field = item.right.as_member_mut().unwrap_or_ice("Member access using a non-field")?;
-                                let field_type_id = *struct_.fields.get(&field.ident.name).unwrap_or_err(Some(field), ResolveErrorKind::UndefinedMember(field.ident.name.clone()), self.module_path)?;
+                                let field = item.right.as_member_mut().ice_msg("Member access using a non-field")?;
+                                let field_type_id = *struct_.fields.get(&field.ident.name).usr(Some(field), ResolveErrorKind::UndefinedMember(field.ident.name.clone()))?;
                                 if let Some(field_type_id) = field_type_id {
                                     //self.set_type_id(item, field_type_id)?;
                                     self.set_type_id(field, field_type_id)?;
@@ -982,7 +997,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                                 // their inner type resolved yet
                             },
                             _ => {
-                                ice("Member access on unsupported type")?;
+                                Self::ice("Member access on unsupported type")?;
                             }
                         }
                     }
@@ -992,11 +1007,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
             Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {
-                return ice("Unexpected operator in resolve_binary_op");
+                return Self::ice("Unexpected operator in resolve_binary_op");
             }
             Cast => {
-                self.resolve_type_name(item.right.as_type_name_mut().unwrap_or_ice(ICE)?, expected_result)?;
-                self.resolve_expression(item.left.as_expression_mut().unwrap_or_ice(ICE)?, None)?;
+                self.resolve_type_name(item.right.as_type_name_mut().ice()?, expected_result)?;
+                self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 if let Some(type_id) = item.right.type_id(self) {
                     *item.type_id_mut(self) = Some(type_id);
                 }
@@ -1020,15 +1035,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             Call => {
                 // resolve function
-                let call_func = item.left.as_expression_mut().unwrap_or_ice(ICE)?;
+                let call_func = item.left.as_expression_mut().ice()?;
                 self.resolve_expression(call_func, None)?;
-                let call_args = item.right.as_argument_list_mut().unwrap_or_ice(ICE)?;
+                let call_args = item.right.as_argument_list_mut().ice()?;
                 self.transform_constant_call(call_func, call_args)?;
                 let num_args = call_args.args.len();
                 // set return type from signature
                 if let Some(function_type_id) = call_func.type_id(self) {
 
-                    let func = self.type_by_id(function_type_id).as_callable().unwrap_or_ice(ICE)?.clone(); //FIXME borrow
+                    let func = self.type_by_id(function_type_id).as_callable().ice()?.clone(); //FIXME borrow
 
                     if let Some(ret_type_id) = func.ret_type_id {
                         self.set_type_id(item, ret_type_id)?;
@@ -1039,11 +1054,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
 
                     if func.arg_type_ids.len() != num_args {
-                        let function_name = format!("{}", item.left.as_expression().unwrap_or_ice(ICE)?);
+                        let function_name = format!("{}", item.left.as_expression().ice()?);
                         return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_name, func.arg_type_ids.len() as ItemIndex, num_args as ItemIndex), self.module_path));
                     }
 
-                    let arguments = item.right.as_argument_list_mut().unwrap_or_ice(ICE)?;
+                    let arguments = item.right.as_argument_list_mut().ice()?;
 
                     for (index, &expected_type_id) in func.arg_type_ids.iter().enumerate() {
                         self.resolve_expression(&mut arguments.args[index], expected_type_id)?;
@@ -1055,7 +1070,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                                     continue; // FIXME: omfg, get this out of here
                                 }
                             }
-                            self.set_type_id(&mut arguments.args[index], expected_type_id.unwrap_or_ice(ICE)?)?;
+                            self.set_type_id(&mut arguments.args[index], expected_type_id.ice()?)?;
                         } else if let (Some(actual_type_id), Some(expected_type_id)) = (actual_type_id, expected_type_id) {
                             self.check_type_accepted_for(&arguments.args[index], actual_type_id, expected_type_id)?;
                         }
@@ -1092,8 +1107,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // move left part before function name into arguments
         if let Some(constant) = constant {
-            let binary_op = call_exp.as_binary_op_mut().unwrap_or_ice(ICE)?;
-            let arg = std::mem::replace(binary_op.left.as_expression_mut().unwrap_or_ice(ICE)?, ast::Expression::void(ast::Position(0)));
+            let binary_op = call_exp.as_binary_op_mut().ice()?;
+            let arg = std::mem::replace(binary_op.left.as_expression_mut().ice()?, ast::Expression::void(ast::Position(0)));
             *call_exp = ast::Expression::Constant(constant);
             call_args.args.insert(0, arg);
         }
@@ -1210,15 +1225,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // resolve type from name
 
-        let type_name = item.type_name.as_mut().unwrap_or_ice(ICE)?;
+        let type_name = item.type_name.as_mut().ice()?;
         let type_id = self.resolve_type_name(type_name, None)?;
 
         // resolve fields from field definition
 
         if let Some(type_id) = type_id {
             self.set_type_id(item, type_id)?;
-            let struct_def = self.type_by_id(type_id).as_struct().unwrap_or_err(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()), self.module_path)?.clone();
-            let struct_ = item.value.as_struct_mut().unwrap_or_ice(ICE)?;
+            let struct_def = self.type_by_id(type_id).as_struct().usr(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()))?.clone();
+            let struct_ = item.value.as_struct_mut().ice()?;
             for (name, field) in &mut struct_.fields {
                 if !struct_def.has_field(name) {
                     return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(name.clone()), self.module_path));
@@ -1254,7 +1269,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // mutably borrow literal as array literal
         let type_id = item.type_id(self);
-        let array_literal = item.value.as_array_mut().unwrap_or_ice("Expected array type, got something else")?;
+        let array_literal = item.value.as_array_mut().ice_msg("Expected array type, got something else")?;
 
         // try to get inner type from element literals
         if elements_type_id.is_none() {
@@ -1281,8 +1296,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }));
             *item.type_id_mut(self) = Some(new_type_id);
         } else if let Some(elements_type_id) = elements_type_id {
-            let array_type_id = item.type_id(self).unwrap_or_ice(ICE)?;
-            let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().unwrap_or_ice(ICE)?;
+            let array_type_id = item.type_id(self).ice()?;
+            let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().ice()?;
             if let Some(current_element_type_id) = array_ty.type_id {
                 self.check_type_accepted_for(item, current_element_type_id, elements_type_id)?;
             } else {

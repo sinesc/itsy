@@ -4,8 +4,6 @@ use crate::ItemIndex;
 use crate::frontend::ast::{Position, Positioned};
 use crate::shared::numeric::Numeric;
 
-pub const ICE: &'static str = "Internal compiler error";
-
 /// Represents the various possible resolver error-kinds.
 #[derive(Clone, Debug)]
 pub enum ResolveErrorKind {
@@ -40,11 +38,14 @@ pub enum ResolveErrorKind {
 pub struct ResolveError {
     kind: ResolveErrorKind,
     position: Position,
-    module_path: String,
+    pub(super) module_path: String,
 }
 impl ResolveError {
     pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
+    }
+    pub(crate) fn ice(message: String) -> ResolveError {
+        Self { kind: ResolveErrorKind::Internal(message), position: Position(0), module_path: "".to_string() }
     }
     /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
@@ -91,60 +92,36 @@ impl Display for ResolveError {
 pub type ResolveResult<T = ()> = Result<T, ResolveError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
-pub(crate) trait SomeOrResolveError<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<T>;
-    fn unwrap_or_ice(self: Self, message: &str) -> ResolveResult<T>;
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<Option<T>>;
-    fn some_or_ice(self: Self, message: &str) -> ResolveResult<Option<T>>;
+pub(crate) trait OptionToResolveError<T> {
+    fn usr(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> ResolveResult<T>;
+    fn ice_msg(self: Self, message: &str) -> ResolveResult<T>;
+    fn ice(self: Self) -> ResolveResult<T>;
 }
 
-impl<T> SomeOrResolveError<T> for Option<T> {
-    fn unwrap_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<T> {
+impl<T> OptionToResolveError<T> for Option<T> {
+    fn usr(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind) -> ResolveResult<T> {
         if let Some(result) = self {
             Ok(result)
         } else {
             Err(ResolveError {
                 kind: kind,
                 position: item.map_or(Position(0), |i| i.position()),
-                module_path: module_path.to_string(),
+                module_path: "".to_string(),
             })
         }
     }
-    fn unwrap_or_ice(self: Self, message: &str) -> ResolveResult<T> {
+    fn ice_msg(self: Self, message: &str) -> ResolveResult<T> {
         #[cfg(feature="ice_panics")]
         if self.is_none() {
             panic!("Internal compiler error: {}", message);
         }
-        self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
+        self.usr(None, ResolveErrorKind::Internal(message.to_string()))
     }
-    fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<Option<T>> {
-        if self.is_some() {
-            Ok(self)
-        } else {
-            Err(ResolveError {
-                kind: kind,
-                position: item.map_or(Position(0), |i| i.position()),
-                module_path: module_path.to_string(),
-            })
-        }
-    }
-    fn some_or_ice(self: Self, message: &str) -> ResolveResult<Option<T>> {
+    fn ice(self: Self) -> ResolveResult<T> {
         #[cfg(feature="ice_panics")]
         if self.is_none() {
-            panic!("Internal compiler error: {}", message);
+            panic!("Internal compiler error: Expectation failed");
         }
-        self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
+        self.usr(None, ResolveErrorKind::Internal("Expectation failed".to_string()))
     }
-}
-
-/// Returns an internal compiler error with positional information.
-pub(crate) fn ice<T>(message: &str) -> ResolveResult<T> {
-    #[cfg(feature="ice_panics")]
-    panic!("Internal compiler error: {}", message);
-    #[cfg(not(feature="ice_panics"))]
-    Err(ResolveError {
-        kind: ResolveErrorKind::Internal(message.to_string()),
-        position: Position(0),
-        module_path: "".to_string(),
-    })
 }

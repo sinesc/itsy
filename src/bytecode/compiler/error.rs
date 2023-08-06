@@ -15,7 +15,7 @@ pub enum CompileErrorKind {
 pub struct CompileError {
     kind: CompileErrorKind,
     position: Position,
-    module_path: String,
+    pub(super) module_path: String,
 }
 
 impl CompileError {
@@ -23,8 +23,8 @@ impl CompileError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
     }
     #[cfg_attr(feature="ice_panics", allow(dead_code))]
-    pub(crate) fn unpositioned(kind: CompileErrorKind, module_path: &str) -> CompileError {
-        Self { kind, position: Position(0), module_path: module_path.to_string() }
+    pub(crate) fn ice(message: String) -> CompileError {
+        Self { kind: CompileErrorKind::Internal(message), position: Position(0), module_path: "".to_string() }
     }
     /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
@@ -54,13 +54,13 @@ impl Display for CompileError {
 pub type CompileResult<T = ()> = Result<T, CompileError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
-pub(super) trait UnwrapOrICE<T> {
-    fn or_ice_msg(self: Self, message: &str) -> CompileResult<T>;
-    fn or_ice(self: Self) -> CompileResult<T>;
+pub(super) trait OptionToCompileError<T> {
+    fn ice_msg(self: Self, message: &str) -> CompileResult<T>;
+    fn ice(self: Self) -> CompileResult<T>;
 }
 
-impl<T> UnwrapOrICE<T> for Option<T> {
-    fn or_ice_msg(self: Self, message: &str) -> CompileResult<T> {
+impl<T> OptionToCompileError<T> for Option<T> {
+    fn ice_msg(self: Self, message: &str) -> CompileResult<T> {
         if let Some(result) = self {
             Ok(result)
         } else {
@@ -74,7 +74,7 @@ impl<T> UnwrapOrICE<T> for Option<T> {
             })
         }
     }
-    fn or_ice(self: Self) -> CompileResult<T> {
+    fn ice(self: Self) -> CompileResult<T> {
         if let Some(result) = self {
             Ok(result)
         } else {
