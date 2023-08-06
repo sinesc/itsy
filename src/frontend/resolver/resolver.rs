@@ -927,6 +927,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             Index | IndexWrite => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
+                if let Some(left_type_id) = item.left.type_id(self) {
+                    if !self.type_by_id(left_type_id).as_array().is_some() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
+                    }
+                }
                 self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
                 // left[right] : item
                 self.set_type_id(item.right.as_expression_mut().ice()?, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
