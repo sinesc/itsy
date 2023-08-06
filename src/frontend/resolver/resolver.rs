@@ -9,12 +9,12 @@ pub mod resolved;
 use crate::{prelude::*, VariantIndex};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
-use crate::frontend::ast::{self, Visibility, LiteralValue, Positioned, Typeable, Resolvable};
+use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable};
-use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, FunctionId, ConstantId};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant};
+use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 
@@ -189,15 +189,13 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Creates new or enters existing scope and returns the original/parent scope id.
-    fn try_create_scope(self: &mut Self, scope_id: &mut Option<ScopeId>, who: &str) -> ScopeId {
+    fn try_create_scope(self: &mut Self, scope_id: &mut Option<ScopeId>) -> ScopeId {
         let parent_scope_id = self.scope_id;
         if let &mut Some(scope_id) = scope_id {
             self.scope_id = scope_id;
-            //self.scopes.print(&format!("existing scope {}", who), self.scope_id);
         } else {
             self.scope_id = self.scopes.create_scope(parent_scope_id);
             *scope_id = Some(self.scope_id);
-            //self.scopes.print(&format!("create scope {}", who), self.scope_id);
         }
         parent_scope_id
     }
@@ -587,7 +585,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an implementation block.
     fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "impl_block");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         if item.ty.type_id(self).is_none() {
             self.resolve_inline_type(&mut item.ty)?;
         }
@@ -630,7 +628,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a trait definition block.
     fn resolve_trait_def(self: &mut Self, item: &mut ast::TraitDef) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "trait_def");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // ensure trait exists
         if item.type_id.is_none() {
             let mut trt = Trait { provided: Map::new(), required: Map::new() };
@@ -687,7 +685,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<TypeId>) -> ResolveResult {
 
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "function");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
 
         self.resolve_signature(&mut item.sig)?;
 
@@ -788,7 +786,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "ifblock");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // resolve condition and block
         self.resolve_expression(&mut item.cond, Some(self.primitive_type_id(Type::bool)?))?;
         self.resolve_block(&mut item.if_block, expected_result)?;
@@ -808,7 +806,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a match expression.
     fn resolve_match_block(self: &mut Self, item: &mut ast::MatchBlock, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "match");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None)?;
         for (_, block) in &mut item.branches {
             self.resolve_block(block, expected_result)?;
@@ -820,7 +818,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop) -> ResolveResult {
         use ast::{Expression::*, BinaryOperator as Op};
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "forloop");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // create binding for the iterator variable
         self.resolve_let_binding(&mut item.iter)?;
         match &item.expr { // NOTE: these need to match Compiler::compile_for_loop
@@ -856,7 +854,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a while loop.
     fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "while");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         self.resolve_expression(&mut item.expr, None)?;
         self.resolve_block(&mut item.block, None)?;
         self.scope_id = parent_scope_id;
@@ -865,7 +863,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id, "block");
+        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         // resolve statments, result and returns
         for statement in item.statements.iter_mut() {
             self.resolve_statement(statement)?;

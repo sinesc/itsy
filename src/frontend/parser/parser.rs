@@ -947,7 +947,6 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
 
 fn let_binding(i: Input<'_>) -> Output<LetBinding> {
     let position = i.position();
-    let j = i.clone();
     ws(map(
         preceded(
             check_flags(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),

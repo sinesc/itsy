@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use crate::prelude::*;
-use crate::{FrameAddress, StackAddress};
+use crate::StackAddress;
 use crate::frontend::ast::Pattern;
 use crate::shared::typed_ids::FunctionId;
 use std::cmp::Ordering;

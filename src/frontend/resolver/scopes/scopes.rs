@@ -101,21 +101,6 @@ impl Scopes {
             }
         }
     }
-
-    /*
-    pub fn print(self: &Self, name: &str, mut scope_id: ScopeId)  {
-        print!("{name}");
-        loop {
-            print!(" -> {}", scope_id.into_usize());
-            if let Some(parent_scope_id) = self.parent_id(scope_id) {
-                scope_id = parent_scope_id;
-            } else {
-                println!("");
-                return;
-            }
-        }
-    }
-    */
 }
 
 /// Function-scope handling
@@ -126,11 +111,11 @@ impl Scopes {
         self.scopefunction.insert(scope_id, Some(function_id));
     }
 
-    /// Registers that this scope has a function attached to it but its id is not known yet.
+    /* /// Registers that this scope has a function attached to it but its id is not known yet.
     /// Does nothing if the scope already has a known function id.
     pub fn register_scopefunction(self: &mut Self, scope_id: ScopeId) {
         self.scopefunction.entry(scope_id).or_insert(None);
-    }
+    }*/
 
     /// Finds the id of the closest function containing this scope.
     pub fn scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
