@@ -13,7 +13,8 @@
                 "build"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": true,
         },
         {
             "label": "cargo build library (release)",
@@ -24,7 +25,8 @@
                 "--release"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": true,
         },
         {
             "label": "cargo test",
@@ -37,7 +39,7 @@
             ],
             "options": {
                 "env": {
-                    "RUST_BACKTRACE": "1"
+                    //"RUST_BACKTRACE": "1"
                 }
             },
             "group": "test",
@@ -85,7 +87,8 @@
                 "debug-run",
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": true,
         },
         {
             "label": "cargo build profile-runner (example)",
@@ -99,7 +102,8 @@
                 "profile-run",
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": true,
         },
         {
             "label": "cargo build runner (example)",
@@ -112,7 +116,8 @@
                 "run",
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": true,
         },
         {
             "label": "cargo run file in debug-runner (example)",
@@ -122,6 +127,7 @@
                 "run",
                 "--features=\"debugging\"",
                 "--features=\"symbols\"",
+                "--features=\"ice_panics\"",
                 "--example",
                 "debug-run",
                 "--",
