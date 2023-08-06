@@ -17,6 +17,17 @@ fn string_literal() {
 }
 
 #[test]
+fn string_static_methods() {
+    let result = run(stringify!(
+        let escape = String::from_ascii(27);
+        ret_str(escape);
+    ));
+    assert_all(&result, &[
+        String::from_utf8(vec![27]).unwrap()
+    ]);
+}
+
+#[test]
 fn string_compare() {
     let result = run(stringify!(
         let string = "abc";

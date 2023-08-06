@@ -769,9 +769,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.constant_id.is_none() {
             let path = self.make_path(&item.path.name);
             item.constant_id = self.scopes.constant_id(self.scope_id, &path, TypeId::VOID);
-            /*if item.constant_id.is_none() {
+            // builtin function
+            if item.path.name.len() == 2 {
+                if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.name[0]) {
+                    if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.name[1].name, type_id)? {
+                        item.constant_id = Some(constant_id);
+                    }
+                }
+            }
+            if item.constant_id.is_none() && self.stage.must_resolve() {
                 return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.path.to_string()), self.module_path));
-            }*/
+            }
         }
         // set expected type, if any
         if item.type_id(self).is_none() && item.constant_id.is_some() {
