@@ -361,3 +361,4 @@ macro_rules! impl_opcodes {
     }
 }
 
+pub(crate) use impl_opcodes;

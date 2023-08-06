@@ -79,18 +79,20 @@ impl Scopes {
     pub fn create_scope(self: &mut Self, parent: ScopeId) -> ScopeId {
         let index = self.parent_map.len();
         self.parent_map.push(parent);
-        index.into()
+        let result: ScopeId = index.into();
+        result
     }
 
     /// Inserts a general alias into the given scope.
-    pub fn insert_alias(self: &mut Self, scope_id: ScopeId, name: &str, alias: &str) {
-        self.aliases.insert((scope_id, alias.to_string()), name.to_string());
+    pub fn insert_alias<T: AsRef<str>, U: AsRef<str>>(self: &mut Self, scope_id: ScopeId, name: T, alias: U) {
+        //self.print(&format!("insert_alias {} -> {}", alias.as_ref().to_string(), name.as_ref()), scope_id);
+        self.aliases.insert((scope_id, alias.as_ref().to_string()), name.as_ref().to_string());
     }
 
     /// Resolves given alias.
-    pub fn alias(self: &Self, mut scope_id: ScopeId, alias: &str) -> Option<&str> {
+    pub fn alias<T: AsRef<str>>(self: &Self, mut scope_id: ScopeId, alias: T) -> Option<&str> {
         loop {
-            if let Some(name) = self.aliases.get(&(scope_id, alias.to_string())) {
+            if let Some(name) = self.aliases.get(&(scope_id, alias.as_ref().to_string())) {
                 return Some(name);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
@@ -99,6 +101,21 @@ impl Scopes {
             }
         }
     }
+
+    /*
+    pub fn print(self: &Self, name: &str, mut scope_id: ScopeId)  {
+        print!("{name}");
+        loop {
+            print!(" -> {}", scope_id.into_usize());
+            if let Some(parent_scope_id) = self.parent_id(scope_id) {
+                scope_id = parent_scope_id;
+            } else {
+                println!("");
+                return;
+            }
+        }
+    }
+    */
 }
 
 /// Function-scope handling
@@ -197,7 +214,7 @@ impl Scopes {
     }
 
     /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> { // todo: rename to binding_id()
+    pub fn binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> {
         loop {
             if let Some(index) = self.local_binding_id(scope_id, name) {
                 return Some(index);
@@ -229,8 +246,8 @@ impl Scopes {
     }
 
     /// Finds the id of the named constant within the scope or its parent scopes.
-    pub fn constant_id(self: &Self, scope_id: ScopeId, name: &str, owning_type_id: TypeId) -> Option<ConstantId> {
-        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string();
+    pub fn constant_id<T: AsRef<str>>(self: &Self, scope_id: ScopeId, name: T, owning_type_id: TypeId) -> Option<ConstantId> {
+        let name = self.alias(scope_id, name.as_ref()).unwrap_or_else(|| name.as_ref()).to_string();
         self.constants.id_by_name(&(name, owning_type_id))
     }
 
@@ -263,14 +280,9 @@ impl Scopes {
     }
 
     /// Returns the id of the named type or alias (the scope id is required for alias resolution).
-    pub fn type_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<TypeId> {
-        let name = self.alias(scope_id, name).unwrap_or_else(|| name).to_string(); // TODO annoying conversion requirement
+    pub fn type_id<T: AsRef<str>>(self: &Self, scope_id: ScopeId, name: T) -> Option<TypeId> {
+        let name = self.alias(scope_id, name.as_ref()).unwrap_or_else(|| name.as_ref()).to_string();
         self.types.id_by_name(&name)
-    }
-
-    /// Returns the name of the given type id.
-    pub fn type_name(self: &Self, type_id: TypeId) -> Option<&String> {
-        self.types.name_by_id(type_id)
     }
 
     /// Returns a mutable reference to the type of the given type id.
@@ -292,6 +304,6 @@ impl TypeContainer for Scopes {
         self.type_mut(type_id)
     }
     fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String> {
-        self.type_name(type_id)
+        self.types.name_by_id(type_id)
     }
 }

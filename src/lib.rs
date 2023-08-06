@@ -13,7 +13,6 @@ mod frontend;
 #[path="shared/shared.rs"]
 #[cfg(feature="compiler")]
 mod shared;
-#[macro_use]
 #[path="bytecode/bytecode.rs"]
 mod bytecode;
 mod interface;

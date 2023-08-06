@@ -156,3 +156,61 @@ pub fn parts_to_path<T: AsRef<str>>(parts: &[T]) -> String {
     let parts = parts.iter().map(|p| p.as_ref()).collect::<Vec<_>>(); // todo: lame to have to collect first
     parts.join("::")
 }
+
+/// Implement variant getters for an enaum.
+///
+/// # Examples
+///
+/// impl_as_getter!(EnumType {
+///     pub as_variant_name: Variant -> *ResultType         // get by value
+///     pub as_variant_name_ref: Variant -> &ResultType     // get by reference
+///     pub as_variant_name_mut: Variant -> mut ResultType  // get by mut reference
+///     pub is_variant_name: Variant ? bool                 // check if is variant
+/// })
+macro_rules! impl_as_getter {
+    (@ref_val * $ident:ident) => { Some(*$ident) };
+    (@ref_val & $ident:ident) => { Some($ident) };
+    (@ref_val mut $ident:ident) => { Some($ident) };
+    (@ref_val $ident:ident) => { true };
+    (@ref_result * $ty:ty) => { Option<$ty> };
+    (@ref_result & $ty:ty) => { Option<&$ty> };
+    (@ref_result mut $ty:ty) => { Option<&mut $ty> };
+    (@ref_result) => { bool };
+    (@ref_self * $ty:ty) => { &$ty };
+    (@ref_self & $ty:ty) => { &$ty };
+    (@ref_self mut $ty:ty) => { &mut $ty };
+    (@ref_self $ty:ty) => { &$ty };
+    (@ref_default $ref_type:tt) => { None };
+    (@ref_default) => { false };
+    (@ref_fn $( #[ $attr:meta ] )* ( mut ) $vis:vis $label:ident : $variant:ident $( -> $ref_type:tt $ty:tt )? $( ? bool )? ) => {
+        $( #[ $attr ] )*
+        $vis fn $label (self: impl_as_getter!(@ref_self $($ref_type)? Self)) -> impl_as_getter!(@ref_result $($ref_type)? $($ty)?) {
+            #[allow(unreachable_patterns,unused_variables)]
+            match self {
+                Self::$variant(v) => impl_as_getter!(@ref_val $($ref_type)? v),
+                _ => impl_as_getter!(@ref_default $($ref_type)?),
+            }
+        }
+    };
+    (@ref_fn $( #[ $attr:meta ] )* ( $( $any:tt )? ) $vis:vis $label:ident : $variant:ident $( -> $ref_type:tt $ty:tt )? $( ? bool )? ) => {
+        $( #[ $attr ] )*
+        $vis const fn $label (self: impl_as_getter!(@ref_self $($ref_type)? Self)) -> impl_as_getter!(@ref_result $($ref_type)? $($ty)?) {
+            #[allow(unreachable_patterns,unused_variables)]
+            match self {
+                Self::$variant(v) => impl_as_getter!(@ref_val $($ref_type)? v),
+                _ => impl_as_getter!(@ref_default $($ref_type)?),
+            }
+        }
+    };
+    ($enum:ident {
+        $( $( #[ $attr:meta ] )* $vis:vis $label:ident : $variant:ident $( -> $ref_type:tt $ty:tt )? $( ? $tb:tt )? ),+ $(,)?
+    }) => {
+        #[allow(unused_attributes)]
+        impl $enum {
+            $(
+                impl_as_getter!(@ref_fn $( #[ $attr ] )* ( $( $ref_type )? ) $vis $label : $variant $( -> $ref_type $ty )? $( ? $tb )? );
+            )+
+        }
+    };
+}
+pub(crate) use impl_as_getter;

@@ -6,6 +6,7 @@ macro_rules! comment {
         $self.writer.comment(&format!($format $(, $value)*));
     }
 }
+pub(crate) use comment;
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
 /*macro_rules! select_signed_opcode {
@@ -23,7 +24,8 @@ macro_rules! comment {
             select_signed_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
         }
     }}
-}*/
+}
+pub(crate) use select_signed_opcode;*/
 
 // Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
 macro_rules! select_unsigned_opcode {
@@ -42,3 +44,4 @@ macro_rules! select_unsigned_opcode {
         }
     }}
 }
+pub(crate) use select_unsigned_opcode;

@@ -171,6 +171,7 @@ macro_rules! impl_builtins {
             use crate::frontend::resolver::Resolver;
             use crate::bytecode::{compiler::Compiler, VMFunc};
             use crate::shared::{meta::Type, typed_ids::TypeId, TypeContainer};
+            use crate::bytecode::macros::impl_builtins;
 
             $( // type
                 #[allow(non_camel_case_types)]
@@ -427,3 +428,5 @@ macro_rules! impl_builtins {
         }
     };
 }
+
+pub(crate) use impl_builtins;

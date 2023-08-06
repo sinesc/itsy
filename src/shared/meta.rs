@@ -1,7 +1,7 @@
 use crate::config::StackAddress;
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
-use crate::shared::{TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
+use crate::shared::{impl_as_getter, TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
 
 /// Binding meta information.
@@ -16,28 +16,8 @@ pub enum ConstantValue {
     Function(FunctionId),
 }
 
-macro_rules! impl_as_getter {
-    (@ref_type * $ident:ident) => { *$ident };
-    (@ref_type & $ident:ident) => { $ident };
-    ($enum:ident {
-        $( $vis:vis $label:ident ( $variant:ident $ref_type:tt $ty:ty ) ),+
-    }) => {
-        impl $enum {
-            $(
-            $vis fn $label (self: &Self) -> Option<$ty> {
-                #[allow(unreachable_patterns)]
-                match self {
-                    Self::$variant(v) => Some(impl_as_getter!(@ref_type $ref_type v)),
-                    _ => None,
-                }
-            }
-            )+
-        }
-    };
-}
-
 impl_as_getter!(ConstantValue {
-    pub as_function_id ( Function * FunctionId )
+    pub as_function_id: Function -> *FunctionId,
 });
 
 
@@ -271,6 +251,27 @@ impl Display for Type {
     }
 }
 
+impl_as_getter!(Type {
+    /// Returns the type as a callable.
+    pub as_callable: Callable -> &Callable,
+    /// Returns the type as an array.
+    pub as_array: Array -> &Array,
+    /// Returns the type as a mutable array.
+    pub as_array_mut: Array -> mut Array,
+    /// Returns the type as a struct.
+    pub as_struct: Struct -> &Struct,
+    /// Returns the type as a mutable struct.
+    pub as_struct_mut: Struct -> mut Struct,
+    /// Returns the type as an enum.
+    pub as_enum: Enum -> &Enum,
+    /// Returns the type as a mutable enum.
+    pub as_enum_mut: Enum -> mut Enum,
+    /// Returns the type as a trait.
+    pub as_trait: Trait -> & Trait,
+    /// Returns the type as a mutable trait.
+    pub as_trait_mut: Trait -> mut Trait,
+});
+
 impl Type {
     /// Size of the primitive type in bytes, otherwise size of the reference.
     pub const fn primitive_size(self: &Self) -> u8 {
@@ -418,69 +419,6 @@ impl Type {
             Type::Trait(_) => false,
             Type::Callable(_) => false,
             _ => !self.is_primitive(),
-        }
-    }
-    /// Returns the type as a callable.
-    pub const fn as_callable(self: &Self) -> Option<&Callable> {
-        match self {
-            Type::Callable(callable) => Some(callable),
-            _ => None
-        }
-    }
-    /// Returns the type as an array.
-    pub const fn as_array(self: &Self) -> Option<&Array> {
-        match self {
-            Type::Array(array) => Some(array),
-            _ => None
-        }
-    }
-    /// Returns the type as a mutable array.
-    pub fn as_array_mut(self: &mut Self) -> Option<&mut Array> {
-        match self {
-            Type::Array(array) => Some(array),
-            _ => None
-        }
-    }
-    /// Returns the type as a struct.
-    pub const fn as_struct(self: &Self) -> Option<&Struct> {
-        match self {
-            Type::Struct(struct_) => Some(struct_),
-            _ => None
-        }
-    }
-    /// Returns the type as a mutable struct.
-    pub fn as_struct_mut(self: &mut Self) -> Option<&mut Struct> {
-        match self {
-            Type::Struct(struct_) => Some(struct_),
-            _ => None
-        }
-    }
-    /// Returns the type as an enum.
-    pub const fn as_enum(self: &Self) -> Option<&Enum> {
-        match self {
-            Type::Enum(enum_) => Some(enum_),
-            _ => None
-        }
-    }
-    /// Returns the type as a mutable enum.
-    pub fn as_enum_mut(self: &mut Self) -> Option<&mut Enum> {
-        match self {
-            Type::Enum(enum_) => Some(enum_),
-            _ => None
-        }
-    }
-    /// Returns the type as a trait.
-    pub const fn as_trait(self: &Self) -> Option<&Trait> {
-        match self {
-            Type::Trait(trait_def) => Some(trait_def),
-            _ => None
-        }
-    }
-    /// Returns the type as a mutable trait.
-    pub fn as_trait_mut(self: &mut Self) -> Option<&mut Trait> {
-        match self {
-            Type::Trait(trait_def) => Some(trait_def),
-            _ => None
         }
     }
     /// Returns an iterator over the type_ids of traits implemented by this type, if any.

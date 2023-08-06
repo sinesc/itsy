@@ -3,6 +3,7 @@
 use crate::prelude::*;
 #[cfg(feature="runtime")]
 use crate::{StackAddress, StackOffset, bytecode::{HeapRef, HeapRefOp, runtime::{vm::VMState, error::RuntimeErrorKind}}};
+use crate::bytecode::macros::impl_builtins;
 #[cfg(feature="runtime")]
 use std::str::Chars;
 

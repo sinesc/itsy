@@ -1,7 +1,7 @@
 //! Bytecode emitter. Compiles bytecode from AST.
 
 mod stack_frame;
-#[macro_use] mod macros;
+mod macros;
 pub mod error;
 mod util;
 mod init_state;
@@ -10,12 +10,13 @@ use crate::config::FrameAddress;
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned, CallTargetType}, resolver::resolved::{ResolvedProgram, Resolved}};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, UnwrapOrICE};
 use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
+use macros::{comment, select_unsigned_opcode};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub(crate) struct Compiler<T> {
@@ -251,37 +252,28 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given expression.
     fn compile_expression(self: &mut Self, item: &ast::Expression) -> CompileResult {
-        use self::ast::Expression as E;
+        use self::ast::Expression::*;
         match item {
-            E::Literal(literal)         => self.compile_literal(literal),
-            E::Value(value) => match value {
-                ast::Value::Variable(variable) => self.compile_variable(variable),
-                ast::Value::Constant(constant) => self.compile_constant(constant),
-                _ => unreachable!("Unknown value"),
-            },
-            E::Member(_)                => Ok(()),
-            E::Call(call)               => self.compile_call(call),
-            E::Assignment(assignment)   => self.compile_assignment(assignment),
-            E::BinaryOp(binary_op)      => self.compile_binary_op(binary_op),
-            E::UnaryOp(unary_op)        => self.compile_unary_op(unary_op),
-            E::Cast(cast)               => self.compile_cast(cast),
-            E::Block(block)             => self.compile_block(block),
-            E::IfBlock(if_block)        => self.compile_if_block(if_block),
-            E::MatchBlock(match_block)        => self.compile_match_block(match_block),
-            E::Closure(_closure) => unimplemented!("Closure compilation todo")
+            Literal(literal) => self.compile_literal(literal),
+            Variable(variable) => self.compile_variable(variable),
+            Constant(constant) => self.compile_constant(constant),
+            Assignment(assignment) => self.compile_assignment(assignment),
+            BinaryOp(binary_op) => self.compile_binary_op(binary_op),
+            UnaryOp(unary_op) => self.compile_unary_op(unary_op),
+            Block(block) => self.compile_block(block),
+            IfBlock(if_block) => self.compile_if_block(if_block),
+            MatchBlock(match_block) => self.compile_match_block(match_block),
+            Closure(_closure) => unimplemented!("Closure compilation todo")
         }
     }
 
     /// Compiles the assignment operation.
     fn compile_assignment(self: &mut Self, item: &ast::Assignment) -> CompileResult {
+        use self::ast::Expression::*;
         comment!(self, "{}", item);
         match &item.left {
-            ast::Expression::Value(value) => match value {
-                ast::Value::Variable(_) => self.compile_assignment_to_var(item),
-                ast::Value::Constant(_) => self.ice_at(item, "Attempted to assign to non-assignable"),
-                ast::Value::Unknown { .. } => self.ice_at(item, "Value::Unknown encountered"),
-            }
-            ast::Expression::BinaryOp(_) => self.compile_assignment_to_offset(item),
+            Variable(_) => self.compile_assignment_to_var(item),
+            BinaryOp(_) => self.compile_assignment_to_offset(item),
             _ => self.ice_at(item, "Attempted to assign to non-assignable"),
         }
     }
@@ -350,11 +342,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles function call arguments.
-    fn compile_call_args(self: &mut Self, item: &ast::Call, function_kind: FunctionKind) -> CompileResult {
+    fn compile_call_args(self: &mut Self, item: &ast::BinaryOp, function_kind: FunctionKind) -> CompileResult {
+        let args = &item.right.as_argument_list().or_ice()?.args;
         // put args on stack, increase ref count to ensure temporaries won't be dropped after access
         // function is responsible for decrementing argument ref-count on exit
-        for (_index, arg) in item.args.iter().enumerate() {
-            comment!(self, "{}() arg {}", item.ident.name, arg);
+        for (_index, arg) in args.iter().enumerate() {
+            comment!(self, "{}() arg {}", item.left, arg);
             self.compile_expression(arg)?;
             match function_kind {
                 FunctionKind::Method(_) | FunctionKind::Function => {
@@ -367,53 +360,41 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given call.
-    fn compile_call(self: &mut Self, item: &ast::Call) -> CompileResult {
-        match item.target {
-            CallTargetType::Constant(constant_id) => self.compile_call_static(item, constant_id),
-            CallTargetType::Variable(binding_id) => self.compile_call_variable(item, binding_id),
-            CallTargetType::Unresolved => {
-                return Ok(());
+    fn compile_binary_op_call(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
+        use ast::Expression::*;
+        match item.left.as_expression().or_ice()? {
+            Constant(_) => self.compile_call_constant(item),
+            Variable(var) => {
+                self.compile_call_args(item, FunctionKind::Function)?;
+                self.compile_variable(var)?;
+                self.write_call_dynamic(var.type_id(self).or_ice()?);
+                Ok(())
             },
+            BinaryOp(binary_op) => {
+                self.compile_call_args(item, FunctionKind::Function)?;
+                self.compile_binary_op(binary_op)?;
+                self.write_call_dynamic(binary_op.type_id(self).or_ice()?);
+                Ok(())
+            },
+            _ => self.ice_at(item, "Invalid call operand")?,
         }
     }
 
-    /// Compiles a call to a dynamically determined address.
-    fn compile_call_variable(self: &mut Self, item: &ast::Call, binding_id: BindingId) -> CompileResult {
-        self.compile_call_args(item, FunctionKind::Function)?;
-        comment!(self, "call-variable {}", item);
-        // load function address from variable
-        // TODO: have resolver restructure AST to a variable/member access followed by a write call_dynamic, so that we can eliminate this specialcase
-        let load_index = {
-            let error_kind = match self.init_state.initialized(binding_id) {
-                BranchingState::Uninitialized => Some(CompileErrorKind::Uninitialized(item.ident.name.clone())),
-                BranchingState::MaybeInitialized => Some(CompileErrorKind::MaybeInitialized(item.ident.name.clone())),
-                _ => None,
-            };
-            if let Some(error_kind) = error_kind {
-                return Err(CompileError::new(item, error_kind, &self.module_path))
-            }
-            self.locals.lookup(binding_id)
-        };
-        let type_id = self.binding_by_id(binding_id).type_id.or_ice_msg("Unresolved function type")?;
-        self.write_load(self.ty(&type_id), load_index)?;
-        self.write_call_dynamic(type_id);
-        Ok(())
-    }
-
     /// Compiles the given statically resolved call.
-    fn compile_call_static(self: &mut Self, item: &ast::Call, constant_id: ConstantId) -> CompileResult {
-        comment!(self, "prepare {}() args", item.ident.name);
-        let function_id = self.resolved.constant(constant_id).value.as_function_id().or_ice()?;
+    fn compile_call_constant(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
+        let constant = item.left.as_expression().or_ice()?.as_constant().or_ice()?;
+        comment!(self, "prepare {}() args", constant.path);
+        let function_id = self.resolved.constant(constant.constant_id.or_ice()?).value.as_function_id().or_ice()?;
         let function_kind = self.resolved.function(function_id).kind.or_ice()?;
         match function_kind {
             FunctionKind::Rust(rust_fn_index) => {
                 self.compile_call_args(item, function_kind)?;
-                comment!(self, "call {}()", item.ident.name);
+                comment!(self, "call {}()", constant.path);
                 self.writer.call_rust(T::from_index(rust_fn_index));
             },
             FunctionKind::Builtin(type_id, builtin_type) => {
                 self.compile_call_args(item, function_kind)?;
-                comment!(self, "call {}()", item.ident.name);
+                comment!(self, "call {}()", constant.path);
                 self.write_builtin(self.ty(&type_id), builtin_type)?;
             },
             FunctionKind::Method(object_type_id) => {
@@ -422,17 +403,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id)?;
                     let function_arg_size = self.resolved.function(function_id).arg_size(self);
-                    comment!(self, "call {}()", item.ident.name);
+                    comment!(self, "call {}()", constant.path);
                     self.writer.call_virtual(function_offset, function_arg_size);
                 } else {
                     // static dispatch
-                    comment!(self, "call {}()", item.ident.name);
+                    comment!(self, "call {}()", constant.path);
                     self.write_call(function_id);
                 }
             },
             FunctionKind::Function => {
                 self.compile_call_args(item, function_kind)?;
-                comment!(self, "call {}()", item.ident.name);
+                comment!(self, "call {}()", constant.path);
                 self.write_call(function_id);
             },
             FunctionKind::Variant(type_id, variant_index) => {
@@ -613,10 +594,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().or_ice()?;
-        self.compile_expression(&binary_op.left)?;          // stack current=lower
+        self.compile_expression(binary_op.left.as_expression().or_ice()?)?;          // stack current=lower
         self.write_store(self.ty(&iter_type_id), iter_loc, None)?;                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
         // push upper range bound
-        self.compile_expression(&binary_op.right)?;             // stack upper
+        self.compile_expression(binary_op.right.as_expression().or_ice()?)?;             // stack upper
         // precheck bounds
         let skip_jump = if binary_op.op == ast::BinaryOperator::Range {
             // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
@@ -724,7 +705,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a for - in loop
     fn compile_for_loop(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
-        use ast::{Expression, BinaryOperator as Op};
+        use ast::{Expression::*, BinaryOperator as Op};
         // initialize iter variable
         let binding_id = item.iter.binding_id.or_ice_msg("Unresolved binding")?;
         self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
@@ -733,10 +714,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let iter_type_id = item.iter.type_id(self).or_ice()?;
         // handle ranges or arrays
         let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
-            Expression::BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
+            BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
                 self.compile_for_loop_range(item, iter_local, iter_type_id)
             },
-            Expression::Block(_) | Expression::Call(_) | Expression::IfBlock(_) | Expression::Literal(_) | Expression::Value(_) => {
+            Literal(_) | Constant(_) | Variable(_) | Block(_) | IfBlock(_) | MatchBlock(_)  => {
                 self.compile_for_loop_array(item, iter_local, iter_type_id)
             },
             _ => self.ice_at(item, "Invalid for loop expression"),
@@ -833,13 +814,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => self.ice_at(item, "Unexpected boolean literal type")?,
                 };
             },
-            LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
+            /*LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
                 // primitive enums don't need to be heap allocated
                 let enum_def = ty.as_enum().or_ice_msg("Non-enum type on enum variant")?;
                 let enum_ty = self.ty(&enum_def.primitive.or_ice()?.0);
                 let variant_value = enum_def.variant_value(&variant.ident.name).or_ice()?;
                 self.write_immediate(enum_ty, variant_value)?;
-            },
+            },*/
             LiteralValue::String(ref string_literal) => {
                 // store string on const pool and write instruction to load it from const pool directly onto th heap
                 // note: we get the offset from current const_len() and not the store_const() result as that points to
@@ -871,7 +852,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let type_id = item.type_id(self).or_ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
-            LiteralValue::Variant(variant) => {
+            /*LiteralValue::Variant(variant) => {
                 // write instructions to construct the data-variant enum on the stack and once complete, upload it to the heap
                 let enum_def = self.ty(item).as_enum().or_ice_msg("Encountered non-enum type on enum variant")?;
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
@@ -880,7 +861,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let size = index_type.primitive_size() as StackAddress;
                 let type_id = item.type_id(self).or_ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-            },
+            },*/
         }
         Ok(())
     }
@@ -911,9 +892,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_binary_op_simple(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         // compile left, right and store references, left and right will be consumed
-        self.compile_expression(&item.left)?; // stack: left
+        self.compile_expression(item.left.as_expression().or_ice()?)?; // stack: left
         comment!(self, "{}", item.op);
-        self.compile_expression(&item.right)?; // stack: left right
+        self.compile_expression(item.right.as_expression().or_ice()?)?; // stack: left right
         let ty_result = self.ty(item);
         let ty_left = self.ty(&item.left);
         match item.op {                             // stack: result
@@ -940,17 +921,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         use crate::frontend::ast::BinaryOperator as BO;
         match item.op {
             BO::And => {
-                self.compile_expression(&item.left)?;
+                self.compile_expression(item.left.as_expression().or_ice()?)?;
                 let exit_jump = self.writer.j0_nc(123); // left is false, result cannot ever be true, skip right
-                self.compile_expression(&item.right)?;
+                self.compile_expression(item.right.as_expression().or_ice()?)?;
                 self.writer.and();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.j0_nc(exit_target));
             },
             BO::Or => {
-                self.compile_expression(&item.left)?;
+                self.compile_expression(item.left.as_expression().or_ice()?)?;
                 let exit_jump = self.writer.jn0_nc(123); // left is true, result cannot ever be false, skip right
-                self.compile_expression(&item.right)?;
+                self.compile_expression(item.right.as_expression().or_ice()?)?;
                 self.writer.or();
                 let exit_target = self.writer.position();
                 self.writer.overwrite(exit_jump, |w| w.jn0_nc(exit_target));
@@ -962,30 +943,32 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles an offsetting binary operation, i.e.. indexing and member access.
     fn compile_binary_op_offseting(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        use crate::frontend::ast::BinaryOperator as BO;
-        self.compile_expression(&item.left)?;
-        self.compile_expression(&item.right)?;
+        use crate::frontend::ast::BinaryOperator::*;
+        self.compile_expression(item.left.as_expression().or_ice()?)?;
+        if item.op == Index || item.op == IndexWrite {
+            self.compile_expression(item.right.as_expression().or_ice()?)?;
+        }
         let result_type = self.ty(item);
         let compare_type = self.ty(&item.left);
         match item.op {
-            BO::Index => {
+            Index => {
                 comment!(self, "[{}]", &item.right);
                 // fetch heap value at reference-target
                 self.write_heap_fetch_element(compare_type, result_type)?;
             },
-            BO::IndexWrite => {
+            IndexWrite => {
                 comment!(self, "[{}] (writing)", &item.right);
                 // compute and push the address of the reference-target
                 self.writer.index(result_type.primitive_size());
             },
-            BO::Access => {
+            Access => {
                 comment!(self, ".{}", &item.right);
                 // fetch heap value at reference-target
                 let struct_ = compare_type.as_struct().or_ice()?;
                 let offset = self.compute_member_offset(struct_, &item.right.as_member().or_ice()?.ident.name);
                 self.write_heap_fetch_member(compare_type, result_type, offset)?;
             },
-            BO::AccessWrite => {
+            AccessWrite => {
                 comment!(self, ".{} (writing)", &item.right);
                 // compute and push the address of the reference-target
                 let struct_ = compare_type.as_struct().or_ice()?;
@@ -1001,39 +984,49 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given binary operation.
     fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        fn equals(a: &ast::Expression, b: &ast::Expression) -> bool {
-            use ast::Expression as E;
-            use ast::Variable as V;
-            use ast::Value;
+        use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression, Variable};
+        fn equals(a: &Operand, b: &Operand) -> bool {
             match (a, b) {
                 (
-                    E::Value(Value::Variable(V { binding_id: Some(a_binding_id), .. })),
-                    E::Value(Value::Variable(V { binding_id: Some(b_binding_id), .. }))
+                    Operand::Expression(Expression::Variable(Variable { binding_id: Some(a_binding_id), .. })),
+                    Operand::Expression(Expression::Variable(Variable { binding_id: Some(b_binding_id), .. }))
                 ) => a_binding_id == b_binding_id,
                 _ => false,
             }
         }
-        if item.op == ast::BinaryOperator::Mul && equals(&item.left, &item.right) {  // TODO: move to optimizer
-            self.compile_expression(&item.left)?;
-            self.write_sq(self.ty(&item.left))?;
-            Ok(())
-        } else if item.op.is_simple() {
-            self.compile_binary_op_simple(item)
-        } else if item.op.is_shortcircuit() {
-            self.compile_binary_op_shortcircuiting(item)
-        } else if item.op.is_offset() {
-            self.compile_binary_op_offseting(item)
-        } else {
-            unreachable!()
+        match item.op {
+            Mul if equals(&item.left, &item.right) => { // TODO: move to optimizer
+                self.compile_expression(item.left.as_expression().or_ice()?)?;
+                self.write_sq(self.ty(&item.left))?;
+                Ok(())
+            },
+            Add | Sub | Mul | Div | Rem | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual => {
+                self.compile_binary_op_simple(item)
+            },
+            And | Or => {
+                self.compile_binary_op_shortcircuiting(item)
+            },
+            Index | IndexWrite | Access | AccessWrite => {
+                self.compile_binary_op_offseting(item)
+            },
+            Cast => {
+                self.compile_binary_op_cast(item)
+            },
+            Call => {
+                self.compile_binary_op_call(item)
+            },
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | Range | RangeInclusive => {
+                self.ice_at(item, "Unexpected operator in compile__binary_op")
+            },
         }
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_cast(self: &mut Self, item: &ast::Cast) -> CompileResult {
-
-        self.compile_expression(&item.expr)?;
-        let from = self.ty(&item.expr);
-        let to = self.ty(&item.ty);
+    fn compile_binary_op_cast(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
+        let expr = item.left.as_expression().or_ice()?;
+        self.compile_expression(expr)?;
+        let from = self.ty(expr);
+        let to = self.ty(item.right.as_type_name().or_ice()?);
         self.write_cast(from, to)?;
         Ok(())
     }
@@ -1111,22 +1104,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn create_stack_frame_exp(self: &Self, expression: &ast::Expression, frame: &mut StackFrame) -> CompileResult {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame)?;
-        } else if let ast::Expression::Call(call) = expression {
-            for arg in &call.args {
-                if let ast::Expression::Block(block) = arg {
-                    self.create_stack_frame_block(block, frame)?;
-                }
-            }
         } else if let ast::Expression::Assignment(assignment) = expression {
             if let ast::Expression::Block(block) = &assignment.right {
                 self.create_stack_frame_block(block, frame)?;
             }
         } else if let ast::Expression::BinaryOp(binary_op) = expression {
-            if let ast::Expression::Block(block) = &binary_op.left {
+            if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.left {
                 self.create_stack_frame_block(block, frame)?;
             }
-            if let ast::Expression::Block(block) = &binary_op.right {
-                self.create_stack_frame_block(block, frame)?;
+            if binary_op.op == ast::BinaryOperator::Call {
+                for arg in &binary_op.right.as_argument_list().or_ice()?.args {
+                    if let ast::Expression::Block(block) = arg {
+                        self.create_stack_frame_block(block, frame)?;
+                    }
+                }
+            } else {
+                if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.right {
+                    self.create_stack_frame_block(block, frame)?;
+                }
             }
         } else if let ast::Expression::UnaryOp(unary_op) = expression {
             if let ast::Expression::Block(block) = &unary_op.expr {

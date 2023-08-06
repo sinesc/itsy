@@ -1,8 +1,8 @@
 use crate::prelude::*;
-use crate::frontend::{ast::{Statement, Position, Module}, parser::error::{ParseErrorKind}};
+use crate::frontend::{ast::{Statement, Position, Module}, parser::error::ParseErrorKind};
 use crate::shared::typed_ids::ScopeId;
 use std::rc::Rc;
-use std::cell::Cell;
+use std::cell::{RefCell, Cell};
 
 /// Parsed sourcecode of a single Itsy module.
 #[derive(Debug)]
@@ -64,19 +64,44 @@ impl ParsedProgram {
     }
 }
 
-/// Interal parser state, tracked via RC through the Input type.
+/// Parse flags, used to determine if some input is currently legal.
 #[derive(Clone, Copy, Debug)]
-pub(super)struct ParserState {
+pub(super) struct ParserFlags {
     pub in_function: bool,
     pub in_loop: bool,
 }
 
-impl ParserState {
+impl ParserFlags {
     fn new() -> Self {
-        ParserState {
+        ParserFlags {
             in_function: false,
             in_loop: false,
         }
+    }
+}
+
+/// Interal parser state, tracked via RC through the Input type.
+pub(super) struct ParserState { // cannot implement clone because cell requires inner to be copy to be able to be cloned
+    pub max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
+    pub flags: Cell<ParserFlags>,
+    pub scopes: RefCell<Vec<UnorderedSet<String>>>,
+}
+
+impl ParserState {
+    pub fn push_scope(self: &Self) {
+        self.scopes.borrow_mut().push(UnorderedSet::new());
+    }
+    pub fn pop_scope(self: &Self) {
+        self.scopes.borrow_mut().pop();
+    }
+    pub fn add_binding(self: &Self, name: String) {
+        self.scopes.borrow_mut().last_mut().unwrap().insert(name);
+    }
+    pub fn has_binding(self: &Self, name: &str) -> bool {
+        let scopes = self.scopes.borrow_mut();
+        let dbg=scopes.iter().rev().find(|s| s.contains(name)).is_some();
+        //println!("has_binding {name}: {dbg}");
+        return dbg;
     }
 }
 
@@ -84,17 +109,16 @@ impl ParserState {
 #[derive(Clone)]
 pub(super) struct Input<'a> {
     pub data: &'a str,
-    pub max_parsed: Rc<Cell<(Option<ParseErrorKind>, usize)>>,
-    pub state: Rc<Cell<ParserState>>,
+    pub state: Rc<ParserState>,
 }
 
 impl<'a> Debug for Input<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let max_parsed = self.max_parsed.clone().take();
+        let max_parsed = self.max_parsed();
         f.debug_struct("Input")
          .field("data", &self.data)
          .field("max_parsed", &max_parsed)
-         .field("state", &self.state)
+         .field("flags", &self.state.flags)
          .finish()
     }
 }
@@ -102,32 +126,40 @@ impl<'a> Debug for Input<'a> {
 impl<'a> Input<'a> {
     pub fn new(data: &'a str) -> Self {
         Input {
-            data        : data,
-            max_parsed  : Rc::new(Cell::new((None, 0))),
-            state       : Rc::new(Cell::new(ParserState::new())),
+            data: data,
+            state: Rc::new(ParserState {
+                max_parsed  : Cell::new((None, 0)),
+                flags       : Cell::new(ParserFlags::new()),
+                scopes      : RefCell::new(Vec::new()),
+            })
         }
     }
-    pub fn position(self: &Self) -> Position {
+    pub fn position(self: &Self) -> Position { // TODO store full length in state, subtract remaining data.len() from full length to get actual position
         Position(self.data.len())
     }
     pub fn max_parsed_mut(self: &Self, inner: impl Fn(&mut (Option<ParseErrorKind>, usize))) {
-        let mut max_parsed = self.max_parsed.take();
+        let mut max_parsed = self.state.max_parsed.take();
         inner(&mut max_parsed);
-        self.max_parsed.set(max_parsed);
+        self.state.max_parsed.set(max_parsed);
     }
-    pub fn state_mut(self: &Self, inner: impl Fn(&mut ParserState)) {
-        let mut state = self.state.get();
+    pub fn max_parsed(self: &Self) -> (Option<ParseErrorKind>, usize) {
+        let max_parsed = self.state.max_parsed.take();
+        let result = max_parsed.clone();
+        self.state.max_parsed.set(max_parsed);
+        result
+    }
+    pub fn flags_mut(self: &Self, inner: impl Fn(&mut ParserFlags)) {
+        let mut state = self.state.flags.get();
         inner(&mut state);
-        self.state.set(state);
+        self.state.flags.set(state);
     }
-    pub fn state(self: &Self) -> ParserState {
-        self.state.get()
+    pub fn flags(self: &Self) -> ParserFlags {
+        self.state.flags.get()
     }
     pub fn from_str(self: &Self, data: &'a str) -> Self {
         Input {
             data        : data,
-            max_parsed  : self.max_parsed.clone(),
-            state       : self.state.clone(),
+            state         : self.state.clone(),
         }
     }
 }

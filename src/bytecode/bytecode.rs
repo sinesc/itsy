@@ -2,10 +2,8 @@
 
 #[cfg(feature="compiler")]
 pub mod writer;
-#[macro_use]
-pub mod impl_opcodes;
-#[macro_use]
-pub mod impl_builtins;
+#[path="macros/macros.rs"]
+pub mod macros;
 pub mod opcodes;
 pub mod builtins;
 #[path="compiler/compiler.rs"]

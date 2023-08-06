@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{FrameAddress, StackAddress, ItemIndex};
-use crate::bytecode::{HeapRefOp, builtins::Builtin};
+use crate::bytecode::{HeapRefOp, builtins::Builtin, macros::impl_opcodes};
 #[cfg(feature="runtime")]
 use crate::{
     StackOffset, HeapAddress,

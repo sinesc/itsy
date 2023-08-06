@@ -1,7 +1,6 @@
 //! Nom parsers used to generate the Itsy AST.
 
 pub mod error;
-#[macro_use]
 mod nomutil;
 pub mod types;
 
@@ -14,20 +13,21 @@ use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
-use types::{Input, Output, Failure, ParserState, ParsedModule, ParsedProgram};
+use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram};
 use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
-fn check_state<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
+/// Runs the given parser. If the parser succeeds the given checker function is run. If it returns true, the parser result is returned, otherwise a failure.
+fn check_flags<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
 where
     P: nom::Parser<Input<'a>, O, Failure<'a>>,
-    C: Fn(ParserState) -> Option<ParseErrorKind>
+    C: Fn(ParserFlags) -> Option<ParseErrorKind>
 {
     move |input: Input<'_>| {
         let before = input.clone();
         let inner_result = parser.parse(input)?;
 
-        if let Some(kind) = checker(before.state()) {
+        if let Some(kind) = checker(before.flags()) {
             Err(nom::Err::Failure(Failure { input: before, kind: kind }))
         } else {
             Ok(inner_result)
@@ -35,22 +35,36 @@ where
     }
 }
 
-fn with_state<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserState), mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+/// Calls the given function with a mutable reference to parser flags, then runs the given parser. Restores previous parser flags afterwards.
+fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        let state = i.state();
-        i.state_mut(s);
-        let inner_result = parser.parse(input)?;
-        i.state_mut(|s| *s = state);
-        Ok(inner_result)
+        let state = i.flags();
+        i.flags_mut(s);
+        let inner_result = parser.parse(input);
+        i.flags_mut(|s| *s = state);
+        inner_result
     }
 }
 
-// identifier ([a-z_][a-z0-9_]*)
+/// Pushes a new scope to the scope stack before running the given parser. Pops scope afterwards.
+fn with_scope<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+    move |input: Input<'_>| {
+        use nom::Parser;
+        let i = input.clone();
+        i.state.push_scope();
+        let inner_result = parser.parse(input);
+        i.state.pop_scope();
+        inner_result
+    }
+}
+
+// identifier and paths
 
 fn label(i: Input<'_>) -> Output<&str> {
     map(
+        // ([a-z_][a-z0-9_]*)
         recognize(tuple((
             take_while1(|m| is_alphabetic(m as u8) || m == '_'),
             take_while(|m| is_alphanumeric(m as u8) || m == '_')
@@ -70,14 +84,389 @@ fn ident(i: Input<'_>) -> Output<Ident> {
     )(i)
 }
 
-// path (a::b)
+fn var_decl(i: Input<'_>) -> Output<Ident> {
+    let j = i.clone();
+    map(
+        ident,
+        move |id| {
+            j.state.add_binding(id.name.clone());
+            id
+        }
+    )(i)
+}
 
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
     map(separated_list1(ws(tag("::")), ident), move |name| Path { position, name })(i)
 }
 
-// literal numerical (-3.14f32)
+// module/use
+
+fn module(i: Input<'_>) -> Output<Module> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_flags(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
+            terminated(ident, char(';'))
+        ),
+        move |ident| Module {
+            position: position,
+            ident   : ident,
+        }
+    ))(i)
+}
+
+fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
+    ws(alt((
+        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
+            let mut flattened = Vec::new();
+            let parent = parts_to_path(&path.name);
+            for elements in list  {
+                for (ident, (path, _)) in elements {
+                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
+                }
+            }
+            flattened
+        }),
+        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
+            vec![(ident.name, (parts_to_path(&path.name), false))]
+        }),
+        map(path, |path| {
+            vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
+        }),
+    )))(i)
+}
+
+fn use_declaration(i: Input<'_>) -> Output<Use> {
+    let position = i.position();
+    ws(map(
+        delimited(
+            check_flags(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
+            use_item,
+            char(';')
+        ),
+        move |items| {
+            Use {
+                position,
+                mapping: items.into_iter().collect(),
+            }
+        }
+    ))(i)
+}
+
+// type definitions
+
+fn inline_type(i: Input<'_>) -> Output<InlineType> {
+    ws(alt((
+        map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
+        map(array, |a| InlineType::Array(Box::new(a)))
+    )))(i)
+}
+
+fn enum_def(i: Input<'_>) -> Output<EnumDef> {
+    fn variant(i: Input<'_>) -> Output<VariantDef> {
+        let position = i.position();
+        map(
+            pair(
+            ws(ident),
+            alt((
+                map(
+                    delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))),
+                    move |fields| VariantKind::Data(None, fields)
+                ),
+                map(
+                    opt(preceded(ws(char('=')), numerical)),
+                    move |variant_value| VariantKind::Simple(variant_value)
+                ),
+            ))),
+            move |(ident, kind)| VariantDef {
+                position,
+                ident,
+                kind,
+            }
+        )(i)
+    }
+    let position = i.position();
+    let the_cloned_clone = i.clone();
+    ws(map_result(
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
+            tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
+        ),
+        move |pair| {
+            let mut have_data = false;
+            let mut have_value = false;
+            for variant in &pair.1.2 {
+                match &variant.kind {
+                    VariantKind::Data(_, _) => have_data = true,
+                    VariantKind::Simple(d) if d.is_some() => have_value = true,
+                    _ => {}
+                }
+            }
+            if have_data && have_value {
+                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalVariantMix })
+            } else {
+                Ok(EnumDef {
+                    position: position,
+                    ident   : pair.1.0,
+                    variants: pair.1.2,
+                    type_id : None,
+                    scope_id: None,
+                    vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+                })
+            }
+        }
+    ))(i)
+}
+
+fn struct_def(i: Input<'_>) -> Output<StructDef> {
+    fn field(i: Input<'_>) -> Output<(String, InlineType)> {
+        map(
+            tuple((ws(label), ws(char(':')), ws(inline_type))),
+            |tuple| (tuple.0.to_string(), tuple.2)
+        )(i)
+    }
+    fn fields(i: Input<'_>) -> Output<Vec<(String, InlineType)>> {
+        map(
+            separated_list1(ws(char(',')), field),
+            |list| {
+                list.into_iter().map(|item| (item.0, item.1)).collect()
+            }
+        )(i)
+    }
+    let position = i.position();
+    ws(map(
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
+            tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
+        ),
+        move |pair| StructDef {
+            position: position,
+            ident   : pair.1.0,
+            fields  : pair.1.2,
+            type_id : None,
+            vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+        }
+    ))(i)
+}
+
+fn trait_def(i: Input<'_>) -> Output<TraitDef> {
+    let position = i.position();
+    ws(map(
+        pair(
+            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
+            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
+        ),
+        move |pair| TraitDef {
+            position,
+            functions   : pair.1.2,
+            scope_id    : None,
+            ident       : pair.1.0,
+            type_id     : None,
+            vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+        }
+    ))(i)
+}
+
+fn array(i: Input<'_>) -> Output<Array> {
+    let position = i.position();
+    ws(map(
+        delimited(ws(char('[')), inline_type, ws(char(']'))),
+        move |ty| Array {
+            position    : position,
+            element_type: ty,
+            type_id     : None,
+        }
+    ))(i)
+}
+
+// type implementations
+
+fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            pair(inline_type, delimited(ws(char('{')), many0(function), ws(char('}'))))
+        ),
+        move |tuple| ImplBlock {
+            position    : position,
+            functions   : tuple.1,
+            scope_id    : None,
+            ty          : tuple.0,
+            trt         : None,
+        }
+    ))(i)
+}
+
+fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
+    let position = i.position();
+    ws(map(
+        preceded(
+            check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            pair(
+                pair(terminated(path, sepl(tag("for"))), sepl(inline_type)),
+                delimited(ws(char('{')), many0(function), ws(char('}')))
+            )
+        ),
+        move |tuple| ImplBlock {
+            position    : position,
+            functions   : tuple.1,
+            scope_id    : None,
+            ty          : tuple.0.1,
+            trt         : Some(TypeName::from_path(tuple.0.0)),
+        }
+    ))(i)
+}
+
+// function/closure/return
+
+fn function(i: Input<'_>) -> Output<Function> {
+    fn function_signature(i: Input<'_>) -> Output<Signature> {
+        fn parameter(i: Input<'_>) -> Output<LetBinding> {
+            let position = i.position();
+            ws(map(
+                tuple((opt(sepr(tag("mut"))), var_decl, ws(char(':')), inline_type)),
+                move |tuple| LetBinding {
+                    position    : position,
+                    ident       : tuple.1,
+                    expr        : None,
+                    mutable     : tuple.0.is_some(),
+                    ty          : Some(tuple.3),
+                    binding_id  : None,
+                }
+            ))(i)
+        }
+        fn parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
+            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(parameter)), ws(char(')')))(i)
+        }
+        fn return_part(i: Input<'_>) -> Output<InlineType> {
+            preceded(ws(tag("->")), inline_type)(i)
+        }
+        ws(map(
+            pair(
+                terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
+                tuple((ident, ws(parameter_list), opt(ws(return_part))))
+            ),
+            |sig| Signature {
+                ident   : sig.1.0,
+                args    : sig.1.1,
+                ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
+                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
+            },
+        ))(i)
+    }
+    let position = i.position();
+    ws(map( // TODO: would be nice to move with_scope after the fn keyword, but that's in function signature and would need some refactoring
+        with_scope(tuple((function_signature, with_flags(&|state: &mut ParserFlags| state.in_function = true, alt((
+            map(block, |b| Some(b)),
+            map(ws(char(';')), |_| None)
+        )))))),
+        move |mut func| {
+            if let Some(block) = &mut func.1 {
+                // transform block result to return statement
+                if let Some(returns) = block.result.take() {
+                    block.statements.push(Statement::Return(Return {
+                        position: returns.position(),
+                        expr: returns,
+                    }));
+                }
+                // if the last block statement is still not a return statement, return void
+                if block.control_flow() != Some(ControlFlowType::Return) {
+                    block.statements.push(Statement::Return(Return {
+                        expr: Expression::void(position),// TODO: wrong position
+                        position: position,// TODO: wrong position
+                    }));
+                }
+            }
+            Function {
+                position    : position,
+                sig         : func.0,
+                block       : func.1,
+                function_id : None,
+                scope_id    : None,
+            }
+        }
+    ))(i.clone())
+}
+
+fn closure(i: Input<'_>) -> Output<Closure> {
+    fn signature(i: Input<'_>) -> Output<Signature> {
+        let position = i.position();
+        fn argument(i: Input<'_>) -> Output<LetBinding> {
+            let position = i.position();
+            ws(map(
+                tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
+                move |tuple| LetBinding {
+                    position    : position,
+                    ident       : tuple.1,
+                    expr        : None,
+                    mutable     : tuple.0.is_some(),
+                    ty          : Some(tuple.3),
+                    binding_id  : None,
+                }
+            ))(i)
+        }
+        ws(map(
+            preceded(
+                check_flags(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                pair(terminated(separated_list0(ws(char(',')), ws(argument)), char('|')), opt(preceded(ws(tag("->")), inline_type)))
+            ),
+            move |sig| Signature {
+                ident   : Ident { name: "closure".to_string(), position }, // TODO: better ident handling
+                args    : sig.0,
+                ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
+                vis     : Visibility::Private,
+            }
+        ))(i)
+    }
+    let position = i.position();
+    ws(map(
+        pair(signature, expression),
+        move |(sig, mut expr)| {
+            if let Expression::Block(block) = &mut expr {
+                // transform block result to return statement
+                if let Some(returns) = block.result.take() {
+                    block.statements.push(Statement::Return(Return {
+                        position: returns.position(),
+                        expr: returns,
+                    }));
+                }
+                // if the last block statement is still not a return statement, return void
+                if block.control_flow() != Some(ControlFlowType::Return) {
+                    block.statements.push(Statement::Return(Return {
+                        expr: Expression::void(position),// TODO: wrong position
+                        position: position,// TODO: wrong position
+                    }));
+                }
+            }
+            Closure {
+                position    : position,
+                sig         : sig,
+                expr        : expr,
+                function_id : None,
+                scope_id    : None,
+                type_id     : None,
+            }
+        }
+    ))(i.clone())
+}
+
+fn return_statement(i: Input<'_>) -> Output<Return> {
+    let position = i.position();
+    map(
+        preceded(
+            check_flags(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
+            terminated(opt(sepl(expression)), ws(char(';'))) // TODO: would error on return{ block }, sepl/r should probably allow but not consume operators/braces
+        ),
+        move |m| Return {
+            position    : position,
+            expr        : m.unwrap_or_else(|| Expression::void(position)),
+        }
+    )(i)
+}
+
+// literals/expression
 
 fn numerical(i: Input<'_>) -> Output<Literal> {
     use nom::Parser;
@@ -177,8 +566,6 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     Err(nom::Err::Failure(Failure { input: i, kind: ParseErrorKind::InvalidNumerical }))
 }
 
-// literal boolean (true, false)
-
 fn boolean(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(alt((tag("true"), tag("false"))), move |m: Input<'_>| {
@@ -190,8 +577,6 @@ fn boolean(i: Input<'_>) -> Output<Literal> {
         }
     })(i)
 }
-
-// literal string ("hello world")
 
 fn string(i: Input<'_>) -> Output<Expression> {
 
@@ -224,8 +609,8 @@ fn string(i: Input<'_>) -> Output<Expression> {
         let add = |left, right| Expression::BinaryOp(Box::new(BinaryOp {
             position,
             op: BinaryOperator::Add,
-            left,
-            right,
+            left: BinaryOperand::Expression(left),
+            right: BinaryOperand::Expression(right),
             type_id: None,
         }));
 
@@ -236,15 +621,16 @@ fn string(i: Input<'_>) -> Output<Expression> {
             type_id: None,
         });
 
-        let cast = |expr| Expression::Cast(Box::new(Cast {
+        let cast = |left| Expression::BinaryOp(Box::new(BinaryOp {
             position,
-            expr,
-            ty: TypeName::from_str("String", position),
+            op: BinaryOperator::Cast,
+            left: BinaryOperand::Expression(left),
+            right: BinaryOperand::TypeName(TypeName::from_str("String", position)),
             type_id: None,
         }));
 
         let mut current_string = "".to_string();
-        let mut ast = None;
+        let mut ast: Option<Expression> = None;
 
         // construct AST from fragments
         for fragment in fragments.drain(..) {
@@ -282,8 +668,6 @@ fn string(i: Input<'_>) -> Output<Expression> {
     })(i)
 }
 
-// literal array ([ 1, 2, 3 ])
-
 fn array_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(
@@ -298,8 +682,6 @@ fn array_literal(i: Input<'_>) -> Output<Literal> {
         }
     )(i)
 }
-
-// literal struct (MyStruct { a: 1 })
 
 fn struct_literal(i: Input<'_>) -> Output<Literal> {
     fn field(i: Input<'_>) -> Output<(String, Expression)> {
@@ -330,226 +712,46 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
     )(i)
 }
 
-// literal simple enum variant (MyEnum::MyVariant)
-
-fn variant_literal(i: Input<'_>) -> Output<Literal> {
-    let position = i.position();
-    map(
-        tuple((ident, ws(tag("::")), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
-        move |(ident, _, mut path)| {
-            path.unshift(ident); // prepend path with ident
-            Literal {
-                position    : position,
-                value       : LiteralValue::Variant(VariantLiteral { ident: path.pop(), path: path }),
-                type_name   : None, //Some(TypeName::from_path(m)),
-                type_id     : None,
-            }
-        }
-    )(i)
-}
-
-// literal
-
 fn literal(i: Input<'_>) -> Output<Expression> {
     ws(alt((
         map(boolean, |l| Expression::Literal(l)),
         string,
-        map(array_literal, |l| Expression::Literal(l)), // TODO: can contain expressions
+        map(array_literal, |l| Expression::Literal(l)),
         map(struct_literal, |l| Expression::Literal(l)),
         map(numerical, |l| Expression::Literal(l)),
     )))(i)
 }
 
-// assignment
-
-fn assignable(i: Input<'_>) -> Output<Expression> {
-    let var_position = i.position();
-    let init = map(ident, |m| Expression::Value(Value::Unknown { position: var_position as Position, ident: m }))(i)?;
-    let op_position = init.0.position();
-    fold_many0_mut(
-        alt((
-            map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, e)),
-            map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, Expression::Member(Member { position: op_position as Position, ident: i, type_id: None })))
-        )),
-        init.1,
-        |mut acc, (op, val)| {
-            // update left part of the expression to ensure only the final index/access is a write operation. // TODO: find less clunky solution
-            match &mut acc {
-                Expression::BinaryOp(exp) => {
-                    if exp.op == BinaryOperator::AccessWrite {
-                        exp.op = BinaryOperator::Access;
-                    } else if exp.op == BinaryOperator::IndexWrite {
-                        exp.op = BinaryOperator::Index;
-                    }
-                }
-                _ => {}
-            }
-            Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: acc, right: val, type_id: None }))
-        }
-    )(init.0)
-}
-
-fn assignment(i: Input<'_>) -> Output<Assignment> {
-    fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
-        ws(map(
-            alt((tag("="), tag("+="), tag("-="), tag("*="), tag("/="), tag("%="))),
-            |o: Input<'_>| {
-                BinaryOperator::from_string(*o)
-            }
-        ))(i)
-    }
-    let position = i.position();
-    ws(map(
-        tuple((assignable, assignment_operator, expression)),
-        move |m| {
-            Assignment {
-                position: position,
-                op      : m.1,
-                left    : m.0,
-                right   : m.2,
-                type_id : None,
-            }
-        }
-    ))(i)
-}
-
-// call
-
-fn call_argument_list(i: Input<'_>) -> Output<Vec<Expression>> {
-    delimited(ws(char('(')), separated_list0(ws(char(',')), expression), ws(char(')')))(i)
-}
-
-fn call_ident(i: Input<'_>) -> Output<Call> {
-    let position = i.position();
-    map(
-        tuple((ident, space0, call_argument_list)),
-        move |m| Call {
-            position    : position,
-            ident       : m.0,
-            args        : m.2,
-            call_syntax : CallSyntax::Ident,
-            target      : CallTargetType::Unresolved,
-            type_id     : None,
-        }
-    )(i)
-}
-
-fn call_path(i: Input<'_>) -> Output<Call> {
-    let position = i.position();
-    map(
-        tuple((path, space0, call_argument_list)),
-        move |mut m| Call {
-            position    : position,
-            ident       : m.0.pop(),
-            args        : m.2,
-            call_syntax : CallSyntax::Path(m.0),
-            target      : CallTargetType::Unresolved,
-            type_id     : None,
-        }
-    )(i)
-}
-
-// block
-
-fn block(i: Input<'_>) -> Output<Block> {
-    let position = i.position();
-    ws(map(
-        delimited(
-            ws(char('{')),
-            pair(many0(statement), opt(expression)),
-            ws(char('}'))
-        ),
-        move |m| Block::new(position, m.0, m.1)
-    ))(i)
-}
-
-// if
-
-fn if_block(i: Input<'_>) -> Output<IfBlock> {
-    fn else_block(i: Input<'_>) -> Output<Block> {
+fn expression(i: Input<'_>) -> Output<Expression> {
+    fn argument_list(i: Input<'_>) -> Output<ArgumentList> {
         let position = i.position();
-        ws(preceded(
-            tag("else"),
-            alt((
-                sepl(map(if_block, move |m| Block::new(position, Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
-                block
-            ))
-        ))(i)
-    }
-    let position = i.position();
-    ws(preceded(
-        // TODO: sepr(tag("if")) causes if(true to be a syntax error. sepr is required to prevent parsing if_ident as if
-        check_state(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
-            tuple((expression, block, opt(else_block))),
-            move |m| IfBlock {
-                    position    : position,
-                    cond        : m.0,
-                    if_block    : m.1,
-                    else_block  : m.2,
-                    scope_id    : None,
-                }
-            )
-    ))(i)
-}
-
-// match
-
-fn match_block(i: Input<'_>) -> Output<MatchBlock> {
-    fn match_pattern(i: Input<'_>) -> Output<Pattern> {
-        //let position = i.position();
-        ws(
-            //alt((
-            map(variant_literal, |v| Pattern::SimpleVariant(v)),
-            //))
+            delimited(ws(char('(')), separated_list0(ws(char(',')), expression), ws(char(')'))),
+            move |args| ArgumentList {
+                position,
+                args,
+            }
         )(i)
     }
-    fn match_case(i: Input<'_>) -> Output<Block> {
-        let position = i.position();
-        ws(alt((
-            block,
-            map(expression, move |e| Block::new(position, Vec::new(), Some(e))),
-        )))(i)
-    }
-    fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
-        ws(separated_list1(
-            char(','),
-            pair(match_pattern, preceded(tag("=>"), match_case))
-        ))(i)
-    }
-    let position = i.position();
-    ws(preceded(
-        check_state(sepr(tag("match")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
-        map(
-            pair(expression, delimited(char('{'), match_list, preceded(opt(char(',')), ws(char('}'))))),
-            move |m| MatchBlock {
-                    position    : position,
-                    expr        : m.0,
-                    branches    : m.1,
-                    scope_id    : None,
-                }
-            )
-    ))(i)
-}
-
-// expression
-
-fn expression(i: Input<'_>) -> Output<Expression> {
     fn parens(i: Input<'_>) -> Output<Expression> {
         ws(delimited(char('('), expression, char(')')))(i)
     }
     fn operand(i: Input<'_>) -> Output<Expression> {
-        let position = i.position();
+        let j = i.clone();
         ws(alt((
             literal,
             map(if_block, |m| Expression::IfBlock(Box::new(m))),
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
             parens,
-            map(call_ident, |m| Expression::Call(m)),
-            map(call_path, |m| Expression::Call(m)),
-            map(variant_literal, |m| Expression::Literal(m)),
-            map(ident, move |m| Expression::Value(Value::Unknown { position: position, ident: m })),
+            map(path, move |mut m| {
+                // single element paths may be variables if their names exist in the current scope
+                if m.name.len() == 1 && j.state.has_binding(&m.name[0].name) {
+                    Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None })
+                } else {
+                    Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
+                }
+            }),
             map(closure, move |m| Expression::Closure(Box::new(m))),
         )))(i)
     }
@@ -558,20 +760,12 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         fold_many0_mut(
             alt((
-                map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, e)),
-                map(preceded(ws(tag(".")), ws(call_ident)), |i| (BinaryOperator::Access, Expression::Call(i))),
-                map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, Expression::Member(Member { position: position, ident: i, type_id: None })))
+                map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, BinaryOperand::Expression(e))),
+                map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, BinaryOperand::Member(Member { position: position, ident: i, type_id: None, constant_id: None }))),
+                map(argument_list, |l| (BinaryOperator::Call, BinaryOperand::ArgumentList(l))),
             )),
             init.1,
-            move |acc, (op, mut val)| match &mut val {
-                Expression::Call(call) if op == BinaryOperator::Access => {
-                    // prepend object argument
-                    call.args.insert(0, acc);
-                    call.call_syntax = CallSyntax::Method;
-                    val
-                },
-                _ => Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
-            }
+            move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
         )(init.0)
     }
     fn unary(i: Input<'_>) -> Output<Expression> {
@@ -626,10 +820,11 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             ),
             move |(expr, path)| {
                 if let Some(path) = path {
-                    Expression::Cast(Box::new(Cast {
+                    Expression::BinaryOp(Box::new(BinaryOp {
                         position: position,
-                        expr    : expr,
-                        ty      : TypeName::from_path(path),
+                        op      : BinaryOperator::Cast,
+                        left    : BinaryOperand::Expression(expr),
+                        right   : BinaryOperand::TypeName(TypeName::from_path(path)),
                         type_id : None,
                     }))
                 } else {
@@ -644,7 +839,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((tag("*"), tag("/"), tag("%"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec6),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     fn prec4(i: Input<'_>) -> Output<Expression> {
@@ -653,7 +848,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((tag("+"), tag("-"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec5),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     fn prec3(i: Input<'_>) -> Output<Expression> {
@@ -662,7 +857,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec4),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     fn prec2(i: Input<'_>) -> Output<Expression> {
@@ -671,7 +866,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((tag("!="), tag("=="))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec3),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     fn prec1(i: Input<'_>) -> Output<Expression> {
@@ -680,7 +875,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(tag("&&"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec2),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     fn prec0(i: Input<'_>) -> Output<Expression> {
@@ -689,7 +884,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         fold_many0_mut(
             pair(map(tag("||"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec1),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: acc, right: val, type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
     ws(alt((
@@ -698,70 +893,65 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     )))(i)
 }
 
-// module
+// let/assignment
 
-fn module(i: Input<'_>) -> Output<Module> {
-    let position = i.position();
-    ws(map(
-        preceded(
-            check_state(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
-            terminated(ident, char(';'))
-        ),
-        move |ident| Module {
-            position: position,
-            ident   : ident,
-        }
-    ))(i)
-}
-
-// use (TODO: capture paths as AST so that we can report exact error positions)
-
-fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
-    ws(alt((
-        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
-            let mut flattened = Vec::new();
-            let parent = parts_to_path(&path.name);
-            for elements in list  {
-                for (ident, (path, _)) in elements {
-                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
+fn assignment(i: Input<'_>) -> Output<Assignment> {
+    fn assignable(i: Input<'_>) -> Output<Expression> {
+        let var_position = i.position();
+        let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
+        let op_position = init.0.position();
+        fold_many0_mut(
+            alt((
+                map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
+                map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position as Position, ident: i, type_id: None, constant_id: None })))
+            )),
+            init.1,
+            |mut acc, (op, val)| {
+                // update left part of the expression to ensure only the final index/access is a write operation. // TODO: find less clunky solution
+                match &mut acc {
+                    Expression::BinaryOp(exp) => {
+                        if exp.op == BinaryOperator::AccessWrite {
+                            exp.op = BinaryOperator::Access;
+                        } else if exp.op == BinaryOperator::IndexWrite {
+                            exp.op = BinaryOperator::Index;
+                        }
+                    }
+                    _ => {}
                 }
+                Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
             }
-            flattened
-        }),
-        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
-            vec![(ident.name, (parts_to_path(&path.name), false))]
-        }),
-        map(path, |path| {
-            vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
-        }),
-    )))(i)
-}
-
-fn use_declaration(i: Input<'_>) -> Output<Use> {
+        )(init.0)
+    }
+    fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
+        ws(map(
+            alt((tag("="), tag("+="), tag("-="), tag("*="), tag("/="), tag("%="))),
+            |o: Input<'_>| {
+                BinaryOperator::from_string(*o)
+            }
+        ))(i)
+    }
     let position = i.position();
     ws(map(
-        delimited(
-            check_state(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
-            use_item,
-            char(';')
-        ),
-        move |items| {
-            Use {
-                position,
-                mapping: items.into_iter().collect(),
+        tuple((assignable, assignment_operator, expression)),
+        move |m| {
+            Assignment {
+                position: position,
+                op      : m.1,
+                left    : m.0,
+                right   : m.2,
+                type_id : None,
             }
         }
     ))(i)
 }
 
-// let
-
-fn binding(i: Input<'_>) -> Output<LetBinding> {
+fn let_binding(i: Input<'_>) -> Output<LetBinding> {
     let position = i.position();
+    let j = i.clone();
     ws(map(
         preceded(
-            check_state(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
-            tuple((opt(sepr(tag("mut"))), ident, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
+            check_flags(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((opt(sepr(tag("mut"))), var_decl, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
         ),
         move |m| LetBinding {
             position    : position,
@@ -774,318 +964,101 @@ fn binding(i: Input<'_>) -> Output<LetBinding> {
     ))(i)
 }
 
-// inline type
+// blocks
 
-fn inline_type(i: Input<'_>) -> Output<InlineType> {
-    ws(alt((
-        map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(array, |a| InlineType::Array(Box::new(a)))
-    )))(i)
+fn block(i: Input<'_>) -> Output<Block> {
+    let position = i.position();
+    ws(map(
+        delimited(
+            ws(char('{')),
+            with_scope(pair(many0(statement), opt(expression))),
+            ws(char('}'))
+        ),
+        move |m| Block::new(position, m.0, m.1)
+    ))(i)
 }
 
-// enum definition
-
-fn enum_def(i: Input<'_>) -> Output<EnumDef> {
-    fn variant(i: Input<'_>) -> Output<VariantDef> {
+fn if_block(i: Input<'_>) -> Output<IfBlock> {
+    fn else_block(i: Input<'_>) -> Output<Block> {
         let position = i.position();
-        map(
-            pair(
-            ws(ident),
+        ws(preceded(
+            tag("else"),
             alt((
-                map(
-                    delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))),
-                    move |fields| VariantKind::Data(None, fields)
-                ),
-                map(
-                    opt(preceded(ws(char('=')), numerical)),
-                    move |variant_value| VariantKind::Simple(variant_value)
-                ),
-            ))),
-            move |(ident, kind)| VariantDef {
-                position,
-                ident,
-                kind,
-            }
-        )(i)
+                sepl(map(if_block, move |m| Block::new(position, Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
+                block
+            ))
+        ))(i)
     }
     let position = i.position();
-    let the_cloned_clone = i.clone();
-    ws(map_result(
-        pair(
-            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
-            tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
-        ),
-        move |pair| {
-            let mut have_data = false;
-            let mut have_value = false;
-            for variant in &pair.1.2 {
-                match &variant.kind {
-                    VariantKind::Data(_, _) => have_data = true,
-                    VariantKind::Simple(d) if d.is_some() => have_value = true,
-                    _ => {}
+    ws(preceded(
+        // TODO: sepr(tag("if")) causes if(true to be a syntax error. sepr is required to prevent parsing if_ident as if
+        check_flags(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        map(
+            tuple((expression, block, opt(else_block))),
+            move |m| IfBlock {
+                    position    : position,
+                    cond        : m.0,
+                    if_block    : m.1,
+                    else_block  : m.2,
+                    scope_id    : None,
                 }
-            }
-            if have_data && have_value {
-                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalVariantMix })
-            } else {
-                Ok(EnumDef {
-                    position: position,
-                    ident   : pair.1.0,
-                    variants: pair.1.2,
-                    type_id : None,
-                    scope_id: None,
-                    vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
-                })
-            }
-        }
-    ))(i)
-}
-
-
-// struct definition
-
-fn struct_def(i: Input<'_>) -> Output<StructDef> {
-    fn field(i: Input<'_>) -> Output<(String, InlineType)> {
-        map(
-            tuple((ws(label), ws(char(':')), ws(inline_type))),
-            |tuple| (tuple.0.to_string(), tuple.2)
-        )(i)
-    }
-    fn fields(i: Input<'_>) -> Output<Vec<(String, InlineType)>> {
-        map(
-            separated_list1(ws(char(',')), field),
-            |list| {
-                list.into_iter().map(|item| (item.0, item.1)).collect()
-            }
-        )(i)
-    }
-    let position = i.position();
-    ws(map(
-        pair(
-            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
-            tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
-        ),
-        move |pair| StructDef {
-            position: position,
-            ident   : pair.1.0,
-            fields  : pair.1.2,
-            type_id : None,
-            vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
-        }
-    ))(i)
-}
-
-// impl block
-
-fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
-    let position = i.position();
-    ws(map(
-        preceded(
-            check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            pair(inline_type, delimited(ws(char('{')), many0(function), ws(char('}'))))
-        ),
-        move |tuple| ImplBlock {
-            position    : position,
-            functions   : tuple.1,
-            scope_id    : None,
-            ty          : tuple.0,
-            trt         : None,
-        }
-    ))(i)
-}
-
-// trait definition
-
-fn trait_def(i: Input<'_>) -> Output<TraitDef> {
-    let position = i.position();
-    ws(map(
-        pair(
-            terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
-            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
-        ),
-        move |pair| TraitDef {
-            position,
-            functions   : pair.1.2,
-            scope_id    : None,
-            ident       : pair.1.0,
-            type_id     : None,
-            vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
-        }
-    ))(i)
-}
-
-// trait implementation
-
-fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
-    let position = i.position();
-    ws(map(
-        preceded(
-            check_state(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            pair(
-                pair(terminated(path, sepl(tag("for"))), sepl(inline_type)),
-                delimited(ws(char('{')), many0(function), ws(char('}')))
             )
-        ),
-        move |tuple| ImplBlock {
-            position    : position,
-            functions   : tuple.1,
-            scope_id    : None,
-            ty          : tuple.0.1,
-            trt         : Some(TypeName::from_path(tuple.0.0)),
-        }
     ))(i)
 }
 
-// array definition
-
-fn array(i: Input<'_>) -> Output<Array> {
-    let position = i.position();
-    ws(map(
-        delimited(ws(char('[')), inline_type, ws(char(']'))),
-        move |ty| Array {
-            position    : position,
-            element_type: ty,
-            type_id     : None,
-        }
-    ))(i)
-}
-
-// function definition
-
-fn function(i: Input<'_>) -> Output<Function> {
-    fn function_signature(i: Input<'_>) -> Output<Signature> {
-        fn argument(i: Input<'_>) -> Output<LetBinding> {
-            let position = i.position();
-            ws(map(
-                tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-                move |tuple| LetBinding {
-                    position    : position,
-                    ident       : tuple.1,
-                    expr        : None,
-                    mutable     : tuple.0.is_some(),
-                    ty          : Some(tuple.3),
-                    binding_id  : None,
-                }
-            ))(i)
-        }
-        fn argument_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
-            delimited(ws(char('(')), separated_list0(ws(char(',')), ws(argument)), ws(char(')')))(i)
-        }
-        fn return_part(i: Input<'_>) -> Output<InlineType> {
-            preceded(ws(tag("->")), inline_type)(i)
-        }
-        ws(map(
-            pair(
-                terminated(opt(sepr(tag("pub"))), check_state(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
-                tuple((ident, ws(argument_list), opt(ws(return_part))))
-            ),
-            |sig| Signature {
-                ident   : sig.1.0,
-                args    : sig.1.1,
-                ret     : if let Some(sig_ty) = sig.1.2 { Some(sig_ty) } else { None },
-                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
-            },
-        ))(i)
-    }
-    let position = i.position();
-    ws(map(
-        tuple((function_signature, with_state(&|state: &mut ParserState| state.in_function = true, alt((
-            map(block, |b| Some(b)),
-            map(ws(char(';')), |_| None)
-        ))))),
-        move |mut func| {
-            if let Some(block) = &mut func.1 {
-                // transform block result to return statement
-                if let Some(returns) = block.result.take() {
-                    block.statements.push(Statement::Return(Return {
-                        position: returns.position(),
-                        expr: returns,
-                    }));
-                }
-                // if the last block statement is still not a return statement, return void
-                if block.control_flow() != Some(ControlFlowType::Return) {
-                    block.statements.push(Statement::Return(Return {
-                        expr: Expression::void(position),// TODO: wrong position
-                        position: position,// TODO: wrong position
-                    }));
-                }
-            }
-            Function {
-                position    : position,
-                sig         : func.0,
-                block       : func.1,
-                function_id : None,
-                scope_id    : None,
-            }
-        }
-    ))(i.clone())
-}
-
-// closure
-
-fn closure(i: Input<'_>) -> Output<Closure> {
-    fn signature(i: Input<'_>) -> Output<Signature> {
+fn match_block(i: Input<'_>) -> Output<MatchBlock> {
+    /*fn variant_literal(i: Input<'_>) -> Output<Literal> {
         let position = i.position();
-        fn argument(i: Input<'_>) -> Output<LetBinding> {
-            let position = i.position();
-            ws(map(
-                tuple((opt(sepr(tag("mut"))), ident, ws(char(':')), inline_type)),
-                move |tuple| LetBinding {
+        map(
+            tuple((ident, ws(tag("::")), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
+            move |(ident, _, mut path)| {
+                path.unshift(ident); // prepend path with ident
+                Literal {
                     position    : position,
-                    ident       : tuple.1,
-                    expr        : None,
-                    mutable     : tuple.0.is_some(),
-                    ty          : Some(tuple.3),
-                    binding_id  : None,
+                    value       : LiteralValue::Variant(VariantLiteral { ident: path.pop(), path: path }),
+                    type_name   : None, //Some(TypeName::from_path(m)),
+                    type_id     : None,
                 }
-            ))(i)
-        }
-        ws(map(
-            preceded(
-                check_state(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(terminated(separated_list0(ws(char(',')), ws(argument)), char('|')), opt(preceded(ws(tag("->")), inline_type)))
-            ),
-            move |sig| Signature {
-                ident   : Ident { name: "closure".to_string(), position }, // TODO: better ident handling
-                args    : sig.0,
-                ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
-                vis     : Visibility::Private,
             }
+        )(i)
+    }*/
+    fn match_pattern(i: Input<'_>) -> Output<Pattern> {
+        //let position = i.position();
+        ws(
+            //alt((
+            map(path, |v| Pattern::SimpleVariant(v)),
+            //))
+        )(i)
+    }
+    fn match_case(i: Input<'_>) -> Output<Block> {
+        let position = i.position();
+        ws(alt((
+            block,
+            map(expression, move |e| Block::new(position, Vec::new(), Some(e))),
+        )))(i)
+    }
+    fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
+        ws(separated_list1(
+            char(','),
+            pair(match_pattern, preceded(tag("=>"), match_case))
         ))(i)
     }
     let position = i.position();
-    ws(map(
-        pair(signature, expression),
-        move |(sig, mut expr)| {
-            if let Expression::Block(block) = &mut expr {
-                // transform block result to return statement
-                if let Some(returns) = block.result.take() {
-                    block.statements.push(Statement::Return(Return {
-                        position: returns.position(),
-                        expr: returns,
-                    }));
+    ws(preceded(
+        check_flags(sepr(tag("match")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        map(
+            pair(expression, delimited(char('{'), match_list, preceded(opt(char(',')), ws(char('}'))))),
+            move |m| MatchBlock {
+                    position    : position,
+                    expr        : m.0,
+                    branches    : m.1,
+                    scope_id    : None,
                 }
-                // if the last block statement is still not a return statement, return void
-                if block.control_flow() != Some(ControlFlowType::Return) {
-                    block.statements.push(Statement::Return(Return {
-                        expr: Expression::void(position),// TODO: wrong position
-                        position: position,// TODO: wrong position
-                    }));
-                }
-            }
-            Closure {
-                position    : position,
-                sig         : sig,
-                expr        : expr,
-                function_id : None,
-                scope_id    : None,
-                type_id     : None,
-            }
-        }
-    ))(i.clone())
+            )
+    ))(i)
 }
 
-// for
+// loops/loop control
 
 fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     fn loop_range(i: Input<'_>) -> Output<Expression> {
@@ -1095,8 +1068,8 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
             move |m| Expression::BinaryOp(Box::new(BinaryOp {
                 position    : position,
                 op          : BinaryOperator::from_string(*m.1),
-                left        : m.0,
-                right       : m.2,
+                left        : BinaryOperand::Expression(m.0),
+                right       : BinaryOperand::Expression(m.2),
                 type_id     : None
             }))
         )(i)
@@ -1104,8 +1077,8 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     let position = i.position();
     ws(map(
         preceded(
-            check_state(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((sepl(ident), sepl(tag("in")), sepl(alt((loop_range, expression))), with_state(&|state: &mut ParserState| state.in_loop = true, block)))
+            check_flags(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
+            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|state: &mut ParserFlags| state.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
@@ -1124,14 +1097,12 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     ))(i)
 }
 
-// while loop
-
 fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let position = i.position();
     ws(map(
         preceded(
-            check_state(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
-            pair(sepl(expression), with_state(&|state: &mut ParserState| state.in_loop = true, block))
+            check_flags(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
+            pair(sepl(expression), with_flags(&|state: &mut ParserFlags| state.in_loop = true, block))
         ),
         move |m| WhileLoop {
             position: position,
@@ -1142,29 +1113,11 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     ))(i)
 }
 
-// return
-
-fn return_statement(i: Input<'_>) -> Output<Return> {
-    let position = i.position();
-    map(
-        preceded(
-            check_state(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
-            terminated(opt(sepl(expression)), ws(char(';')))
-        ),
-        move |m| Return {
-            position    : position,
-            expr        : m.unwrap_or_else(|| Expression::void(position)),
-        }
-    )(i)
-}
-
-// loop control (break/continue)
-
 fn break_statement(i: Input<'_>) -> Output<Break> {
     let position = i.position();
     map(
         preceded(
-            check_state(tag("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
+            check_flags(tag("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
             ws(char(';'))
         ),
         move |_| Break { position }
@@ -1175,7 +1128,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
     let position = i.position();
     map(
         preceded(
-            check_state(tag("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
+            check_flags(tag("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
             ws(char(';'))
         ),
         move |_| Continue { position }
@@ -1187,7 +1140,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 fn statement(i: Input<'_>) -> Output<Statement> {
     ws(alt((
         root_items,
-        map(binding,|m| Statement::LetBinding(m)),
+        map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
         map(while_loop, |m| Statement::WhileLoop(m)),
@@ -1214,14 +1167,10 @@ fn root_items(i: Input<'_>) -> Output<Statement> {
     )))(i)
 }
 
-fn root(i: Input<'_>) -> Output<Vec<Statement>> {
-    all_consuming(ws(many0(root_items)))(i)
-}
-
 /// Parses Itsy source code into a program AST structure.
 pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
     let input = Input::new(src);
-    let result = root(input.clone());
+    let result = all_consuming(ws(many0(root_items)))(input.clone());
     match result {
         Ok(result) => {
             Ok(ParsedModule::new(module_path, result.1))
@@ -1235,7 +1184,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
                 }
                 nom::Err::Error(_) => {
                     // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
-                    let error = input.max_parsed.take();
+                    let error = input.state.max_parsed.take();
                     Err(ParseError::new(ParseErrorKind::SyntaxError, Position(error.1), module_path))
                 }
             }

@@ -111,6 +111,10 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         }
     }
     fn unwrap_or_ice(self: Self, message: &str) -> ResolveResult<T> {
+        #[cfg(feature="ice_panics")]
+        if self.is_none() {
+            panic!("Internal compiler error: {}", message);
+        }
         self.unwrap_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
     fn some_or_err(self: Self, item: Option<&dyn Positioned>, kind: ResolveErrorKind, module_path: &str) -> ResolveResult<Option<T>> {
@@ -125,12 +129,19 @@ impl<T> SomeOrResolveError<T> for Option<T> {
         }
     }
     fn some_or_ice(self: Self, message: &str) -> ResolveResult<Option<T>> {
+        #[cfg(feature="ice_panics")]
+        if self.is_none() {
+            panic!("Internal compiler error: {}", message);
+        }
         self.some_or_err(None, ResolveErrorKind::Internal(message.to_string()), "")
     }
 }
 
 /// Returns an internal compiler error with positional information.
 pub(crate) fn ice<T>(message: &str) -> ResolveResult<T> {
+    #[cfg(feature="ice_panics")]
+    panic!("Internal compiler error: {}", message);
+    #[cfg(not(feature="ice_panics"))]
     Err(ResolveError {
         kind: ResolveErrorKind::Internal(message.to_string()),
         position: Position(0),
