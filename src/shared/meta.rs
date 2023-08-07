@@ -254,6 +254,8 @@ impl Display for Type {
 impl_as_getter!(Type {
     /// Returns the type as a callable.
     pub as_callable: Callable -> &Callable,
+    /// Returns the type as a mutable callable.
+    pub as_callable_mut: Callable -> mut Callable,
     /// Returns the type as an array.
     pub as_array: Array -> &Array,
     /// Returns the type as a mutable array.

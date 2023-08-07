@@ -428,6 +428,25 @@ impl Resolvable for Function {
     }
 }
 
+/// The type signature of a function/closure reference.
+#[derive(Debug)]
+pub struct FunctionReference {
+    pub position: Position,
+    pub args    : Vec<InlineType>,
+    pub ret     : Option<InlineType>,
+    pub type_id : Option<TypeId>,
+}
+
+impl_positioned!(FunctionReference);
+impl_typeable!(FunctionReference);
+
+impl Resolvable for FunctionReference {
+    fn num_resolved(self: &Self) -> Progress {
+        self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
+        + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
+    }
+}
+
 /// The type signatures of function parameters and returns.
 #[derive(Debug)]
 pub struct Signature {
@@ -510,6 +529,7 @@ impl Positioned for TypeName {
 pub enum InlineType {
     TypeName(TypeName),
     Array(Box<ArrayDef>),
+    FunctionReference(Box<FunctionReference>),
 }
 
 impl Typeable for InlineType {
@@ -517,12 +537,14 @@ impl Typeable for InlineType {
         match &self {
             InlineType::Array(array) => array.type_id(bindings),
             InlineType::TypeName(type_name) => type_name.type_id(bindings),
+            InlineType::FunctionReference(f) => f.type_id(bindings),
         }
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         match self {
             InlineType::Array(array) => array.type_id_mut(bindings),
             InlineType::TypeName(type_name) => type_name.type_id_mut(bindings),
+            InlineType::FunctionReference(f) => f.type_id_mut(bindings),
         }
     }
 }
@@ -532,6 +554,7 @@ impl Resolvable for InlineType {
         match self {
             Self::TypeName(typename) => typename.num_resolved(),
             Self::Array(array) => array.num_resolved(),
+            Self::FunctionReference(f) => f.num_resolved(),
         }
     }
 }

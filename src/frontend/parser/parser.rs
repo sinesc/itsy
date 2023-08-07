@@ -158,9 +158,29 @@ fn use_declaration(i: Input<'_>) -> Output<Use> {
 
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ws(alt((
+        map(function_reference, |f| InlineType::FunctionReference(Box::new(f))),
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(array_def, |a| InlineType::Array(Box::new(a)))
+        map(array_def, |a| InlineType::Array(Box::new(a))),
     )))(i)
+}
+
+fn function_reference(i: Input<'_>) -> Output<FunctionReference> {
+    fn parameter_list(i: Input<'_>) -> Output<Vec<InlineType>> {
+        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), ws(char(')')))(i)
+    }
+    fn return_part(i: Input<'_>) -> Output<InlineType> {
+        preceded(ws(tag("->")), inline_type)(i)
+    }
+    let position = i.position();
+    ws(map(
+        tuple((tag("fn"), ws(parameter_list), opt(ws(return_part)))),
+        move |sig| FunctionReference {
+            position,
+            args    : sig.1,
+            ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
+            type_id : None,
+        },
+    ))(i)
 }
 
 fn enum_def(i: Input<'_>) -> Output<EnumDef> {

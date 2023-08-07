@@ -13,7 +13,7 @@ use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, Callable};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
@@ -432,10 +432,43 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     // Resolves an inline type definition.
     fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType) -> ResolveResult<Option<TypeId>> {
+        use ast::InlineType::*;
         match item {
-            ast::InlineType::TypeName(type_name) => self.resolve_type_name(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
-            ast::InlineType::Array(array) => self.resolve_array_def(array),
+            TypeName(type_name) => self.resolve_type_name(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
+            Array(array) => self.resolve_array_def(array),
+            FunctionReference(f) => self.resolve_function_reference(f),
         }
+    }
+
+    /// Resolves a struct definition.
+    fn resolve_function_reference(self: &mut Self, item: &mut ast::FunctionReference) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_none() {
+            let ty = Type::Callable(Callable {
+                arg_type_ids: item.args.iter().map(|a| None).collect(),
+                ret_type_id: None,
+            });
+            let new_type_id = self.scopes.insert_type(None, ty);
+            item.type_id = Some(new_type_id);
+        }
+        // resolve args and result
+        if let Some(ret) = &mut item.ret {
+            self.resolve_inline_type(ret)?;
+        }
+        for field in &mut item.args {
+            self.resolve_inline_type(field)?;
+        }
+        // assemble type list
+        let ret_type_id = item.ret.as_ref().map(|r| r.type_id(self));
+        let arg_type_ids: Vec<_> = item.args.iter()
+            .map(|field| field.type_id(self))
+            .collect();
+
+        let callable = self.type_by_id_mut(item.type_id.ice()?).as_callable_mut().ice()?;
+        callable.arg_type_ids = arg_type_ids;
+        callable.ret_type_id = ret_type_id.map(|r| match r { Some(r) => r, None => TypeId::VOID });
+
+        self.resolved_or_err(item, None)?;
+        Ok(item.type_id)
     }
 
     /// Resolves a type (name) to a type_id.
