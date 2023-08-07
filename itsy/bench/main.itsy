@@ -186,26 +186,17 @@ fn main() {
 
     let num_passes = 5;
     let passes: [ [ Test ] ] = [ ];
+    let benches = [ bench_mandelbrot, bench_fib_r, bench_stringcat, bench_upload_struct, bench_upload_array, bench_string_return, bench_heap_reuse ];
     println("Ballpark Bench™ - Measuring in approximate baseball fields");
     print("running {num_passes} passes, pass ");
 
     for pass in 0..num_passes {
         print((pass + 1) as String + "...");
         let pass_results: [ Test ] = [ ];
-        bench_mandelbrot(pass_results); // todo: need closures here
-        heap_purge();
-        bench_fib_r(pass_results);
-        heap_purge();
-        bench_stringcat(pass_results);
-        heap_purge();
-        bench_upload_struct(pass_results);
-        heap_purge();
-        bench_upload_array(pass_results);
-        heap_purge();
-        bench_string_return(pass_results);
-        heap_purge();
-        bench_heap_reuse(pass_results);
-        heap_purge();
+        for bench in benches {
+            bench(pass_results);
+            heap_purge();
+        }
         passes.push(pass_results);
     }
 
