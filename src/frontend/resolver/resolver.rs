@@ -500,14 +500,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_inline_type(field)?;
         }
         // assemble type list first to avoid borrow issues
-        let ret_type_id = item.ret.as_ref().map(|r| r.type_id(self));
+        let ret_type_id = item.ret.as_ref().map_or(Some(TypeId::VOID), |ret| ret.type_id(self));
         let arg_type_ids: Vec<_> = item.args.iter()
             .map(|field| field.type_id(self))
             .collect();
         // assign type ids to definition
         let callable = self.type_by_id_mut(item.type_id.ice()?).as_callable_mut().ice()?;
         callable.arg_type_ids = arg_type_ids;
-        callable.ret_type_id = ret_type_id.map(|r| match r { Some(r) => r, None => TypeId::VOID });
+        callable.ret_type_id = ret_type_id;
         // ensure type is resolved during must-resolve stage
         self.types_resolved(item, None)?;
         Ok(item.type_id)
