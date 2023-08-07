@@ -137,7 +137,7 @@ fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
     )))(i)
 }
 
-fn use_declaration(i: Input<'_>) -> Output<Use> {
+fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
     let position = i.position();
     ws(map(
         delimited(
@@ -146,7 +146,7 @@ fn use_declaration(i: Input<'_>) -> Output<Use> {
             char(';')
         ),
         move |items| {
-            Use {
+            UseDecl {
                 position,
                 mapping: items.into_iter().collect(),
             }
@@ -158,13 +158,13 @@ fn use_declaration(i: Input<'_>) -> Output<Use> {
 
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ws(alt((
-        map(function_reference, |f| InlineType::FunctionReference(Box::new(f))),
+        map(callable_def, |f| InlineType::CallableDef(Box::new(f))),
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(array_def, |a| InlineType::Array(Box::new(a))),
+        map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     )))(i)
 }
 
-fn function_reference(i: Input<'_>) -> Output<FunctionReference> {
+fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     fn parameter_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), ws(char(')')))(i)
     }
@@ -174,7 +174,7 @@ fn function_reference(i: Input<'_>) -> Output<FunctionReference> {
     let position = i.position();
     ws(map(
         tuple((tag("fn"), ws(parameter_list), opt(ws(return_part)))),
-        move |sig| FunctionReference {
+        move |sig| CallableDef {
             position,
             args    : sig.1,
             ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },

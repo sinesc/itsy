@@ -218,7 +218,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
                         Some(FunctionKind::Builtin(type_id, builtin_type))
                     ))
-                }
+                },
             })
         } else if self.stage.must_resolve() {
             Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("{}", &item)), self.module_path))
@@ -250,7 +250,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
                     Some(FunctionKind::Builtin(type_id, builtin_type))
                 ))
-            }
+            },
         })
     }
 
@@ -309,12 +309,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
-    fn resolved_or_err(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolved(self: &Self, item: &(impl Positioned+Resolvable)) -> ResolveResult {
+        if self.stage.must_resolve() && !item.is_resolved() {
+            Err(ResolveError::new(item, item.unresolved_error(), self.module_path))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
+    fn types_resolved(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
         if self.stage.must_resolve() {
             if item.is_resolved() {
                 match expected_result {
                     Some(expected_result) => self.check_type_accepted_for(item, item.type_id(self).unwrap(), expected_result),
-                    None => Ok(())
+                    None => Ok(()),
                 }
             } else {
                 Err(ResolveError::new(item, item.unresolved_error(), self.module_path))
@@ -322,7 +331,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         } else {
             match (item.type_id(self), expected_result) {
                 (Some(item_type_id), Some(expected_result)) => self.check_type_accepted_for(item, item_type_id, expected_result),
-                _ => Ok(())
+                _ => Ok(()),
             }
         }
     }
@@ -350,7 +359,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn item_type(self: &Self, item: &impl Typeable) -> Option<&Type> {
         match item.type_id(self) {
             None => None,
-            Some(type_id) => Some(self.type_by_id(type_id))
+            Some(type_id) => Some(self.type_by_id(type_id)),
         }
     }
 
@@ -363,6 +372,35 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.module_path.to_string() + "::" + &parts_str
         }
     }
+
+    /// Transforms a method call from a.b.c() format to c(a.b) if c is a function name (i.e. not a function reference)
+    fn transform_constant_call(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+        let mut constant = None;
+        if let Some(binary_op) = call_exp.as_binary_op_mut() {
+            if binary_op.op == ast::BinaryOperator::Access {
+                if let Some(member) = binary_op.right.as_member() {
+                    if member.constant_id.is_some() {
+                        // last member item is a function name, convert to const
+                        constant = Some(
+                            ast::Constant {
+                                position: member.position,
+                                path: ast::Path { position: member.ident.position, name: vec![ member.ident.clone() ]},
+                                constant_id: member.constant_id,
+                            }
+                        );
+                    }
+                }
+            }
+        }
+        // move left part before function name into arguments
+        if let Some(constant) = constant {
+            let binary_op = call_exp.as_binary_op_mut().ice()?;
+            let arg = std::mem::replace(binary_op.left.as_expression_mut().ice()?, ast::Expression::void(ast::Position(0)));
+            *call_exp = ast::Expression::Constant(constant);
+            call_args.args.insert(0, arg);
+        }
+        Ok(())
+    }
 }
 
 /// Methods to resolve individual AST structures.
@@ -370,27 +408,27 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves types and bindings used in a statement.
     fn resolve_statement(self: &mut Self, item: &mut ast::Statement) -> ResolveResult  {
-        use self::ast::Statement as S;
+        use self::ast::Statement::*;
         match item {
-            S::Function(function)       => self.resolve_function(function, None),
-            S::StructDef(structure)     => self.resolve_struct_def(structure),
-            S::ImplBlock(impl_block)     => self.resolve_impl_block(impl_block),
-            S::TraitDef(trait_def)     => self.resolve_trait_def(trait_def),
-            S::LetBinding(binding)         => self.resolve_let_binding(binding),
-            S::IfBlock(if_block)        => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
-            S::ForLoop(for_loop)        => self.resolve_for_loop(for_loop),
-            S::WhileLoop(while_loop)    => self.resolve_while_loop(while_loop),
-            S::Block(block)             => self.resolve_block(block, None),
-            S::Return(ret)              => self.resolve_return(ret),
-            S::Expression(expression)   => self.resolve_expression(expression, None),
-            S::Use(use_declaration)                => self.resolve_use_declaration(use_declaration),
-            S::EnumDef(enum_def)        => self.resolve_enum_def(enum_def),
-            S::Module(_) | S::Break(_) | S::Continue(_) => { Ok(()) /* nothing to do here */ },
+            Function(function) => self.resolve_function(function, None),
+            StructDef(structure) => self.resolve_struct_def(structure),
+            ImplBlock(impl_block) => self.resolve_impl_block(impl_block),
+            TraitDef(trait_def) => self.resolve_trait_def(trait_def),
+            LetBinding(binding) => self.resolve_let_binding(binding),
+            IfBlock(if_block) => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
+            ForLoop(for_loop) => self.resolve_for_loop(for_loop),
+            WhileLoop(while_loop) => self.resolve_while_loop(while_loop),
+            Block(block) => self.resolve_block(block, None),
+            Return(ret) => self.resolve_return(ret),
+            Expression(expression) => self.resolve_expression(expression, None),
+            Use(use_declaration) => self.resolve_use_decl(use_declaration),
+            EnumDef(enum_def) => self.resolve_enum_def(enum_def),
+            Module(_) | Break(_) | Continue(_) => { Ok(()) /* nothing to do here */ },
         }
     }
 
     /// Resolves use declarations.
-    fn resolve_use_declaration(self: &mut Self, item: &mut ast::Use) -> ResolveResult  {
+    fn resolve_use_decl(self: &mut Self, item: &mut ast::UseDecl) -> ResolveResult  {
         let mut unresolved = None;
         for (name, (ref path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
             if self.module_paths.contains(path) {
@@ -415,18 +453,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves types and bindings used in an expression.
     fn resolve_expression(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
-        use ast::Expression as E;
+        use ast::Expression::*;
         match item { // todo: these all need to check expected_result since the caller might depend on an error result on type mismatch
-            E::Literal(literal) => self.resolve_literal(literal, expected_result),
-            E::Variable(variable) => self.resolve_variable(variable, expected_result),
-            E::Constant(constant) => self.resolve_constant(constant, expected_result),
-            E::Assignment(assignment) => self.resolve_assignment(assignment),
-            E::BinaryOp(binary_op) => self.resolve_binary_op(binary_op, expected_result),
-            E::UnaryOp(unary_op) => self.resolve_unary_op(unary_op, expected_result),
-            E::Block(block) => self.resolve_block(block, expected_result),
-            E::IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
-            E::MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
-            E::Closure(_closure) => unimplemented!("Closure resolution todo"),
+            Literal(literal) => self.resolve_literal(literal, expected_result),
+            Variable(variable) => self.resolve_variable(variable, expected_result),
+            Constant(constant) => self.resolve_constant(constant, expected_result),
+            Assignment(assignment) => self.resolve_assignment(assignment),
+            BinaryOp(binary_op) => self.resolve_binary_op(binary_op, expected_result),
+            UnaryOp(unary_op) => self.resolve_unary_op(unary_op, expected_result),
+            Block(block) => self.resolve_block(block, expected_result),
+            IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
+            MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
+            Closure(_closure) => unimplemented!("Closure resolution todo"),
         }
     }
 
@@ -435,16 +473,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use ast::InlineType::*;
         match item {
             TypeName(type_name) => self.resolve_type_name(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
-            Array(array) => self.resolve_array_def(array),
-            FunctionReference(f) => self.resolve_function_reference(f),
+            ArrayDef(array) => self.resolve_array_def(array),
+            CallableDef(callable) => self.resolve_callable_def(callable),
         }
     }
 
     /// Resolves a struct definition.
-    fn resolve_function_reference(self: &mut Self, item: &mut ast::FunctionReference) -> ResolveResult<Option<TypeId>> {
+    fn resolve_callable_def(self: &mut Self, item: &mut ast::CallableDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved() {
+            return Ok(item.type_id);
+        }
+        // init container type
         if item.type_id.is_none() {
             let ty = Type::Callable(Callable {
-                arg_type_ids: item.args.iter().map(|a| None).collect(),
+                arg_type_ids: Vec::new(),
                 ret_type_id: None,
             });
             let new_type_id = self.scopes.insert_type(None, ty);
@@ -457,34 +499,40 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for field in &mut item.args {
             self.resolve_inline_type(field)?;
         }
-        // assemble type list
+        // assemble type list first to avoid borrow issues
         let ret_type_id = item.ret.as_ref().map(|r| r.type_id(self));
         let arg_type_ids: Vec<_> = item.args.iter()
             .map(|field| field.type_id(self))
             .collect();
-
+        // assign type ids to definition
         let callable = self.type_by_id_mut(item.type_id.ice()?).as_callable_mut().ice()?;
         callable.arg_type_ids = arg_type_ids;
         callable.ret_type_id = ret_type_id.map(|r| match r { Some(r) => r, None => TypeId::VOID });
-
-        self.resolved_or_err(item, None)?;
+        // ensure type is resolved during must-resolve stage
+        self.types_resolved(item, None)?;
         Ok(item.type_id)
     }
 
     /// Resolves a type (name) to a type_id.
     fn resolve_type_name(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved() {
+            return Ok(item.type_id);
+        }
         if item.type_id.is_none() {
             item.type_id = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.name));
         }
         if let (Some(item_type_id), Some(expected_result)) = (item.type_id, expected_result) {
             self.check_type_accepted_for(item, item_type_id, expected_result)?;
         }
-        self.resolved_or_err(item, expected_result)?;
+        self.types_resolved(item, expected_result)?;
         Ok(item.type_id)
     }
 
     /// Resolves an array definition.
     fn resolve_array_def(self: &mut Self, item: &mut ast::ArrayDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved() {
+            return Ok(item.type_id);
+        }
         if let (None, inner_type_id @ Some(_)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
@@ -492,13 +540,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let new_type_id = self.scopes.insert_type(None, ty);
             item.type_id = Some(new_type_id);
         }
-        self.resolved_or_err(item, None)?;
+        self.types_resolved(item, None)?;
         Ok(item.type_id)
     }
 
     /// Resolves a struct definition.
     fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
-        if item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved() {
             return Ok(());
         }
         // resolve struct fields
@@ -521,12 +569,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 //self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
-        self.resolved_or_err(item, None)
+        self.types_resolved(item, None)
     }
 
     /// Resolves an enum definition.
     fn resolve_enum_def(self: &mut Self, item: &mut ast::EnumDef) -> ResolveResult {
-        if item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved() {
             return Ok(());
         }
 
@@ -613,7 +661,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         //self.scope_id = parent_scope_id;
-        self.resolved_or_err(item, None)
+        self.types_resolved(item, None)
     }
 
     /// Resolves an implementation block.
@@ -656,7 +704,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a trait definition block.
@@ -699,11 +747,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         self.scope_id = parent_scope_id;
-        self.resolved_or_err(item, None)
+        self.types_resolved(item, None)
     }
 
     /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature) -> ResolveResult {
+        if item.is_resolved() {
+            return Ok(());
+        }
         // resolve arguments
         for arg in item.args.iter_mut() {
             self.resolve_let_binding(arg)?; // checks resolved_or_err
@@ -712,7 +763,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(ret) = &mut item.ret {
             self.resolve_inline_type(ret)?; // checks resolved_or_err
         }
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a function defintion.
@@ -759,21 +810,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         self.scope_id = parent_scope_id;
-        if self.stage.must_resolve() && (!item.sig.args_resolved(self) || !item.sig.ret_resolved(self)) {
-            Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("signature for '{}'", item.sig.ident.name)), self.module_path))
-        } else {
-            Ok(())
-        }
+        self.resolved(item)
     }
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.scopefunction_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
-        self.resolved_or_err(&mut item.expr, None)?;
+        self.types_resolved(&mut item.expr, None)?;
         self.resolve_expression(&mut item.expr, ret_type_id)?;
         // check return type matches function result type
-        self.resolved_or_err(&mut item.expr, ret_type_id)
+        self.types_resolved(&mut item.expr, ret_type_id)
     }
 
     /// Resolves a variable name to a variable.
@@ -793,7 +840,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
         }
-        self.resolved_or_err(item, expected_result)
+        self.types_resolved(item, expected_result)
     }
 
     /// Resolves a constant name to a constant.
@@ -822,7 +869,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
         }
-        self.resolved_or_err(item, expected_result)
+        self.types_resolved(item, expected_result)
     }
 
     /// Resolves an if block.
@@ -842,7 +889,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.check_type_accepted_for(item, if_type_id, TypeId::VOID)?; // Todo: meh, using this to generate an error when we already know there is an error.
         }
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a match expression.
@@ -853,7 +900,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_block(block, expected_result)?;
         }
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a for loop.
@@ -890,7 +937,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // handle block
         self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a while loop.
@@ -899,7 +946,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.expr, None)?;
         self.resolve_block(&mut item.block, None)?;
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a block.
@@ -913,7 +960,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_expression(result, expected_result)?;
         }
         self.scope_id = parent_scope_id;
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves an assignment expression.
@@ -923,7 +970,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let left_type_id = item.left.type_id(self);
         self.resolve_expression(&mut item.right, left_type_id)?;
         item.type_id = Some(TypeId::VOID);
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a binary operation.
@@ -934,7 +981,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
                 self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
                 *item.type_id_mut(self) = Some(self.primitive_type_id(Type::bool)?);
-            }
+            },
             Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 let left_type_id = item.left.type_id(self);
@@ -945,7 +992,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
                 }
-            }
+            },
             Add | Sub | Mul | Div | Rem | Range | RangeInclusive => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
                 let left_type_id = item.left.type_id(self);
@@ -957,7 +1004,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
                 }
-            }
+            },
             Index | IndexWrite => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 if let Some(left_type_id) = item.left.type_id(self) {
@@ -990,7 +1037,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.item_type(&item.left) {
                     self.set_type_id(item, element_type_id)?;
                 }
-            }
+            },
             Access | AccessWrite => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 //self.resolve_expression(item.right.as_member_mut().ice()?, None)?;
@@ -1042,17 +1089,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             },
                             _ => {
                                 Self::ice("Member access on unsupported type")?;
-                            }
+                            },
                         }
                     }
                     if let Some(type_id) = item.right.type_id(self) {
                         self.set_type_id(item, type_id)?; // ignored if member is constant
                     }
                 }
-            }
-            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {
-                return Self::ice("Unexpected operator in resolve_binary_op");
-            }
+            },
             Cast => {
                 self.resolve_type_name(item.right.as_type_name_mut().ice()?, expected_result)?;
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
@@ -1076,7 +1120,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         }
                     }
                 }
-            }
+            },
             Call => {
                 // resolve function
                 let call_func = item.left.as_expression_mut().ice()?;
@@ -1124,39 +1168,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(expected_result) = expected_result {
                     self.set_type_id(item, expected_result)?;
                 }
-            }
+            },
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {
+                return Self::ice("Unexpected operator in resolve_binary_op");
+            },
         }
-
-        Ok(())
-    }
-
-    /// Transforms a method call from a.b.c() format to c(a.b) if c is a function name (i.e. not a function reference)
-    fn transform_constant_call(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
-        let mut constant = None;
-        if let Some(binary_op) = call_exp.as_binary_op_mut() {
-            if binary_op.op == ast::BinaryOperator::Access {
-                if let Some(member) = binary_op.right.as_member() {
-                    if member.constant_id.is_some() {
-                        // last member item is a function name, convert to const
-                        constant = Some(
-                            ast::Constant {
-                                position: member.position,
-                                path: ast::Path { position: member.ident.position, name: vec![ member.ident.clone() ]},
-                                constant_id: member.constant_id,
-                            }
-                        );
-                    }
-                }
-            }
-        }
-        // move left part before function name into arguments
-        if let Some(constant) = constant {
-            let binary_op = call_exp.as_binary_op_mut().ice()?;
-            let arg = std::mem::replace(binary_op.left.as_expression_mut().ice()?, ast::Expression::void(ast::Position(0)));
-            *call_exp = ast::Expression::Constant(constant);
-            call_args.args.insert(0, arg);
-        }
-        Ok(())
+        self.resolved(item)
     }
 
     /// Resolves a binding created by let, for or a signature.
@@ -1197,28 +1214,28 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        self.resolved_or_err(item, None)
+        self.types_resolved(item, None)
     }
 
     /// Resolves a unary operation.
     fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp, expected_type: Option<TypeId>) -> ResolveResult {
-        use crate::frontend::ast::UnaryOperator as UO;
+        use crate::frontend::ast::UnaryOperator::*;
         self.resolve_expression(&mut item.expr, expected_type)?;
         match item.op {
-            UO::Not => {
+            Not => {
                 if let Some(expected_type_id) = expected_type {
                     self.check_type_accepted_for(item, self.primitive_type_id(Type::bool)?, expected_type_id)?;
                 }
                 self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
             },
-            UO::Plus | UO::Minus => {
+            Plus | Minus => {
                 if let Some(type_id) = item.expr.type_id(self) {
                     self.set_type_id(item, type_id)?;
                 }
             },
         }
-        self.resolved_or_err(&item.expr, None)?;
-        self.resolved_or_err(item, expected_type)
+        self.types_resolved(&item.expr, None)?;
+        self.types_resolved(item, expected_type)
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
@@ -1261,7 +1278,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
         }
-        self.resolved_or_err(item, expected_type)
+        self.types_resolved(item, expected_type)
     }
 
     /// Resolves an struct literal and creates the required field types.
@@ -1283,11 +1300,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(name.clone()), self.module_path));
                 }
                 self.resolve_expression(field, struct_def.type_id(name))?;
-                self.resolved_or_err(field, None)?;
+                self.types_resolved(field, None)?;
             }
         }
 
-        self.resolved_or_err(item, None)
+        self.types_resolved(item, None)
     }
 
     /// Resolves an array literal and creates the required array types.
@@ -1349,7 +1366,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        self.resolved_or_err(item, expected_type_id)
+        self.types_resolved(item, expected_type_id)
     }
 }
 

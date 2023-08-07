@@ -244,7 +244,7 @@ pub enum Statement {
     Continue(Continue),
     Expression(Expression),
     Module(Module),
-    Use(Use),
+    Use(UseDecl),
     EnumDef(EnumDef),
 }
 
@@ -324,14 +324,14 @@ impl Resolvable for Module {
 
 /// A use declaration, e.g. `use frontend::{ast::Use, parser::{parse, parse_module}};`.
 #[derive(Debug)]
-pub struct Use {
+pub struct UseDecl {
     pub position    : Position,
     pub mapping     : UnorderedMap<String, (String, bool)>,
 }
 
-impl_positioned!(Use);
+impl_positioned!(UseDecl);
 
-impl Resolvable for Use {
+impl Resolvable for UseDecl {
     fn num_resolved(self: &Self) -> Progress {
         Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())
     }
@@ -430,17 +430,17 @@ impl Resolvable for Function {
 
 /// The type signature of a function/closure reference.
 #[derive(Debug)]
-pub struct FunctionReference {
+pub struct CallableDef {
     pub position: Position,
     pub args    : Vec<InlineType>,
     pub ret     : Option<InlineType>,
     pub type_id : Option<TypeId>,
 }
 
-impl_positioned!(FunctionReference);
-impl_typeable!(FunctionReference);
+impl_positioned!(CallableDef);
+impl_typeable!(CallableDef);
 
-impl Resolvable for FunctionReference {
+impl Resolvable for CallableDef {
     fn num_resolved(self: &Self) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
         + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
@@ -471,10 +471,19 @@ impl Signature {
     }
 }
 
+impl Positioned for Signature {
+    fn position(self: &Self) -> Position {
+        self.ident.position
+    }
+}
+
 impl Resolvable for Signature {
     fn num_resolved(self: &Self) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved())
         + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved())
+    }
+    fn unresolved_error(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve(format!("signature for '{}'", self.ident.name))
     }
 }
 
@@ -528,23 +537,23 @@ impl Positioned for TypeName {
 #[derive(Debug)]
 pub enum InlineType {
     TypeName(TypeName),
-    Array(Box<ArrayDef>),
-    FunctionReference(Box<FunctionReference>),
+    ArrayDef(Box<ArrayDef>),
+    CallableDef(Box<CallableDef>),
 }
 
 impl Typeable for InlineType {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match &self {
-            InlineType::Array(array) => array.type_id(bindings),
+            InlineType::ArrayDef(array) => array.type_id(bindings),
             InlineType::TypeName(type_name) => type_name.type_id(bindings),
-            InlineType::FunctionReference(f) => f.type_id(bindings),
+            InlineType::CallableDef(f) => f.type_id(bindings),
         }
     }
     fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
         match self {
-            InlineType::Array(array) => array.type_id_mut(bindings),
+            InlineType::ArrayDef(array) => array.type_id_mut(bindings),
             InlineType::TypeName(type_name) => type_name.type_id_mut(bindings),
-            InlineType::FunctionReference(f) => f.type_id_mut(bindings),
+            InlineType::CallableDef(f) => f.type_id_mut(bindings),
         }
     }
 }
@@ -553,8 +562,8 @@ impl Resolvable for InlineType {
     fn num_resolved(self: &Self) -> Progress {
         match self {
             Self::TypeName(typename) => typename.num_resolved(),
-            Self::Array(array) => array.num_resolved(),
-            Self::FunctionReference(f) => f.num_resolved(),
+            Self::ArrayDef(array) => array.num_resolved(),
+            Self::CallableDef(f) => f.num_resolved(),
         }
     }
 }
