@@ -159,7 +159,7 @@ fn use_declaration(i: Input<'_>) -> Output<Use> {
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ws(alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(array, |a| InlineType::Array(Box::new(a)))
+        map(array_def, |a| InlineType::Array(Box::new(a)))
     )))(i)
 }
 
@@ -268,11 +268,11 @@ fn trait_def(i: Input<'_>) -> Output<TraitDef> {
     ))(i)
 }
 
-fn array(i: Input<'_>) -> Output<Array> {
+fn array_def(i: Input<'_>) -> Output<ArrayDef> {
     let position = i.position();
     ws(map(
         delimited(ws(char('[')), inline_type, ws(char(']'))),
-        move |ty| Array {
+        move |ty| ArrayDef {
             position    : position,
             element_type: ty,
             type_id     : None,

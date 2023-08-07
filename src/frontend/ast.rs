@@ -509,7 +509,7 @@ impl Positioned for TypeName {
 #[derive(Debug)]
 pub enum InlineType {
     TypeName(TypeName),
-    Array(Box<Array>),
+    Array(Box<ArrayDef>),
 }
 
 impl Typeable for InlineType {
@@ -538,16 +538,16 @@ impl Resolvable for InlineType {
 
 /// An array definition, e.g. `[ MyInt ]`.
 #[derive(Debug)]
-pub struct Array {
+pub struct ArrayDef {
     pub position    : Position,
     pub element_type: InlineType,
     pub type_id     : Option<TypeId>,
 }
 
-impl_positioned!(Array);
-impl_typeable!(Array);
+impl_positioned!(ArrayDef);
+impl_typeable!(ArrayDef);
 
-impl Resolvable for Array {
+impl Resolvable for ArrayDef {
     fn num_resolved(self: &Self) -> Progress {
         self.element_type.num_resolved()
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))

@@ -451,7 +451,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array definition.
-    fn resolve_array_def(self: &mut Self, item: &mut ast::Array) -> ResolveResult<Option<TypeId>> {
+    fn resolve_array_def(self: &mut Self, item: &mut ast::ArrayDef) -> ResolveResult<Option<TypeId>> {
         if let (None, inner_type_id @ Some(_)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
