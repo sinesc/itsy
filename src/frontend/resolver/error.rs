@@ -7,17 +7,17 @@ use crate::shared::numeric::Numeric;
 /// Represents the various possible resolver error-kinds.
 #[derive(Clone, Debug)]
 pub enum ResolveErrorKind {
-    TypeMismatch(String, String),
-    InvalidCast(String, String),
-    IncompatibleNumeric(String, Numeric),
-    UndefinedVariable(String),
+    UndefinedIdentifier(String),
     UndefinedMember(String),
-    NumberOfArguments(String, ItemIndex, ItemIndex),
-    MutabilityEscalation,
-    AssignToImmutable,
     UndefinedFunction(String),
     UndefinedType(String),
     UndefinedItem(String),
+    TypeMismatch(String, String),
+    InvalidCast(String, String),
+    IncompatibleNumeric(String, Numeric),
+    NumberOfArguments(String, ItemIndex, ItemIndex),
+    MutabilityEscalation,
+    AssignToImmutable,
     /// Duplicate discriminant.
     DuplicateVariantValue(Numeric),
     /// Enum variant value is not an integer.
@@ -67,7 +67,7 @@ impl Display for ResolveError {
             ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {e}, got {g}"),
             ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {t1} to {t2}"),
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {n} for expected type {t}"),
-            ResolveErrorKind::UndefinedVariable(v) => write!(f, "Undefined variable '{v}'"),
+            ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier '{v}'"),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{m}'"),
             ResolveErrorKind::NumberOfArguments(func, e, g) => write!(f, "Invalid number of arguments. Function '{func}' expects {e} argument, got {g}"),
             ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),

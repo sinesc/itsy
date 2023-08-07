@@ -749,7 +749,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.binding_id.is_none() {
             item.binding_id = self.scopes.binding_id(self.scope_id, &item.ident.name);
             if item.binding_id.is_none() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.ident.name.to_string()), self.module_path));
+                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.ident.name.to_string()), self.module_path));
             }
         }
         // set expected type, if any
@@ -778,7 +778,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
             if item.constant_id.is_none() && self.stage.must_resolve() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedVariable(item.path.to_string()), self.module_path));
+                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string()), self.module_path));
             }
         }
         // set expected type, if any
