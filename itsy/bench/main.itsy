@@ -1,150 +1,32 @@
 /*
- * Basic ballpark benchmarking. TODO: super clunky due to lack of closures and hashmaps.
+ * Basic ballpark benchmarking. Not to be taken too seriously.
  */
 use BenchAPI::{print, println, start_time, stop_time, heap_purge, rust_mandelbrot, rust_fib_r, rust_stringcat};
 
-struct Test {
+struct CompareBench {
+    name: String,
+    itsy: fn() -> String,
+    rust: fn() -> String,
+}
+
+struct SingleBench {
+    name: String,
+    itsy: fn(),
+}
+
+struct Result {
     name: String,
     itsy_time: f64,
     rust_time: f64,
 }
 
-struct ConstructTestInner {
-    c: i32,
-    d: u64,
-    e: f32,
-    f: i8,
-}
+fn print_results(results: [ [ Result ] ]) {
 
-struct ConstructTest {
-    a: ConstructTestInner,
-    b: u8,
-    c: i64,
-    d: f32,
-    e: [ u64 ],
-}
-
-fn bench_mandelbrot(results: [ Test ]) {
-
-    start_time();
-    let rust_result = rust_mandelbrot(800, 600);
-    let rust_time = stop_time();
-
-    start_time();
-    let itsy_result = itsy_mandelbrot(800, 600);
-    let itsy_time = stop_time();
-
-    if itsy_result != rust_result {
-        print("ERROR: {itsy_result} != {rust_result}");
-    }
-
-    results.push(Test { name: "mandelbrot", rust_time: rust_time, itsy_time: itsy_time });
-}
-
-fn bench_fib_r(results: [ Test ]) {
-
-    start_time();
-    let rust_result = rust_fib_r(32);
-    let rust_time = stop_time();
-
-    start_time();
-    let itsy_result = itsy_fib_r(32);
-    let itsy_time = stop_time();
-
-    if itsy_result != rust_result {
-        print("ERROR: {itsy_result} != {rust_result}");
-    }
-
-    results.push(Test { name: "fib_r", rust_time: rust_time, itsy_time: itsy_time });
-}
-
-fn bench_stringcat(results: [ Test ]) {
-
-    start_time();
-    let rust_result = rust_stringcat(5000);
-    let rust_time = stop_time();
-
-    start_time();
-    let itsy_result = itsy_stringcat(5000);
-    let itsy_time = stop_time();
-
-    if itsy_result != rust_result {
-        print("ERROR: {itsy_result} != {rust_result}");
-    }
-
-    results.push(Test { name: "stringcat", rust_time: rust_time, itsy_time: itsy_time });
-}
-
-fn bench_upload_struct(results: [ Test ]) {
-
-    start_time();
-
-    for i in 0..1000000 {
-        // partially dynamic contents -> upload opcode
-        let item = ConstructTest { a: ConstructTestInner { c: 14, d: i, e: 3.14, f: -21 }, b: 17, c: i as i64, d: 1.7, e: [ 1, 2, i, 8, 131231 ] };
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "upload_struct", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_upload_array(results: [ Test ]) {
-
-    start_time();
-
-    for i in 0..1000000 {
-        // static contents -> construct opcode
-        let item = [
-            [ 1u64, i, 3, 4 ],
-            [ 5, i, 7, 8, 9 ],
-            [ i, 11, 12 ],
-            [ 13, 14, i, 16, 17, 18 ],
-            [ 19, i ],
-        ];
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "upload_array", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_string_return(results: [ Test ]) {
-
-    start_time();
-
-    let result: [ String ] = [ ];
-
-    for i in 0..1500 {
-        let item = "Hello".repeat(50000);
-        result.push(item);
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "string_return", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_heap_reuse(results: [ Test ]) {
-
-    start_time();
-
-    for i in 0..9000 {
-        let item = "Hello".repeat(50000);
-    }
-
-    let itsy_time = stop_time();
-
-    results.push(Test { name: "heap_reuse", rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn print_results(passes: [ [ Test ] ]) {
-
-    for t in 0..passes[0].len() {
+    for t in 0..results[0].len() {
 
         let itsy_avg = 0.0;
         let rust_avg = 0.0;
-        println(passes[0][t].name);
+        println(results[0][t].name);
 
         for source in [ "itsy", "rust" ] {
 
@@ -152,8 +34,8 @@ fn print_results(passes: [ [ Test ] ]) {
             let max = 0.0;
             let sum = 0.0;
 
-            for p in 0..passes.len() {
-                let time = if source == "itsy" { passes[p][t].itsy_time } else { passes[p][t].rust_time };
+            for p in 0..results.len() {
+                let time = if source == "itsy" { results[p][t].itsy_time } else { results[p][t].rust_time };
                 sum += time;
                 if (min == 0.0 || min > time) {
                     min = time;
@@ -163,7 +45,7 @@ fn print_results(passes: [ [ Test ] ]) {
                 }
             }
 
-            let avg = sum / passes.len() as f64;
+            let avg = sum / results.len() as f64;
 
             if source == "itsy" {
                 itsy_avg = avg
@@ -182,26 +64,74 @@ fn print_results(passes: [ [ Test ] ]) {
     }
 }
 
-fn main() {
+fn bench_single(name: String, itsy: fn(), results: [ Result ]) {
+    start_time();
+    itsy();
+    results.push(Result { name: name, rust_time: 0.0, itsy_time: stop_time() });
+}
 
+fn bench_compare(name: String, itsy: fn() -> String, rust: fn() -> String, results: [ Result ]) {
+    start_time();
+    let rust_result = rust();
+    let rust_time = stop_time();
+    start_time();
+    let itsy_result = itsy();
+    let itsy_time = stop_time();
+    if itsy_result != rust_result {
+        print("ERROR: {itsy_result} != {rust_result}");
+    }
+    results.push(Result { name: name, rust_time: rust_time, itsy_time: itsy_time });
+}
+
+fn main() {
+    let compares = [
+        CompareBench { name: "mandelbrot", itsy: fn() -> String { itsy_mandelbrot(800, 600) }, rust: fn() -> String { rust_mandelbrot(800, 600) } },
+        CompareBench { name: "fib_r", itsy: fn() -> String { itsy_fib_r(32) as String }, rust: fn() -> String { rust_fib_r(32) as String } },
+        CompareBench { name: "stringcat", itsy: fn() -> String { itsy_stringcat(5000) }, rust: fn() -> String { rust_stringcat(5000) } },
+    ];
+    let singles = [
+        SingleBench { name: "upload_struct", itsy: itsy_upload_struct },
+        SingleBench { name: "upload_array", itsy: itsy_upload_array },
+        SingleBench { name: "string_return", itsy: itsy_string_return },
+        SingleBench { name: "heap_reuse", itsy: itsy_heap_reuse },
+    ];
     let num_passes = 5;
-    let passes: [ [ Test ] ] = [ ];
-    let benches = [ bench_mandelbrot, bench_fib_r, bench_stringcat, bench_upload_struct, bench_upload_array, bench_string_return, bench_heap_reuse ];
+    let results: [ [ Result ] ] = [ ];
+
     println("Ballpark Bench™ - Measuring in approximate baseball fields");
     print("running {num_passes} passes, pass ");
 
     for pass in 0..num_passes {
-        print((pass + 1) as String + "...");
-        let pass_results: [ Test ] = [ ];
-        for bench in benches {
-            bench(pass_results);
+        print("{pass+1}...");
+        let pass_results: [ Result ] = [ ];
+        for compare in compares {
+            bench_compare(compare.name, compare.itsy, compare.rust, pass_results);
             heap_purge();
         }
-        passes.push(pass_results);
+        for single in singles {
+            bench_single(single.name, single.itsy, pass_results);
+            heap_purge();
+        }
+        results.push(pass_results);
     }
 
     println("");
-    print_results(passes);
+    print_results(results);
+}
+
+struct ConstructTestInner {
+    c: i32,
+    d: u64,
+    e: f32,
+    f: i8,
+}
+
+struct ConstructTest {
+    a: ConstructTestInner,
+    b: u8,
+    c: i64,
+    d: f32,
+    e: [ u64 ],
 }
 
 fn itsy_fib_r(n: i32) -> i32 {
@@ -248,4 +178,38 @@ fn itsy_stringcat(n: i32) -> String {
         s += itsy_stringcat(n - 1);
     }
     s
+}
+
+fn itsy_upload_struct() {
+    for i in 0..1000000 {
+        // partially dynamic contents -> upload opcode
+        let item = ConstructTest { a: ConstructTestInner { c: 14, d: i, e: 3.14, f: -21 }, b: 17, c: i as i64, d: 1.7, e: [ 1, 2, i, 8, 131231 ] };
+    }
+}
+
+fn itsy_upload_array() {
+    for i in 0..1000000 {
+        // static contents -> construct opcode
+        let item = [
+            [ 1u64, i, 3, 4 ],
+            [ 5, i, 7, 8, 9 ],
+            [ i, 11, 12 ],
+            [ 13, 14, i, 16, 17, 18 ],
+            [ 19, i ],
+        ];
+    }
+}
+
+fn itsy_string_return() {
+    let result: [ String ] = [ ];
+    for i in 0..1500 {
+        let item = "Hello".repeat(50000);
+        result.push(item);
+    }
+}
+
+fn itsy_heap_reuse() {
+    for i in 0..9000 {
+        let item = "Hello".repeat(50000);
+    }
 }
