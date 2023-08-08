@@ -82,6 +82,7 @@ impl ParserFlags {
 
 /// Interal parser state, tracked via RC through the Input type.
 pub(super) struct ParserState { // cannot implement clone because cell requires inner to be copy to be able to be cloned
+    pub len: usize,
     pub max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
     pub flags: Cell<ParserFlags>,
     pub scopes: RefCell<Vec<UnorderedSet<String>>>,
@@ -128,14 +129,15 @@ impl<'a> Input<'a> {
         Input {
             data: data,
             state: Rc::new(ParserState {
+                len         : data.len(),
                 max_parsed  : Cell::new((None, 0)),
                 flags       : Cell::new(ParserFlags::new()),
                 scopes      : RefCell::new(Vec::new()),
             })
         }
     }
-    pub fn position(self: &Self) -> Position { // TODO store full length in state, subtract remaining data.len() from full length to get actual position
-        Position(self.data.len())
+    pub fn position(self: &Self) -> Position {
+        Position(self.state.len - self.data.len())
     }
     pub fn max_parsed_mut(self: &Self, inner: impl Fn(&mut (Option<ParseErrorKind>, usize))) {
         let mut max_parsed = self.state.max_parsed.take();
@@ -158,8 +160,8 @@ impl<'a> Input<'a> {
     }
     pub fn from_str(self: &Self, data: &'a str) -> Self {
         Input {
-            data        : data,
-            state         : self.state.clone(),
+            data    : data,
+            state   : self.state.clone(),
         }
     }
 }

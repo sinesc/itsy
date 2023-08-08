@@ -63,14 +63,13 @@ pub(crate) trait Resolvable {
 pub struct Position(pub(crate) usize);
 
 impl Position {
-    /// Create a new position. The source is required since a position is internally an absolute offset from the end of a string.
-    pub fn new(input: &str, offset: usize) -> Self {
-        Self(input.len() - offset)
+    /// Create a new position.
+    pub fn new(offset: usize) -> Self {
+        Self(offset)
     }
     /// Compute 1-based line/column number in string.
     pub fn loc(self: &Self, input: &str) -> (u32, u32) {
-        let offset = input.len() - self.0;
-        let mut parsed = &input[0..offset];
+        let mut parsed = &input[0..self.0];
         let mut line = 1;
         while { // can't use let parsed.lines() here as a line-break at the end is ignored
             let mut break_char = '\0';

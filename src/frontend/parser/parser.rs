@@ -1194,7 +1194,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
         Ok(result) => {
             Ok(ParsedModule::new(module_path, result.1))
         },
-        Err(err) => { // TODO: compute position from start here, change Position to be relative to start
+        Err(err) => {
             match err {
                 nom::Err::Incomplete(_) => unreachable!("No parser should return Incomplete"),
                 nom::Err::Failure(failure) => {
@@ -1204,7 +1204,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
                 nom::Err::Error(_) => {
                     // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
                     let error = input.state.max_parsed.take();
-                    Err(ParseError::new(ParseErrorKind::SyntaxError, Position(error.1), module_path))
+                    Err(ParseError::new(ParseErrorKind::SyntaxError, Position(src.len() - error.1), module_path))
                 }
             }
         }
