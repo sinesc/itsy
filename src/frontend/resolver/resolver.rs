@@ -464,6 +464,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Block(block) => self.resolve_block(block, expected_result),
             IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
             MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
+            AnonymousFunction(anonymous_function) => self.resolve_function(anonymous_function, None),
             Closure(_closure) => unimplemented!("Closure resolution todo"),
         }
     }
@@ -693,8 +694,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let trait_name = item.trt.as_ref().unwrap().path.to_string();
                         return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                     }
-                    if let Some(function_id) = function.function_id {
-                        let constant_id = self.scopes.function_constant_id(function_id).ice()?;
+                    if let Some(constant_id) = function.constant_id {
                         if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
                             let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
                             impl_trait.functions.insert(function_name.clone(), Some(constant_id));
@@ -736,9 +736,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // update trait
         for function in &item.functions {
-            if let Some(function_id) = function.function_id {
+            if let Some(constant_id) = function.constant_id {
                 let name = &function.sig.ident.name;
-                let constant_id = self.scopes.function_constant_id(function_id).ice()?;
                 let trt = self.type_by_id_mut(item.type_id.unwrap()).as_trait_mut().unwrap();
                 match function.block {
                     Some(_) => *trt.provided.get_mut(name).unwrap() = Some(constant_id),
@@ -774,7 +773,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_signature(&mut item.sig)?;
 
         //let signature_scope_id = self.try_create_scope(&mut item.scope_id); // todo: put body into separate scope so signature can't access body
-        if item.function_id.is_none() && item.sig.ret_resolved(self) && item.sig.args_resolved(self) {
+        if item.constant_id.is_none() && item.sig.ret_resolved(self) && item.sig.args_resolved(self) {
             let result_type_id = item.sig.ret_type_id(self);
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids(self);
             // function/method switch
@@ -799,11 +798,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // TODO: public visibility
                 //self.scopes.alias_constant(ScopeId::ROOT, &qualified, constant_id);
             }
-            let function_id = self.scopes.constant_ref(constant_id).value.as_function_id().unwrap();
-            item.function_id = Some(function_id);
+            let function_id = self.scopes.constant_function_id(constant_id).ice()?;
+            item.constant_id = Some(constant_id);
             self.scopes.set_scopefunction_id(self.scope_id, function_id);
         }
-        if let Some(function_id) = item.function_id {
+        if let Some(constant_id) = item.constant_id {
+            let function_id = self.scopes.constant_function_id(constant_id).ice()?;
             let ret_type = self.scopes.function_ref(function_id).ret_type_id(self);
             if let Some(block) = &mut item.block {
                 self.resolve_block(block, ret_type)?;

@@ -174,13 +174,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     if let Some(TypeName { type_id, .. }) = impl_block.trt {
                         let trait_type_id = type_id.ice()?;
                         let trt = self.ty(&trait_type_id).as_trait().ice()?;
-                        let function_id = function.function_id;
+                        let function_id = self.constant_by_id(function.constant_id.ice()?).value.as_function_id().ice()?;
                         let function_name = &function.sig.ident.name;
                         // check if function is defined in trait
                         let trait_constant_id = trt.provided.get(function_name).or(trt.required.get(function_name)).ice()?;
                         let trait_function_id = self.resolved.constant(trait_constant_id.ice()?).value.as_function_id().ice()?;
                         let trait_function = self.resolved.function(trait_function_id);
-                        let impl_function = self.resolved.function(function_id.ice()?);
+                        let impl_function = self.resolved.function(function_id);
                         if !self.is_compatible_function(trait_function, impl_function)? {
                             return Err(CompileError::new(function, CompileErrorKind::IncompatibleTraitMethod(function_name.clone()), &self.module_path));
                         }
@@ -266,7 +266,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Block(block) => self.compile_block(block),
             IfBlock(if_block) => self.compile_if_block(if_block),
             MatchBlock(match_block) => self.compile_match_block(match_block),
-            Closure(_closure) => unimplemented!("Closure compilation todo")
+            Closure(_closure) => unimplemented!("Closure compilation todo"),
+            AnonymousFunction(anonymous_function) => self.compile_anonymous_function(anonymous_function),
         }
     }
 
@@ -730,6 +731,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         result
     }
 
+    /// Compiles an anonymous function.
+    fn compile_anonymous_function(self: &mut Self, item: &ast::Function) -> CompileResult {
+        // write code to skip over function instructions
+        comment!(self, "skip inlined {} body", item.sig.ident.name);
+        let function_skip_jump = self.writer.jmp(123);
+        let function_addr = self.writer.position();
+        self.compile_function(item)?;
+        let function_done_jump = self.writer.position();
+        self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
+        // write function address to stack
+        comment!(self, "\npush @{}", item.sig.ident.name);
+        self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+        Ok(())
+    }
+
     /// Compiles the given function.
     fn compile_function(self: &mut Self, item: &ast::Function) -> CompileResult {
 
@@ -757,7 +773,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
 
         // store call info required to compile calls to this function and fix calls that were made before the function address was known
-        let function_id = item.function_id.ice()?;
+        let function_id = self.constant_by_id(item.constant_id.ice()?).value.as_function_id().ice()?;
         let arg_size = frame.arg_pos;
         if let Some(calls) = self.functions.register_function(function_id, position) {
             let backup_position = self.writer.position();

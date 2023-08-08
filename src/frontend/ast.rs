@@ -44,6 +44,17 @@ impl Typeable for Option<TypeId> {
     }
 }
 
+/// Implements the Display trait for given structure.
+macro_rules! impl_display {
+    ($struct_name:ident, $format:literal $(, $field:tt)*) => {
+        impl Display for $struct_name {
+            fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, $format $(, self.$field)*)
+            }
+        }
+    };
+}
+
 /// Resolvable AST structures.
 pub(crate) trait Resolvable {
     /// Number of resolved and total items.
@@ -88,6 +99,8 @@ impl Position {
     }
 }
 
+impl_display!(Position, "{}", 0);
+
 impl Debug for Position {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Position({})", self.0)
@@ -111,17 +124,6 @@ macro_rules! impl_positioned {
     };
 }
 
-/// Implements the Display trait for given structure.
-macro_rules! impl_display {
-    ($struct_name:ident, $format:literal $(, $field:ident)*) => {
-        impl Display for $struct_name {
-            fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, $format $(, self.$field)*)
-            }
-        }
-    };
-}
-
 /// Implements a match block with cases for all variants of Expression or Statement
 macro_rules! impl_matchall {
     (@match $self:ident, $enum_name:ident, $val_name:ident, $code:tt, [ $( $pattern:pat => $default:tt )? ] $(, $variant_name:ident)+) => {
@@ -133,7 +135,7 @@ macro_rules! impl_matchall {
         }
     };
     ($self:ident, Expression, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure)
+        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
@@ -410,17 +412,38 @@ pub struct Function {
     pub position    : Position,
     pub sig         : Signature,
     pub block       : Option<Block>,
-    pub function_id : Option<FunctionId>,
+    pub constant_id : Option<ConstantId>,
     pub scope_id    : Option<ScopeId>,
 }
 
 impl_positioned!(Function);
 
+impl Display for Function {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.sig.ident.name)
+    }
+}
+
+impl Typeable for Function {
+    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+        match self.constant_id {
+            Some(constant_id) => bindings.constant_by_id(constant_id).type_id,
+            None => None,
+        }
+    }
+    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+        match self.constant_id {
+            Some(constant_id) => &mut bindings.constant_by_id_mut(constant_id).type_id,
+            None => unreachable!(),
+        }
+    }
+}
+
 impl Resolvable for Function {
     fn num_resolved(self: &Self) -> Progress {
         self.sig.num_resolved()
         + self.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved())
-        + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.constant_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
         ResolveErrorKind::CannotResolve(self.sig.ident.name.clone())
@@ -979,6 +1002,7 @@ pub enum Expression {
     IfBlock(Box<IfBlock>),
     MatchBlock(Box<MatchBlock>),
     Closure(Box<Closure>),
+    AnonymousFunction(Box<Function>),
 }
 
 impl Expression {
