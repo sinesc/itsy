@@ -832,7 +832,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.ident.name.to_string()), self.module_path));
             }
         }
-        // set expected type, if any
+        // set expected type, if it isn't a trait or we're in final resolver stage
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
                 if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).as_trait().is_some() {
@@ -857,11 +857,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             }
-            if item.constant_id.is_none() && self.stage.must_resolve() {
+            if item.constant_id.is_none() && self.stage.must_exist() {
                 return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string()), self.module_path));
             }
         }
-        // set expected type, if any
+        // set expected type, if it isn't a trait or we're in final resolver stage
         if item.type_id(self).is_none() && item.constant_id.is_some() {
             if let Some(expected_result) = expected_result {
                 if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).as_trait().is_some() {
