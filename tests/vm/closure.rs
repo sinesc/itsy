@@ -77,3 +77,20 @@ fn fnref_access_index() {
         "a via y.myvoid".to_string(), "c via y.myret".to_string(),
         "123".to_string() ]);
 }
+
+#[test]
+fn anonymous() {
+    let result = run(stringify!(
+        fn apply(operation: fn(u32) -> u32, value: u32) -> u32 {
+            operation(value)
+        }
+        fn main() {
+            let double = fn(x: u32) -> u32 { x * 2 };
+            let get_double = fn() -> fn(u32) -> u32 { fn(x: u32) -> u32 { x * 2 } };
+            ret_u32(double(7));
+            ret_u32(apply(double, 13));
+            ret_u32(apply(get_double(), 2));
+        }
+    ));
+    assert_all(&result, &[ 14u32, 26, 4 ]);
+}
