@@ -348,7 +348,7 @@ fn function_return_part(i: Input<'_>) -> Output<InlineType> {
 fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input<'_>) -> Output<LetBinding> {
         let position = i.position();
-        ws(map(
+        map(
             tuple((opt(sepr(tag("mut"))), var_decl, ws(char(':')), inline_type)),
             move |tuple| LetBinding {
                 position    : position,
@@ -358,7 +358,7 @@ fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
                 ty          : Some(tuple.3),
                 binding_id  : None,
             }
-        ))(i)
+        )(i)
     }
     separated_list0(ws(char(',')), ws(parameter))(i)
 }
@@ -383,79 +383,69 @@ fn function_transform_result(block: &mut Block, position: Position) {
 fn function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         ws(map(
-            pair(
+            tuple((
                 terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
-                tuple((ident, char('('), ws(function_parameter_list), char(')'), opt(ws(function_return_part))))
-            ),
+                terminated(ws(ident), char('(')), terminated(ws(function_parameter_list), char(')')), opt(ws(function_return_part))
+            )),
             |sig| Signature {
-                ident   : sig.1.0,
-                args    : sig.1.2,
-                ret     : if let Some(sig_ty) = sig.1.4 { Some(sig_ty) } else { None },
+                ident   : sig.1,
+                args    : sig.2,
+                ret     : if let Some(sig_ty) = sig.3 { Some(sig_ty) } else { None },
                 vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
             },
         ))(i)
     }
     let position = i.position();
-    ws(map( // TODO: would be nice to move with_scope after the fn keyword, but that's in function signature and would need some refactoring
+    ws(map(
         with_scope(tuple((signature, with_flags(&|state: &mut ParserFlags| state.in_function = true, alt((
             map(block, |b| Some(b)),
             map(ws(char(';')), |_| None)
         )))))),
-        move |mut func| {
-            if let Some(block) = &mut func.1 {
+        move |(sig, mut block)| {
+            if let Some(block) = &mut block {
                 function_transform_result(block, position);
             }
             Function {
                 position    : position,
-                sig         : func.0,
-                block       : func.1,
+                sig         : sig,
+                block       : block,
                 constant_id : None,
                 scope_id    : None,
             }
         }
-    ))(i.clone())
+    ))(i)
 }
 
 fn anonymous_function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         let position = i.position();
         ws(map(
-            pair(
-                ws(tag("fn")),
-                tuple((
-                    check_flags(char('('), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                    ws(function_parameter_list),
-                    char(')'),
-                    opt(ws(function_return_part))
-                ))
+            preceded(
+                check_flags(tag("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                pair(preceded(ws(char('(')), ws(function_parameter_list)), preceded(char(')'), opt(ws(function_return_part))))
             ),
             move |sig| Signature {
                 ident   : Ident { name: format!("anonymous@{}", position), position },
-                args    : sig.1.1,
-                ret     : if let Some(sig_ty) = sig.1.3 { Some(sig_ty) } else { None },
+                args    : sig.0,
+                ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
                 vis     : Visibility::Private,
             },
         ))(i)
     }
     let position = i.position();
-    ws(map( // TODO: would be nice to move with_scope after the fn keyword, but that's in function signature and would need some refactoring
-        with_scope(tuple((signature, with_flags(&|state: &mut ParserFlags| state.in_function = true, alt((
-            map(block, |b| Some(b)),
-            map(ws(char(';')), |_| None)
-        )))))),
-        move |mut func| {
-            if let Some(block) = &mut func.1 {
-                function_transform_result(block, position);
-            }
+    ws(map(
+        with_scope(pair(signature, block)),
+        move |(sig, mut block)| {
+            function_transform_result(&mut block, position);
             Function {
                 position    : position,
-                sig         : func.0,
-                block       : func.1,
+                sig         : sig,
+                block       : Some(block),
                 constant_id : None,
                 scope_id    : None,
             }
         }
-    ))(i.clone())
+    ))(i)
 }
 
 fn closure(i: Input<'_>) -> Output<Closure> {
@@ -464,7 +454,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
         ws(map(
             preceded(
                 check_flags(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(terminated(function_parameter_list, char('|')), opt(preceded(ws(tag("->")), inline_type)))
+                pair(terminated(ws(function_parameter_list), char('|')), opt(ws(function_return_part)))
             ),
             move |sig| Signature {
                 ident   : Ident { name: format!("closure@{}", position), position },
@@ -476,7 +466,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
     }
     let position = i.position();
     ws(map(
-        pair(signature, expression),
+        with_scope(pair(signature, expression)),
         move |(sig, mut expr)| {
             if let Expression::Block(block) = &mut expr {
                 function_transform_result(block, position);
@@ -490,7 +480,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 type_id     : None,
             }
         }
-    ))(i.clone())
+    ))(i)
 }
 
 fn return_statement(i: Input<'_>) -> Output<Return> {
