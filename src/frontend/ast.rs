@@ -361,7 +361,7 @@ impl Typeable for LetBinding {
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.binding_id {
             Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
-            None => unreachable!(),
+            None => { /* not resolved to binding yet */ },
         }
     }
 }
@@ -434,7 +434,7 @@ impl Typeable for Function {
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
-            None => unreachable!(),
+            None => { /* not resolved to constant yet */ },
         }
     }
 }
@@ -1245,7 +1245,7 @@ impl Typeable for Variable {
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.binding_id {
             Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
-            None => unreachable!(),
+            None => { /* not resolved to binding yet */ },
         }
     }
 }
@@ -1278,7 +1278,7 @@ impl Typeable for Constant {
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
-            None => unreachable!(),
+            None => { /* not resolved to constant yet */ },
         }
     }
 }
