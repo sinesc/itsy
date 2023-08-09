@@ -9,7 +9,7 @@ pub(crate) trait Typeable {
     /// Returns the type_id.
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId>;
     /// Returns a mutable reference to the type_id.
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId>;
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId);
 }
 
 /// Implements the Typeable trait for given structure.
@@ -19,8 +19,8 @@ macro_rules! impl_typeable {
             fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
                 self.type_id
             }
-            fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {   // FIXME: why is this compatible to the trait?
-                &mut self.type_id
+            fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+                self.type_id = Some(type_id);
             }
         }
     };
@@ -30,7 +30,7 @@ impl Typeable for TypeId {
     fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
         Some(*self)
     }
-    fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         panic!("Cannot mutate TypeId through Typeable trait.")
     }
 }
@@ -39,7 +39,7 @@ impl Typeable for Option<TypeId> {
     fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
         *self
     }
-    fn type_id_mut(self: &mut Self, _: &mut impl BindingContainer) -> &mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         panic!("Cannot mutate Option<TypeId> through Typeable trait.")
     }
 }
@@ -358,9 +358,9 @@ impl Typeable for LetBinding {
             None => None,
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.binding_id {
-            Some(binding_id) => &mut bindings.binding_by_id_mut(binding_id).type_id,
+            Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
             None => unreachable!(),
         }
     }
@@ -431,9 +431,9 @@ impl Typeable for Function {
             None => None,
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.constant_id {
-            Some(constant_id) => &mut bindings.constant_by_id_mut(constant_id).type_id,
+            Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => unreachable!(),
         }
     }
@@ -571,11 +571,11 @@ impl Typeable for InlineType {
             InlineType::CallableDef(f) => f.type_id(bindings),
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self {
-            InlineType::ArrayDef(array) => array.type_id_mut(bindings),
-            InlineType::TypeName(type_name) => type_name.type_id_mut(bindings),
-            InlineType::CallableDef(f) => f.type_id_mut(bindings),
+            InlineType::ArrayDef(array) => array.set_type_id(bindings, type_id),
+            InlineType::TypeName(type_name) => type_name.set_type_id(bindings, type_id),
+            InlineType::CallableDef(f) => f.set_type_id(bindings, type_id),
         }
     }
 }
@@ -862,8 +862,8 @@ impl Typeable for MatchBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.branches.first().unwrap().1.type_id(bindings)
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
-        self.branches.first_mut().unwrap().1.type_id_mut(bindings)
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+        self.branches.first_mut().unwrap().1.set_type_id(bindings, type_id)
     }
 }
 
@@ -912,9 +912,9 @@ impl Typeable for IfBlock {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         if let Some(result) = &mut self.if_block.result {
-            result.type_id_mut(bindings)
+            result.set_type_id(bindings, type_id)
         } else {
             panic!("attempted to set return type of if statement (not an expression)")
         }
@@ -965,9 +965,9 @@ impl Typeable for Block {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         self.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         if let Some(result) = &mut self.result {
-            result.type_id_mut(bindings)
+            result.set_type_id(bindings, type_id)
         } else {
             panic!("attempted to set return type of block statement (not an expression)")
         }
@@ -1044,8 +1044,8 @@ impl Typeable for Expression {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         impl_matchall!(self, Expression, item, { item.type_id(bindings) })
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
-        impl_matchall!(self, Expression, item, { item.type_id_mut(bindings) })
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+        impl_matchall!(self, Expression, item, { item.set_type_id(bindings, type_id) })
     }
 }
 
@@ -1242,9 +1242,9 @@ impl Typeable for Variable {
             None => None,
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.binding_id {
-            Some(binding_id) => &mut bindings.binding_by_id_mut(binding_id).type_id,
+            Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
             None => unreachable!(),
         }
     }
@@ -1275,9 +1275,9 @@ impl Typeable for Constant {
             None => None,
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self.constant_id {
-            Some(constant_id) => &mut bindings.constant_by_id_mut(constant_id).type_id,
+            Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => unreachable!(),
         }
     }
@@ -1424,12 +1424,12 @@ impl Typeable for BinaryOperand {
             Self::TypeName(v) => v.type_id(bindings),
         }
     }
-    fn type_id_mut<'t>(self: &'t mut Self, bindings: &'t mut impl BindingContainer) -> &'t mut Option<TypeId> {
+    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self {
-            Self::Expression(v) => v.type_id_mut(bindings),
+            Self::Expression(v) => v.set_type_id(bindings, type_id),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable"),
-            Self::Member(v) => v.type_id_mut(bindings),
-            Self::TypeName(v) => v.type_id_mut(bindings),
+            Self::Member(v) => v.set_type_id(bindings, type_id),
+            Self::TypeName(v) => v.set_type_id(bindings, type_id),
         }
     }
 }

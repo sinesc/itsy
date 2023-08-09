@@ -341,7 +341,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(item_type_id) = item.type_id(self) {
             self.check_type_equals(item, item_type_id, new_type_id)?;
         }
-        *item.type_id_mut(self) = Some(new_type_id);
+        item.set_type_id(self, new_type_id);
         Ok(())
     }
 
@@ -980,14 +980,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             And | Or => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
                 self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(Type::bool)?))?;
-                *item.type_id_mut(self) = Some(self.primitive_type_id(Type::bool)?);
+                item.set_type_id(self, self.primitive_type_id(Type::bool)?);
             },
             Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 let left_type_id = item.left.type_id(self);
                 self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
                 let right_type_id = item.right.type_id(self);
-                *item.type_id_mut(self) = Some(self.primitive_type_id(Type::bool)?);
+                item.set_type_id(self, self.primitive_type_id(Type::bool)?);
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
@@ -1101,7 +1101,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_type_name(item.right.as_type_name_mut().ice()?, expected_result)?;
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
                 if let Some(type_id) = item.right.type_id(self) {
-                    *item.type_id_mut(self) = Some(type_id);
+                    item.set_type_id(self, type_id);
                 }
                 if let (Some(from_type_id), Some(to_type_id)) = (item.left.type_id(self), item.right.type_id(self)) {
                     if from_type_id != to_type_id {
@@ -1355,7 +1355,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let new_type_id = self.scopes.insert_type(None, Type::Array(Array {
                 type_id : elements_type_id,
             }));
-            *item.type_id_mut(self) = Some(new_type_id);
+            item.set_type_id(self, new_type_id);
         } else if let Some(elements_type_id) = elements_type_id {
             let array_type_id = item.type_id(self).ice()?;
             let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().ice()?;
