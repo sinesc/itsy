@@ -141,7 +141,7 @@ impl HeapRefOp {
             x if x == Self::Dec as u8 => Self::Dec,
             x if x == Self::Free as u8 => Self::Free,
             x if x == Self::DecNoFree as u8 => Self::DecNoFree,
-            _ => panic!("Invalid HeapRefOp index {}", index),
+            _ => panic!("Invalid HeapRefOp index {}.", index),
         }
     }
 }
@@ -241,7 +241,7 @@ impl Constructor {
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
             x if x == Self::Enum as u8 => Self::Enum,
-            index @ _ => unreachable!("Invalid constructor type {}", index),
+            index @ _ => panic!("Invalid constructor type {}.", index),
         }
     }
     // Parses serialized constructor parameters with given constructor op.

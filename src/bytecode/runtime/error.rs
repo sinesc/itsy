@@ -47,9 +47,9 @@ impl Display for RuntimeError {
             RuntimeErrorKind::CannotClear => write!(f, "Cannot clear VM error. VM is not in a resumable state."),
             RuntimeErrorKind::UnexpectedReady => write!(f, "VM returned before reaching an exit or yld instruction."),
             RuntimeErrorKind::HeapCorruption => write!(f, "Heap elements remaining after program termination."),
-            RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}"),
-            RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}"),
-            RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}"),
+            RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}."),
+            RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}."),
+            RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}."),
         }
     }
 }

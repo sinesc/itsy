@@ -117,7 +117,7 @@ impl<T, U> VM<T, U> {
                 (CE::Float, 4)      => stack.push(f32::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::Float, 8)      => stack.push(f64::from_le_bytes(consts[start..end].try_into().unwrap())),
                 (CE::None, _)       => stack.extend_from(&consts[start..end]),
-                _ => panic!("Unexpected ConstDescriptor {:?}", &descriptor),
+                _ => panic!("Unexpected ConstDescriptor {:?}.", &descriptor),
             }
         }
         stack.begin();
@@ -232,7 +232,7 @@ impl<T, U> VM<T, U> {
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::Primitive => {
-                    panic!("Unexpected primitive constructor");
+                    panic!("Unexpected primitive constructor.");
                 },
             };
             *constructor_offset = parsed.next;

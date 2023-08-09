@@ -43,11 +43,11 @@ macro_rules! impl_builtins {
     // Resolver: Type id mapping for resolve() function
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Self) => { $type_id };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Array) => { $type_id };
-    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic type not defined but used.") };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic inner type is not resolved.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, str) => { $resolver.primitive_type_id(Type::String).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackAddress) => { $resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackOffset) => { $resolver.primitive_type_id(crate::STACK_OFFSET_TYPE).unwrap() };
-    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, HeapRef) => { $inner_type_id.expect("Generic type not defined but used.") };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, HeapRef) => { $inner_type_id.expect("Generic inner type is not resolved.") };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, $primitive:ident) => { $resolver.primitive_type_id(Type::$primitive).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::VOID };
     // Compiler: Write implementation variants
@@ -65,7 +65,7 @@ macro_rules! impl_builtins {
                 4 => $compiler.writer.call_builtinx(Builtin::$variant_32, constructor, 0),
                 2 => $compiler.writer.call_builtinx(Builtin::$variant_16, constructor, 0),
                 1 => $compiler.writer.call_builtinx(Builtin::$variant_8, constructor, 0),
-                _ => unreachable!("Invalid type size for builtin call"),
+                _ => panic!("Invalid type size for builtin call."),
             };
         }
     } };
@@ -73,7 +73,7 @@ macro_rules! impl_builtins {
         match $ty.primitive_size() {
             8 => $compiler.writer.call_builtin(Builtin::$variant_64),
             4 => $compiler.writer.call_builtin(Builtin::$variant_32),
-            _ => unreachable!("Invalid type size for builtin call"),
+            _ => panic!("Invalid type size for builtin call."),
         };
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident) => { {
@@ -82,7 +82,7 @@ macro_rules! impl_builtins {
             4 => $compiler.writer.call_builtin(Builtin::$variant_32),
             2 => $compiler.writer.call_builtin(Builtin::$variant_16),
             1 => $compiler.writer.call_builtin(Builtin::$variant_8),
-            _ => unreachable!("Invalid type size for builtin call"),
+            _ => panic!("Invalid type size for builtin call."),
         };
     } };
     (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
@@ -92,7 +92,7 @@ macro_rules! impl_builtins {
                 4 => $compiler.writer.call_builtin(Builtin::$variant_i32),
                 2 => $compiler.writer.call_builtin(Builtin::$variant_i16),
                 1 => $compiler.writer.call_builtin(Builtin::$variant_i8),
-                _ => unreachable!("Invalid type size for builtin call"),
+                _ => panic!("Invalid type size for builtin call."),
             };
         } else {
             match $ty.primitive_size() {
@@ -100,7 +100,7 @@ macro_rules! impl_builtins {
                 4 => $compiler.writer.call_builtin(Builtin::$variant_u32),
                 2 => $compiler.writer.call_builtin(Builtin::$variant_u16),
                 1 => $compiler.writer.call_builtin(Builtin::$variant_u8),
-                _ => unreachable!("Invalid type size for builtin call"),
+                _ => panic!("Invalid type size for builtin call."),
             };
         }
     } };
@@ -296,7 +296,7 @@ macro_rules! impl_builtins {
                             )+
                         )+
                     )+
-                    _ => panic!("Invalid Builtin index {}", index),
+                    _ => panic!("Invalid Builtin index {}.", index),
                 }
             }
             #[allow(unused_variables, unused_assignments, unused_imports)]

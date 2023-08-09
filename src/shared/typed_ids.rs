@@ -16,7 +16,7 @@ macro_rules! impl_typed_id {
             pub const fn new(input: usize) -> Self {
                 Self(match NonZeroUsize::new(input + 1) {
                     Some(v) => v,
-                    None => panic!("Input usize overflowed"),
+                    None => panic!("Input usize overflowed."),
                 })
             }
         }
@@ -27,7 +27,7 @@ macro_rules! impl_typed_id {
         }
         impl From<usize> for $name {
             fn from(input: usize) -> $name {
-                Self(NonZeroUsize::new(input + 1).expect("Input usize overflowed"))
+                Self(NonZeroUsize::new(input + 1).expect("Input usize overflowed."))
             }
         }
         impl Debug for $name {

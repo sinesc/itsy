@@ -916,7 +916,7 @@ impl Typeable for IfBlock {
         if let Some(result) = &mut self.if_block.result {
             result.set_type_id(bindings, type_id)
         } else {
-            panic!("attempted to set return type of if statement (not an expression)")
+            panic!("Cannot set return type of if statement (not an expression).")
         }
     }
 }
@@ -969,7 +969,7 @@ impl Typeable for Block {
         if let Some(result) = &mut self.result {
             result.set_type_id(bindings, type_id)
         } else {
-            panic!("attempted to set return type of block statement (not an expression)")
+            panic!("Cannot to set return type of block statement (not an expression).")
         }
     }
 }
@@ -1419,7 +1419,7 @@ impl Typeable for BinaryOperand {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match self {
             Self::Expression(v) => v.type_id(bindings),
-            Self::ArgumentList(_) => panic!("ArgumentList is not typeable"),
+            Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
             Self::Member(v) => v.type_id(bindings),
             Self::TypeName(v) => v.type_id(bindings),
         }
@@ -1427,7 +1427,7 @@ impl Typeable for BinaryOperand {
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self {
             Self::Expression(v) => v.set_type_id(bindings, type_id),
-            Self::ArgumentList(_) => panic!("ArgumentList is not typeable"),
+            Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
             Self::Member(v) => v.set_type_id(bindings, type_id),
             Self::TypeName(v) => v.set_type_id(bindings, type_id),
         }
@@ -1540,12 +1540,12 @@ impl UnaryOperator {
     pub fn prefix_from_string(op: &str) -> Self {
         match op {
             "!" => UnaryOperator::Not,
-            _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
+            _ => panic!("Parser yielded invalid prefix operator \"{}\".", op),
         }
     }
     pub fn suffix_from_string(op: &str) -> Self {
         match op {
-            _ => panic!("parser yielded invalid prefix operator \"{}\"", op),
+            _ => panic!("Parser yielded invalid prefix operator \"{}\".", op),
         }
     }
 }
@@ -1610,7 +1610,7 @@ impl BinaryOperator {
             "..=" => BinaryOperator::RangeInclusive,
             "." => BinaryOperator::Access,
 
-            _ => panic!("parser yielded invalid binary operator \"{}\"", op),
+            _ => panic!("Parser yielded invalid binary operator \"{}\".", op),
         }
     }
     pub fn is_simple(self: &Self) -> bool {

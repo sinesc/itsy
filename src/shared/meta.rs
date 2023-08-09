@@ -295,7 +295,7 @@ impl Type {
             2 => Self::u16,
             4 => Self::u32,
             8 => Self::u64,
-            _ => panic!("Unsupported unsigned integer size"), // unreachable! with string argument causes compile error
+            _ => panic!("Unsupported unsigned integer size."),
         }
     }
     /// Returns the type for a signed integer of the given byte-size.
@@ -305,7 +305,7 @@ impl Type {
             2 => Self::i16,
             4 => Self::i32,
             8 => Self::i64,
-            _ => panic!("Unsupported signed integer size"), // unreachable! with string argument causes compile error
+            _ => panic!("Unsupported signed integer size."),
         }
     }
     /// Whether the given numeric is compatible with this type.
@@ -323,7 +323,7 @@ impl Type {
                 Type::i16   => (Numeric::Signed(i16::MIN as Signed), Numeric::Signed(i16::MAX as Signed)),
                 Type::i32   => (Numeric::Signed(i32::MIN as Signed), Numeric::Signed(i32::MAX as Signed)),
                 Type::i64   => (Numeric::Signed(i64::MIN as Signed), Numeric::Signed(i64::MAX as Signed)),
-                _ => unreachable!(),
+                _ => panic!("Type is not numeric"),
             };
             range.0 <= value && range.1 >= value
         } else {

@@ -198,7 +198,7 @@ macro_rules! itsy_api {
                     $(
                         x if x == Self::$name as $crate::internals::binary::sizes::RustFnIndex => Self::$name,
                     )+
-                    _ => panic!("Invalid VMFunc index {}", index),
+                    _ => panic!("Invalid RustFnIndex {}.", index),
                 }
             }
             #[allow(unused_mut)]
@@ -243,7 +243,7 @@ macro_rules! itsy_api {
                             )?
                         },
                     )*
-                    $type_name::_dummy => panic!("Attempted to execute dummy function")
+                    func @ _ => panic!("Invalid RustFn {:?}.", func)
                 }
             }
         }

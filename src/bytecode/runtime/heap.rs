@@ -9,11 +9,11 @@ macro_rules! debug_assert_index {
         if $self.free_small.iter().find(|&&pos| pos == $index).is_some() ||
             $self.free_medium.iter().find(|&&pos| pos == $index).is_some() ||
             $self.free_large.iter().find(|&&pos| pos == $index).is_some() {
-            panic!("HEAP: operation on previously freed object {}", $index);
+            panic!("Heap operation on previously freed object {}.", $index);
         }
         #[cfg(debug_assertions)]
         if $index as usize >= $self.objects.len() {
-            panic!("HEAP: invalid heap object index {}", $index);
+            panic!("Invalid heap object index {}.", $index);
         }
     }
 }
@@ -382,9 +382,9 @@ impl_heap!(multi, HeapRef);
 /// References two elements of a slice mutably
 pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
     if a == b {
-        panic!("tried to index element {} twice", a);
+        panic!("Tried to index element {} twice.", a);
     } else if a >= slice.len() || b >= slice.len() {
-        panic!("index ({}, {}) out of bounds", a, b);
+        panic!("Index ({}, {}) out of bounds.", a, b);
     } else {
         if a > b {
             let (left, right) = slice.split_at_mut(a);

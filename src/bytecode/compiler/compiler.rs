@@ -266,7 +266,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Block(block) => self.compile_block(block),
             IfBlock(if_block) => self.compile_if_block(if_block),
             MatchBlock(match_block) => self.compile_match_block(match_block),
-            Closure(_closure) => unimplemented!("Closure compilation todo"),
+            Closure(_closure) => unimplemented!("Closure compilation"),
             AnonymousFunction(anonymous_function) => self.compile_anonymous_function(anonymous_function),
         }
     }
@@ -1057,7 +1057,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Returns the type of given AST item.
     fn ty(self: &Self, item: &impl Typeable) -> &Type {
         match item.type_id(self) {
-            None => panic!("Unresolved type encountered"),
+            None => panic!("Unresolved type encountered."),
             Some(type_id) => self.type_by_id(type_id)
         }
     }
@@ -1068,12 +1068,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(*self.constructors.get(&type_id).unwrap_or(&0))
     }
 
-    /// Generates an internal compiler error at the given item.
+    /// Generates an internal compiler error at the given item. Message should not end in a ".".
     fn ice_at<R>(item: &dyn Positioned, message: &str) -> CompileResult<R> {
         #[cfg(feature="ice_panics")]
-        panic!("Internal compiler error: {} at position {:?}", message, item.position());
+        panic!("Internal compiler error: {} at position {:?}.", message, item.position());
         #[cfg(not(feature="ice_panics"))]
-        Err(CompileError::new(item, CompileErrorKind::Internal(message.to_string()), ""))
+        Err(CompileError::new(item, CompileErrorKind::Internal(format!("{message}.")), ""))
     }
 
     /// Generates an internal compiler error.
@@ -1273,7 +1273,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 })?;
                 *prev_primitive = None;
             }
-            Type::Trait(_) => unimplemented!("trait constructor"),
             ty @ _ if ty.is_primitive() => {
                 // try to merge primitive with previous primitive
                 if let Some((offset, len)) = prev_primitive {
@@ -1414,7 +1413,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             match temp_from {
                 Type::i64 => self.writer.i64_to_string(),
                 Type::u64 => self.writer.u64_to_string(),
-                _ => unreachable!(),
+                _ => unreachable!("Match arm is not reachable because temp_from is created as an i64 or u64."),
             };
         } else if from == &Type::f32 && to.is_string() {
             self.writer.f32_to_string();
@@ -1424,7 +1423,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let from = self.ty(primitive);
             self.write_cast(from, to)?;
         } else if from != to {
-            unreachable!("Invalid cast {:?} to {:?}", from, to);
+            return Err(CompileError::ice(format!("Unsupported cast from {from:?} to {to:?}")));
         }
         Ok(position)
     }
@@ -1854,7 +1853,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_ceq()
         } else {
-            unimplemented!("general heap compare not yet implemented");
+            unimplemented!("General heap compare");
         })
     }
 
@@ -1871,7 +1870,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cneq()
         } else {
-            unimplemented!("general heap compare not yet implemented");
+            unimplemented!("General heap compare");
         })
     }
 
@@ -2009,7 +2008,7 @@ impl<T> TypeContainer for Compiler<T> {
         self.resolved.ty(type_id)
     }
     fn type_by_id_mut(self: &mut Self, _type_id: TypeId) -> &mut Type {
-        unreachable!("Compiler should not mutate types")
+        unreachable!("Compiler does not mutate types.")
     }
     fn type_flat_name(self: &Self, _type_id: TypeId) -> Option<&String> {
         None // TODO
@@ -2022,12 +2021,12 @@ impl<T> BindingContainer for Compiler<T> {
         self.resolved.binding(binding_id)
     }
     fn binding_by_id_mut(self: &mut Self, _binding_id: BindingId) -> &mut Binding {
-        unreachable!("Compiler should not mutate bindings")
+        unreachable!("Compiler does not mutate bindings.")
     }
     fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant {
         self.resolved.constant(constant_id)
     }
     fn constant_by_id_mut(self: &mut Self, _: ConstantId) -> &mut Constant {
-        unreachable!("Compiler should not mutate constants")
+        unreachable!("Compiler does not mutate constants.")
     }
 }

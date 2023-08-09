@@ -465,7 +465,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
             MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
             AnonymousFunction(anonymous_function) => self.resolve_function(anonymous_function, None),
-            Closure(_closure) => unimplemented!("Closure resolution todo"),
+            Closure(_closure) => unimplemented!("Closure resolution"),
         }
     }
 
@@ -1183,7 +1183,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.binding_id.is_none() {
             // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
             if self.scopes.local_binding_id(self.scope_id, &item.ident.name).is_some() {
-                unimplemented!("cannot shadow {}", item.ident.name); // todo: support shadowing
+                unimplemented!("Shadowing {}", item.ident.name); // todo: support shadowing
             }
             let binding_id = self.scopes.insert_binding(self.scope_id, &item.ident.name, item.mutable, None);
             item.binding_id = Some(binding_id);

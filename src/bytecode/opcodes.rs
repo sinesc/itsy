@@ -260,7 +260,7 @@ impl_opcodes!{
             32 => self.stack.push(if value > u32::MAX as T { u32::MAX } else if value < u32::MIN as T { u32::MIN } else { value as u32 }),
             16 => self.stack.push(if value > u16::MAX as T { u16::MAX } else if value < u16::MIN as T { u16::MIN } else { value as u16 }),
             8 => self.stack.push(if value > u8::MAX as T { u8::MAX } else if value < u8::MIN as T { u8::MIN } else { value as u8 }),
-            _ => unreachable!("Invalid size argument for trimu* opcode"),
+            _ => panic!("Invalid size argument for trimu* opcode."),
         };
     }
 
@@ -276,7 +276,7 @@ impl_opcodes!{
             32 => self.stack.push(if value > i32::MAX as T { i32::MAX } else if value < i32::MIN as T { i32::MIN } else { value as i32 }),
             16 => self.stack.push(if value > i16::MAX as T { i16::MAX } else if value < i16::MIN as T { i16::MIN } else { value as i16 }),
             8 => self.stack.push(if value > i8::MAX as T { i8::MAX } else if value < i8::MIN as T { i8::MIN } else { value as i8 }),
-            _ => unreachable!("Invalid size argument for trims* opcode"),
+            _ => panic!("Invalid size argument for trims* opcode."),
         };
     }
 
@@ -294,7 +294,7 @@ impl_opcodes!{
             64 => self.stack.push(value as u64),
             32 => self.stack.push(value as u32),
             16 => self.stack.push(value as u16),
-            _ => unreachable!("Invalid size argument for extend* opcode"),
+            _ => panic!("Invalid size argument for extend* opcode."),
         };
     }
 

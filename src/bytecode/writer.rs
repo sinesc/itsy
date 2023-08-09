@@ -137,7 +137,7 @@ impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
     }
     fn update_const(self: &Self, _position: StackAddress, _value: &str) {
         // this probably won't be needed and changing string length would be hairy
-        unimplemented!("Cannot update constant string");
+        unimplemented!("Constant string update");
     }
 }
 

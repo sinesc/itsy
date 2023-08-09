@@ -120,8 +120,8 @@ impl<T> OptionToResolveError<T> for Option<T> {
     fn ice(self: Self) -> ResolveResult<T> {
         #[cfg(feature="ice_panics")]
         if self.is_none() {
-            panic!("Internal compiler error: Expectation failed");
+            panic!("Internal compiler error: Expectation failed.");
         }
-        self.usr(None, ResolveErrorKind::Internal("Expectation failed".to_string()))
+        self.usr(None, ResolveErrorKind::Internal("Expectation failed.".to_string()))
     }
 }

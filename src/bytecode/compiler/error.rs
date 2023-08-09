@@ -79,10 +79,10 @@ impl<T> OptionToCompileError<T> for Option<T> {
             Ok(result)
         } else {
             #[cfg(feature="ice_panics")]
-            panic!("Internal compiler error: Expectation failed");
+            panic!("Internal compiler error: Expectation failed.");
             #[cfg(not(feature="ice_panics"))]
             Err(CompileError {
-                kind: CompileErrorKind::Internal("Expectation failed".to_string()),
+                kind: CompileErrorKind::Internal("Expectation failed.".to_string()),
                 position: Position(0),
                 module_path: "".to_string(),
             })

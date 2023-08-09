@@ -188,7 +188,7 @@ macro_rules! impl_opcodes {
                                 )+
                             )?
                         ),+
-                        _ => unreachable!("Invalid opcode"),
+                        op @ _ => panic!("Invalid opcode {op:?}."),
                     }
                 }
             }
@@ -230,7 +230,7 @@ macro_rules! impl_opcodes {
                             )+
                         )?
                     ),+
-                    _ => unreachable!("Invalid opcode"),
+                    op @ _ => panic!("Invalid opcode {op:?}."),
                 }
             }
 
@@ -312,7 +312,7 @@ macro_rules! impl_opcodes {
                                 )+
                             )?
                         ),+,
-                        _ => unreachable!("Invalid opcode"),
+                        op @ _ => panic!("Invalid opcode {op:?}."),
                     }
                 }
             }
