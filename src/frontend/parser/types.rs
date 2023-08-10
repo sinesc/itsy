@@ -82,28 +82,10 @@ impl ParserFlags {
 
 /// Interal parser state, tracked via RC through the Input type.
 pub(super) struct ParserState { // cannot implement clone because cell requires inner to be copy to be able to be cloned
-    pub len: usize,
-    pub max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
-    pub flags: Cell<ParserFlags>,
-    pub scopes: RefCell<Vec<UnorderedSet<String>>>,
-}
-
-impl ParserState {
-    pub fn push_scope(self: &Self) {
-        self.scopes.borrow_mut().push(UnorderedSet::new());
-    }
-    pub fn pop_scope(self: &Self) {
-        self.scopes.borrow_mut().pop();
-    }
-    pub fn add_binding(self: &Self, name: String) {
-        self.scopes.borrow_mut().last_mut().unwrap().insert(name);
-    }
-    pub fn has_binding(self: &Self, name: &str) -> bool {
-        let scopes = self.scopes.borrow_mut();
-        let dbg=scopes.iter().rev().find(|s| s.contains(name)).is_some();
-        //println!("has_binding {name}: {dbg}");
-        return dbg;
-    }
+    len: usize,
+    max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
+    flags: Cell<ParserFlags>,
+    scopes: RefCell<Vec<UnorderedSet<String>>>,
 }
 
 /// Parser input
@@ -136,6 +118,12 @@ impl<'a> Input<'a> {
             })
         }
     }
+    pub fn from_str(self: &Self, data: &'a str) -> Self {
+        Input {
+            data    : data,
+            state   : self.state.clone(),
+        }
+    }
     pub fn position(self: &Self) -> Position {
         Position(self.state.len - self.data.len())
     }
@@ -158,11 +146,20 @@ impl<'a> Input<'a> {
     pub fn flags(self: &Self) -> ParserFlags {
         self.state.flags.get()
     }
-    pub fn from_str(self: &Self, data: &'a str) -> Self {
-        Input {
-            data    : data,
-            state   : self.state.clone(),
-        }
+    pub fn push_scope(self: &Self) {
+        self.state.scopes.borrow_mut().push(UnorderedSet::new());
+    }
+    pub fn pop_scope(self: &Self) {
+        self.state.scopes.borrow_mut().pop();
+    }
+    pub fn add_binding(self: &Self, name: String) {
+        self.state.scopes.borrow_mut().last_mut().unwrap().insert(name);
+    }
+    pub fn has_binding(self: &Self, name: &str) -> bool {
+        let scopes = self.state.scopes.borrow_mut();
+        let dbg=scopes.iter().rev().find(|s| s.contains(name)).is_some();
+        //println!("has_binding {name}: {dbg}");
+        return dbg;
     }
 }
 

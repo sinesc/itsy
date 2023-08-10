@@ -40,10 +40,10 @@ fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P)
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        let state = i.flags();
+        let flags = i.flags();
         i.flags_mut(s);
         let inner_result = parser.parse(input);
-        i.flags_mut(|s| *s = state);
+        i.flags_mut(|s| *s = flags);
         inner_result
     }
 }
@@ -53,9 +53,9 @@ fn with_scope<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Outpu
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        i.state.push_scope();
+        i.push_scope();
         let inner_result = parser.parse(input);
-        i.state.pop_scope();
+        i.pop_scope();
         inner_result
     }
 }
@@ -89,7 +89,7 @@ fn var_decl(i: Input<'_>) -> Output<Ident> {
     map(
         ident,
         move |id| {
-            j.state.add_binding(id.name.clone());
+            j.add_binding(id.name.clone());
             id
         }
     )(i)
@@ -397,7 +397,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     }
     let position = i.position();
     ws(map(
-        with_scope(tuple((signature, with_flags(&|state: &mut ParserFlags| state.in_function = true, alt((
+        with_scope(tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
             map(block, |b| Some(b)),
             map(ws(char(';')), |_| None)
         )))))),
@@ -778,7 +778,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(anonymous_function, move |m| Expression::AnonymousFunction(Box::new(m))),
             map(path, move |mut m| {
                 // single element paths may be variables if their names exist in the current scope
-                if m.name.len() == 1 && j.state.has_binding(&m.name[0].name) {
+                if m.name.len() == 1 && j.has_binding(&m.name[0].name) {
                     Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None })
                 } else {
                     Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
@@ -1109,7 +1109,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     ws(map(
         preceded(
             check_flags(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|state: &mut ParserFlags| state.in_loop = true, block)))
+            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|flags: &mut ParserFlags| flags.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
@@ -1133,7 +1133,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     ws(map(
         preceded(
             check_flags(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
-            pair(sepl(expression), with_flags(&|state: &mut ParserFlags| state.in_loop = true, block))
+            pair(sepl(expression), with_flags(&|flags: &mut ParserFlags| flags.in_loop = true, block))
         ),
         move |m| WhileLoop {
             position: position,
@@ -1215,7 +1215,7 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
                 }
                 nom::Err::Error(_) => {
                     // nom error is useless to us, but we stored the highest parsed offset on the input which is the most likely error position
-                    let error = input.state.max_parsed.take();
+                    let error = input.max_parsed();
                     Err(ParseError::new(ParseErrorKind::SyntaxError, Position(src.len() - error.1), module_path))
                 }
             }
