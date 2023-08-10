@@ -19,7 +19,7 @@ macro_rules! impl_typeable {
             fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
                 self.type_id
             }
-            fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+            fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, type_id: TypeId) {
                 self.type_id = Some(type_id);
             }
         }
@@ -30,7 +30,7 @@ impl Typeable for TypeId {
     fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
         Some(*self)
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, _type_id: TypeId) {
         panic!("Cannot mutate TypeId through Typeable trait.")
     }
 }
@@ -39,7 +39,7 @@ impl Typeable for Option<TypeId> {
     fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
         *self
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, _type_id: TypeId) {
         panic!("Cannot mutate Option<TypeId> through Typeable trait.")
     }
 }
