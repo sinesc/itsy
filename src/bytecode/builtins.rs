@@ -1129,6 +1129,9 @@ impl_builtins! {
     /// offsets, not byte offsets. Internally strings are an immutable reference type that behaves like
     /// a mutable value type.
     ///
+    /// String literals interpolate expressions encased in curly braces. The expression result needs to
+    /// support `as`-casting to String.
+    ///
     /// # Examples
     ///
     /// ``` ignore
@@ -1137,6 +1140,7 @@ impl_builtins! {
     /// hello += "!";
     ///
     /// println("{hello} <-> {original_hello}");
+    /// println("There are {hello.len()} letters in {hello}");
     /// ```
     ///
     /// This prints `Добридень! <-> Добридень`.
