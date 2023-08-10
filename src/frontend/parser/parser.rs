@@ -49,11 +49,11 @@ fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P)
 }
 
 /// Pushes a new scope to the scope stack before running the given parser. Pops scope afterwards.
-fn with_scope<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+fn with_scope<'a, P: 'a, O: 'a>(transparent: bool, mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        i.push_scope();
+        i.push_scope(transparent);
         let inner_result = parser.parse(input);
         i.pop_scope();
         inner_result
@@ -397,7 +397,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     }
     let position = i.position();
     ws(map(
-        with_scope(tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
+        with_scope(false, tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
             map(block, |b| Some(b)),
             map(ws(char(';')), |_| None)
         )))))),
@@ -434,7 +434,7 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
     }
     let position = i.position();
     ws(map(
-        with_scope(pair(signature, block)),
+        with_scope(false, pair(signature, block)),
         move |(sig, mut block)| {
             function_transform_result(&mut block, position);
             Function {
@@ -466,7 +466,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
     }
     let position = i.position();
     ws(map(
-        with_scope(pair(signature, expression)),
+        with_scope(true, pair(signature, expression)),
         move |(sig, mut expr)| {
             if let Expression::Block(block) = &mut expr {
                 function_transform_result(block, position);
@@ -1002,7 +1002,7 @@ fn block(i: Input<'_>) -> Output<Block> {
     ws(map(
         delimited(
             ws(char('{')),
-            with_scope(pair(many0(statement), opt(expression))),
+            with_scope(true, pair(many0(statement), opt(expression))),
             ws(char('}'))
         ),
         move |m| Block::new(position, m.0, m.1)

@@ -85,7 +85,7 @@ pub(super) struct ParserState { // cannot implement clone because cell requires 
     len: usize,
     max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
     flags: Cell<ParserFlags>,
-    scopes: RefCell<Vec<UnorderedSet<String>>>,
+    scopes: RefCell<Vec<(bool, UnorderedSet<String>)>>,
 }
 
 /// Parser input
@@ -146,20 +146,25 @@ impl<'a> Input<'a> {
     pub fn flags(self: &Self) -> ParserFlags {
         self.state.flags.get()
     }
-    pub fn push_scope(self: &Self) {
-        self.state.scopes.borrow_mut().push(UnorderedSet::new());
+    pub fn push_scope(self: &Self, transparent: bool) {
+        self.state.scopes.borrow_mut().push((transparent, UnorderedSet::new()));
     }
     pub fn pop_scope(self: &Self) {
         self.state.scopes.borrow_mut().pop();
     }
     pub fn add_binding(self: &Self, name: String) {
-        self.state.scopes.borrow_mut().last_mut().unwrap().insert(name);
+        self.state.scopes.borrow_mut().last_mut().unwrap().1.insert(name);
     }
     pub fn has_binding(self: &Self, name: &str) -> bool {
         let scopes = self.state.scopes.borrow_mut();
-        let dbg=scopes.iter().rev().find(|s| s.contains(name)).is_some();
-        //println!("has_binding {name}: {dbg}");
-        return dbg;
+        for &(transparent, ref bindings) in scopes.iter().rev() {
+            if bindings.contains(name) {
+                return true;
+            } else if !transparent {
+                break;
+            }
+        }
+        return false;
     }
 }
 
