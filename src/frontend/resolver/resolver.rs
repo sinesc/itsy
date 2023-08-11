@@ -140,7 +140,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
         for module in &mut program.0 {
             resolver.module_path = &module.path;
-            resolver.scope_id = module.scope_id.unwrap();
+            resolver.scope_id = module.scope_id.ice()?;
             for mut statement in module.ast.iter_mut() {
                 if let Err(mut err) = resolver.resolve_statement(&mut statement) {
                     err.module_path = module.path.clone();
@@ -322,7 +322,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if self.stage.must_resolve() {
             if item.is_resolved() {
                 match expected_result {
-                    Some(expected_result) => self.check_type_accepted_for(item, item.type_id(self).unwrap(), expected_result),
+                    Some(expected_result) => self.check_type_accepted_for(item, item.type_id(self).ice()?, expected_result),
                     None => Ok(()),
                 }
             } else {
@@ -447,7 +447,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if !self.stage.must_resolve() || unresolved.is_none() {
             Ok(())
         } else {
-            Err(ResolveError::new(item, ResolveErrorKind::UndefinedItem(unresolved.unwrap()), self.module_path))
+            Err(ResolveError::new(item, ResolveErrorKind::UndefinedItem(unresolved.ice()?), self.module_path))
         }
     }
 
@@ -560,7 +560,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             .collect();
         // insert or update type
         if let Some(type_id) = item.type_id {
-            self.type_by_id_mut(type_id).as_struct_mut().unwrap().fields = fields;
+            self.type_by_id_mut(type_id).as_struct_mut().ice()?.fields = fields;
         } else {
             let qualified = self.make_path(&[ &item.ident.name ]);
             let type_id = self.scopes.insert_type(Some(&qualified), Type::Struct(Struct { fields, impl_traits: Map::new() }));
@@ -631,7 +631,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // insert or update type
         if let Some(type_id) = item.type_id {
-            self.type_by_id_mut(type_id).as_enum_mut().unwrap().variants = variants;
+            self.type_by_id_mut(type_id).as_enum_mut().ice()?.variants = variants;
         } else {
             let qualified = self.make_path(&[ &item.ident.name ]);
             let primitive = if item.is_primitive() {
@@ -654,7 +654,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     ast::VariantKind::Data(function_id @ None, fields) => {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
                         let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
-                        let kind = FunctionKind::Variant(item.type_id.unwrap(), index as VariantIndex);
+                        let kind = FunctionKind::Variant(item.type_id.ice()?, index as VariantIndex);
                         *function_id = Some(self.scopes.insert_function(&path, item.type_id, arg_type_ids, Some(kind)));
                     },
                     _ => { },
@@ -687,11 +687,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_function(function, Some(type_id))?;
                 // if this is a trait impl and the trait is resolved
                 if let Some(Some(trait_type_id)) = trait_type_id {
-                    let trt = self.type_by_id(trait_type_id).as_trait().unwrap();
+                    let trt = self.type_by_id(trait_type_id).as_trait().ice()?;
                     let function_name = &function.sig.ident.name;
                     // check if function is defined in trait
                     if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
-                        let trait_name = item.trt.as_ref().unwrap().path.to_string();
+                        let trait_name = item.trt.as_ref().ice()?.path.to_string();
                         return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                     }
                     if let Some(constant_id) = function.constant_id {
@@ -732,16 +732,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // try to resolve functions
         for function in &mut item.functions {
-            self.resolve_function(function, Some(item.type_id.unwrap()))?;
+            self.resolve_function(function, Some(item.type_id.ice()?))?;
         }
         // update trait
         for function in &item.functions {
             if let Some(constant_id) = function.constant_id {
                 let name = &function.sig.ident.name;
-                let trt = self.type_by_id_mut(item.type_id.unwrap()).as_trait_mut().unwrap();
+                let trt = self.type_by_id_mut(item.type_id.ice()?).as_trait_mut().ice()?;
                 match function.block {
-                    Some(_) => *trt.provided.get_mut(name).unwrap() = Some(constant_id),
-                    None => *trt.required.get_mut(name).unwrap() = Some(constant_id),
+                    Some(_) => *trt.provided.get_mut(name).ice()? = Some(constant_id),
+                    None => *trt.required.get_mut(name).ice()? = Some(constant_id),
                 };
             }
         }
@@ -778,7 +778,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let arg_type_ids: Vec<_> = item.sig.arg_type_ids(self);
             // function/method switch
             let (function_kind, qualified, alias) = if let Some(type_id) = struct_scope {
-                let type_name = self.type_flat_name(type_id).unwrap();
+                let type_name = self.type_flat_name(type_id).ice()?;
                 let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
                 if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" { // FIXME ugh
                     let alias = self.make_path(&[ "Self", &item.sig.ident.name ]);
@@ -928,7 +928,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         array.type_id = Some(iter_type_id);
                     }
                 } else if self.item_type(&item.expr).map_or(false, |expr| expr.as_array().is_none()) {
-                    let type_name = self.type_name(item.expr.type_id(self).unwrap());
+                    let type_name = self.type_name(item.expr.type_id(self).ice()?);
                     return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
                 }
             },
@@ -1209,7 +1209,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // check binding is resolved. Resolvable (via resolved_or_err) does not do this for us. (TODO/FIXME)
         if self.stage.must_resolve() {
-            if let Binding { type_id: None, .. } = self.binding_by_id(item.binding_id.unwrap()) {
+            if let Binding { type_id: None, .. } = self.binding_by_id(item.binding_id.ice()?) {
                 return Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(item.ident.to_string()), self.module_path))
             }
         }

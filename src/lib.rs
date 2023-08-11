@@ -142,8 +142,8 @@ macro_rules! itsy_api {
     (@handle_param_type str) => { $crate::internals::binary::heap::HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
-    (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).to_string() };
-    (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name) };
+    (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap().to_string() };
+    (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap() };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
     // VM: Translate some pseudo-type names to concrete rust types.
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed

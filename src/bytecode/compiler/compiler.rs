@@ -86,7 +86,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let trait_implementors: Vec<_> = resolved.implementors().collect();
 
     // save flattened list of trait implementations and their concrete function ids for later serialization (once compilation is done and absolute function addresses are known)
-    let trait_function_implementations = Compiler::<T>::select_trait_function_implementations(&resolved, &trait_functions, &trait_implementors);
+    let trait_function_implementations = Compiler::<T>::select_trait_function_implementations(&resolved, &trait_functions, &trait_implementors)?;
 
     // initialize compiler struct used while visiting every ast node
     let mut compiler = Compiler {
@@ -371,13 +371,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Variable(var) => {
                 self.compile_call_args(item, FunctionKind::Function)?;
                 self.compile_variable(var)?;
-                self.write_call_dynamic(var.type_id(self).ice()?);
+                self.write_call_dynamic(var.type_id(self).ice()?)?;
                 Ok(())
             },
             BinaryOp(binary_op) => {
                 self.compile_call_args(item, FunctionKind::Function)?;
                 self.compile_binary_op(binary_op)?;
-                self.write_call_dynamic(binary_op.type_id(self).ice()?);
+                self.write_call_dynamic(binary_op.type_id(self).ice()?)?;
                 Ok(())
             },
             _ => Self::ice_at(item, "Invalid call operand")?,
@@ -1663,13 +1663,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Writes a call_dynamic instruction.
-    fn write_call_dynamic(self: &mut Self, type_id: TypeId) -> StackAddress {
-        let arg_size = self.ty(&type_id).as_callable().unwrap().arg_size(self);
-        self.writer.call_dynamic(arg_size)
+    fn write_call_dynamic(self: &mut Self, type_id: TypeId) -> CompileResult<StackAddress> {
+        let arg_size = self.ty(&type_id).as_callable().ice()?.arg_size(self);
+        Ok(self.writer.call_dynamic(arg_size))
     }
 
     /// Writes instructions for build-in len method.
-    fn write_builtin(self: &Self, ty: &Type, builtin: BuiltinType) -> CompileResult<StackAddress>{
+    fn write_builtin(self: &Self, ty: &Type, builtin: BuiltinType) -> CompileResult<StackAddress> {
         let type_id = self.resolved.types().find(|m| m.1 == ty).ice()?.0;
         #[allow(unreachable_patterns)]
         Ok(match (ty, builtin) {
@@ -1935,8 +1935,8 @@ impl<T> Compiler<T> {
     fn filter_trait_functions(resolved: &Resolved) -> Vec<(TypeId, &String, FunctionId)> {
         resolved.traits()
             .flat_map(|(type_id, trt)| {
-                trt.provided.iter().map(move |(function_name, function_id)| (type_id, function_name, resolved.constant(function_id.unwrap()).value.as_function_id().unwrap()))
-                .chain(trt.required.iter().map(move |(function_name, function_id)| (type_id, function_name, resolved.constant(function_id.unwrap()).value.as_function_id().unwrap())))
+                trt.provided.iter().map(move |(function_name, constant_id)| (type_id, function_name, resolved.constant(constant_id.unwrap()).value.as_function_id().unwrap()))
+                .chain(trt.required.iter().map(move |(function_name, constant_id)| (type_id, function_name, resolved.constant(constant_id.unwrap()).value.as_function_id().unwrap())))
             })
             .collect()
     }
@@ -1966,7 +1966,7 @@ impl<T> Compiler<T> {
             for &(_, implementor_traits) in trait_implementors.iter() {
                 if let Some(impl_trait) = implementor_traits.get(&trait_type_id) {
                     if let Some(&implementor_function_id) = impl_trait.functions.get(function_name) {
-                        let implementor_function_id = resolved.constant(implementor_function_id.ice_msg("Unresolved implementor function")?).value.as_function_id().unwrap();
+                        let implementor_function_id = resolved.constant(implementor_function_id.ice_msg("Unresolved implementor function")?).value.as_function_id().ice()?;
                         trait_function_implementors.insert(implementor_function_id, trait_function_id);
                     }
                 }
@@ -1980,24 +1980,23 @@ impl<T> Compiler<T> {
     /// This allows for the lookup position to be computed as `table_start + function_index * num_trait_implementors + trait_implementor_index` (sizeof<ItemIndex> multipliers omitted)
     /// Since the first three components are statically known their result can be statically supplied to call_virtual. The implementor index is stored
     /// on the heap object the function is being called on.
-    fn select_trait_function_implementations(resolved: &Resolved, trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> Vec<(usize, Option<FunctionId>)> {
+    fn select_trait_function_implementations(resolved: &Resolved, trait_functions: &Vec<(TypeId, &String, FunctionId)>, trait_implementors: &Vec<(TypeId, &Map<TypeId, ImplTrait>)>) -> CompileResult<Vec<(usize, Option<FunctionId>)>> {
         let mut trait_implementation_mapping = Vec::new();
         for &(trait_type_id, function_name, trait_function_id) in trait_functions.iter() {
             for (implementor_index, &(_, implementor_traits)) in trait_implementors.iter().enumerate() {
                 trait_implementation_mapping.push((implementor_index, match implementor_traits.get(&trait_type_id) {
                     Some(impl_trait) => {
-                        impl_trait.functions.get(function_name).map_or(Some(trait_function_id), |c|
-                            resolved.constant(c.unwrap()).value.as_function_id()
-                        )
-
-
-                        //.unwrap_or(&Some(trait_function_id))
+                        if let Some(constant_id) = impl_trait.functions.get(function_name) {
+                            Some(resolved.constant(constant_id.ice()?).value.as_function_id().ice()?)
+                        } else {
+                            Some(trait_function_id)
+                        }
                     },
                     None => None,
                 }));
             }
         }
-        trait_implementation_mapping
+        Ok(trait_implementation_mapping)
     }
 }
 

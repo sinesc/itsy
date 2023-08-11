@@ -288,12 +288,12 @@ impl Heap {
         }
     }
     /// Returns a string slice for the given heap reference.
-    pub fn string(self: &Self, item: HeapRef) -> &str {
+    pub fn string(self: &Self, item: HeapRef) -> Option<&str> {
         debug_assert_index!(self, item.index());
         let (index, offset) = item.into();
         let slice = &self.objects[index as usize].data[offset as usize..];
         //un safe { std::str::from_utf8_unchecked(&slice) }
-        std::str::from_utf8(slice).unwrap()
+        std::str::from_utf8(slice).ok()
     }
     // Compares string of one heap object with another.
     pub fn compare_string(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
