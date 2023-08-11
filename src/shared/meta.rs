@@ -110,7 +110,7 @@ pub struct Trait {
     pub required: Map<String, Option<ConstantId>>,
 }
 
-/// Callable type (closure or function in type position).
+/// Type-information for a function or closure.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Callable {
     pub arg_type_ids: Vec<Option<TypeId>>,
@@ -134,7 +134,7 @@ impl Callable {
     }
 }
 
-/// Function mata information.
+/// A concrete function implementation, referring to a bit of Itsy or Rust code.
 #[derive(Clone, Debug)]
 pub struct Function {
     pub kind                : Option<FunctionKind>,
@@ -338,13 +338,6 @@ impl Type {
             _ => false,
         }
     }
-    /*/// Whether the type is a copy type.
-    pub const fn is_copy(self: &Self) -> bool {
-        match self {
-            Type::String => true,
-            _ => self.is_primitive(),
-        }
-    }*/
     /// Whether the type is a primitive.
     pub const fn is_primitive(self: &Self) -> bool {
         !self.is_ref()
@@ -356,13 +349,6 @@ impl Type {
             _ => false,
         }
     }
-    /*/// Whether the type is void.
-    pub const fn is_void(self: &Self) -> bool {
-        match self {
-            Type::void => true,
-            _ => false
-        }
-    }*/
     /// Whether the type is unsigned
     pub const fn is_unsigned(self: &Self) -> bool {
         match self {
