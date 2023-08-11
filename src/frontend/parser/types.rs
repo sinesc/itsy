@@ -80,12 +80,34 @@ impl ParserFlags {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum ScopeType {
+    /// Blocks are fully transparent to parent bindings.
+    Block,
+    /// Closures are transparent to parent bindings, but they will have to be
+    /// converted to struct member access since that's how closures 'close over' variables.
+    Closure,
+    /// Functions are non-transparent. Parent scope bindings are inaccessible.
+    Function,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum ScopeBindingType {
+    /// Binding originates in the current scope or is reachable through transparent scopes.
+    Local,
+    /// Binding originates outside the current closure and needs to be captured.
+    Parent,
+    /// Not a binding or behind a non-transparent scope.
+    None,
+}
+
+
 /// Interal parser state, tracked via RC through the Input type.
 pub(super) struct ParserState { // cannot implement clone because cell requires inner to be copy to be able to be cloned
     len: usize,
     max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
     flags: Cell<ParserFlags>,
-    scopes: RefCell<Vec<(bool, UnorderedSet<String>)>>,
+    scopes: RefCell<Vec<(ScopeType, UnorderedSet<String>)>>,
 }
 
 /// Parser input
@@ -146,8 +168,8 @@ impl<'a> Input<'a> {
     pub fn flags(self: &Self) -> ParserFlags {
         self.state.flags.get()
     }
-    pub fn push_scope(self: &Self, transparent: bool) {
-        self.state.scopes.borrow_mut().push((transparent, UnorderedSet::new()));
+    pub fn push_scope(self: &Self, scope_type: ScopeType) {
+        self.state.scopes.borrow_mut().push((scope_type, UnorderedSet::new()));
     }
     pub fn pop_scope(self: &Self) {
         self.state.scopes.borrow_mut().pop();
@@ -155,16 +177,23 @@ impl<'a> Input<'a> {
     pub fn add_binding(self: &Self, name: String) {
         self.state.scopes.borrow_mut().last_mut().unwrap().1.insert(name);
     }
-    pub fn has_binding(self: &Self, name: &str) -> bool {
+    pub fn has_binding(self: &Self, name: &str) -> ScopeBindingType {
         let scopes = self.state.scopes.borrow_mut();
-        for &(transparent, ref bindings) in scopes.iter().rev() {
+        // initially assume binding is local
+        let mut scope_binding_type = ScopeBindingType::Local;
+        for &(scope_type, ref bindings) in scopes.iter().rev() {
             if bindings.contains(name) {
-                return true;
-            } else if !transparent {
+                // binding found, return type
+                return scope_binding_type;
+            } else if scope_type == ScopeType::Closure {
+                // binding not found and scope is a closure, downgrade protential binding type (if found) to Parent
+                scope_binding_type = ScopeBindingType::Parent;
+            } else if scope_type == ScopeType::Function {
+                // function scope encountered, binding not found, fall through to exit
                 break;
             }
         }
-        return false;
+        return ScopeBindingType::None;
     }
 }
 

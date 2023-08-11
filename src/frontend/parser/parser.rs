@@ -13,7 +13,7 @@ use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
 use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
-use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram};
+use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram, ScopeBindingType, ScopeType};
 use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
@@ -49,11 +49,11 @@ fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P)
 }
 
 /// Pushes a new scope to the scope stack before running the given parser. Pops scope afterwards.
-fn with_scope<'a, P: 'a, O: 'a>(transparent: bool, mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+fn with_scope<'a, P: 'a, O: 'a>(scope_type: ScopeType, mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        i.push_scope(transparent);
+        i.push_scope(scope_type);
         let inner_result = parser.parse(input);
         i.pop_scope();
         inner_result
@@ -397,7 +397,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     }
     let position = i.position();
     ws(map(
-        with_scope(false, tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
+        with_scope(ScopeType::Function, tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
             map(block, |b| Some(b)),
             map(ws(char(';')), |_| None)
         )))))),
@@ -434,7 +434,7 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
     }
     let position = i.position();
     ws(map(
-        with_scope(false, pair(signature, block)),
+        with_scope(ScopeType::Function, pair(signature, block)),
         move |(sig, mut block)| {
             function_transform_result(&mut block, position);
             Function {
@@ -466,7 +466,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
     }
     let position = i.position();
     ws(map(
-        with_scope(true, pair(signature, expression)),
+        with_scope(ScopeType::Closure, pair(signature, expression)),
         move |(sig, mut expr)| {
             if let Expression::Block(block) = &mut expr {
                 function_transform_result(block, position);
@@ -778,11 +778,23 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(anonymous_function, move |m| Expression::AnonymousFunction(Box::new(m))),
             map(path, move |mut m| {
                 // single element paths may be variables if their names exist in the current scope
-                if m.name.len() == 1 && j.has_binding(&m.name[0].name) {
-                    Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None })
-                } else {
-                    Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
+                if m.name.len() == 1 {
+                    match j.has_binding(&m.name[0].name) {
+                        // local variable binding
+                        ScopeBindingType::Local => return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None }),
+                        // a binding originating in a parent of the current closure, convert to struct access (hidden closure struct)
+                        ScopeBindingType::Parent => return Expression::BinaryOp(Box::new(BinaryOp {
+                            position: m.position,
+                            op: BinaryOperator::Access,
+                            left: BinaryOperand::Expression(Expression::Variable(Variable { position: m.position, ident: Ident { name: "self".to_string(), position: m.position }, binding_id: None })),
+                            right: BinaryOperand::Member(Member { type_id: None, position: m.position, ident: m.name[0].clone(), constant_id: None }),
+                            type_id: None,
+                        })),
+                        // not a binding, fall through to handle name.len() != 1 case as well
+                        _ => {},
+                    }
                 }
+                Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
             }),
             map(closure, move |m| Expression::Closure(Box::new(m))),
         )))(i)
@@ -1002,7 +1014,7 @@ fn block(i: Input<'_>) -> Output<Block> {
     ws(map(
         delimited(
             ws(char('{')),
-            with_scope(true, pair(many0(statement), opt(expression))),
+            with_scope(ScopeType::Block, pair(many0(statement), opt(expression))),
             ws(char('}'))
         ),
         move |m| Block::new(position, m.0, m.1)
