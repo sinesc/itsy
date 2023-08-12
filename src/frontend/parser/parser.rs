@@ -475,12 +475,13 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 function_transform_result(block, position);
             }
             Closure {
-                position    : position,
-                sig         : sig,
-                expr        : expr,
+                position ,
+                sig,
+                expr,
                 function_id : None,
                 scope_id    : None,
                 type_id     : None,
+                required_bindings,
             }
         }
     )))(i)

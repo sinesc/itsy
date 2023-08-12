@@ -385,6 +385,7 @@ pub struct Closure {
     pub expr        : Expression,
     pub type_id     : Option<TypeId>,
     pub function_id : Option<FunctionId>,
+    pub required_bindings: UnorderedSet<String>,
     pub scope_id    : Option<ScopeId>,
 }
 

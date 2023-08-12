@@ -220,7 +220,20 @@ impl<'a> Input<'a> {
     pub fn take_required_bindings(self: &Self) -> UnorderedSet<String> {
         let mut scopes = self.state.scopes.borrow_mut();
         let scope = scopes.last_mut().unwrap();
-        std::mem::replace(&mut scope.require_bindings, UnorderedSet::new())
+        let bindings = std::mem::replace(&mut scope.require_bindings, UnorderedSet::new());
+        for scope in scopes.iter_mut().rev().skip(1) {
+            if scope.kind == ScopeKind::Closure {
+                // propagate required bindings to parent closure
+                for binding in &bindings {
+                    scope.require_bindings.insert(binding.clone());
+                }
+                break;
+            } else if scope.kind == ScopeKind::Function {
+                // function scope encountered, no need to look any further for closures
+                break;
+            }
+        }
+        bindings
     }
 }
 
