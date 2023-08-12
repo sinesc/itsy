@@ -800,7 +800,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
             let function_id = self.scopes.constant_function_id(constant_id).ice()?;
             item.constant_id = Some(constant_id);
-            self.scopes.set_scopefunction_id(self.scope_id, function_id);
+            self.scopes.scope_set_function_id(self.scope_id, function_id);
         }
         if let Some(constant_id) = item.constant_id {
             let function_id = self.scopes.constant_function_id(constant_id).ice()?;
@@ -815,7 +815,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
-        let function_id = self.scopes.scopefunction_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
+        let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
         let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
         self.types_resolved(&mut item.expr, None)?;
         self.resolve_expression(&mut item.expr, ret_type_id)?;

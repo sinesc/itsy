@@ -106,19 +106,19 @@ impl Scopes {
 /// Function-scope handling
 impl Scopes {
 
-    /// Sets the id of the function containing this scope.
-    pub fn set_scopefunction_id(self: &mut Self, scope_id: ScopeId, function_id: FunctionId) {
+    /// Sets the id of the function containing this scope. Used to check return types against function signature.
+    pub fn scope_set_function_id(self: &mut Self, scope_id: ScopeId, function_id: FunctionId) {
         self.scopefunction.insert(scope_id, Some(function_id));
     }
 
     /* /// Registers that this scope has a function attached to it but its id is not known yet.
     /// Does nothing if the scope already has a known function id.
-    pub fn register_scopefunction(self: &mut Self, scope_id: ScopeId) {
+    pub fn scope_register_function(self: &mut Self, scope_id: ScopeId) {
         self.scopefunction.entry(scope_id).or_insert(None);
     }*/
 
     /// Finds the id of the closest function containing this scope.
-    pub fn scopefunction_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
+    pub fn scope_function_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
         loop {
             // Check if we have a resolved or unresolved scope id. Don't look in parent if we have one that is just not resolved yet.
             if let Some(&function_id) = self.scopefunction.get(&scope_id) {
