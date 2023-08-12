@@ -81,7 +81,7 @@ impl ParserFlags {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum ScopeType {
+pub(super) enum ScopeKind {
     /// Blocks are fully transparent to parent bindings.
     Block,
     /// Closures are transparent to parent bindings, but they will have to be
@@ -101,13 +101,18 @@ pub(super) enum ScopeBindingType {
     None,
 }
 
+struct Scope {
+    kind: ScopeKind,
+    have_bindings: UnorderedSet<String>,
+    require_bindings: UnorderedSet<String>,
+}
 
 /// Interal parser state, tracked via RC through the Input type.
 pub(super) struct ParserState { // cannot implement clone because cell requires inner to be copy to be able to be cloned
     len: usize,
     max_parsed: Cell<(Option<ParseErrorKind>, usize)>,
     flags: Cell<ParserFlags>,
-    scopes: RefCell<Vec<(ScopeType, UnorderedSet<String>)>>,
+    scopes: RefCell<Vec<Scope>>,
 }
 
 /// Parser input
@@ -168,32 +173,54 @@ impl<'a> Input<'a> {
     pub fn flags(self: &Self) -> ParserFlags {
         self.state.flags.get()
     }
-    pub fn push_scope(self: &Self, scope_type: ScopeType) {
-        self.state.scopes.borrow_mut().push((scope_type, UnorderedSet::new()));
+    pub fn push_scope(self: &Self, scope_type: ScopeKind) {
+        self.state.scopes.borrow_mut().push(Scope { kind: scope_type, have_bindings: UnorderedSet::new(), require_bindings: UnorderedSet::new() });
     }
     pub fn pop_scope(self: &Self) {
         self.state.scopes.borrow_mut().pop();
     }
     pub fn add_binding(self: &Self, name: String) {
-        self.state.scopes.borrow_mut().last_mut().unwrap().1.insert(name);
+        self.state.scopes.borrow_mut().last_mut().unwrap().have_bindings.insert(name);
     }
     pub fn has_binding(self: &Self, name: &str) -> ScopeBindingType {
         let scopes = self.state.scopes.borrow_mut();
         // initially assume binding is local
         let mut scope_binding_type = ScopeBindingType::Local;
-        for &(scope_type, ref bindings) in scopes.iter().rev() {
-            if bindings.contains(name) {
+        for scope in scopes.iter().rev() {
+            if scope.have_bindings.contains(name) {
                 // binding found, return type
                 return scope_binding_type;
-            } else if scope_type == ScopeType::Closure {
+            } else if scope.kind == ScopeKind::Closure {
                 // binding not found and scope is a closure, downgrade protential binding type (if found) to Parent
                 scope_binding_type = ScopeBindingType::Parent;
-            } else if scope_type == ScopeType::Function {
+            } else if scope.kind == ScopeKind::Function {
                 // function scope encountered, binding not found, fall through to exit
                 break;
             }
         }
         return ScopeBindingType::None;
+    }
+    pub fn require_binding(self: &Self, name: &str) {
+        let mut scopes = self.state.scopes.borrow_mut();
+        for scope in scopes.iter_mut().rev() {
+            if scope.have_bindings.contains(name) {
+                // binding already exists
+                panic!("Binding to be required already exists in scope");
+            } else if scope.kind == ScopeKind::Closure {
+                // have found the nearest closure scope, add required binding
+                scope.require_bindings.insert(name.to_string());
+                return;
+            } else if scope.kind == ScopeKind::Function {
+                // function scope encountered, apparently a binding was required on a non-closure, fall through to panic
+                break;
+            }
+        }
+        panic!("Could not find a closure for the binding to be required by");
+    }
+    pub fn take_required_bindings(self: &Self) -> UnorderedSet<String> {
+        let mut scopes = self.state.scopes.borrow_mut();
+        let scope = scopes.last_mut().unwrap();
+        std::mem::replace(&mut scope.require_bindings, UnorderedSet::new())
     }
 }
 
