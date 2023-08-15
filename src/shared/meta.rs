@@ -256,6 +256,8 @@ impl_as_getter!(Type {
     pub as_callable: Callable -> &Callable,
     /// Returns the type as a mutable callable.
     pub as_callable_mut: Callable -> mut Callable,
+    // Returns whether the type is a callable.
+    pub is_callable: Callable ? bool,
     /// Returns the type as an array.
     pub as_array: Array -> &Array,
     /// Returns the type as a mutable array.
@@ -284,7 +286,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::Callable(_) => size_of::<StackAddress>() as u8,
+            Type::Callable(_) => (size_of::<HeapAddress>() /*+ size_of::<StackAddress>()*/) as u8,
             Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) => size_of::<HeapAddress>() as u8,
         }
     }
@@ -334,7 +336,7 @@ impl Type {
     pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) /*| Type::Callable(_)*/ => true,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::Callable(_) => true,
             _ => false,
         }
     }

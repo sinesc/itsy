@@ -111,18 +111,18 @@ impl Scopes {
         self.scopefunction.insert(scope_id, Some(function_id));
     }
 
-    /* /// Registers that this scope has a function attached to it but its id is not known yet.
+    /// Registers that this scope has a function attached to it but its id is not known yet.
     /// Does nothing if the scope already has a known function id.
     pub fn scope_register_function(self: &mut Self, scope_id: ScopeId) {
         self.scopefunction.entry(scope_id).or_insert(None);
-    }*/
+    }
 
     /// Finds the id of the closest function containing this scope.
-    pub fn scope_function_id(self: &Self, mut scope_id: ScopeId) -> Option<FunctionId> {
+    pub fn scope_function_id(self: &Self, mut scope_id: ScopeId) -> Option<Option<FunctionId>> {
         loop {
             // Check if we have a resolved or unresolved scope id. Don't look in parent if we have one that is just not resolved yet.
             if let Some(&function_id) = self.scopefunction.get(&scope_id) {
-                return function_id;
+                return Some(function_id);
             } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
                 scope_id = parent_scope_id;
             } else {
@@ -146,6 +146,14 @@ impl Scopes {
         let function_id = FunctionId::from(self.functions.len());
         self.functions.push(Function { signature_type_id, kind });
         self.insert_constant(name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
+    }
+
+    /// Insert a closure into the given scope, returning a function id. Its types might not be resolved yet.
+    pub fn insert_closure(self: &mut Self, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>) -> FunctionId {
+        let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
+        let function_id = FunctionId::from(self.functions.len());
+        self.functions.push(Function { signature_type_id, kind: Some(FunctionKind::Function) });
+        function_id
     }
 
     /// Looks up an existing constant_id for the given function_id.

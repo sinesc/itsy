@@ -11,7 +11,7 @@ use nom::multi::{separated_list0, separated_list1, many0, fold_many0, fold_many1
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
 use crate::prelude::*;
-use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
+use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path, typed_ids::BindingId};
 use crate::frontend::ast::*;
 use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram, ScopeBindingType, ScopeKind};
 use error::{ParseResult, ParseError, ParseErrorKind};
@@ -406,11 +406,13 @@ fn function(i: Input<'_>) -> Output<Function> {
                 function_transform_result(block, position);
             }
             Function {
-                position    : position,
-                sig         : sig,
-                block       : block,
-                constant_id : None,
-                scope_id    : None,
+                shared: FunctionShared {
+                    position,
+                    sig,
+                    block,
+                    scope_id: None,
+                },
+                constant_id: None,
             }
         }
     ))(i)
@@ -438,11 +440,13 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
         move |(sig, mut block)| {
             function_transform_result(&mut block, position);
             Function {
-                position    : position,
-                sig         : sig,
-                block       : Some(block),
-                constant_id : None,
-                scope_id    : None,
+                shared: FunctionShared {
+                    position,
+                    sig,
+                    block: Some(block),
+                    scope_id: None,
+                },
+                constant_id: None,
             }
         }
     ))(i)
@@ -456,11 +460,13 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 check_flags(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
                 pair(terminated(ws(function_parameter_list), char('|')), opt(ws(function_return_part)))
             ),
-            move |sig| Signature {
-                ident   : Ident { name: format!("closure@{}", position), position },
-                args    : sig.0,
-                ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
-                vis     : Visibility::Private,
+            move |sig| {
+                Signature {
+                    ident   : Ident { name: format!("closure[{}]", position), position },
+                    args    : sig.0,
+                    ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
+                    vis     : Visibility::Private,
+                }
             }
         ))(i)
     }
@@ -468,20 +474,26 @@ fn closure(i: Input<'_>) -> Output<Closure> {
     let j = i.clone();
     ws(with_scope(ScopeKind::Closure, map(
         pair(signature, expression),
-        move |(sig, mut expr)| {
+        move |(sig, expr)| {
             let required_bindings = j.take_required_bindings();
-            // TODO: store on closure, propagate upwards so that potential parent closure captures these as well
-            if let Expression::Block(block) = &mut expr {
-                function_transform_result(block, position);
-            }
+            // convert to block to allow for more reuse of Function specific code
+            let mut block = if let Expression::Block(block) = expr {
+                *block
+            } else {
+                Block {
+                    position: expr.position(),
+                    statements: Vec::new(),
+                    result: Some(expr),
+                    scope_id: None,
+                }
+            };
+            function_transform_result(&mut block, position);
             Closure {
-                position ,
-                sig,
-                expr,
-                function_id : None,
-                scope_id    : None,
-                type_id     : None,
-                required_bindings,
+                shared: FunctionShared { position, sig, block: Some(block), scope_id: None },
+                required_bindings: required_bindings.into_iter().map(|n| (n, None)).collect::<UnorderedMap<String, Option<BindingId>>>(),
+                function_id     : None,
+                type_id         : None,
+                struct_type_id  : None,
             }
         }
     )))(i)
@@ -786,16 +798,10 @@ fn expression(i: Input<'_>) -> Output<Expression> {
                     match j.has_binding(&m.name[0].name) {
                         // local variable binding
                         ScopeBindingType::Local => return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None }),
-                        // a binding originating in a parent of the current closure, convert to struct access (hidden closure struct)
+                        // a binding originating in a parent of the current closure
                         ScopeBindingType::Parent => {
                             j.require_binding(&m.name[0].name);
-                            return Expression::BinaryOp(Box::new(BinaryOp {
-                                position: m.position,
-                                op: BinaryOperator::Access,
-                                left: BinaryOperand::Expression(Expression::Variable(Variable { position: m.position, ident: Ident { name: "self".to_string(), position: m.position }, binding_id: None })),
-                                right: BinaryOperand::Member(Member { type_id: None, position: m.position, ident: m.name[0].clone(), constant_id: None }),
-                                type_id: None,
-                            }));
+                            return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None });
                         },
                         // not a binding, fall through to handle name.len() != 1 case as well
                         _ => {},

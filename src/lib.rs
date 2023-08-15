@@ -341,7 +341,7 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
 /// about running a program or [build_str] for an example that uses the `run` function.
 #[cfg(feature="runtime")]
 pub fn run<F, D>(program: Program<F>, context: &mut D) -> Result<bytecode::runtime::vm::VM<F, D>, bytecode::runtime::error::RuntimeError> where F: bytecode::VMFunc<F> + bytecode::VMData<F, D> {
-    use bytecode::{runtime::vm::VM};
+    use bytecode::runtime::vm::VM;
     let mut vm = VM::new(program);
     vm.run(context).map(|_| vm)
 }

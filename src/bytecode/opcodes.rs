@@ -690,8 +690,12 @@ impl_opcodes!{
 
     /// Dynamic function call. Pops function address of stack, creates a new stack frame at SP - arg_size and sets programm counter to given addr.
     fn call_dynamic(&mut self, arg_size: FrameAddress) {
-        let addr: StackAddress = self.stack.pop();
-        self.call(addr, arg_size);
+        let heap_ref: HeapRef = self.stack.pop();
+        let data = &self.heap.item(heap_ref.index()).data;
+        let data_size = data.len() - (2 * size_of::<StackAddress>()); // trailing function address AND constructor offset
+        self.stack.extend_from(&data[0..data_size]);
+        let addr = StackAddress::from_ne_bytes(data[data_size..data_size + size_of::<StackAddress>()].try_into().unwrap());
+        self.call(addr, arg_size + data_size as FrameAddress);
     }
 
     /// Virtual function call. Resolves concrete call address from vtable and invokes call().

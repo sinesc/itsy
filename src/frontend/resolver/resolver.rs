@@ -465,7 +465,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
             MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
             AnonymousFunction(anonymous_function) => self.resolve_function(anonymous_function, None),
-            Closure(_closure) => unimplemented!("Closure resolution"),
+            Closure(closure) => self.resolve_closure(closure, expected_result),
         }
     }
 
@@ -688,7 +688,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // if this is a trait impl and the trait is resolved
                 if let Some(Some(trait_type_id)) = trait_type_id {
                     let trt = self.type_by_id(trait_type_id).as_trait().ice()?;
-                    let function_name = &function.sig.ident.name;
+                    let function_name = &function.shared.sig.ident.name;
                     // check if function is defined in trait
                     if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
                         let trait_name = item.trt.as_ref().ice()?.path.to_string();
@@ -714,8 +714,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if item.type_id.is_none() {
             let mut trt = Trait { provided: Map::new(), required: Map::new() };
             for function in &mut item.functions {
-                let name = function.sig.ident.name.clone();
-                match function.block {
+                let name = function.shared.sig.ident.name.clone();
+                match function.shared.block {
                     Some(_) => trt.provided.insert(name, None),
                     None => trt.required.insert(name, None),
                 };
@@ -737,9 +737,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // update trait
         for function in &item.functions {
             if let Some(constant_id) = function.constant_id {
-                let name = &function.sig.ident.name;
+                let name = &function.shared.sig.ident.name;
                 let trt = self.type_by_id_mut(item.type_id.ice()?).as_trait_mut().ice()?;
-                match function.block {
+                match function.shared.block {
                     Some(_) => *trt.provided.get_mut(name).ice()? = Some(constant_id),
                     None => *trt.required.get_mut(name).ice()? = Some(constant_id),
                 };
@@ -765,36 +765,98 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved(item)
     }
 
+    /// Resolves a closure defintion. // TODO dedup with Function
+    fn resolve_closure(self: &mut Self, item: &mut ast::Closure, _expected_result: Option<TypeId>) -> ResolveResult {
+
+        let parent_scope_id = self.try_create_scope(&mut item.shared.scope_id);
+        self.scopes.scope_register_function(self.scope_id);
+
+        // resolve closed over bindings
+        if item.struct_type_id.is_none() {
+            // todo: move binding id handling to parser
+            for (binding_name, binding_id) in item.required_bindings.iter_mut() {
+                if binding_id.is_none() {
+                    *binding_id = self.scopes.binding_id(self.scope_id, binding_name);
+                }
+            }
+
+            let closure_type_ids: Map<_, _> = item.required_bindings.iter().map(|(name, _)| (name.clone(), self.scopes.binding_id(self.scope_id, name).map_or(None, |b| self.binding_by_id(b).type_id))).collect();
+            if closure_type_ids.iter().all(|t| t.1.is_some()) {
+                //let mangled_type_name = format!("{}::{}", &self.module_path, &item.shared.sig.ident.name);
+                let type_id = self.scopes.insert_type(None, Type::Struct(Struct { fields: closure_type_ids, impl_traits: Map::new() }));
+                item.struct_type_id = Some(type_id);
+            }
+        }
+
+        // resolve signature and expression using signature return type, if any
+        self.resolve_signature(&mut item.shared.sig)?;
+        self.resolve_block(item.shared.block.as_mut().ice()?, item.shared.sig.ret.as_ref().map(|r| r.type_id(self)).flatten())?;
+
+        // if the closure has an explicit return type // TODO: why set explicit type from non-explicit expression?
+        if let Some(ret) = &mut item.shared.sig.ret {
+            if item.shared.block.as_ref().ice()?.is_resolved() && !ret.is_resolved() {
+                ret.set_type_id(self, item.shared.block.as_ref().ice()?.type_id(self).ice()?);
+            }
+        }
+
+        // if signature has a return type, use that, otherwise try to infer from expression
+        let ret_type_id = if let Some(ret) = &item.shared.sig.ret {
+            ret.type_id(self)
+        } else if let Some(type_id) = item.shared.block.as_ref().ice()?.type_id(self) {
+            Some(type_id)
+        } else {
+            None
+        };
+
+        if item.function_id.is_none() && item.shared.sig.ret_resolved(self) && item.shared.sig.args_resolved(self) && ret_type_id.is_some() {
+            let arg_type_ids = item.shared.sig.arg_type_ids(self);
+            // insert function
+            let function_id = self.scopes.insert_closure(ret_type_id, arg_type_ids.clone());
+            item.function_id = Some(function_id);
+            self.scopes.scope_set_function_id(self.scope_id, function_id);
+            // insert function type
+            let closure_ty = Type::Callable(Callable { arg_type_ids, ret_type_id });
+            let closure_type_id = self.scopes.insert_anonymous_type(true, closure_ty);
+            item.type_id = Some(closure_type_id);
+        }
+
+        self.scope_id = parent_scope_id;
+
+        if self.stage.must_resolve() && (!item.shared.sig.args_resolved(self) || !item.shared.sig.ret_resolved(self)) {
+            Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("signature for '{}'", item.shared.sig.ident.name)), self.module_path))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<TypeId>) -> ResolveResult {
 
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.try_create_scope(&mut item.shared.scope_id);
+        self.resolve_signature(&mut item.shared.sig)?;
 
-        self.resolve_signature(&mut item.sig)?;
-
-        //let signature_scope_id = self.try_create_scope(&mut item.scope_id); // todo: put body into separate scope so signature can't access body
-        if item.constant_id.is_none() && item.sig.ret_resolved(self) && item.sig.args_resolved(self) {
-            let result_type_id = item.sig.ret_type_id(self);
-            let arg_type_ids: Vec<_> = item.sig.arg_type_ids(self);
+        if item.constant_id.is_none() && item.shared.sig.ret_resolved(self) && item.shared.sig.args_resolved(self) {
+            let result_type_id = item.shared.sig.ret_type_id(self);
+            let arg_type_ids: Vec<_> = item.shared.sig.arg_type_ids(self);
             // function/method switch
             let (function_kind, qualified, alias) = if let Some(type_id) = struct_scope {
                 let type_name = self.type_flat_name(type_id).ice()?;
-                let path = self.make_path(&[ type_name, &item.sig.ident.name ]);
-                if item.sig.args.len() == 0 || item.sig.args[0].ident.name != "self" { // FIXME ugh
-                    let alias = self.make_path(&[ "Self", &item.sig.ident.name ]);
+                let path = self.make_path(&[ type_name, &item.shared.sig.ident.name ]);
+                if item.shared.sig.args.len() == 0 || item.shared.sig.args[0].ident.name != "self" { // FIXME ugh
+                    let alias = self.make_path(&[ "Self", &item.shared.sig.ident.name ]);
                     (FunctionKind::Function, path, Some(alias))
                 } else {
                     (FunctionKind::Method(type_id), path, None)
                 }
             } else {
-                let path = self.make_path(&[ &item.sig.ident.name ]);
+                let path = self.make_path(&[ &item.shared.sig.ident.name ]);
                 (FunctionKind::Function, path, None)
             };
             let constant_id = self.scopes.insert_function(&qualified, result_type_id, arg_type_ids, Some(function_kind));
             if let Some(alias) = alias {
                 self.scopes.insert_alias(parent_scope_id, qualified, alias);
             }
-            if item.sig.vis == Visibility::Public {
+            if item.shared.sig.vis == Visibility::Public {
                 // TODO: public visibility
                 //self.scopes.alias_constant(ScopeId::ROOT, &qualified, constant_id);
             }
@@ -805,7 +867,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(constant_id) = item.constant_id {
             let function_id = self.scopes.constant_function_id(constant_id).ice()?;
             let ret_type = self.scopes.function_ref(function_id).ret_type_id(self);
-            if let Some(block) = &mut item.block {
+            if let Some(block) = &mut item.shared.block {
                 self.resolve_block(block, ret_type)?;
             }
         }
@@ -816,9 +878,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
-        let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
-        self.types_resolved(&mut item.expr, None)?;
-        self.resolve_expression(&mut item.expr, ret_type_id)?;
+        let ret_type_id = if let Some(function_id) = function_id {
+            let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
+            self.types_resolved(&mut item.expr, None)?;
+            self.resolve_expression(&mut item.expr, ret_type_id)?;
+            ret_type_id
+        } else {
+            None
+        };
         // check return type matches function result type
         self.types_resolved(&mut item.expr, ret_type_id)
     }

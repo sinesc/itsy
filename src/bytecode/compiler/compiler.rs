@@ -108,9 +108,10 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
     compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress); // FIXME: this does not consider endianess
 
-    // serialize constructors onto const pool, ensure position 0 is not used as that indicates a virtual constructor
-    if compiler.writer.const_len() == 0 {
-        compiler.writer.store_const(101 as u8);
+    // serialize constructors onto const pool, ensure position 0 and 1 are not used
+    if compiler.writer.const_len() < 2 {
+        compiler.writer.store_const(111 as u8); // constructor address 0 indicates a virtual constructor (picked via trait vtable)
+        compiler.writer.store_const(123 as u8); // constructor address 1 indicates a dynamic constructor (stored at end of heap object, used by closures)
     }
     for (type_id, _) in compiler.resolved.types().filter(|ty| ty.1.is_constructible()) {
         // store constructor, remember position
@@ -175,7 +176,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         let trait_type_id = type_id.ice()?;
                         let trt = self.ty(&trait_type_id).as_trait().ice()?;
                         let function_id = self.constant_by_id(function.constant_id.ice()?).value.as_function_id().ice()?;
-                        let function_name = &function.sig.ident.name;
+                        let function_name = &function.shared.sig.ident.name;
                         // check if function is defined in trait
                         let trait_constant_id = trt.provided.get(function_name).or(trt.required.get(function_name)).ice()?;
                         let trait_function_id = self.resolved.constant(trait_constant_id.ice()?).value.as_function_id().ice()?;
@@ -190,7 +191,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             S::TraitDef(trait_def) => {
                 for function in &trait_def.functions {
-                    if function.block.is_some() {
+                    if function.shared.block.is_some() {
                         self.compile_function(function)?;
                     }
                 }
@@ -266,8 +267,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Block(block) => self.compile_block(block),
             IfBlock(if_block) => self.compile_if_block(if_block),
             MatchBlock(match_block) => self.compile_match_block(match_block),
-            Closure(_closure) => unimplemented!("Closure compilation"),
             AnonymousFunction(anonymous_function) => self.compile_anonymous_function(anonymous_function),
+            Closure(closure) => self.compile_closure(closure),
         }
     }
 
@@ -734,20 +735,60 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles an anonymous function.
     fn compile_anonymous_function(self: &mut Self, item: &ast::Function) -> CompileResult {
         // write code to skip over function instructions
-        comment!(self, "skip inlined {} body", item.sig.ident.name);
+        comment!(self, "skip inlined {} body", item.shared.sig.ident.name);
         let function_skip_jump = self.writer.jmp(123);
         let function_addr = self.writer.position();
         self.compile_function(item)?;
         let function_done_jump = self.writer.position();
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
         // write function address to stack
-        comment!(self, "\npush @{}", item.sig.ident.name);
+        comment!(self, "\npush @{}", item.shared.sig.ident.name);
+        self.writer.immediate64(0);
         self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+        Ok(())
+    }
+
+    /// Compiles the given closure.
+    fn compile_closure(self: &mut Self, item: &ast::Closure) -> CompileResult {
+        // write code to skip over function instructions
+        comment!(self, "skip inlined {} body", item.shared.sig.ident.name);
+        let function_skip_jump = self.writer.jmp(123);
+        let function_addr = self.writer.position();
+        let captures: Vec<_> = item.required_bindings.iter().map(|(_, binding_id)| *binding_id).collect();
+        self.compile_function_inner(&item.shared, item.function_id.ice()?, &captures)?;
+        let function_done_jump = self.writer.position();
+        self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
+        // load captures and function addr and copy to heap
+        comment!(self, "\ncapture variables for {}", item.shared.sig.ident.name);
+        let mut size = 0;
+        for (_, capture_binding_id) in item.required_bindings.iter() {
+            let capture_binding_id = capture_binding_id.ice()?;
+            let loc = self.locals.lookup(capture_binding_id);
+            let type_id = self.binding_by_id(capture_binding_id).type_id.ice()?;
+            let ty = self.ty(&type_id);
+            size += ty.primitive_size() as StackAddress;
+            self.write_load(ty, loc)?;
+        }
+        self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization, implement immediate_sa
+        size += size_of::<StackAddress>();
+        let constructor = self.constructor(self.ty(&item.struct_type_id))?;
+        self.writer.immediate64(constructor as u64); // TODO: immediate_sa bla
+        size += size_of::<StackAddress>();
+        // write function address to stack
+        comment!(self, "push @{}", item.shared.sig.ident.name);
+        self.writer.upload(size as StackAddress, 0);
         Ok(())
     }
 
     /// Compiles the given function.
     fn compile_function(self: &mut Self, item: &ast::Function) -> CompileResult {
+        let function_id = self.constant_by_id(item.constant_id.ice()?).value.as_function_id().ice()?;
+        let captures = Vec::new();
+        self.compile_function_inner(&item.shared, function_id, &captures)
+    }
+
+    /// Compiles the given function.
+    fn compile_function_inner(self: &mut Self, item: &ast::FunctionShared, function_id: FunctionId, closure_captures: &[ Option<BindingId> ]) -> CompileResult {
 
         // register function bytecode index
         let position = self.writer.position();
@@ -764,8 +805,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             frame.arg_pos += self.ty(arg).primitive_size() as FrameAddress;
         }
 
+        // clone closed over variables
+        for closure_capture in closure_captures {
+            frame.insert(closure_capture.ice()?, frame.arg_pos);
+            let binding_id = closure_capture.ice()?;
+            self.init_state.declare(binding_id);
+            self.init_state.initialize(binding_id);
+            let capture_type = self.binding_by_id(binding_id).type_id.ice()?;
+            frame.arg_pos += self.ty(&capture_type).primitive_size() as FrameAddress;
+        }
+
         // create variables in local environment and reserve space on the stack
-        frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2;
+        frame.var_pos = frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2; // space for prev fp and prev pc
         self.create_stack_frame_block(item.block.as_ref().ice()?, &mut frame)?;
         let var_size = frame.var_pos - (frame.arg_pos + size_of::<StackAddress>() as FrameAddress * 2);
         if var_size > 0 {
@@ -773,7 +824,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
 
         // store call info required to compile calls to this function and fix calls that were made before the function address was known
-        let function_id = self.constant_by_id(item.constant_id.ice()?).value.as_function_id().ice()?;
         let arg_size = frame.arg_pos;
         if let Some(calls) = self.functions.register_function(function_id, position) {
             let backup_position = self.writer.position();
@@ -1064,8 +1114,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Returns constructor index for given type or 0.
     pub(super) fn constructor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        let type_id = self.resolved.types().find(|m| m.1 == ty).ice()?.0;
-        Ok(*self.constructors.get(&type_id).unwrap_or(&0))
+        if ty.is_callable() { // TODO unify cases, consider always storing the concrete constuctor as meta information on the heap object (like currently the implementor index)
+            Ok(1) // callables use constructor offset 1 to indicate the actual offset is stored at the end of the heap object
+        } else {
+            let type_id = self.resolved.types().find(|m| m.1 == ty).ice()?.0;
+            Ok(*self.constructors.get(&type_id).unwrap_or(&0)) // offset 0 means to look into the heap object's implementor index
+        }
     }
 
     /// Generates an internal compiler error at the given item. Message should not end in a ".".

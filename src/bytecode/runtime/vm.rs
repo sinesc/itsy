@@ -141,8 +141,15 @@ impl<T, U> VM<T, U> {
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: StackAddress, op: HeapRefOp) {
         if constructor_offset == 0 {
+            // trait implementor specific constructor
             let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
             constructor_offset = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
+        } else if constructor_offset == 1 {
+            // dynamic constructor, index stored at the end of the heap-object
+            let item_index = item.index();
+            let data = &self.heap.item(item_index).data;
+            let pos = data.len() - size_of::<StackAddress>();
+            constructor_offset = StackAddress::from_ne_bytes(data[pos..].try_into().unwrap());
         }
         let constructor = self.construct_read_op(&mut constructor_offset);
         let epoch = self.heap.new_epoch();

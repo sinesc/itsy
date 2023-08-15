@@ -377,25 +377,36 @@ impl Resolvable for LetBinding {
     }
 }
 
+#[derive(Debug)]
+pub struct FunctionShared {
+    pub position: Position,
+    pub sig     : Signature,
+    pub block   : Option<Block>,
+    pub scope_id: Option<ScopeId>,
+}
+
 /// A closure, e.g. `|a: u8, b: String| -> u16 { ... }`.
 #[derive(Debug)]
 pub struct Closure {
-    pub position    : Position,
-    pub sig         : Signature,
-    pub expr        : Expression,
+    pub shared      : FunctionShared,
+    pub struct_type_id: Option<TypeId>,
     pub type_id     : Option<TypeId>,
     pub function_id : Option<FunctionId>,
-    pub required_bindings: UnorderedSet<String>,
-    pub scope_id    : Option<ScopeId>,
+    pub required_bindings: UnorderedMap<String, Option<BindingId>>,
+}
+
+impl Positioned for Closure {
+    fn position(self: &Self) -> Position {
+        self.shared.position
+    }
 }
 
 impl_typeable!(Closure);
-impl_positioned!(Closure);
 
 impl Resolvable for Closure {
     fn num_resolved(self: &Self) -> Progress {
-        self.sig.num_resolved()
-        + self.expr.num_resolved()
+        self.shared.sig.num_resolved()
+        + self.shared.block.as_ref().map_or(Progress::new(1, 1), |b| b.num_resolved())
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
@@ -403,25 +414,26 @@ impl Resolvable for Closure {
 
 impl Display for Closure {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "|...|{}", self.expr) // todo: not super helpful
+        write!(f, "|...|{:?}", self.shared.block) // todo: not super helpful
     }
 }
 
 /// A function definition, e.g. `fn myfunc(a: u8, b: String) -> u16 { ... }`.
 #[derive(Debug)]
 pub struct Function {
-    pub position    : Position,
-    pub sig         : Signature,
-    pub block       : Option<Block>,
+    pub shared      : FunctionShared,
     pub constant_id : Option<ConstantId>,
-    pub scope_id    : Option<ScopeId>,
 }
 
-impl_positioned!(Function);
+impl Positioned for Function {
+    fn position(self: &Self) -> Position {
+        self.shared.position
+    }
+}
 
 impl Display for Function {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.sig.ident.name)
+        write!(f, "{}", self.shared.sig.ident.name)
     }
 }
 
@@ -442,16 +454,16 @@ impl Typeable for Function {
 
 impl Resolvable for Function {
     fn num_resolved(self: &Self) -> Progress {
-        self.sig.num_resolved()
-        + self.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved())
+        self.shared.sig.num_resolved()
+        + self.shared.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved())
         + self.constant_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
-        ResolveErrorKind::CannotResolve(self.sig.ident.name.clone())
+        ResolveErrorKind::CannotResolve(self.shared.sig.ident.name.clone())
     }
 }
 
-/// The type signature of a function/closure reference.
+/// The type signature of an anonymous function/closure.
 #[derive(Debug)]
 pub struct CallableDef {
     pub position: Position,
@@ -470,7 +482,7 @@ impl Resolvable for CallableDef {
     }
 }
 
-/// The type signatures of function parameters and returns.
+/// The signatures of a function or closure.
 #[derive(Debug)]
 pub struct Signature {
     pub ident   : Ident,
