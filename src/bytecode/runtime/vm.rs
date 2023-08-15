@@ -150,6 +150,10 @@ impl<T, U> VM<T, U> {
             let data = &self.heap.item(item_index).data;
             let pos = data.len() - size_of::<StackAddress>();
             constructor_offset = StackAddress::from_ne_bytes(data[pos..].try_into().unwrap());
+            if constructor_offset == 0 {
+                self.heap.ref_item(item_index, op);
+                return;
+            }
         }
         let constructor = self.construct_read_op(&mut constructor_offset);
         let epoch = self.heap.new_epoch();
@@ -236,6 +240,9 @@ impl<T, U> VM<T, U> {
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::String => {
+                    self.heap.ref_item(item_index, op);
+                },
+                Constructor::Closure => {
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::Primitive => {

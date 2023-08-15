@@ -209,6 +209,7 @@ pub enum Constructor {
     Struct      = 177,  // Struct(constructor_size, implementor index, num_fields, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
     Enum        = 179,  // Enum(constructor_size, implementor index, num_variants, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
+    Closure     = 181,
 }
 
 /// Information about a serialized constructor
@@ -241,6 +242,7 @@ impl Constructor {
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
             x if x == Self::Enum as u8 => Self::Enum,
+            x if x == Self::Closure as u8 => Self::Closure,
             index @ _ => panic!("Invalid constructor type {}.", index),
         }
     }
@@ -266,7 +268,7 @@ impl Constructor {
                     next: offset + SIZE,
                 }
             },
-            Constructor::String => {
+            Constructor::String | Constructor::Closure => {
                 // no additional data attached to string
                 ConstructorData {
                     op: constructor,

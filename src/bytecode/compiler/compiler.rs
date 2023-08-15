@@ -470,7 +470,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match constant.value {
             ConstantValue::Function(function_id) => {
                 let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
+                // load function address
+                comment!(self, "\npush @{}", item.path.to_string());
                 self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+                // load constructor (none)
+                self.writer.immediate64(0 as u64); // TODO: immediate_sa bla
+                // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
+                self.writer.upload(size_of::<StackAddress>() * 2, 0);
             },
         }
         Ok(())
@@ -741,10 +747,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_function(item)?;
         let function_done_jump = self.writer.position();
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
-        // write function address to stack
+        // load function address
         comment!(self, "\npush @{}", item.shared.sig.ident.name);
-        self.writer.immediate64(0);
         self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+        // load constructor (none)
+        self.writer.immediate64(0 as u64); // TODO: immediate_sa bla
+        // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
+        self.writer.upload(size_of::<StackAddress>() * 2, 0);
         Ok(())
     }
 
@@ -758,7 +767,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.compile_function_inner(&item.shared, item.function_id.ice()?, &captures)?;
         let function_done_jump = self.writer.position();
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
-        // load captures and function addr and copy to heap
+        // load captures
         comment!(self, "\ncapture variables for {}", item.shared.sig.ident.name);
         let mut size = 0;
         for (_, capture_binding_id) in item.required_bindings.iter() {
@@ -769,12 +778,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             size += ty.primitive_size() as StackAddress;
             self.write_load(ty, loc)?;
         }
+        // load function address
         self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization, implement immediate_sa
         size += size_of::<StackAddress>();
+        // load constructor
         let constructor = self.constructor(self.ty(&item.struct_type_id))?;
         self.writer.immediate64(constructor as u64); // TODO: immediate_sa bla
         size += size_of::<StackAddress>();
-        // write function address to stack
+        // upload captures, address and constructor into heap object
         comment!(self, "push @{}", item.shared.sig.ident.name);
         self.writer.upload(size as StackAddress, 0);
         Ok(())
@@ -1290,6 +1301,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     Ok(0)
                 })?;
             }
+            Type::Callable(callable) => {
+                *prev_primitive = None;
+                self.writer.store_const(Constructor::Closure);
+            },
             Type::String => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::String);
