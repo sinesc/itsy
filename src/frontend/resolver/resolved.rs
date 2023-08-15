@@ -32,6 +32,7 @@ impl Debug for Resolved {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Resolved")
             .field("binding_map", &self.bindings().collect::<Map<_, _>>())
+            .field("constant_map", &self.constants().collect::<Map<_, _>>())
             .field("type_map", &self.types().collect::<Map<_, _>>())
             .field("function_map", &self.functions().collect::<Map<_, _>>())
             .finish()
@@ -69,9 +70,13 @@ impl Resolved {
             .filter_map(|(type_id, ty)| ty.as_struct().map(|struct_| (TypeId::from(type_id), struct_)))
             .filter_map(|i| if i.1.impl_traits.len() > 0 { Some((i.0, &i.1.impl_traits)) } else { None })
     }
-    /// Returns an iterator over the type mapping.
+    /// Returns an iterator over the binding mapping.
     pub fn bindings(self: &Self) -> impl Iterator<Item=(BindingId, &Binding)> {
         self.binding_map.iter().enumerate().map(|(index, info)| (BindingId::from(index), info))
+    }
+    /// Returns an iterator over the constant mapping.
+    pub fn constants(self: &Self) -> impl Iterator<Item=(ConstantId, &Constant)> {
+        self.constant_map.iter().enumerate().map(|(index, info)| (ConstantId::from(index), info))
     }
     /// Returns function information for given function id.
     pub fn function(self: &Self, function_id: FunctionId) -> &Function {
