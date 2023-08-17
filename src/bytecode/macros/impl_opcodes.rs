@@ -327,7 +327,7 @@ macro_rules! impl_opcodes {
                 $( #[ $attr ] )*
                 // single opcode
                 $(
-                    #[cfg_attr(not(debug_assertions), inline)]
+                    #[cfg_attr(not(debug_assertions), inline(always))]
                     fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(@map_reader_type $arg_type)),* ) {
                         #[allow(dead_code)]
                         /// Single variant opcodes don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
@@ -342,7 +342,7 @@ macro_rules! impl_opcodes {
                 $(
                     $(
                         $( #[$vattr] )*
-                        #[cfg_attr(not(debug_assertions), inline)]
+                        #[cfg_attr(not(debug_assertions), inline(always))]
                         fn $vname ( $vself: &mut Self, $( $varg_name: impl_opcodes!(@map_reader_type $vtype_name) ),* ) {
                             $(
                                 $( type $vgeneric_name = $vgeneric_type; )+
