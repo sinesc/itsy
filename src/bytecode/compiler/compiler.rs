@@ -657,7 +657,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_cnt(array_ty, true, HeapRefOp::Inc)?;
         self.write_clone_ref();                                         // stack &array &array
         self.write_builtin(array_ty, BuiltinType::Array(builtin_types::Array::len))?;             // stack &array len
-        let exit_jump = self.writer.j0_sa_nc(123);
+        let exit_jump = self.writer.j0sa_nc(123);
         let loop_start = self.write_dec(&STACK_ADDRESS_TYPE)?;        // stack &array index (indexing from the end to be able to count downwards from len)
 
         let element_ty = self.ty(&element_type_id);
@@ -681,7 +681,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             None
         };
 
-        let cond_target = self.writer.jn0_sa_nc(loop_start);
+        let cond_target = self.writer.jn0sa_nc(loop_start);
 
         // if the loop contains a break we need a target for the break jump that decrefs the potential element
         // reference but doesn't jump back to the start of the loop. the normal loop exit has to jump over this.
@@ -697,7 +697,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         // fix jump addresses
         let exit_target = self.writer.position();
-        self.writer.overwrite(exit_jump, |w| w.j0_sa_nc(exit_target));
+        self.writer.overwrite(exit_jump, |w| w.j0sa_nc(exit_target));
         for loop_control in &loop_controls {
             match loop_control {
                 &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(break_target.unwrap_or(exit_target))),
@@ -1396,11 +1396,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                             self.write_cnt(ty, false, HeapRefOp::Dec)?;
                         } else if state == BranchingState::MaybeInitialized {
                             self.write_load(ty, local)?;
-                            let init_jump = self.writer.jn0_sa_nc(123);
+                            let init_jump = self.writer.jn0sa_nc(123);
                             self.write_discard(ty)?;
                             let uninit_jump = self.writer.jmp(123);
                             let init_target = self.write_cnt(ty, false, HeapRefOp::Dec)?;
-                            self.writer.overwrite(init_jump, |w| w.jn0_sa_nc(init_target));
+                            self.writer.overwrite(init_jump, |w| w.jn0sa_nc(init_target));
                             let done_target = self.writer.position();
                             self.writer.overwrite(uninit_jump, |w| w.jmp(done_target));
                         }

@@ -650,7 +650,7 @@ impl_opcodes!{
     }
 
     /// Jumps to given address if the StackAddress sized stack-top equals 0.
-    fn j0_sa_nc(&mut self, addr: StackAddress) {
+    fn j0sa_nc(&mut self, addr: StackAddress) {
         let a: StackAddress = self.stack.top();
         if a == 0 {
             self.pc = addr;
@@ -658,7 +658,7 @@ impl_opcodes!{
     }
 
     /// Jumps to given address if the StackAddress sized stack-top does not equal 0.
-    fn jn0_sa_nc(&mut self, addr: StackAddress) {
+    fn jn0sa_nc(&mut self, addr: StackAddress) {
         let a: StackAddress = self.stack.top();
         if a != 0 {
             self.pc = addr;
