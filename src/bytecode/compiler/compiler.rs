@@ -1303,7 +1303,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     Ok(0)
                 })?;
             }
-            Type::Callable(callable) => {
+            Type::Callable(_callable) => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Closure);
             },

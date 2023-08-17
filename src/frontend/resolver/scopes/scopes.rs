@@ -156,13 +156,13 @@ impl Scopes {
         function_id
     }
 
-    /// Looks up an existing constant_id for the given function_id.
+    /* /// Looks up an existing constant_id for the given function_id.
     pub fn function_constant_id(self: &Self, function_id: FunctionId) -> Option<ConstantId> {
         self.constants.id_search(|c| match c.value {
             ConstantValue::Function(f) => f == function_id,
             //_ => false,
         })
-    }
+    }*/
 
     /// Returns the function id for the given constant id, if the constant represents a function.
     pub fn constant_function_id(self: &Self, constant_id: ConstantId) -> Option<FunctionId> {

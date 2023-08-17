@@ -51,10 +51,10 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
     pub fn id_by_value(self: &Self, value: &V) -> Option<I> where V: Eq {
         self.data.iter().enumerate().find_map(|item| if item.1 == value { Some(item.0.into()) } else { None })
     }
-    /// Returns the id of the given value.
+    /* /// Returns the id of the given value.
     pub fn id_search(self: &Self, mut searcher: impl FnMut(&V) -> bool) -> Option<I> {
         self.data.iter().enumerate().find_map(|item| if searcher(item.1) { Some(item.0.into()) } else { None })
-    }
+    }*/
 }
 
 impl<K, I, V> Into<Vec<V>> for Repository<K, I, V> {

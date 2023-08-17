@@ -1,4 +1,3 @@
-use crate::config::StackAddress;
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
 use crate::shared::{impl_as_getter, TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
