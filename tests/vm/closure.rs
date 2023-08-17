@@ -94,3 +94,13 @@ fn anonymous() {
     ));
     assert_all(&result, &[ 14u32, 26, 4 ]);
 }
+
+#[test]
+fn capture_ref() {
+    let result = run(stringify!(
+        let captured_name = "c";
+        let c = |x: u8| -> String "{captured_name}: {x}";
+        ret_str(c(123));
+    ));
+    assert_all(&result, &[ "c: 123".to_string() ]);
+}
