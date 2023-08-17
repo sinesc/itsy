@@ -10,6 +10,11 @@ license = "MIT"
 readme = "README.md"
 keywords = [ "language", "scripting" ]
 
+[profile.release]
+#strip = true
+#lto = true
+#codegen-units = 1
+
 [features]
 default = [ "compiler", "runtime" ]
 compiler = [ "nom" ]
