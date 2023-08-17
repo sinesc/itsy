@@ -7,20 +7,25 @@ struct CompareBench {
     name: String,
     itsy: fn() -> String,
     rust: fn() -> String,
+    rating: u32,
 }
 
 struct SingleBench {
     name: String,
     itsy: fn(),
+    rating: u32,
 }
 
 struct Result {
     name: String,
     itsy_time: f64,
     rust_time: f64,
+    score: u32,
 }
 
 fn print_results(results: [ [ Result ] ]) {
+
+    let total_score = 0;
 
     for t in 0..results[0].len() {
 
@@ -33,9 +38,11 @@ fn print_results(results: [ [ Result ] ]) {
             let min = 0.0;
             let max = 0.0;
             let sum = 0.0;
+            let max_score = 0;
 
             for p in 0..results.len() {
                 let time = if source == "itsy" { results[p][t].itsy_time } else { results[p][t].rust_time };
+                let score = if source == "itsy" { results[p][t].score } else { 0 };
                 sum += time;
                 if (min == 0.0 || min > time) {
                     min = time;
@@ -43,9 +50,13 @@ fn print_results(results: [ [ Result ] ]) {
                 if (max < time) {
                     max = time;
                 }
+                if (max_score < score) {
+                    max_score = score;
+                }
             }
 
             let avg = sum / results.len() as f64;
+            total_score += max_score;
 
             if source == "itsy" {
                 itsy_avg = avg
@@ -54,7 +65,7 @@ fn print_results(results: [ [ Result ] ]) {
             }
 
             if sum > 0.0 {
-                println("  {source} avg: {avg.fmt(4)} min: {min.fmt(4)} max: {max.fmt(4)} var: {((max-min)/min*100.0).fmt(3)}%");
+                println("  {source} score: {max_score}, avg: {avg.fmt(4)} min: {min.fmt(4)} max: {max.fmt(4)} var: {((max-min)/min*100.0).fmt(3)}%");
             }
         }
 
@@ -62,15 +73,18 @@ fn print_results(results: [ [ Result ] ]) {
             println("  factor {(itsy_avg / rust_avg).fmt(2)}x");
         }
     }
+
+    println("final score {total_score} points");
 }
 
-fn bench_single(name: String, itsy: fn(), results: [ Result ]) {
+fn bench_single(name: String, rating: u32, itsy: fn(), results: [ Result ]) {
     start_time();
     itsy();
-    results.push(Result { name: name, rust_time: 0.0, itsy_time: stop_time() });
+    let itsy_time = stop_time();
+    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: 0.0, itsy_time: itsy_time });
 }
 
-fn bench_compare(name: String, itsy: fn() -> String, rust: fn() -> String, results: [ Result ]) {
+fn bench_compare(name: String, rating: u32, itsy: fn() -> String, rust: fn() -> String, results: [ Result ]) {
     start_time();
     let rust_result = rust();
     let rust_time = stop_time();
@@ -80,20 +94,20 @@ fn bench_compare(name: String, itsy: fn() -> String, rust: fn() -> String, resul
     if itsy_result != rust_result {
         print("ERROR: {itsy_result} != {rust_result}");
     }
-    results.push(Result { name: name, rust_time: rust_time, itsy_time: itsy_time });
+    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: rust_time, itsy_time: itsy_time });
 }
 
 fn main() {
     let compares = [
-        CompareBench { name: "mandelbrot", itsy: fn() -> String { itsy_mandelbrot(800, 600) }, rust: fn() -> String { rust_mandelbrot(800, 600) } },
-        CompareBench { name: "fib_r", itsy: fn() -> String { itsy_fib_r(32) as String }, rust: fn() -> String { rust_fib_r(32) as String } },
-        CompareBench { name: "stringcat", itsy: fn() -> String { itsy_stringcat(5000) }, rust: fn() -> String { rust_stringcat(5000) } },
+        CompareBench { name: "mandelbrot", rating: 100, itsy: fn() -> String { itsy_mandelbrot(800, 600) }, rust: fn() -> String { rust_mandelbrot(800, 600) } },
+        CompareBench { name: "fib_r", rating: 100, itsy: fn() -> String { itsy_fib_r(32) as String }, rust: fn() -> String { rust_fib_r(32) as String } },
+        CompareBench { name: "stringcat", rating: 1, itsy: fn() -> String { itsy_stringcat(5000) }, rust: fn() -> String { rust_stringcat(5000) } },
     ];
     let singles = [
-        SingleBench { name: "upload_struct", itsy: itsy_upload_struct },
-        SingleBench { name: "upload_array", itsy: itsy_upload_array },
-        SingleBench { name: "string_return", itsy: itsy_string_return },
-        SingleBench { name: "heap_reuse", itsy: itsy_heap_reuse },
+        SingleBench { name: "upload_struct", rating: 100, itsy: itsy_upload_struct },
+        SingleBench { name: "upload_array", rating: 200, itsy: itsy_upload_array },
+        SingleBench { name: "string_return", rating: 100, itsy: itsy_string_return },
+        SingleBench { name: "heap_reuse", rating: 0, itsy: itsy_heap_reuse }, // too unstable to include in rating
     ];
     let num_passes = 5;
     let results: [ [ Result ] ] = [ ];
@@ -105,11 +119,11 @@ fn main() {
         print("{pass+1}...");
         let pass_results: [ Result ] = [ ];
         for compare in compares {
-            bench_compare(compare.name, compare.itsy, compare.rust, pass_results);
+            bench_compare(compare.name, compare.rating, compare.itsy, compare.rust, pass_results);
             heap_purge();
         }
         for single in singles {
-            bench_single(single.name, single.itsy, pass_results);
+            bench_single(single.name, single.rating, single.itsy, pass_results);
             heap_purge();
         }
         results.push(pass_results);
