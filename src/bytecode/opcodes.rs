@@ -86,18 +86,6 @@ impl_opcodes!{
         self.stack.push(local);
     }
 
-    /// Pops heap object index, loads some data from the heap object at given offset and pushes it onto the stack.
-    fn <
-        heap_load8<T: Data8>(loc: FrameAddress),
-        heap_load16<T: Data16>(loc: FrameAddress),
-        heap_load32<T: Data32>(loc: FrameAddress),
-        heap_load64<T: Data64>(loc: FrameAddress),
-    >(&mut self) {
-        let index: StackAddress = self.stack.pop();
-        let data: T = self.heap.load(index, loc as StackAddress);
-        self.stack.push(data);
-    }
-
     /// Pops data off the stack and stores it at the given stackframe-offset.
     fn <
         store8_8<T: Data8>(loc: u8 as FrameAddress),
@@ -134,18 +122,6 @@ impl_opcodes!{
                 self.refcount_value(prev, constructor, HeapRefOp::Dec);
             }
         }
-    }
-
-    /// Pops heap object index and some data off the stack and stores it at the given offset in the heap object.
-    fn <
-        heap_store8<T: Data8>(loc: FrameAddress),
-        heap_store16<T: Data16>(loc: FrameAddress),
-        heap_store32<T: Data32>(loc: FrameAddress),
-        heap_store64<T: Data64>(loc: FrameAddress),
-    >(&mut self) {
-        let index: StackAddress = self.stack.pop();
-        let data: T = self.stack.pop();
-        self.heap.store(index, loc as StackAddress, data);
     }
 
     /// Swap the 2 topmost stack values.
@@ -185,24 +161,6 @@ impl_opcodes!{
         value = T::wrapping_sub(value, decr as T);
         self.stack.store_fp(loc, value);
         self.stack.push(value);
-    }
-
-    /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
-    fn index(&mut self, element_size: u8) {
-        let element_index: StackAddress = self.stack.pop();
-        let mut item: HeapRef = self.stack.pop();
-        item.add_offset(element_index as StackOffset * element_size as StackOffset);
-        self.stack.push(item);
-    }
-
-    /// Offsets the heap address at the top of the stack by given value.
-    fn <
-        offsetx_8(offset: u8),
-        offsetx_16(offset: FrameAddress)
-    >(&mut self) {
-        let mut item: HeapRef = self.stack.pop();
-        item.add_offset(offset as StackOffset);
-        self.stack.push(item);
     }
 
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
@@ -836,35 +794,23 @@ impl_opcodes!{
         self.refcount_value(item, constructor, HeapRefOp::Free);
     }
 
-    /*/// Pops 2 heap references dest and src and copies num_bytes bytes from src to dest.
-    fn heap_copy(&mut self, constructor: StackAddress, num_bytes: StackAddress) {
-        let dest: HeapRef = self.stack.pop();
-        let src: HeapRef = self.stack.pop();
-        self.heap.copy(dest, src, num_bytes);
-        self.refcount_value(src, constructor, HeapRefOp::Free);
+    /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
+    fn index(&mut self, element_size: u8) {
+        let element_index: StackAddress = self.stack.pop();
+        let mut item: HeapRef = self.stack.pop();
+        item.add_offset(element_index as StackOffset * element_size as StackOffset);
+        self.stack.push(item);
     }
 
-    /// Pops 2 heap references and compares num_bytes bytes. Drops temporary references.
-    fn heap_ceq(&mut self, constructor: StackAddress, num_bytes: StackAddress) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let data_a = self.heap.slice(a, num_bytes);
-        let data_b = self.heap.slice(b, num_bytes);
-        self.stack.push((data_a == data_b) as Data8);
-        self.refcount_value(a, constructor, HeapRefOp::Free);
-        self.refcount_value(b, constructor, HeapRefOp::Free);
+    /// Offsets the heap address at the top of the stack by given value.
+    fn <
+        offsetx_8(offset: u8),
+        offsetx_16(offset: FrameAddress)
+    >(&mut self) {
+        let mut item: HeapRef = self.stack.pop();
+        item.add_offset(offset as StackOffset);
+        self.stack.push(item);
     }
-
-    /// Pops 2 heap references and compares num_bytes bytes. Drops temporary references.
-    fn heap_cneq(&mut self, constructor: StackAddress, num_bytes: StackAddress) {
-        let b: HeapRef = self.stack.pop();
-        let a: HeapRef = self.stack.pop();
-        let data_a = self.heap.slice(a, num_bytes);
-        let data_b = self.heap.slice(b, num_bytes);
-        self.stack.push((data_a != data_b) as Data8);
-        self.refcount_value(a, constructor, HeapRefOp::Free);
-        self.refcount_value(b, constructor, HeapRefOp::Free);
-    }*/
 
     /// Pop a heap reference and push the heap value at its current offset onto the stack.
     fn <
