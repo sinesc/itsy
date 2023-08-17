@@ -406,6 +406,36 @@ impl_opcodes!{
         self.stack.push(a * b);
     }
 
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        vmuls8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmuls16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmuls32<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmuls64<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmulu8<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmulu16<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmulu32<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        vmulu64<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        let result = T::overflowing_mul(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        vmulf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        vmulf64<T: f64>(left: FrameAddress, right: FrameAddress)
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        self.stack.push(a * b);
+    }
+
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
         divs8<T: i8>() [ check ],
@@ -514,34 +544,6 @@ impl_opcodes!{
         let b: T = self.stack.pop();
         let a: T = self.stack.pop();
         self.stack.push(a % b);
-    }
-
-    /// Pops an integer value off the stack and pushes its square.
-    fn <
-        sqs8<T: i8>() [ check ],
-        sqs16<T: i16>() [ check ],
-        sqs32<T: i32>() [ check ],
-        sqs64<T: i64>() [ check ],
-        squ8<T: u8>() [ check ],
-        squ16<T: u16>() [ check ],
-        squ32<T: u32>() [ check ],
-        squ64<T: u64>() [ check ],
-    >(&mut self) {
-        let v: T = self.stack.pop();
-        let result = T::overflowing_mul(v, v);
-        self.stack.push(result.0);
-        if result.1 {
-            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
-        }
-    }
-
-    /// Pops a float value off the stack and pushes its square.
-    fn <
-        sqf32<T: f32>(),
-        sqf64<T: f64>(),
-    >(&mut self) {
-        let v: T = self.stack.pop();
-        self.stack.push(v * v);
     }
 
     /// Pops stack address sized value, shifts it by given number of bits and pushes it.

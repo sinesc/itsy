@@ -75,7 +75,7 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64,
                 if 4.0 <= r * r + i_tmp {
                     break;
                 }
-                i = 2.0 * r * i + ry;
+                i = r * i * 2.0 + ry;
                 r = r * r - i_tmp + rx;
                 n += 1;
             }

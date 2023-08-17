@@ -159,7 +159,7 @@ fn itsy_mandelbrot(columns: u32, rows: u32) -> String {
             let n = 0;
             while n < 16 && r * r + i * i <= 4.0 {
                 r = r * r - i * i + x;
-                i = 2.0 * r * i + y;
+                i = r * i * 2.0 + y;
                 n += 1;
             }
             line += chars[n-1];

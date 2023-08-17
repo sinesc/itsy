@@ -452,11 +452,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given variable.
     fn compile_variable(self: &mut Self, item: &ast::Variable) -> CompileResult {
         comment!(self, "variable {}", item);
-        let load_index = {
-            self.check_initialized(item)?;
-            let binding_id = item.binding_id.ice_msg("Unresolved binding encountered")?;
-            self.locals.lookup(binding_id)
-        };
+        let load_index = self.load_variable(item)?;
         self.write_load(self.ty(item), load_index)?;
         Ok(())
     }
@@ -1064,38 +1060,37 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given binary operation.
     fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression, Variable};
-        fn equals(a: &Operand, b: &Operand) -> bool {
-            match (a, b) {
-                (
-                    Operand::Expression(Expression::Variable(Variable { binding_id: Some(a_binding_id), .. })),
-                    Operand::Expression(Expression::Variable(Variable { binding_id: Some(b_binding_id), .. }))
-                ) => a_binding_id == b_binding_id,
-                _ => false,
-            }
-        }
-        match item.op {
-            Mul if equals(&item.left, &item.right) => { // TODO: move to optimizer
-                self.compile_expression(item.left.as_expression().ice()?)?;
-                self.write_sq(self.ty(&item.left))?;
+        use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression};
+        let vars = match (&item.left, &item.right) {
+            (
+                Operand::Expression(Expression::Variable(vl)),
+                Operand::Expression(Expression::Variable(vr))
+            ) => Some((vl, vr)),
+            _ => None,
+        };
+        match (item.op, vars) {
+            (Mul, Some((vl, vr))) => {
+                let addr_l = self.load_variable(vl)?;
+                let addr_r = self.load_variable(vr)?;
+                self.write_vmul(self.ty(&item.left), addr_l, addr_r)?;
                 Ok(())
             },
-            Add | Sub | Mul | Div | Rem | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual => {
+            (Add | Sub | Mul | Div | Rem | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual, _) => {
                 self.compile_binary_op_simple(item)
             },
-            And | Or => {
+            (And | Or, _) => {
                 self.compile_binary_op_shortcircuiting(item)
             },
-            Index | IndexWrite | Access | AccessWrite => {
+            (Index | IndexWrite | Access | AccessWrite, _) => {
                 self.compile_binary_op_offseting(item)
             },
-            Cast => {
+            (Cast, _) => {
                 self.compile_binary_op_cast(item)
             },
-            Call => {
+            (Call, _) => {
                 self.compile_binary_op_call(item)
             },
-            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | Range | RangeInclusive => {
+            (Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | Range | RangeInclusive, _) => {
                 Self::ice_at(item, "Unexpected operator in compile__binary_op")
             },
         }
@@ -1263,6 +1258,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else {
             Ok(())
         }
+    }
+
+    /// Returns a variable index, errors if variable is not initialized.
+    fn load_variable(self: &mut Self, item: &ast::Variable) -> CompileResult<FrameAddress> {
+        self.check_initialized(item)?;
+        let binding_id = item.binding_id.ice_msg("Unresolved binding encountered")?;
+        Ok(self.locals.lookup(binding_id))
     }
 
     /// Stores an instance constructor on the const pool.
@@ -1845,19 +1847,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Write square instruction.
-    fn write_sq(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
+    /// Write variable multiplication instruction.
+    fn write_vmul(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
         Ok(match ty {
-            Type::i8 => self.writer.sqs8(),
-            Type::i16 => self.writer.sqs16(),
-            Type::i32 => self.writer.sqs32(),
-            Type::i64 => self.writer.sqs64(),
-            Type::u8 => self.writer.squ8(),
-            Type::u16 => self.writer.squ16(),
-            Type::u32 => self.writer.squ32(),
-            Type::u64 => self.writer.squ64(),
-            Type::f32 => self.writer.sqf32(),
-            Type::f64 => self.writer.sqf64(),
+            Type::i8 => self.writer.vmuls8(left, right),
+            Type::i16 => self.writer.vmuls16(left, right),
+            Type::i32 => self.writer.vmuls32(left, right),
+            Type::i64 => self.writer.vmuls64(left, right),
+            Type::u8 => self.writer.vmulu8(left, right),
+            Type::u16 => self.writer.vmulu16(left, right),
+            Type::u32 => self.writer.vmulu32(left, right),
+            Type::u64 => self.writer.vmulu64(left, right),
+            Type::f32 => self.writer.vmulf32(left, right),
+            Type::f64 => self.writer.vmulf64(left, right),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
