@@ -287,7 +287,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_assignment_to_var(self: &mut Self, item: &ast::Assignment) -> CompileResult {
         use crate::frontend::ast::BinaryOperator as BO;
         comment!(self, "direct assignment");
-        let binding_id = item.left.as_variable().ice()?.binding_id.ice()?;
+        let binding_id = item.left.as_variable().ice()?.binding_id;
         let loc = self.locals.lookup(binding_id);
         match item.op {
             BO::Assign => {
@@ -434,7 +434,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles a variable binding and optional assignment.
     fn compile_binding(self: &mut Self, item: &ast::LetBinding) -> CompileResult {
-        let binding_id = item.binding_id.ice_msg("Unresolved binding")?;
+        let binding_id = item.binding_id;
         self.init_state.declare(binding_id);
         if let Some(expr) = &item.expr {
             comment!(self, "let {} = ...", item.ident.name);
@@ -714,7 +714,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_for_loop(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
         use ast::{Expression::*, BinaryOperator as Op};
         // initialize iter variable
-        let binding_id = item.iter.binding_id.ice_msg("Unresolved binding")?;
+        let binding_id = item.iter.binding_id;
         self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
@@ -759,15 +759,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "skip inlined {} body", item.shared.sig.ident.name);
         let function_skip_jump = self.writer.jmp(123);
         let function_addr = self.writer.position();
-        let captures: Vec<_> = item.required_bindings.iter().map(|(_, binding_id)| *binding_id).collect();
-        self.compile_function_inner(&item.shared, item.function_id.ice()?, &captures)?;
+        self.compile_function_inner(&item.shared, item.function_id.ice()?, &item.required_bindings)?;
         let function_done_jump = self.writer.position();
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
         // load captures
         comment!(self, "\ncapture variables for {}", item.shared.sig.ident.name);
         let mut size = 0;
-        for (_, capture_binding_id) in item.required_bindings.iter() {
-            let capture_binding_id = capture_binding_id.ice()?;
+        for &capture_binding_id in item.required_bindings.iter() {
             let loc = self.locals.lookup(capture_binding_id);
             let type_id = self.binding_by_id(capture_binding_id).type_id.ice()?;
             let ty = self.ty(&type_id);
@@ -795,7 +793,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles the given function.
-    fn compile_function_inner(self: &mut Self, item: &ast::FunctionShared, function_id: FunctionId, closure_captures: &[ Option<BindingId> ]) -> CompileResult {
+    fn compile_function_inner(self: &mut Self, item: &ast::FunctionShared, function_id: FunctionId, closure_captures: &[ BindingId ]) -> CompileResult {
 
         // register function bytecode index
         let position = self.writer.position();
@@ -806,16 +804,15 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let mut frame = StackFrame::new();
         frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.ty(ret).primitive_size());
         for arg in item.sig.args.iter() {
-            frame.insert(arg.binding_id.ice()?, frame.arg_pos);
-            self.init_state.declare(arg.binding_id.ice()?);
-            self.init_state.initialize(arg.binding_id.ice()?);
+            frame.insert(arg.binding_id, frame.arg_pos);
+            self.init_state.declare(arg.binding_id);
+            self.init_state.initialize(arg.binding_id);
             frame.arg_pos += self.ty(arg).primitive_size() as FrameAddress;
         }
 
         // clone closed over variables
-        for closure_capture in closure_captures {
-            frame.insert(closure_capture.ice()?, frame.arg_pos);
-            let binding_id = closure_capture.ice()?;
+        for &binding_id in closure_captures {
+            frame.insert(binding_id, frame.arg_pos);
             self.init_state.declare(binding_id);
             self.init_state.initialize(binding_id);
             let capture_type = self.binding_by_id(binding_id).type_id.ice()?;
@@ -1220,13 +1217,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // todo: this is pretty bad. need to come up with better solution. trait on ast?
         for statement in item.statements.iter() {
             if let ast::Statement::LetBinding(binding) = statement {
-                frame.insert(binding.binding_id.ice()?, frame.var_pos);
+                frame.insert(binding.binding_id, frame.var_pos);
                 frame.var_pos += self.ty(binding).primitive_size() as FrameAddress;
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame)?;
                 }
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.insert(for_loop.iter.binding_id.ice()?, frame.var_pos);
+                frame.insert(for_loop.iter.binding_id, frame.var_pos);
                 frame.var_pos += self.ty(&for_loop.iter).primitive_size() as FrameAddress;
                 self.create_stack_frame_block(&for_loop.block, frame)?;
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
@@ -1250,8 +1247,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Checks whether the given variable is initialized
     fn check_initialized(self: &Self, item: &ast::Variable) -> CompileResult {
-        let binding_id = item.binding_id.ice_msg("Unresolved binding")?;
-        let state = self.init_state.initialized(binding_id);
+        let state = self.init_state.initialized(item.binding_id);
         if state == BranchingState::Uninitialized || state == BranchingState::MaybeInitialized {
             let variable = item.ident.name.clone();
             Err(CompileError::new(item, if state == BranchingState::Uninitialized { CompileErrorKind::Uninitialized(variable) } else { CompileErrorKind::MaybeInitialized(variable) }, &self.module_path))
@@ -1263,8 +1259,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Returns a variable index, errors if variable is not initialized.
     fn load_variable(self: &mut Self, item: &ast::Variable) -> CompileResult<FrameAddress> {
         self.check_initialized(item)?;
-        let binding_id = item.binding_id.ice_msg("Unresolved binding encountered")?;
-        Ok(self.locals.lookup(binding_id))
+        Ok(self.locals.lookup(item.binding_id))
     }
 
     /// Stores an instance constructor on the const pool.

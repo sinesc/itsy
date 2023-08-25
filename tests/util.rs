@@ -1,4 +1,4 @@
-pub use itsy::{build_str, run as itsy_run, parser::parse_module, internals::ast::Position, internals::binary::sizes::{StackAddress, STACK_ADDRESS_TYPE}, internals::resolved::Type};
+pub use itsy::{build_str, run as itsy_run, parser::{parse_module, ParsedModule, ParseResult, LinkState}, internals::ast::Position, internals::binary::sizes::{StackAddress, STACK_ADDRESS_TYPE}, internals::resolved::Type};
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
@@ -111,4 +111,10 @@ pub fn run(code: &str) -> Context {
         }
     }
     context
+}
+
+#[allow(dead_code)]
+pub fn parse(src: &str) -> ParseResult<ParsedModule> {
+    let mut linkstate = LinkState::new();
+    parse_module(&mut linkstate, src, "")
 }

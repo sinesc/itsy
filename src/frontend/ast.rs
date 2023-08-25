@@ -346,23 +346,17 @@ pub struct LetBinding {
     pub mutable     : bool,
     pub expr        : Option<Expression>,
     pub ty          : Option<InlineType>,
-    pub binding_id  : Option<BindingId>,
+    pub binding_id  : BindingId,
 }
 
 impl_positioned!(LetBinding);
 
 impl Typeable for LetBinding {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        match self.binding_id {
-            Some(binding_id) => bindings.binding_by_id(binding_id).type_id,
-            None => None,
-        }
+        bindings.binding_by_id(self.binding_id).type_id
     }
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
-        match self.binding_id {
-            Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
-            None => { /* not resolved to binding yet */ },
-        }
+        bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id);
     }
 }
 
@@ -370,7 +364,9 @@ impl Resolvable for LetBinding {
     fn num_resolved(self: &Self) -> Progress {
         self.expr.as_ref().map_or(Progress::zero(), |expr| expr.num_resolved())
         + self.ty.as_ref().map_or(Progress::zero(), |ty| ty.num_resolved())
-        + self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+
+        // FIXME need binding-container to actually verify binding is resolved
+        //+ self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
         ResolveErrorKind::CannotResolve(self.ident.name.clone())
@@ -382,17 +378,17 @@ pub struct FunctionShared {
     pub position: Position,
     pub sig     : Signature,
     pub block   : Option<Block>,
-    pub scope_id: Option<ScopeId>,
+    pub scope_id: ScopeId,
 }
 
 /// A closure, e.g. `|a: u8, b: String| -> u16 { ... }`.
 #[derive(Debug)]
 pub struct Closure {
-    pub shared      : FunctionShared,
-    pub struct_type_id: Option<TypeId>,
-    pub type_id     : Option<TypeId>,
-    pub function_id : Option<FunctionId>,
-    pub required_bindings: UnorderedMap<String, Option<BindingId>>,
+    pub shared              : FunctionShared,
+    pub struct_type_id      : Option<TypeId>,
+    pub type_id             : Option<TypeId>,
+    pub function_id         : Option<FunctionId>,
+    pub required_bindings   : Vec<BindingId>,
 }
 
 impl Positioned for Closure {
@@ -654,7 +650,7 @@ pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
     pub variants: Vec<VariantDef>,
-    pub scope_id: Option<ScopeId>,
+    pub scope_id: ScopeId,
     pub type_id : Option<TypeId>,
     pub vis     : Visibility,
 }
@@ -709,7 +705,7 @@ impl Resolvable for StructDef {
 pub struct ImplBlock {
     pub position    : Position,
     pub functions   : Vec<Function>,
-    pub scope_id    : Option<ScopeId>,
+    pub scope_id    : ScopeId,
     pub ty          : InlineType,
     pub trt         : Option<TypeName>,
 }
@@ -729,7 +725,7 @@ impl Resolvable for ImplBlock {
 pub struct TraitDef {
     pub position    : Position,
     pub functions   : Vec<Function>,
-    pub scope_id    : Option<ScopeId>,
+    pub scope_id    : ScopeId,
     pub ident       : Ident,
     pub type_id     : Option<TypeId>,
     pub vis         : Visibility,
@@ -752,7 +748,7 @@ pub struct ForLoop {
     pub iter    : LetBinding,
     pub expr    : Expression,
     pub block   : Block,
-    pub scope_id: Option<ScopeId>,
+    pub scope_id: ScopeId,
 }
 
 impl_positioned!(ForLoop);
@@ -781,7 +777,7 @@ pub struct WhileLoop {
     pub position: Position,
     pub expr    : Expression,
     pub block   : Block,
-    pub scope_id: Option<ScopeId>,
+    pub scope_id: ScopeId,
 }
 
 impl_positioned!(WhileLoop);
@@ -858,7 +854,7 @@ pub struct MatchBlock {
     pub position    : Position,
     pub expr        : Expression,
     pub branches    : Vec<(Pattern, Block)>,
-    pub scope_id    : Option<ScopeId>,
+    pub scope_id    : ScopeId,
 }
 
 impl_positioned!(MatchBlock);
@@ -887,7 +883,7 @@ pub struct IfBlock {
     pub cond        : Expression,
     pub if_block    : Block,
     pub else_block  : Option<Block>,
-    pub scope_id    : Option<ScopeId>,
+    pub scope_id    : ScopeId,
 }
 
 impl_positioned!(IfBlock);
@@ -940,14 +936,14 @@ pub struct Block {
     pub position    : Position,
     pub statements  : Vec<Statement>,
     pub result      : Option<Expression>,
-    pub scope_id    : Option<ScopeId>,
+    pub scope_id    : ScopeId,
 }
 
 impl_positioned!(Block);
 impl_display!(Block, "{{ ... }}");
 
 impl Block {
-    pub fn new(position: Position, mut statements: Vec<Statement>, mut result: Option<Expression>) -> Self {
+    pub fn new(position: Position, scope_id: ScopeId, mut statements: Vec<Statement>, mut result: Option<Expression>) -> Self {
         // truncate dead code
         if let Some(control_flow_position) = statements.iter().position(|s| s.identify_control_flow(true).is_some()) {
             // TODO: implement warning support and attach a warning to the block ast node
@@ -961,7 +957,7 @@ impl Block {
             position,
             statements,
             result,
-            scope_id: None,
+            scope_id,
         }
     }
 
@@ -1242,7 +1238,7 @@ impl Resolvable for StructLiteral {
 pub struct Variable {
     pub position    : Position,
     pub ident       : Ident,
-    pub binding_id  : Option<BindingId>,
+    pub binding_id  : BindingId,
 }
 
 impl_positioned!(Variable);
@@ -1250,22 +1246,18 @@ impl_display!(Variable, "{}", ident);
 
 impl Typeable for Variable {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
-        match self.binding_id {
-            Some(binding_id) => bindings.binding_by_id(binding_id).type_id,
-            None => None,
-        }
+        bindings.binding_by_id(self.binding_id).type_id
     }
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
-        match self.binding_id {
-            Some(binding_id) => bindings.binding_by_id_mut(binding_id).type_id = Some(type_id),
-            None => { /* not resolved to binding yet */ },
-        }
+        bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
     }
 }
 
 impl Resolvable for Variable {
     fn num_resolved(self: &Self) -> Progress {
-        self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        // FIXME: this needs a binding container
+        //self.binding_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        Progress::new(1, 1)
     }
 }
 

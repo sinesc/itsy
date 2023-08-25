@@ -8,10 +8,6 @@ macro_rules! impl_typed_id {
         #[doc = $string]
         pub struct $name(NonZeroUsize);
         impl $name {
-            /// Converts the typed id into a usize. Useful to avoid `Into::<usize>::into(self)` when inference fails.
-            pub fn into_usize(self: Self) -> usize {
-                self.into()
-            }
             /// Creates a new typed id from given usize.
             pub const fn new(input: usize) -> Self {
                 Self(match NonZeroUsize::new(input + 1) {
@@ -19,24 +15,32 @@ macro_rules! impl_typed_id {
                     None => panic!("Input usize overflowed."),
                 })
             }
+            /// Converts the typed id into a usize. Useful to avoid `Into::<usize>::into(self)` when inference fails.
+            pub const fn into_usize(self: Self) -> usize {
+                self.0.get() - 1
+            }
+            /// Returns the next id following this one.
+            pub fn next(self: Self) -> Self {
+                Self::from(self.into_usize() + 1)
+            }
         }
         impl From<$name> for usize {
             fn from(input: $name) -> usize {
-                Into::<usize>::into(input.0) - 1
+                input.into_usize()
             }
         }
         impl From<usize> for $name {
             fn from(input: usize) -> $name {
-                Self(NonZeroUsize::new(input + 1).expect("Input usize overflowed."))
+                Self::new(input)
             }
         }
         impl Debug for $name {
             fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}({})", stringify!($name), Into::<usize>::into(self.0))
+                write!(f, "{}({})", stringify!($name), self.into_usize())
             }
         }
         impl Default for $name {
-            fn default() -> Self { Self(NonZeroUsize::new(1).unwrap()) }
+            fn default() -> Self { Self::new(0) }
         }
     };
 }

@@ -3,67 +3,70 @@ use util::*;
 
 #[test]
 fn line_comment() {
-    parse_module("// test\n", "").unwrap();
+    parse("// test\n").unwrap();
 }
 
 #[test]
 fn unterminated_line_comment() {
-    parse_module("// test", "").unwrap();
+    parse("// test").unwrap();
 }
 
 #[test]
 fn unterminated_empty_line_comment() {
-    parse_module("//", "").unwrap();
+    parse("//").unwrap();
 }
 
 #[test]
 fn block_comment() {
-    parse_module("/* test */", "").unwrap();
+    parse("/* test */").unwrap();
 }
 
 #[test]
 fn multi_line_block_comment() {
-    parse_module("/*
+    parse("/*
     test
-    */", "").unwrap();
+    */").unwrap();
 }
 
 #[test]
 fn multi_line_block_comment_followed() {
-    parse_module("/*
+    parse("/*
     test
-    */ //", "").unwrap();
+    */ //").unwrap();
 }
 
 #[test]
 fn comments_in_expression() {
-    parse_module("
+    parse("
         fn test() {
+            let x = 1;
+            let y = 1;
             x + /* ml */ y // sl
         }
-    ", "").unwrap();
+    ").unwrap();
 }
 
 #[test]
 fn comments_in_statement() {
-    parse_module("
+    parse("
         fn /* test */ test() {
         }
-    ", "").unwrap();
+    ").unwrap();
 }
 
 #[test]
 fn comments_without_whitespace() {
-    parse_module("
+    parse("
         fn/*ml*/test(){//sl
         }
-    ", "").unwrap();
+    ").unwrap();
 }
 
 #[test]
 fn binary_as() {
-    parse_module("
+    parse("
         fn test() -> u8 {
+            let a = 1;
             a as u8 + 1
-        }\n", "").unwrap();
+        }\n").unwrap();
 }

@@ -69,7 +69,10 @@ pub(crate) struct Resolver<'ctx> {
 pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveResult<ResolvedProgram<T>> where T: VMFunc<T> {
 
     // create root scope and insert primitives
-    let mut scopes = scopes::Scopes::new();
+    let mut scopes = scopes::Scopes::new(
+        replace(&mut program.scope_parent_map, UnorderedMap::new()),
+        replace(&mut program.binding_map, Set::new())
+    );
     let mut primitives = UnorderedMap::new();
     primitives.insert(&Type::void, scopes.insert_type(None, Type::void));
     primitives.insert(&Type::bool, scopes.insert_type(Some("bool"), Type::bool));
@@ -108,16 +111,14 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     }
 
     // create scopes for each module, import builtin types into module namespace
-    for module in &mut program.0 {
-        let module_scope_id = scopes.create_scope(ScopeId::ROOT);
+    for module in &mut program.modules {
         let module_path = module.path.clone() + "::";
         for (_, &type_id) in &primitives {
             if let Some(name) = scopes.type_flat_name(type_id) {
                 let name = name.clone();
-                scopes.insert_alias(module_scope_id, &name, &(module_path.clone() + &name));
+                scopes.insert_alias(module.scope_id, &name, &(module_path.clone() + &name));
             }
         }
-        module.scope_id = Some(module_scope_id);
     }
 
     // assemble set of module paths to check use declarations against
@@ -138,9 +139,9 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             module_path     : "",
         };
 
-        for module in &mut program.0 {
+        for module in &mut program.modules {
             resolver.module_path = &module.path;
-            resolver.scope_id = module.scope_id.ice()?;
+            resolver.scope_id = module.scope_id;
             for mut statement in module.ast.iter_mut() {
                 if let Err(mut err) = resolver.resolve_statement(&mut statement) {
                     err.module_path = module.path.clone();
@@ -170,7 +171,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // find entry module (empty path) and main function within
     let entry_scope_id = program.modules()
         .find(|&m| m.path == "").ice()?
-        .scope_id.ice()?;
+        .scope_id;
 
     let entry_fn = match scopes.constant_id(entry_scope_id, &entry_function, TypeId::VOID) {
         Some(constant_id) => scopes.constant_function_id(constant_id),
@@ -179,7 +180,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     Ok(ResolvedProgram {
         ty              : PhantomData,
-        modules         : program.0,
+        modules         : program.modules,
         entry_fn        : entry_fn.usr(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()))?,
         resolved        : scopes.into(),
     })
@@ -187,18 +188,6 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
 /// Utility methods to update a typeslot with a resolved type and increase the resolution counter.
 impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
-
-    /// Creates new or enters existing scope and returns the original/parent scope id.
-    fn try_create_scope(self: &mut Self, scope_id: &mut Option<ScopeId>) -> ScopeId {
-        let parent_scope_id = self.scope_id;
-        if let &mut Some(scope_id) = scope_id {
-            self.scope_id = scope_id;
-        } else {
-            self.scope_id = self.scopes.create_scope(parent_scope_id);
-            *scope_id = Some(self.scope_id);
-        }
-        parent_scope_id
-    }
 
     /// Try to create concrete array builtin function signature for the given array type
     fn try_create_array_builtin(self: &mut Self, item: &ast::Expression, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
@@ -667,7 +656,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an implementation block.
     fn resolve_impl_block(self: &mut Self, item: &mut ast::ImplBlock) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         if item.ty.type_id(self).is_none() {
             self.resolve_inline_type(&mut item.ty)?;
         }
@@ -709,7 +699,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a trait definition block.
     fn resolve_trait_def(self: &mut Self, item: &mut ast::TraitDef) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         // ensure trait exists
         if item.type_id.is_none() {
             let mut trt = Trait { provided: Map::new(), required: Map::new() };
@@ -768,19 +759,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a closure defintion. // TODO dedup with Function
     fn resolve_closure(self: &mut Self, item: &mut ast::Closure, _expected_result: Option<TypeId>) -> ResolveResult {
 
-        let parent_scope_id = self.try_create_scope(&mut item.shared.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.shared.scope_id;
         self.scopes.scope_register_function(self.scope_id);
 
         // resolve closed over bindings
         if item.struct_type_id.is_none() {
-            // todo: move binding id handling to parser
-            for (binding_name, binding_id) in item.required_bindings.iter_mut() {
-                if binding_id.is_none() {
-                    *binding_id = self.scopes.binding_id(self.scope_id, binding_name);
-                }
-            }
-
-            let closure_type_ids: Map<_, _> = item.required_bindings.iter().map(|(name, _)| (name.clone(), self.scopes.binding_id(self.scope_id, name).map_or(None, |b| self.binding_by_id(b).type_id))).collect();
+            let closure_type_ids: Map<_, _> = item.required_bindings.iter().map(|&b| ("".to_string(), self.binding_by_id(b).type_id)).collect();
             if closure_type_ids.iter().all(|t| t.1.is_some()) {
                 //let mangled_type_name = format!("{}::{}", &self.module_path, &item.shared.sig.ident.name);
                 let type_id = self.scopes.insert_type(None, Type::Struct(Struct { fields: closure_type_ids, impl_traits: Map::new() }));
@@ -832,7 +817,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a function defintion.
     fn resolve_function(self: &mut Self, item: &mut ast::Function, struct_scope: Option<TypeId>) -> ResolveResult {
 
-        let parent_scope_id = self.try_create_scope(&mut item.shared.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.shared.scope_id;
         self.resolve_signature(&mut item.shared.sig)?;
 
         if item.constant_id.is_none() && item.shared.sig.ret_resolved(self) && item.shared.sig.args_resolved(self) {
@@ -892,13 +878,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a variable name to a variable.
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable, expected_result: Option<TypeId>) -> ResolveResult {
-        // resolve binding
-        if item.binding_id.is_none() {
-            item.binding_id = self.scopes.binding_id(self.scope_id, &item.ident.name);
-            if item.binding_id.is_none() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.ident.name.to_string()), self.module_path));
-            }
-        }
         // set expected type, if it isn't a trait or we're in final resolver stage
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
@@ -941,7 +920,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         // resolve condition and block
         self.resolve_expression(&mut item.cond, Some(self.primitive_type_id(Type::bool)?))?;
         self.resolve_block(&mut item.if_block, expected_result)?;
@@ -961,7 +941,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a match expression.
     fn resolve_match_block(self: &mut Self, item: &mut ast::MatchBlock, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         self.resolve_expression(&mut item.expr, None)?;
         for (_, block) in &mut item.branches {
             self.resolve_block(block, expected_result)?;
@@ -973,7 +954,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a for loop.
     fn resolve_for_loop(self: &mut Self, item: &mut ast::ForLoop) -> ResolveResult {
         use ast::{Expression::*, BinaryOperator as Op};
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         // create binding for the iterator variable
         self.resolve_let_binding(&mut item.iter)?;
         match &item.expr { // NOTE: these need to match Compiler::compile_for_loop
@@ -1009,7 +991,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a while loop.
     fn resolve_while_loop(self: &mut Self, item: &mut ast::WhileLoop) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         self.resolve_expression(&mut item.expr, None)?;
         self.resolve_block(&mut item.block, None)?;
         self.scope_id = parent_scope_id;
@@ -1018,7 +1001,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block, expected_result: Option<TypeId>) -> ResolveResult {
-        let parent_scope_id = self.try_create_scope(&mut item.scope_id);
+        let parent_scope_id = self.scope_id;
+        self.scope_id = item.scope_id;
         // resolve statments, result and returns
         for statement in item.statements.iter_mut() {
             self.resolve_statement(statement)?;
@@ -1154,8 +1138,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                                 // can't ice here since builtin resolve above might actually temporarily fail on arrays that don't have
                                 // their inner type resolved yet
                             },
-                            _ => {
-                                Self::ice("Member access on unsupported type")?;
+                            x @ _ => {
+                                Self::ice(&format!("Member access on unsupported type {:?}", x))?;
                             },
                         }
                     }
@@ -1246,16 +1230,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a binding created by let, for or a signature.
     fn resolve_let_binding(self: &mut Self, item: &mut ast::LetBinding) -> ResolveResult {
 
-        // create binding id if we don't have one yet
-        if item.binding_id.is_none() {
-            // this binding ast node wasn't processed yet. if the binding name already exists we're shadowing - which is NYI
-            if self.scopes.local_binding_id(self.scope_id, &item.ident.name).is_some() {
-                unimplemented!("Shadowing {}", item.ident.name); // todo: support shadowing
-            }
-            let binding_id = self.scopes.insert_binding(self.scope_id, &item.ident.name, item.mutable, None);
-            item.binding_id = Some(binding_id);
-        }
-
         // check if a type is specified
         if let Some(inline_type) = &mut item.ty {
             if let Some(inline_type_id) = self.resolve_inline_type(inline_type)? {
@@ -1276,7 +1250,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // check binding is resolved. Resolvable (via resolved_or_err) does not do this for us. (TODO/FIXME)
         if self.stage.must_resolve() {
-            if let Binding { type_id: None, .. } = self.binding_by_id(item.binding_id.ice()?) {
+            if let Binding { type_id: None, .. } = self.binding_by_id(item.binding_id) {
                 return Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(item.ident.to_string()), self.module_path))
             }
         }

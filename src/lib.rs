@@ -285,8 +285,9 @@ macro_rules! itsy_api {
 /// ```
 #[cfg(feature="compiler")]
 pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: bytecode::VMFunc<F> {
-    use crate::frontend::parser::{parse_module, types::ParsedProgram, error::ParseError, error::ParseErrorKind};
-    let parsed = parse_module(source, "")?;
+    use crate::frontend::parser::{parse_module, types::{LinkState, ParsedProgram}, error::{ParseError, ParseErrorKind}};
+    let mut state = LinkState::new();
+    let parsed = parse_module(&mut state, source, "")?;
     if let Some(module) = parsed.modules().next() {
         return Err(Error::ParseError(ParseError::new(
             ParseErrorKind::DisabledFeature("build_str() does not support module loading. Please use either build() or parser::parse() and provide a module loader"),
@@ -296,6 +297,7 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: bytecode
     }
     let mut program = ParsedProgram::new();
     program.add_module(parsed);
+    program.set_link_state(state);
     let resolved = resolver::resolve::<F>(program, "main")?;
     Ok(compiler::compile(resolved)?)
 }
@@ -321,13 +323,13 @@ pub fn build<F, P>(source_file: P) -> Result<Program<F>, BuildError> where F: by
 
 #[cfg(feature="compiler")]
 fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::HashMap<String, (std::path::PathBuf, String)>) -> Result<Program<F>, Error> where F: bytecode::VMFunc<F> {
-    let parsed = parser::parse(|module_path| {
+    let parsed = parser::parse(|module_path, state| {
         let mut filename = parser::module_filename(source_file, module_path, false);
         let file = std::fs::read_to_string(&filename).or_else(|_| {
             filename = parser::module_filename(source_file, module_path, true);
             std::fs::read_to_string(&filename)
         })?;
-        let module = parser::parse_module(&file, module_path);
+        let module = parser::parse_module(state, &file, module_path);
         files.insert(module_path.to_string(), (filename, file));
         module
     })?;

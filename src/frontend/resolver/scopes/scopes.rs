@@ -18,17 +18,21 @@ pub(crate) struct Scopes {
     /// List of functions. Vector index represents FunctionId
     functions       : Vec<Function>,
     /// Scoped bindings.
-    bindings        : Repository<(ScopeId, String), BindingId, Binding>,
+    bindings        : UnorderedMap<BindingId, Binding>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
     /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
-    parent_map      : Vec<ScopeId>, // ScopeId => ScopeId
+    parent_map      : UnorderedMap<ScopeId, ScopeId>,
 }
 
 impl Into<Resolved> for Scopes {
     /// convert scopes into type vector
-    fn into(self: Self) -> Resolved {
-        let binding_map = self.bindings.into();
+    fn into(mut self: Self) -> Resolved {
+        // todo refactor
+        let mut binding_map = Vec::new();
+        for i in 0..self.bindings.len() {
+            binding_map.push(self.bindings.remove(&BindingId::new(i)).unwrap());
+        }
         let type_map = self.types.into();
         let constant_map = self.constants.into();
         Resolved::new(binding_map, type_map, constant_map, self.functions)
@@ -38,15 +42,15 @@ impl Into<Resolved> for Scopes {
 impl Scopes {
 
     /// Creates and returns a new Scopes instance.
-    pub fn new() -> Self {
+    pub fn new(scope_parent_map: UnorderedMap<ScopeId, ScopeId>, binding_map: Set<BindingId>) -> Self {
         Scopes {
             aliases         : UnorderedMap::new(),
             types           : Repository::new(),
-            bindings        : Repository::new(),
+            bindings        : binding_map.into_iter().map(|binding_id| (binding_id, Binding { mutable: true, type_id: None })).collect(),
             constants       : Repository::new(),
             functions       : Vec::new(),
             scopefunction   : UnorderedMap::new(),
-            parent_map      : vec![ ScopeId::ROOT ], // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
+            parent_map      : scope_parent_map, // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
     }
 
@@ -71,16 +75,8 @@ impl Scopes {
 
     /// Returns the parent scope id of the given scope id.
     fn parent_id(self: &Self, scope_id: ScopeId) -> Option<ScopeId> {
-        let parent_scope_id = self.parent_map[Into::<usize>::into(scope_id)];
+        let parent_scope_id = self.parent_map[&scope_id];
         if parent_scope_id == scope_id { None } else { Some(parent_scope_id) }
-    }
-
-    /// Creates a new scope within the parent and returns its id.
-    pub fn create_scope(self: &mut Self, parent: ScopeId) -> ScopeId {
-        let index = self.parent_map.len();
-        self.parent_map.push(parent);
-        let result: ScopeId = index.into();
-        result
     }
 
     /// Inserts a general alias into the given scope.
@@ -196,37 +192,14 @@ impl Scopes {
 /// Binding handling
 impl Scopes {
 
-    /// Insert a binding into the given scope, returning a binding id. Its type might not be resolved yet.
-    pub fn insert_binding(self: &mut Self, scope_id: ScopeId, name: &str, mutable: bool, type_id: Option<TypeId>) -> BindingId {
-        self.bindings.insert(Some((scope_id, name.into())), Binding { mutable, type_id })
-    }
-
-    /// Returns the id of the named binding originating in exactly this scope.
-    pub fn local_binding_id(self: &Self, scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        self.bindings.id_by_name(&(scope_id, name.to_string()))
-    }
-
-    /// Finds the id of the named binding within the scope or its parent scopes.
-    pub fn binding_id(self: &Self, mut scope_id: ScopeId, name: &str) -> Option<BindingId> {
-        loop {
-            if let Some(index) = self.local_binding_id(scope_id, name) {
-                return Some(index);
-            } else if let Some(parent_scope_id) = self.parent_id(scope_id) {
-                scope_id = parent_scope_id;
-            } else {
-                return None;
-            }
-        }
-    }
-
     /// Returns a mutable reference to the binding info of the given binding id.
     pub fn binding_mut(self: &mut Self, binding_id: BindingId) -> &mut Binding {
-        self.bindings.value_by_id_mut(binding_id)
+        self.bindings.get_mut(&binding_id).unwrap()
     }
 
     /// Returns a reference to the binding info of the given binding id.
     pub fn binding_ref(self: &Self, binding_id: BindingId) -> &Binding {
-        self.bindings.value_by_id(binding_id)
+        self.bindings.get(&binding_id).unwrap()
     }
 }
 

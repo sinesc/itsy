@@ -8,7 +8,7 @@ pub mod parser {
     //! Sourcecode parsing.
     //!
     //! See [parse] for an example that loads and parses multiple files into a [ParsedProgram], ready for type resolution by [resolve](crate::resolver::resolve).
-    pub use crate::frontend::parser::{parse, parse_module, module_filename, types::ParsedModule, types::ParsedProgram, error::{ParseError, ParseErrorKind}};
+    pub use crate::frontend::parser::{parse, parse_module, module_filename, types::{ParsedModule, ParsedProgram, LinkState}, error::{ParseResult, ParseError, ParseErrorKind}};
 }
 
 pub mod internals {

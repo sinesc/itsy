@@ -10,10 +10,10 @@ use nom::combinator::{recognize, opt, all_consuming, map, not, verify};
 use nom::multi::{separated_list0, separated_list1, many0, fold_many0, fold_many1};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
-use crate::prelude::*;
-use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path, typed_ids::BindingId};
+use crate::{prelude::*, internals::resolved::ids::BindingId};
+use crate::shared::{numeric::Numeric, path_to_parts, parts_to_path};
 use crate::frontend::ast::*;
-use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram, ScopeBindingType, ScopeKind};
+use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram, ScopeBindingType, ScopeKind, VarDecl, LinkState};
 use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
@@ -53,9 +53,36 @@ fn with_scope<'a, P: 'a, O: 'a>(scope_type: ScopeKind, mut parser: P) -> impl Fn
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
-        i.push_scope(scope_type);
+        let backup_state = i.push_scope(scope_type);
         let inner_result = parser.parse(input);
-        i.pop_scope();
+        i.pop_scope(if inner_result.is_ok() {
+            None
+        } else {
+            Some(backup_state)
+        });
+        inner_result
+    }
+}
+
+/// Snapshots binding id state, restores it if the inner parser fails.
+fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+    move |input: Input<'_>| {
+        use nom::Parser;
+        let i = input.clone();
+        let (next_binding_id, next_scope_id) = {
+            let state = i.state.borrow();
+            (state.link_state.next_binding_id, state.link_state.next_scope_id)
+        };
+        let inner_result = parser.parse(input);
+        if inner_result.is_err() {
+            let mut state = i.state.borrow_mut();
+            if next_binding_id != state.link_state.next_binding_id {
+                state.link_state.next_binding_id = next_binding_id;
+                state.link_state.binding_map.retain(|&binding_id| binding_id < next_binding_id);
+                state.scope_stack.last_mut().unwrap().have_bindings.retain(|_, &mut binding_id| binding_id < next_binding_id);
+            }
+            state.link_state.next_scope_id = next_scope_id;
+        }
         inner_result
     }
 }
@@ -84,13 +111,20 @@ fn ident(i: Input<'_>) -> Output<Ident> {
     )(i)
 }
 
-fn var_decl(i: Input<'_>) -> Output<Ident> {
+fn var_decl(i: Input<'_>) -> Output<VarDecl> {
     let j = i.clone();
     map(
         ident,
-        move |id| {
-            j.add_binding(id.name.clone());
-            id
+        move |ident| {
+            let binding_id = if j.flags().is_dead {
+                BindingId::new(0)
+            } else {
+                j.add_binding(&ident.name)
+            };
+            VarDecl {
+                binding_id,
+                ident,
+            }
         }
     )(i)
 }
@@ -158,14 +192,14 @@ fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
 
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ws(alt((
-        map(callable_def, |f| InlineType::CallableDef(Box::new(f))),
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
+        map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     )))(i)
 }
 
 fn callable_def(i: Input<'_>) -> Output<CallableDef> {
-    fn parameter_list(i: Input<'_>) -> Output<Vec<InlineType>> {
+    fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), ws(char(')')))(i)
     }
     fn return_part(i: Input<'_>) -> Output<InlineType> {
@@ -173,7 +207,7 @@ fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     }
     let position = i.position();
     ws(map(
-        tuple((tag("fn"), ws(parameter_list), opt(ws(return_part)))),
+        tuple((tag("fn"), ws(type_list), opt(ws(return_part)))),
         move |sig| CallableDef {
             position,
             args    : sig.1,
@@ -207,7 +241,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         )(i)
     }
     let position = i.position();
-    let the_cloned_clone = i.clone();
+    let j = i.clone();
     ws(map_result(
         pair(
             terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
@@ -224,14 +258,14 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
                 }
             }
             if have_data && have_value {
-                Err(Failure { input: the_cloned_clone.clone(), kind: ParseErrorKind::IllegalVariantMix })
+                Err(Failure { input: j.clone(), kind: ParseErrorKind::IllegalVariantMix })
             } else {
                 Ok(EnumDef {
                     position: position,
                     ident   : pair.1.0,
                     variants: pair.1.2,
                     type_id : None,
-                    scope_id: None,
+                    scope_id: j.scope_id(),
                     vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
                 })
             }
@@ -272,20 +306,21 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
 
 fn trait_def(i: Input<'_>) -> Output<TraitDef> {
     let position = i.position();
-    ws(map(
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Module, map(
         pair(
             terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
-            tuple((ident, ws(char('{')), many0(function), ws(char('}'))))
+            tuple((ident, ws(char('{')), with_flags(&|flags| flags.in_trait = true, many0(function)), ws(char('}'))))
         ),
         move |pair| TraitDef {
             position,
             functions   : pair.1.2,
-            scope_id    : None,
+            scope_id    : j.scope_id(),
             ident       : pair.1.0,
             type_id     : None,
             vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
-    ))(i)
+    )))(i)
 }
 
 fn array_def(i: Input<'_>) -> Output<ArrayDef> {
@@ -304,7 +339,8 @@ fn array_def(i: Input<'_>) -> Output<ArrayDef> {
 
 fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
-    ws(map(
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Module, map(
         preceded(
             check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(inline_type, delimited(ws(char('{')), many0(function), ws(char('}'))))
@@ -312,16 +348,17 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
         move |tuple| ImplBlock {
             position    : position,
             functions   : tuple.1,
-            scope_id    : None,
+            scope_id    : j.scope_id(),
             ty          : tuple.0,
             trt         : None,
         }
-    ))(i)
+    )))(i)
 }
 
 fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
-    ws(map(
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Module, map(
         preceded(
             check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(
@@ -332,11 +369,11 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
         move |tuple| ImplBlock {
             position    : position,
             functions   : tuple.1,
-            scope_id    : None,
+            scope_id    : j.scope_id(),
             ty          : tuple.0.1,
             trt         : Some(TypeName::from_path(tuple.0.0)),
         }
-    ))(i)
+    )))(i)
 }
 
 // function/closure/return
@@ -352,11 +389,11 @@ fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
             tuple((opt(sepr(tag("mut"))), var_decl, ws(char(':')), inline_type)),
             move |tuple| LetBinding {
                 position    : position,
-                ident       : tuple.1,
+                binding_id  : tuple.1.binding_id,
+                ident       : tuple.1.ident,
                 expr        : None,
                 mutable     : tuple.0.is_some(),
                 ty          : Some(tuple.3),
-                binding_id  : None,
             }
         )(i)
     }
@@ -384,7 +421,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         ws(map(
             tuple((
-                terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunction) } else { None })),
+                terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
                 terminated(ws(ident), char('(')), terminated(ws(function_parameter_list), char(')')), opt(ws(function_return_part))
             )),
             |sig| Signature {
@@ -396,11 +433,12 @@ fn function(i: Input<'_>) -> Output<Function> {
         ))(i)
     }
     let position = i.position();
-    ws(map(
-        with_scope(ScopeKind::Function, tuple((signature, with_flags(&|flags: &mut ParserFlags| flags.in_function = true, alt((
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Function, map(
+        tuple((signature, with_flags(&|flags| flags.in_function = true, alt((
             map(block, |b| Some(b)),
-            map(ws(char(';')), |_| None)
-        )))))),
+            map(ws(check_flags(char(';'), |f| if !f.in_trait { Some(ParseErrorKind::IllegalFunctionDecl) } else { None })), |_| None)
+        ))))),
         move |(sig, mut block)| {
             if let Some(block) = &mut block {
                 function_transform_result(block, position);
@@ -410,12 +448,12 @@ fn function(i: Input<'_>) -> Output<Function> {
                     position,
                     sig,
                     block,
-                    scope_id: None,
+                    scope_id: j.scope_id(),
                 },
                 constant_id: None,
             }
         }
-    ))(i)
+    )))(i)
 }
 
 fn anonymous_function(i: Input<'_>) -> Output<Function> {
@@ -435,8 +473,9 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
         ))(i)
     }
     let position = i.position();
-    ws(map(
-        with_scope(ScopeKind::Function, pair(signature, block)),
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Function, map(
+        pair(signature, block),
         move |(sig, mut block)| {
             function_transform_result(&mut block, position);
             Function {
@@ -444,12 +483,12 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
                     position,
                     sig,
                     block: Some(block),
-                    scope_id: None,
+                    scope_id: j.scope_id(),
                 },
                 constant_id: None,
             }
         }
-    ))(i)
+    )))(i)
 }
 
 fn closure(i: Input<'_>) -> Output<Closure> {
@@ -480,17 +519,20 @@ fn closure(i: Input<'_>) -> Output<Closure> {
             let mut block = if let Expression::Block(block) = expr {
                 *block
             } else {
+                j.push_scope(ScopeKind::Closure);
+                let scope_id = j.scope_id();
+                j.pop_scope(None);
                 Block {
-                    position: expr.position(),
-                    statements: Vec::new(),
-                    result: Some(expr),
-                    scope_id: None,
+                    position    : expr.position(),
+                    statements  : Vec::new(),
+                    result      : Some(expr),
+                    scope_id,
                 }
             };
             function_transform_result(&mut block, position);
             Closure {
-                shared: FunctionShared { position, sig, block: Some(block), scope_id: None },
-                required_bindings: required_bindings.into_iter().map(|n| (n, None)).collect::<UnorderedMap<String, Option<BindingId>>>(),
+                shared          : FunctionShared { position, sig, block: Some(block), scope_id: j.scope_id() },
+                required_bindings,
                 function_id     : None,
                 type_id         : None,
                 struct_type_id  : None,
@@ -501,14 +543,15 @@ fn closure(i: Input<'_>) -> Output<Closure> {
 
 fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
+    let j = i.clone();
     map(
         preceded(
             check_flags(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
             terminated(opt(sepl(expression)), ws(char(';'))) // TODO: would error on return{ block }, sepl/r should probably allow but not consume operators/braces
         ),
         move |m| Return {
-            position    : position,
-            expr        : m.unwrap_or_else(|| Expression::void(position)),
+            position,
+            expr: m.unwrap_or_else(|| Expression::void(position)),
         }
     )(i)
 }
@@ -791,17 +834,16 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
             parens,
-            map(anonymous_function, move |m| Expression::AnonymousFunction(Box::new(m))),
             map(path, move |mut m| {
                 // single element paths may be variables if their names exist in the current scope
                 if m.name.len() == 1 {
                     match j.has_binding(&m.name[0].name) {
                         // local variable binding
-                        ScopeBindingType::Local => return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None }),
+                        ScopeBindingType::Local(binding_id) => return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id }),
                         // a binding originating in a parent of the current closure
-                        ScopeBindingType::Parent => {
-                            j.require_binding(&m.name[0].name);
-                            return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id: None });
+                        ScopeBindingType::Parent(binding_id) => {
+                            j.require_binding(binding_id);
+                            return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id });
                         },
                         // not a binding, fall through to handle name.len() != 1 case as well
                         _ => {},
@@ -809,6 +851,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
                 }
                 Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
             }),
+            map(snap(anonymous_function), move |m| Expression::AnonymousFunction(Box::new(m))),
             map(closure, move |m| Expression::Closure(Box::new(m))),
         )))(i)
     }
@@ -819,7 +862,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             alt((
                 map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, BinaryOperand::Expression(e))),
                 map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, BinaryOperand::Member(Member { position: position, ident: i, type_id: None, constant_id: None }))),
-                map(argument_list, |l| (BinaryOperator::Call, BinaryOperand::ArgumentList(l))),
+                map(snap(argument_list), |l| (BinaryOperator::Call, BinaryOperand::ArgumentList(l))),
             )),
             init.1,
             move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
@@ -955,12 +998,34 @@ fn expression(i: Input<'_>) -> Output<Expression> {
 fn assignment(i: Input<'_>) -> Output<Assignment> {
     fn assignable(i: Input<'_>) -> Output<Expression> {
         let var_position = i.position();
-        let init = map(ident, |m| Expression::Variable(Variable { position: var_position as Position, ident: m, binding_id: None }))(i)?;
+        let j = i.clone();
+        let init = map(ident, |m| {
+            if let Some(binding_id) = j.has_binding(&m.name).binding_id() {
+                Expression::Variable(Variable {
+                    position    : var_position,
+                    binding_id  : binding_id,
+                    ident       : m,
+                })
+            } else {
+                // We don't have a binding id - it is not defined. But we cannot error yet because
+                // there's a really high chance this isn't even supposed to be an assignment and the parent
+                // parser is just going through alt() options.
+                // We have to wait until the whole assignment is parsed and identified to actually be an
+                // assignment before generating an error.
+                // There's probably a way to handle this with nom error handling but I can't figure it out,
+                // so instead we'll just return a constant and check for that somewhere downstream.
+                Expression::Constant(Constant {
+                    position    : var_position,
+                    constant_id : None,
+                    path        : Path { name: vec![ m ], position: var_position },
+                })
+            }
+        })(i)?;
         let op_position = init.0.position();
         fold_many0_mut(
             alt((
                 map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
-                map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position as Position, ident: i, type_id: None, constant_id: None })))
+                map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position, ident: i, type_id: None, constant_id: None })))
             )),
             init.1,
             |mut acc, (op, val)| {
@@ -975,7 +1040,7 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
                     }
                     _ => {}
                 }
-                Expression::BinaryOp(Box::new(BinaryOp { position: op_position as Position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
+                Expression::BinaryOp(Box::new(BinaryOp { position: op_position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
             }
         )(init.0)
     }
@@ -991,6 +1056,7 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
     ws(map(
         tuple((assignable, assignment_operator, expression)),
         move |m| {
+            // TODO: check that left is not a constant
             Assignment {
                 position: position,
                 op      : m.1,
@@ -1010,12 +1076,12 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
             tuple((opt(sepr(tag("mut"))), var_decl, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
         ),
         move |m| LetBinding {
-            position    : position,
-            ident       : m.1,
+            position    : position.clone(),
+            binding_id  : m.1.binding_id,
+            ident       : m.1.ident,
             mutable     : m.0.is_some(),
             expr        : m.3,
             ty          : m.2,
-            binding_id  : None,
         }
     ))(i)
 }
@@ -1024,28 +1090,34 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
 
 fn block(i: Input<'_>) -> Output<Block> {
     let position = i.position();
-    ws(map(
+    let j = i.clone();
+    ws(with_scope(ScopeKind::Block, map(
         delimited(
             ws(char('{')),
-            with_scope(ScopeKind::Block, pair(many0(statement), opt(expression))),
+            // contain flags here but don't set any yet. required by return statement dead code marker
+            with_flags(&|_| (), pair(many0(statement), opt(expression))),
             ws(char('}'))
         ),
-        move |m| Block::new(position, m.0, m.1)
-    ))(i)
+        move |m| {
+            Block::new(position, j.scope_id(), m.0, m.1)
+        }
+    )))(i)
 }
 
 fn if_block(i: Input<'_>) -> Output<IfBlock> {
     fn else_block(i: Input<'_>) -> Output<Block> {
         let position = i.position();
+        let j = i.clone();
         ws(preceded(
             tag("else"),
             alt((
-                sepl(map(if_block, move |m| Block::new(position, Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
+                sepl(map(if_block, move |m| Block::new(position, j.scope_id(), Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
                 block
             ))
         ))(i)
     }
     let position = i.position();
+    let j = i.clone();
     ws(preceded(
         // TODO: sepr(tag("if")) causes if(true to be a syntax error. sepr is required to prevent parsing if_ident as if
         check_flags(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
@@ -1056,7 +1128,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
                     cond        : m.0,
                     if_block    : m.1,
                     else_block  : m.2,
-                    scope_id    : None,
+                    scope_id    : j.scope_id(),
                 }
             )
     ))(i)
@@ -1088,9 +1160,10 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     }
     fn match_case(i: Input<'_>) -> Output<Block> {
         let position = i.position();
+        let j = i.clone();
         ws(alt((
             block,
-            map(expression, move |e| Block::new(position, Vec::new(), Some(e))),
+            map(expression, move |e| Block::new(position, j.scope_id(), Vec::new(), Some(e))),
         )))(i)
     }
     fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
@@ -1100,17 +1173,18 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
         ))(i)
     }
     let position = i.position();
+    let j = i.clone();
     ws(preceded(
         check_flags(sepr(tag("match")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
             pair(expression, delimited(char('{'), match_list, preceded(opt(char(',')), ws(char('}'))))),
             move |m| MatchBlock {
-                    position    : position,
-                    expr        : m.0,
-                    branches    : m.1,
-                    scope_id    : None,
-                }
-            )
+                position    : position,
+                expr        : m.0,
+                branches    : m.1,
+                scope_id    : j.scope_id(),
+            }
+        )
     ))(i)
 }
 
@@ -1131,40 +1205,42 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
         )(i)
     }
     let position = i.position();
+    let j = i.clone();
     ws(map(
         preceded(
             check_flags(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|flags: &mut ParserFlags| flags.in_loop = true, block)))
+            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|flags| flags.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
             iter: LetBinding {
                 position    : position,
-                ident       : m.0,
+                binding_id  : m.0.binding_id,
+                ident       : m.0.ident,
                 mutable     : true,
                 expr        : None,
                 ty          : None,
-                binding_id  : None,
             },
-            expr   : m.2,
-            block   : m.3,
-            scope_id: None,
+            expr: m.2,
+            block: m.3,
+            scope_id: j.scope_id(),
         }
     ))(i)
 }
 
 fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let position = i.position();
+    let j = i.clone();
     ws(map(
         preceded(
             check_flags(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
-            pair(sepl(expression), with_flags(&|flags: &mut ParserFlags| flags.in_loop = true, block))
+            pair(sepl(expression), with_flags(&|flags| flags.in_loop = true, block))
         ),
         move |m| WhileLoop {
             position: position,
             expr    : m.0,
             block   : m.1,
-            scope_id: None,
+            scope_id: j.scope_id(),
         }
     ))(i)
 }
@@ -1194,8 +1270,9 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 // statement
 
 fn statement(i: Input<'_>) -> Output<Statement> {
-    ws(alt((
-        root_items,
+    let j = i.clone();
+    let output = ws(alt((
+        //root_items,
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
@@ -1204,8 +1281,14 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(break_statement, |m| Statement::Break(m)),
         map(continue_statement, |m| Statement::Continue(m)),
         map(block, |m| Statement::Block(m)),
-        map(terminated(expression, char(';')), |m| Statement::Expression(m)),
-    )))(i)
+        map(snap(terminated(expression, char(';'))), |m| Statement::Expression(m)),
+    )))(i);
+    if let Ok((_, s)) = &output {
+        if s.identify_control_flow(true).is_some() {
+            j.flags_mut(|f| f.is_dead = true);
+        }
+    }
+    output
 }
 
 // root
@@ -1224,12 +1307,14 @@ fn root_items(i: Input<'_>) -> Output<Statement> {
 }
 
 /// Parses Itsy source code into a program AST structure.
-pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
-    let input = Input::new(src);
-    let result = all_consuming(ws(many0(root_items)))(input.clone());
+pub fn parse_module(link_state: &mut LinkState, src: &str, module_path: &str) -> ParseResult<ParsedModule> {
+    let input = Input::new(src, replace(link_state, LinkState::new()));
+    let module_scope_id = link_state.next_scope_id;
+    let result = all_consuming(ws(with_scope(ScopeKind::Module, many0(root_items))))(input.clone());
+    *link_state = input.take_linkstate();
     match result {
         Ok(result) => {
-            Ok(ParsedModule::new(module_path, result.1))
+            Ok(ParsedModule::new(module_scope_id, module_path, result.1))
         },
         Err(err) => {
             match err {
@@ -1269,18 +1354,20 @@ pub fn parse_module(src: &str, module_path: &str) -> ParseResult<ParsedModule> {
 /// ```
 ///
 /// The returned [ParsedProgram] is now ready for type resolution by [resolve](crate::resolver::resolve).
-pub fn parse(mut loader: impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult<ParsedProgram> {
+pub fn parse(mut loader: impl FnMut(&str, &mut LinkState) -> ParseResult<ParsedModule>) -> ParseResult<ParsedProgram> {
     let mut program = ParsedProgram::new();
-    parse_recurse("", &mut program, &mut loader)?;
+    let mut state = LinkState::new();
+    parse_recurse("", &mut state, &mut program, &mut loader)?;
+    program.set_link_state(state);
     Ok(program)
 }
 
 /// Recursively parse all submodules.
-fn parse_recurse(module_path: &str, program: &mut ParsedProgram, loader: &mut impl FnMut(&str) -> ParseResult<ParsedModule>) -> ParseResult {
-    let module = loader(module_path)?;
+fn parse_recurse(module_path: &str, state: &mut LinkState, program: &mut ParsedProgram, loader: &mut impl FnMut(&str, &mut LinkState) -> ParseResult<ParsedModule>) -> ParseResult {
+    let module = loader(module_path, state)?;
     for submodule_ast in module.modules() {
         let submodule_path = if module_path != "" { module_path.to_string() + "::" + submodule_ast.name() } else { submodule_ast.name().to_string() };
-        match parse_recurse(&submodule_path, program, loader) {
+        match parse_recurse(&submodule_path, state, program, loader) {
             Ok(module) => Ok(module),
             Err(err) => Err(match err.kind {
                 ParseErrorKind::IOError(_) => ParseError::new(ParseErrorKind::ModuleNotFound(submodule_path), submodule_ast.position, module_path),

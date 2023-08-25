@@ -76,23 +76,30 @@ fn log(filename: &str, append: bool, data: &str) {
 
 fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, (PathBuf, String)>, write_logs: bool) -> Result<Program<MyAPI>, Error> {
     let source_file = source_file.as_ref();
-    let parsed = parser::parse(|module_path| {
+    let parsed = parser::parse(|module_path, state| {
         let mut filename = parser::module_filename(source_file, module_path, false);
         let file = std::fs::read_to_string(&filename).or_else(|_| {
             filename = parser::module_filename(source_file, module_path, true);
             std::fs::read_to_string(&filename)
         })?;
-        let module = parser::parse_module(&file, module_path);
+        let module = parser::parse_module(state, &file, module_path);
         files.insert(module_path.to_string(), (filename, file));
         module
     })?;
     if write_logs {
         log("logs/ast.c", false, &format!("{:?}", parsed.modules().collect::<Vec<_>>()));
     }
-    let resolved = resolver::resolve::<MyAPI>(parsed, "main")?;
-    if write_logs {
-        log("logs/ast.c", false, &format!("{:?}", resolved.modules));
-        log("logs/resolved.c", false, &format!("{:#?}", resolved.resolved));
+    let resolved = resolver::resolve::<MyAPI>(parsed, "main");
+    match resolved {
+        Ok(resolved) => {
+            if write_logs {
+                log("logs/ast.c", false, &format!("{:?}", resolved.modules));
+                log("logs/resolved.c", false, &format!("{:#?}", resolved.resolved));
+            }
+            Ok(compiler::compile(resolved)?)
+        },
+        Err(err) => {
+            Err(err.into())
+        }
     }
-    Ok(compiler::compile(resolved)?)
 }
