@@ -256,7 +256,7 @@ impl<'a> Input<'a> {
         } else {
             state.link_state.scope_parent_map.insert(scope.scope_id, scope.parent_scope_id);
             let scope_bindings = replace(&mut scope.have_bindings, Map::new());
-            for (name, binding_id) in scope_bindings.into_iter() {
+            for (_, binding_id) in scope_bindings.into_iter() {
                 state.link_state.binding_map.insert(binding_id);
             }
         }

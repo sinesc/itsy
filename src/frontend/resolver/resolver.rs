@@ -151,7 +151,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         }
 
         prev_resolved = now_resolved;
-        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved());
+        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved(&scopes));
 
         if !now_resolved.done() {
             if now_resolved == prev_resolved {
@@ -299,7 +299,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
     fn resolved(self: &Self, item: &(impl Positioned+Resolvable)) -> ResolveResult {
-        if self.stage.must_resolve() && !item.is_resolved() {
+        if self.stage.must_resolve() && !item.is_resolved(self) {
             Err(ResolveError::new(item, item.unresolved_error(), self.module_path))
         } else {
             Ok(())
@@ -309,7 +309,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Returns Err if item and expected type are resolved but do not match as well as if must_resolve is set and item is not resolved.
     fn types_resolved(self: &Self, item: &(impl Typeable+Positioned+Resolvable), expected_result: Option<TypeId>) -> ResolveResult {
         if self.stage.must_resolve() {
-            if item.is_resolved() {
+            if item.is_resolved(self) {
                 match expected_result {
                     Some(expected_result) => self.check_type_accepted_for(item, item.type_id(self).ice()?, expected_result),
                     None => Ok(()),
@@ -470,7 +470,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a struct definition.
     fn resolve_callable_def(self: &mut Self, item: &mut ast::CallableDef) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
         // init container type
@@ -505,7 +505,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a type (name) to a type_id.
     fn resolve_type_name(self: &mut Self, item: &mut ast::TypeName, expected_result: Option<TypeId>) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
         if item.type_id.is_none() {
@@ -520,7 +520,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an array definition.
     fn resolve_array_def(self: &mut Self, item: &mut ast::ArrayDef) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
         if let (None, inner_type_id @ Some(_)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
@@ -536,7 +536,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a struct definition.
     fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
-        if item.type_id.is_some() && item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
         }
         // resolve struct fields
@@ -564,7 +564,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an enum definition.
     fn resolve_enum_def(self: &mut Self, item: &mut ast::EnumDef) -> ResolveResult {
-        if item.type_id.is_some() && item.is_resolved() {
+        if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
         }
 
@@ -638,7 +638,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // create variant constructors
         //let parent_scope_id = self.try_create_scope(&mut item.scope_id);
         for (index, variant) in item.variants.iter_mut().enumerate() {
-            if variant.is_resolved() {
+            if variant.is_resolved(self) {
                 match &mut variant.kind {
                     ast::VariantKind::Data(function_id @ None, fields) => {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
@@ -742,7 +742,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a function signature.
     fn resolve_signature(self: &mut Self, item: &mut ast::Signature) -> ResolveResult {
-        if item.is_resolved() {
+        if item.is_resolved(self) {
             return Ok(());
         }
         // resolve arguments
@@ -779,7 +779,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
         // if the closure has an explicit return type // TODO: why set explicit type from non-explicit expression?
         if let Some(ret) = &mut item.shared.sig.ret {
-            if item.shared.block.as_ref().ice()?.is_resolved() && !ret.is_resolved() {
+            if item.shared.block.as_ref().ice()?.is_resolved(self) && !ret.is_resolved(self) {
                 ret.set_type_id(self, item.shared.block.as_ref().ice()?.type_id(self).ice()?);
             }
         }
