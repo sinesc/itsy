@@ -89,13 +89,18 @@ fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> w
 
 // identifier and paths
 
+const KEYWORDS: &[ &'static str ] = &[ "for", "fn", "if" ];
+
 fn label(i: Input<'_>) -> Output<&str> {
     map(
         // ([a-z_][a-z0-9_]*)
-        recognize(tuple((
-            take_while1(|m| is_alphabetic(m as u8) || m == '_'),
-            take_while(|m| is_alphanumeric(m as u8) || m == '_')
-        ))),
+    terminated(
+            recognize(pair(
+                take_while1(|m| is_alphabetic(m as u8) || m == '_'),
+                take_while(|m| is_alphanumeric(m as u8) || m == '_')
+                )),
+            space0
+        ),
         move |l: Input<'_>| *l
     )(i)
 }
@@ -103,12 +108,20 @@ fn label(i: Input<'_>) -> Output<&str> {
 fn ident(i: Input<'_>) -> Output<Ident> {
     let position = i.position();
     map(
-        verify(label, |input: &str| input != "fn"),
+        verify(label, |input: &str| !KEYWORDS.contains(&input)),
         move |l| Ident {
             name: l.to_string(),
             position: position,
         }
     )(i)
+}
+
+fn word<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+    verify(label, move |input: &str| w == input)
+}
+
+fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+    map(terminated(tag(p), space0), |s: Input<'_>| *s)
 }
 
 fn var_decl(i: Input<'_>) -> Output<VarDecl> {
@@ -131,28 +144,28 @@ fn var_decl(i: Input<'_>) -> Output<VarDecl> {
 
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(ws(tag("::")), ident), move |name| Path { position, name })(i)
+    map(separated_list1(punct("::"), ident), move |name| Path { position, name })(i)
 }
 
 // module/use
 
 fn module(i: Input<'_>) -> Output<Module> {
     let position = i.position();
-    ws(map(
+    map(
         preceded(
-            check_flags(sepr(tag("mod")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
-            terminated(ident, char(';'))
+            check_flags(word("mod"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
+            terminated(ident, punct(";"))
         ),
         move |ident| Module {
             position: position,
             ident   : ident,
         }
-    ))(i)
+    )(i)
 }
 
 fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
-    ws(alt((
-        map(pair(path, delimited(pair(ws(tag("::")), ws(char('{'))), separated_list1(char(','), ws(use_item)), char('}') )), |(path, list)| {
+    alt((
+        map(pair(path, delimited(pair(punct("::"), punct("{")), separated_list1(punct(","), use_item), punct("}") )), |(path, list)| {
             let mut flattened = Vec::new();
             let parent = parts_to_path(&path.name);
             for elements in list  {
@@ -162,22 +175,22 @@ fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
             }
             flattened
         }),
-        map(pair(path, preceded(sepl(tag("as")), sepl(ident))), |(path, ident)| {
+        map(pair(path, preceded(word("as"), ident)), |(path, ident)| {
             vec![(ident.name, (parts_to_path(&path.name), false))]
         }),
         map(path, |path| {
             vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
         }),
-    )))(i)
+    ))(i)
 }
 
 fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
     let position = i.position();
-    ws(map(
+    map(
         delimited(
-            check_flags(sepr(tag("use")), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
+            check_flags(word("use"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
             use_item,
-            char(';')
+            punct(";")
         ),
         move |items| {
             UseDecl {
@@ -185,36 +198,36 @@ fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
                 mapping: items.into_iter().collect(),
             }
         }
-    ))(i)
+    )(i)
 }
 
 // type definitions
 
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
-    ws(alt((
+    alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
-    )))(i)
+    ))(i)
 }
 
 fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
-        delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), ws(char(')')))(i)
+        delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
     fn return_part(i: Input<'_>) -> Output<InlineType> {
-        preceded(ws(tag("->")), inline_type)(i)
+        preceded(punct("->"), inline_type)(i)
     }
     let position = i.position();
-    ws(map(
-        tuple((tag("fn"), ws(type_list), opt(ws(return_part)))),
+    map(
+        tuple((word("fn"), type_list, opt(return_part))),
         move |sig| CallableDef {
             position,
             args    : sig.1,
             ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
             type_id : None,
         },
-    ))(i)
+    )(i)
 }
 
 fn enum_def(i: Input<'_>) -> Output<EnumDef> {
@@ -222,14 +235,14 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
         let position = i.position();
         map(
             pair(
-            ws(ident),
+            ident,
             alt((
                 map(
-                    delimited(ws(char('(')), separated_list0(ws(char(',')), ws(inline_type)), preceded(opt(ws(char(','))), ws(char(')')))),
+                    delimited(punct("("), separated_list0(punct(","), inline_type), preceded(opt(punct(",")), punct(")"))),
                     move |fields| VariantKind::Data(None, fields)
                 ),
                 map(
-                    opt(preceded(ws(char('=')), numerical)),
+                    opt(preceded(punct("="), numerical)),
                     move |variant_value| VariantKind::Simple(variant_value)
                 ),
             ))),
@@ -242,10 +255,10 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     }
     let position = i.position();
     let j = i.clone();
-    ws(map_result(
+    map_result(
         pair(
-            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("enum")), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
-            tuple((ident, ws(char('{')), separated_list1(ws(char(',')), variant), opt(ws(char(','))), ws(char('}'))))
+            terminated(opt(word("pub")), check_flags(word("enum"), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
+            tuple((ident, punct("{"), separated_list1(punct(","), variant), opt(punct(",")), punct("}")))
         ),
         move |pair| {
             let mut have_data = false;
@@ -270,29 +283,29 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
                 })
             }
         }
-    ))(i)
+    )(i)
 }
 
 fn struct_def(i: Input<'_>) -> Output<StructDef> {
     fn field(i: Input<'_>) -> Output<(String, InlineType)> {
         map(
-            tuple((ws(label), ws(char(':')), ws(inline_type))),
+            tuple((label, punct(":"), inline_type)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
     fn fields(i: Input<'_>) -> Output<Vec<(String, InlineType)>> {
         map(
-            separated_list1(ws(char(',')), field),
+            separated_list1(punct(","), field),
             |list| {
                 list.into_iter().map(|item| (item.0, item.1)).collect()
             }
         )(i)
     }
     let position = i.position();
-    ws(map(
+    map(
         pair(
-            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("struct")), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
-            tuple((ident, ws(char('{')), fields, opt(ws(char(','))), ws(char('}'))))
+            terminated(opt(word("pub")), check_flags(word("struct"), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
+            tuple((ident, punct("{"), fields, opt(punct(",")), punct("}")))
         ),
         move |pair| StructDef {
             position: position,
@@ -301,16 +314,16 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
             type_id : None,
             vis     : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
-    ))(i)
+    )(i)
 }
 
 fn trait_def(i: Input<'_>) -> Output<TraitDef> {
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Module, map(
+    with_scope(ScopeKind::Module, map(
         pair(
-            terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("trait")), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
-            tuple((ident, ws(char('{')), with_flags(&|flags| flags.in_trait = true, many0(function)), ws(char('}'))))
+            terminated(opt(word("pub")), check_flags(word("trait"), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
+            tuple((ident, punct("{"), with_flags(&|flags| flags.in_trait = true, many0(function)), punct("}")))
         ),
         move |pair| TraitDef {
             position,
@@ -320,19 +333,19 @@ fn trait_def(i: Input<'_>) -> Output<TraitDef> {
             type_id     : None,
             vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
         }
-    )))(i)
+    ))(i)
 }
 
 fn array_def(i: Input<'_>) -> Output<ArrayDef> {
     let position = i.position();
-    ws(map(
-        delimited(ws(char('[')), inline_type, ws(char(']'))),
+    map(
+        delimited(punct("["), inline_type, punct("]")),
         move |ty| ArrayDef {
             position    : position,
             element_type: ty,
             type_id     : None,
         }
-    ))(i)
+    )(i)
 }
 
 // type implementations
@@ -340,10 +353,10 @@ fn array_def(i: Input<'_>) -> Output<ArrayDef> {
 fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Module, map(
+    with_scope(ScopeKind::Module, map(
         preceded(
-            check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            pair(inline_type, delimited(ws(char('{')), many0(function), ws(char('}'))))
+            check_flags(word("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            pair(inline_type, delimited(punct("{"), many0(function), punct("}")))
         ),
         move |tuple| ImplBlock {
             position    : position,
@@ -352,18 +365,18 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
             ty          : tuple.0,
             trt         : None,
         }
-    )))(i)
+    ))(i)
 }
 
 fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Module, map(
+    with_scope(ScopeKind::Module, map(
         preceded(
-            check_flags(sepr(tag("impl")), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            check_flags(word("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(
-                pair(terminated(path, sepl(tag("for"))), sepl(inline_type)),
-                delimited(ws(char('{')), many0(function), ws(char('}')))
+                pair(terminated(path, word("for")), inline_type),
+                delimited(punct("{"), many0(function), punct("}"))
             )
         ),
         move |tuple| ImplBlock {
@@ -373,20 +386,20 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
             ty          : tuple.0.1,
             trt         : Some(TypeName::from_path(tuple.0.0)),
         }
-    )))(i)
+    ))(i)
 }
 
 // function/closure/return
 
 fn function_return_part(i: Input<'_>) -> Output<InlineType> {
-    preceded(ws(tag("->")), inline_type)(i)
+    preceded(punct("->"), inline_type)(i)
 }
 
 fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input<'_>) -> Output<LetBinding> {
         let position = i.position();
         map(
-            tuple((opt(sepr(tag("mut"))), var_decl, ws(char(':')), inline_type)),
+            tuple((opt(word("mut")), var_decl, punct(":"), inline_type)),
             move |tuple| LetBinding {
                 position    : position,
                 binding_id  : tuple.1.binding_id,
@@ -397,7 +410,7 @@ fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
             }
         )(i)
     }
-    separated_list0(ws(char(',')), ws(parameter))(i)
+    separated_list0(punct(","), parameter)(i)
 }
 
 fn function_transform_result(block: &mut Block, position: Position) {
@@ -419,10 +432,10 @@ fn function_transform_result(block: &mut Block, position: Position) {
 
 fn function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
-        ws(map(
+        map(
             tuple((
-                terminated(opt(sepr(tag("pub"))), check_flags(sepr(tag("fn")), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
-                terminated(ws(ident), char('(')), terminated(ws(function_parameter_list), char(')')), opt(ws(function_return_part))
+                terminated(opt(word("pub")), check_flags(word("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
+                terminated(ident, punct("(")), terminated(function_parameter_list, punct(")")), opt(function_return_part)
             )),
             |sig| Signature {
                 ident   : sig.1,
@@ -430,14 +443,14 @@ fn function(i: Input<'_>) -> Output<Function> {
                 ret     : if let Some(sig_ty) = sig.3 { Some(sig_ty) } else { None },
                 vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
             },
-        ))(i)
+        )(i)
     }
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Function, map(
+    with_scope(ScopeKind::Function, map(
         tuple((signature, with_flags(&|flags| flags.in_function = true, alt((
             map(block, |b| Some(b)),
-            map(ws(check_flags(char(';'), |f| if !f.in_trait { Some(ParseErrorKind::IllegalFunctionDecl) } else { None })), |_| None)
+            map(check_flags(punct(";"), |f| if !f.in_trait { Some(ParseErrorKind::IllegalFunctionDecl) } else { None }), |_| None)
         ))))),
         move |(sig, mut block)| {
             if let Some(block) = &mut block {
@@ -453,16 +466,16 @@ fn function(i: Input<'_>) -> Output<Function> {
                 constant_id: None,
             }
         }
-    )))(i)
+    ))(i)
 }
 
 fn anonymous_function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         let position = i.position();
-        ws(map(
+        map(
             preceded(
-                check_flags(tag("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(preceded(ws(char('(')), ws(function_parameter_list)), preceded(char(')'), opt(ws(function_return_part))))
+                check_flags(word("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                pair(preceded(punct("("), function_parameter_list), preceded(punct(")"), opt(function_return_part)))
             ),
             move |sig| Signature {
                 ident   : Ident { name: format!("anonymous@{}", position), position },
@@ -470,11 +483,11 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
                 ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
                 vis     : Visibility::Private,
             },
-        ))(i)
+        )(i)
     }
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Function, map(
+    with_scope(ScopeKind::Function, map(
         pair(signature, block),
         move |(sig, mut block)| {
             function_transform_result(&mut block, position);
@@ -488,16 +501,16 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
                 constant_id: None,
             }
         }
-    )))(i)
+    ))(i)
 }
 
 fn closure(i: Input<'_>) -> Output<Closure> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         let position = i.position();
-        ws(map(
+        map(
             preceded(
-                check_flags(ws(char('|')), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(terminated(ws(function_parameter_list), char('|')), opt(ws(function_return_part)))
+                check_flags(punct("|"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                pair(terminated(function_parameter_list, punct("|")), opt(function_return_part))
             ),
             move |sig| {
                 Signature {
@@ -507,11 +520,11 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                     vis     : Visibility::Private,
                 }
             }
-        ))(i)
+        )(i)
     }
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Closure, map(
+    with_scope(ScopeKind::Closure, map(
         pair(signature, expression),
         move |(sig, expr)| {
             let required_bindings = j.take_required_bindings();
@@ -538,15 +551,15 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 struct_type_id  : None,
             }
         }
-    )))(i)
+    ))(i)
 }
 
 fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
     map(
         preceded(
-            check_flags(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
-            terminated(opt(sepl(expression)), ws(char(';'))) // TODO: would error on return{ block }, sepl/r should probably allow but not consume operators/braces
+            check_flags(word("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
+            terminated(opt(expression), punct(";"))
         ),
         move |m| Return {
             position,
@@ -558,8 +571,6 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
 // literals/expression
 
 fn numerical(i: Input<'_>) -> Output<Literal> {
-    use nom::Parser;
-
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
         let tail = if n.len() > 3 {
@@ -609,13 +620,17 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     }
 
     let position = i.position();
+    let j = i.clone();
 
-    let (remaining, numerical) = recognize(tuple((
-        opt(recognize(ws(one_of("+-")))),
-        digit1,
-        opt(recognize(tuple((tag("."), not(char('.')), digit0)))), // not(.) to avoid matching ranges
-        opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
-    ))).parse(i.clone())?;
+    let (remaining, numerical) = terminated(
+        recognize(tuple((
+            opt(recognize(alt((punct("+"), punct("-"))))),
+            digit1,
+            opt(recognize(tuple((tag("."), not(punct(".")), digit0)))), // not(.) to avoid matching ranges
+            opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
+        ))),
+        space0
+    )(i)?;
 
     let (value, type_name) = splits_numerical_suffix(*numerical);
 
@@ -652,15 +667,15 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
         }
     }
 
-    Err(nom::Err::Failure(Failure { input: i, kind: ParseErrorKind::InvalidNumerical }))
+    Err(nom::Err::Failure(Failure { input: j, kind: ParseErrorKind::InvalidNumerical }))
 }
 
 fn boolean(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
-    map(alt((tag("true"), tag("false"))), move |m: Input<'_>| {
+    map(alt((word("true"), word("false"))), move |m| {
         Literal {
             position    : position,
-            value       : LiteralValue::Bool(*m == "true"),
+            value       : LiteralValue::Bool(m == "true"),
             type_name   : None,
             type_id     : None,
         }
@@ -683,7 +698,7 @@ fn string(i: Input<'_>) -> Output<Expression> {
             alt((
                 map(parse_literal, |l| StringFragment::Literal(&l.data)),
                 map(parse_escaped_char, |e| StringFragment::EscapedChar(e)),
-                map(delimited(char('{'), expression, char('}')), |i| StringFragment::Interpolation(i)),
+                map(delimited(punct("{"), expression, char('}')), |i| StringFragment::Interpolation(i)), // intentionally not tailing punct("}") to not consume whitespace in the string
             )),
             Vec::new,
             |mut vec, fragment| {
@@ -693,7 +708,7 @@ fn string(i: Input<'_>) -> Output<Expression> {
         )(i)
     }
 
-    map(delimited(char('"'), fragments, char('"')), move |mut fragments| {
+    map(delimited(char('"'), fragments, punct("\"")), move |mut fragments| {  // intentionally not leading punct("\"") to not consume whitespace in the string
 
         let add = |left, right| Expression::BinaryOp(Box::new(BinaryOp {
             position,
@@ -760,7 +775,7 @@ fn string(i: Input<'_>) -> Output<Expression> {
 fn array_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(
-        tuple((ws(char('[')), separated_list0(ws(char(',')), expression), opt(ws(char(','))), ws(char(']')))),
+        tuple((punct("["), separated_list0(punct(","), expression), opt(punct(",")), punct("]"))),
         move |m| Literal {
             position    : position,
             value: LiteralValue::Array(ArrayLiteral {
@@ -775,13 +790,13 @@ fn array_literal(i: Input<'_>) -> Output<Literal> {
 fn struct_literal(i: Input<'_>) -> Output<Literal> {
     fn field(i: Input<'_>) -> Output<(String, Expression)> {
         map(
-            tuple((ws(label), ws(char(':')), expression)),
+            tuple((label, punct(":"), expression)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
     fn fields(i: Input<'_>) -> Output<UnorderedMap<String, Expression>> {
         map(
-            separated_list1(char(','), field),
+            separated_list1(punct(","), field),
             |list| {
                 list.into_iter().map(|item| (item.0, item.1)).collect()
             }
@@ -789,7 +804,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
     }
     let position = i.position();
     map(
-        tuple((ws(path), ws(char('{')), fields, opt(ws(char(','))), ws(char('}')))),
+        tuple((path, punct("{"), fields, opt(punct(",")), punct("}"))),
         move |m| Literal {
             position    : position,
             value: LiteralValue::Struct(StructLiteral {
@@ -802,20 +817,20 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
 }
 
 fn literal(i: Input<'_>) -> Output<Expression> {
-    ws(alt((
+    alt((
         map(boolean, |l| Expression::Literal(l)),
         string,
         map(array_literal, |l| Expression::Literal(l)),
         map(struct_literal, |l| Expression::Literal(l)),
         map(numerical, |l| Expression::Literal(l)),
-    )))(i)
+    ))(i)
 }
 
 fn expression(i: Input<'_>) -> Output<Expression> {
     fn argument_list(i: Input<'_>) -> Output<ArgumentList> {
         let position = i.position();
         map(
-            delimited(ws(char('(')), separated_list0(ws(char(',')), expression), ws(char(')'))),
+            delimited(punct("("), separated_list0(punct(","), expression), punct(")")),
             move |args| ArgumentList {
                 position,
                 args,
@@ -823,11 +838,11 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         )(i)
     }
     fn parens(i: Input<'_>) -> Output<Expression> {
-        ws(delimited(char('('), expression, char(')')))(i)
+        delimited(punct("("), expression, punct(")"))(i)
     }
     fn operand(i: Input<'_>) -> Output<Expression> {
         let j = i.clone();
-        ws(alt((
+        alt((
             literal,
             map(if_block, |m| Expression::IfBlock(Box::new(m))),
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
@@ -852,15 +867,15 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             }),
             map(snap(anonymous_function), move |m| Expression::AnonymousFunction(Box::new(m))),
             map(closure, move |m| Expression::Closure(Box::new(m))),
-        )))(i)
+        ))(i)
     }
     fn prec7(i: Input<'_>) -> Output<Expression> {
         let init = operand(i.clone())?;
         let position = i.position();
         fold_many0_mut(
             alt((
-                map(delimited(ws(tag("[")), expression, ws(tag("]"))), |e| (BinaryOperator::Index, BinaryOperand::Expression(e))),
-                map(preceded(ws(tag(".")), ws(ident)), |i| (BinaryOperator::Access, BinaryOperand::Member(Member { position: position, ident: i, type_id: None, constant_id: None }))),
+                map(delimited(punct("["), expression, punct("]")), |e| (BinaryOperator::Index, BinaryOperand::Expression(e))),
+                map(preceded(punct("."), ident), |i| (BinaryOperator::Access, BinaryOperand::Member(Member { position: position, ident: i, type_id: None, constant_id: None }))),
                 map(snap(argument_list), |l| (BinaryOperator::Call, BinaryOperand::ArgumentList(l))),
             )),
             init.1,
@@ -873,25 +888,25 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             pair(
                 opt(alt((
                     // count number of ! to handle them all here
-                    ws(fold_many1(char('!'), || ('!', 0usize), |mut acc, _| { acc.1 += 1; acc })),
+                    fold_many1(punct("!"), || ("!", 0usize), |mut acc, _| { acc.1 += 1; acc }),
                     // allow only one +/-, ensure not followed by numeric to avoid parsing e.g -128i8 (valid) as unary(-, 128i8) which would
                     // be an overflowing numeric literal
                     map(
-                        ws(alt((
-                            terminated(char('+'), not(ws(one_of("+.0123456789")))),
-                            terminated(char('-'), not(ws(one_of("-.0123456789"))))
-                        ))),
+                        alt((
+                            terminated(punct("+"), not(one_of("+.0123456789"))),
+                            terminated(punct("-"), not(one_of("-.0123456789")))
+                        )),
                         |c| (c, 1)
                     )
                 ))),
-                ws(prec7)
+                prec7
             ),
             move |m| {
                 if let Some(unary) = m.0 {
                     let op = match unary.0 {
-                        '!' => UnaryOperator::Not,
-                        '+' => UnaryOperator::Plus,
-                        '-' => UnaryOperator::Minus,
+                        "!" => UnaryOperator::Not,
+                        "+" => UnaryOperator::Plus,
+                        "-" => UnaryOperator::Minus,
                         _ => unreachable!("Parser only accepts !, + and - operator."),
                     };
                     // nest required number of unary repetitons
@@ -913,9 +928,9 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     }
     fn prec6(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
-        ws(map(
+        map(
             pair(
-                unary, opt(preceded(ws(sepr(tag("as"))), path))
+                unary, opt(preceded(word("as"), path))
             ),
             move |(expr, path)| {
                 if let Some(path) = path {
@@ -930,13 +945,13 @@ fn expression(i: Input<'_>) -> Output<Expression> {
                     expr
                 }
             }
-        ))(i)
+        )(i)
     }
     fn prec5(i: Input<'_>) -> Output<Expression> {
         let init = prec6(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(alt((tag("*"), tag("/"), tag("%"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec6),
+            pair(map(alt((punct("*"), punct("/"), punct("%"))), |o| BinaryOperator::from_string(o)), prec6),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -945,7 +960,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let init = prec5(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(alt((tag("+"), tag("-"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec5),
+            pair(map(alt((punct("+"), punct("-"))), |o| BinaryOperator::from_string(o)), prec5),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -954,7 +969,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let init = prec4(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(alt((tag("<="), tag(">="), tag("<"), tag(">"))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec4),
+            pair(map(alt((punct("<="), punct(">="), punct("<"), punct(">"))), |o| BinaryOperator::from_string(o)), prec4),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -963,7 +978,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let init = prec3(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(alt((tag("!="), tag("=="))), |o: Input<'_>| BinaryOperator::from_string(*o)), prec3),
+            pair(map(alt((punct("!="), punct("=="))), |o| BinaryOperator::from_string(o)), prec3),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -972,7 +987,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let init = prec2(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(tag("&&"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec2),
+            pair(map(punct("&&"), |o| BinaryOperator::from_string(o)), prec2),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -981,15 +996,15 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let init = prec1(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(tag("||"), |o: Input<'_>| BinaryOperator::from_string(*o)), prec1),
+            pair(map(punct("||"), |o| BinaryOperator::from_string(o)), prec1),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    ws(alt((
+    alt((
         map(assignment, |m| Expression::Assignment(Box::new(m))),
         prec0
-    )))(i)
+    ))(i)
 }
 
 // let/assignment
@@ -1023,8 +1038,8 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
         let op_position = init.0.position();
         fold_many0_mut(
             alt((
-                map(delimited(ws(tag("[")), expression, tag("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
-                map(preceded(ws(tag(".")), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position, ident: i, type_id: None, constant_id: None })))
+                map(delimited(punct("["), expression, punct("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
+                map(preceded(punct("."), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position, ident: i, type_id: None, constant_id: None })))
             )),
             init.1,
             |mut acc, (op, val)| {
@@ -1044,15 +1059,15 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
         )(init.0)
     }
     fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
-        ws(map(
-            alt((tag("="), tag("+="), tag("-="), tag("*="), tag("/="), tag("%="))),
-            |o: Input<'_>| {
-                BinaryOperator::from_string(*o)
+        map(
+            alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="))),
+            |o| {
+                BinaryOperator::from_string(o)
             }
-        ))(i)
+        )(i)
     }
     let position = i.position();
-    ws(map(
+    map(
         tuple((assignable, assignment_operator, expression)),
         move |m| {
             // TODO: check that left is not a constant
@@ -1064,15 +1079,15 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
                 type_id : None,
             }
         }
-    ))(i)
+    )(i)
 }
 
 fn let_binding(i: Input<'_>) -> Output<LetBinding> {
     let position = i.position();
-    ws(map(
+    map(
         preceded(
-            check_flags(sepr(tag("let")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
-            tuple((opt(sepr(tag("mut"))), var_decl, opt(preceded(ws(char(':')), inline_type)), opt(preceded(ws(char('=')), expression)), ws(char(';'))))
+            check_flags(word("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((opt(word("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
         ),
         move |m| LetBinding {
             position    : position.clone(),
@@ -1082,7 +1097,7 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
             expr        : m.3,
             ty          : m.2,
         }
-    ))(i)
+    )(i)
 }
 
 // blocks
@@ -1090,36 +1105,35 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
 fn block(i: Input<'_>) -> Output<Block> {
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Block, map(
+    with_scope(ScopeKind::Block, map(
         delimited(
-            ws(char('{')),
+            punct("{"),
             // contain flags here but don't set any yet. required by return statement dead code marker
             with_flags(&|_| (), pair(many0(statement), opt(expression))),
-            ws(char('}'))
+            punct("}")
         ),
         move |m| {
             Block::new(position, j.scope_id(), m.0, m.1)
         }
-    )))(i)
+    ))(i)
 }
 
 fn if_block(i: Input<'_>) -> Output<IfBlock> {
     fn else_block(i: Input<'_>) -> Output<Block> {
         let position = i.position();
         let j = i.clone();
-        ws(preceded(
-            tag("else"),
+        preceded(
+            word("else"),
             alt((
-                sepl(map(if_block, move |m| Block::new(position, j.scope_id(), Vec::new(), Some(Expression::IfBlock(Box::new(m)))))),
+                map(if_block, move |m| Block::new(position, j.scope_id(), Vec::new(), Some(Expression::IfBlock(Box::new(m))))),
                 block
             ))
-        ))(i)
+        )(i)
     }
     let position = i.position();
     let j = i.clone();
-    ws(preceded(
-        // TODO: sepr(tag("if")) causes if(true to be a syntax error. sepr is required to prevent parsing if_ident as if
-        check_flags(sepr(tag("if")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+    preceded(
+        check_flags(word("if"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
             tuple((expression, block, opt(else_block))),
             move |m| IfBlock {
@@ -1130,14 +1144,14 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
                     scope_id    : j.scope_id(),
                 }
             )
-    ))(i)
+    )(i)
 }
 
 fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     /*fn variant_literal(i: Input<'_>) -> Output<Literal> {
         let position = i.position();
         map(
-            tuple((ident, ws(tag("::")), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
+            tuple((ident, punct("::"), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
             move |(ident, _, mut path)| {
                 path.unshift(ident); // prepend path with ident
                 Literal {
@@ -1151,32 +1165,31 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     }*/
     fn match_pattern(i: Input<'_>) -> Output<Pattern> {
         //let position = i.position();
-        ws(
-            //alt((
-            map(path, |v| Pattern::SimpleVariant(v)),
-            //))
-        )(i)
+        //alt((
+            map(path, |v| Pattern::SimpleVariant(v))
+        //))
+        (i)
     }
     fn match_case(i: Input<'_>) -> Output<Block> {
         let position = i.position();
         let j = i.clone();
-        ws(alt((
+        alt((
             block,
             map(expression, move |e| Block::new(position, j.scope_id(), Vec::new(), Some(e))),
-        )))(i)
+        ))(i)
     }
     fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
-        ws(separated_list1(
-            char(','),
-            pair(match_pattern, preceded(tag("=>"), match_case))
-        ))(i)
+        separated_list1(
+            punct(","),
+            pair(match_pattern, preceded(punct("=>"), match_case))
+        )(i)
     }
     let position = i.position();
     let j = i.clone();
-    ws(preceded(
-        check_flags(sepr(tag("match")), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+    preceded(
+        check_flags(word("match"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
-            pair(expression, delimited(char('{'), match_list, preceded(opt(char(',')), ws(char('}'))))),
+            pair(expression, delimited(punct("{"), match_list, preceded(opt(punct(",")), punct("}")))),
             move |m| MatchBlock {
                 position    : position,
                 expr        : m.0,
@@ -1184,7 +1197,7 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
                 scope_id    : j.scope_id(),
             }
         )
-    ))(i)
+    )(i)
 }
 
 // loops/loop control
@@ -1193,10 +1206,10 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     fn loop_range(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         map(
-            tuple((ws(expression), ws(alt((tag("..="), tag("..")))), ws(expression))),
+            tuple((expression, alt((punct("..="), punct(".."))), expression)),
             move |m| Expression::BinaryOp(Box::new(BinaryOp {
                 position    : position,
-                op          : BinaryOperator::from_string(*m.1),
+                op          : BinaryOperator::from_string(m.1),
                 left        : BinaryOperand::Expression(m.0),
                 right       : BinaryOperand::Expression(m.2),
                 type_id     : None
@@ -1205,10 +1218,10 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     }
     let position = i.position();
     let j = i.clone();
-    ws(with_scope(ScopeKind::Block, map(
+    with_scope(ScopeKind::Block, map(
         preceded(
-            check_flags(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|flags| flags.in_loop = true, block)))
+            check_flags(word("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
+            tuple((var_decl, word("in"), alt((loop_range, expression)), with_flags(&|flags| flags.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
@@ -1224,16 +1237,16 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
             block: m.3,
             scope_id: j.scope_id(),
         }
-    )))(i)
+    ))(i)
 }
 
 fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let position = i.position();
     let j = i.clone();
-    ws(map(
+    map(
         preceded(
-            check_flags(tag("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
-            pair(sepl(expression), with_flags(&|flags| flags.in_loop = true, block))
+            check_flags(word("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
+            pair(expression, with_flags(&|flags| flags.in_loop = true, block))
         ),
         move |m| WhileLoop {
             position: position,
@@ -1241,15 +1254,15 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
             block   : m.1,
             scope_id: j.scope_id(),
         }
-    ))(i)
+    )(i)
 }
 
 fn break_statement(i: Input<'_>) -> Output<Break> {
     let position = i.position();
     map(
         preceded(
-            check_flags(tag("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
-            ws(char(';'))
+            check_flags(word("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
+            punct(";")
         ),
         move |_| Break { position }
     )(i)
@@ -1259,8 +1272,8 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
     let position = i.position();
     map(
         preceded(
-            check_flags(tag("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
-            ws(char(';'))
+            check_flags(word("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
+            punct(";")
         ),
         move |_| Continue { position }
     )(i)
@@ -1270,7 +1283,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 
 fn statement(i: Input<'_>) -> Output<Statement> {
     let j = i.clone();
-    let output = ws(alt((
+    let output = alt((
         //root_items,
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
@@ -1280,8 +1293,8 @@ fn statement(i: Input<'_>) -> Output<Statement> {
         map(break_statement, |m| Statement::Break(m)),
         map(continue_statement, |m| Statement::Continue(m)),
         map(block, |m| Statement::Block(m)),
-        map(snap(terminated(expression, char(';'))), |m| Statement::Expression(m)),
-    )))(i);
+        map(snap(terminated(expression, punct(";"))), |m| Statement::Expression(m)),
+    ))(i);
     if let Ok((_, s)) = &output {
         if s.identify_control_flow(true).is_some() {
             j.flags_mut(|f| f.is_dead = true);
@@ -1293,7 +1306,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
 // root
 
 fn root_items(i: Input<'_>) -> Output<Statement> {
-    ws(alt((
+    alt((
         map(use_declaration, |m| Statement::Use(m)),
         map(module, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
@@ -1302,14 +1315,14 @@ fn root_items(i: Input<'_>) -> Output<Statement> {
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
-    )))(i)
+    ))(i)
 }
 
 /// Parses Itsy source code into a program AST structure.
 pub fn parse_module(link_state: &mut LinkState, src: &str, module_path: &str) -> ParseResult<ParsedModule> {
     let input = Input::new(src, replace(link_state, LinkState::new()));
     let module_scope_id = link_state.next_scope_id;
-    let result = all_consuming(ws(with_scope(ScopeKind::Module, many0(root_items))))(input.clone());
+    let result = all_consuming(preceded(space0, with_scope(ScopeKind::Module, many0(root_items))))(input.clone());
     *link_state = input.take_linkstate();
     match result {
         Ok(result) => {

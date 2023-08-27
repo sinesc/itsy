@@ -2,7 +2,7 @@ use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use std::str::{Chars, CharIndices};
 use nom::bytes::complete::{take, take_while, take_until, take_while1, take_while_m_n, tag};
 use nom::combinator::{map_opt, recognize, value, verify};
-use nom::multi::{many0, many1};
+use nom::multi::many0;
 use nom::branch::alt;
 use nom::sequence::{delimited, preceded, terminated};
 use nom::character::complete::char;
@@ -172,7 +172,7 @@ macro_rules! trace {
     };
 }
 
-/// Fixes non-provided fold_many0 implementation to have less strict bounds.
+/// Fixes nom-provided fold_many0 implementation to have less strict bounds.
 pub(super) fn fold_many0_mut<I, O, E, F, G, R>(mut f: F, init: R, mut g: G) -> impl FnOnce(I) -> nom::IResult<I, R, E>
 where
     I: Clone + PartialEq,
@@ -222,57 +222,7 @@ where
     }
 }
 
-/// Allow optional whitespace before and after matching the inner parser.
-pub(super) fn ws<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>
-where
-    F: FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>,
-    E: Debug
-{
-    delimited(
-        space0,
-        p,
-        space0
-    )
-}
-
-/// Expect at least one whitespace before matching the inner parser.
-pub(super) fn sepl<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>
-where
-    F: FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>,
-    E: Debug
-{
-    preceded(
-        space1,
-        p
-    )
-}
-
-/// Expect at least one whitespace after matching the inner parser.
-pub(super) fn sepr<'a, F: 'a, O, E: 'a + nom::error::ParseError<Input<'a>>>(p: F) -> impl FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>
-where
-    F: FnMut(Input<'a>) -> nom::IResult<Input<'a>, O, E>,
-    E: Debug
-{
-    terminated(
-        p,
-        space1
-    )
-}
-
-/// Restores function removed from nom 5
-fn take_until_and_consume<T, I, E>(tag: T) -> impl FnMut(I) -> nom::IResult<I, I, E>
-where
-    E: nom::error::ParseError<I>,
-    I: nom::InputTake
-        + nom::FindSubstring<T>
-        + nom::Slice<std::ops::RangeFrom<usize>>
-        + nom::InputIter<Item = char>
-        + nom::InputLength,
-    T: nom::InputLength + Clone,
-{
-    move |input| terminated(take_until(tag.clone()), take(tag.input_len()))(input)
-}
-
+/// Consumes 0 or more whitespace characters or comments
 pub(super) fn space0<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> nom::IResult<I, I, E>
 where
     E: nom::error::ParseError<I> + Debug,
@@ -292,31 +242,7 @@ where
 {
     recognize(many0(alt((
         preceded(tag("//"), take_while(not_eol)),
-        preceded(tag("/*"), take_until_and_consume("*/")), // TODO: check if this proceeds
-        take_while1(is_whitespace)
-    ))))(input)
-}
-
-pub(super) fn space1<'a, I: 'a, E: nom::error::ParseError<I>>(input: I) -> nom::IResult<I, I, E>
-where
-    E: nom::error::ParseError<I> + Debug,
-    I: nom::InputTake
-        + nom::FindSubstring<I>
-        + nom::Slice<std::ops::RangeFrom<usize>>
-        + nom::Slice<std::ops::RangeTo<usize>>
-        + nom::InputIter<Item = char>
-        + nom::InputLength
-        + nom::InputTakeAtPosition<Item = char>
-        + nom::Offset
-        + nom::Compare<&'a str>
-        + nom::FindSubstring<&'a str>
-        + Clone
-        + PartialEq
-        + Debug
-{
-    recognize(many1(alt((
-        preceded(tag("//"), take_while(not_eol)),
-        preceded(tag("/*"), take_until_and_consume("*/")), // TODO: check if this proceeds
+        preceded(tag("/*"), terminated(take_until("*/"), take(2u8))),
         take_while1(is_whitespace)
     ))))(input)
 }
