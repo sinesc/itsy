@@ -543,7 +543,6 @@ fn closure(i: Input<'_>) -> Output<Closure> {
 
 fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
-    let j = i.clone();
     map(
         preceded(
             check_flags(tag("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
@@ -1206,7 +1205,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     }
     let position = i.position();
     let j = i.clone();
-    ws(map(
+    ws(with_scope(ScopeKind::Block, map(
         preceded(
             check_flags(tag("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
             tuple((sepl(var_decl), sepl(tag("in")), sepl(alt((loop_range, expression))), with_flags(&|flags| flags.in_loop = true, block)))
@@ -1225,7 +1224,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
             block: m.3,
             scope_id: j.scope_id(),
         }
-    ))(i)
+    )))(i)
 }
 
 fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
