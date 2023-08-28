@@ -469,7 +469,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_callable_def(self: &mut Self, item: &mut ast::CallableDef) -> ResolveResult<Option<TypeId>> {
+    fn resolve_callable_def(self: &mut Self, item: &mut ast::CallableType) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
@@ -519,7 +519,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array definition.
-    fn resolve_array_def(self: &mut Self, item: &mut ast::ArrayDef) -> ResolveResult<Option<TypeId>> {
+    fn resolve_array_def(self: &mut Self, item: &mut ast::ArrayType) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
@@ -535,7 +535,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_struct_def(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
+    fn resolve_struct_def(self: &mut Self, item: &mut ast::StructType) -> ResolveResult {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
         }
@@ -563,7 +563,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an enum definition.
-    fn resolve_enum_def(self: &mut Self, item: &mut ast::EnumDef) -> ResolveResult {
+    fn resolve_enum_def(self: &mut Self, item: &mut ast::EnumType) -> ResolveResult {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
         }
@@ -698,7 +698,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a trait definition block.
-    fn resolve_trait_def(self: &mut Self, item: &mut ast::TraitDef) -> ResolveResult {
+    fn resolve_trait_def(self: &mut Self, item: &mut ast::TraitType) -> ResolveResult {
         let parent_scope_id = self.scope_id;
         self.scope_id = item.scope_id;
         // ensure trait exists

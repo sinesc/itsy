@@ -17,6 +17,30 @@ use types::{Input, Output, Failure, ParserFlags, ParsedModule, ParsedProgram, Sc
 use error::{ParseResult, ParseError, ParseErrorKind};
 use nomutil::*;
 
+/// List of keywords that are not legal identifier.
+const KEYWORDS: &[ &'static str ] = &[
+    "as",
+    "break",
+    "continue",
+    "enum",
+    "false",
+    "fn",
+    "for",
+    "if",
+    "impl",
+    "let",
+    "match",
+    "mod",
+    "mut",
+    "pub",
+    "return",
+    "struct",
+    "trait",
+    "true",
+    "use",
+    "while",
+];
+
 /// Runs the given parser. If the parser succeeds the given checker function is run. If it returns true, the parser result is returned, otherwise a failure.
 fn check_flags<'a, O, P, C>(mut parser: P, checker: C) -> impl FnMut(Input<'a>) -> Output<'a, O>
 where
@@ -87,28 +111,33 @@ fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> w
     }
 }
 
-// identifier and paths
-
-const KEYWORDS: &[ &'static str ] = &[ "for", "fn", "if" ];
-
-fn label(i: Input<'_>) -> Output<&str> {
+/// Matches and returns a legal alphanumeric word and consumes optional trailing whitespace.
+fn word(i: Input<'_>) -> Output<&str> {
     map(
         // ([a-z_][a-z0-9_]*)
     terminated(
             recognize(pair(
                 take_while1(|m| is_alphabetic(m as u8) || m == '_'),
                 take_while(|m| is_alphanumeric(m as u8) || m == '_')
-                )),
+            )),
             space0
         ),
         move |l: Input<'_>| *l
     )(i)
 }
 
+/// Returns a parser that matches and returns the given string and consumes optional trailing whitespace.
+fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+    map(terminated(tag(p), space0), |s: Input<'_>| *s)
+}
+
+// keywords, identifier and paths
+
+/// Matches a valid identifier.
 fn ident(i: Input<'_>) -> Output<Ident> {
     let position = i.position();
     map(
-        verify(label, |input: &str| !KEYWORDS.contains(&input)),
+        verify(word, |input: &str| !KEYWORDS.contains(&input)),
         move |l| Ident {
             name: l.to_string(),
             position: position,
@@ -116,14 +145,12 @@ fn ident(i: Input<'_>) -> Output<Ident> {
     )(i)
 }
 
-fn word<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
-    verify(label, move |input: &str| w == input)
+/// Returns a parser that matches the given alphanumeric keyword. Requires the entire next alphanumeric token to match.
+fn keyword<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+    verify(word, move |input: &str| w == input)
 }
 
-fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
-    map(terminated(tag(p), space0), |s: Input<'_>| *s)
-}
-
+/// Matches a variable name and declares the variable in the current scope.
 fn var_decl(i: Input<'_>) -> Output<VarDecl> {
     let j = i.clone();
     map(
@@ -142,18 +169,19 @@ fn var_decl(i: Input<'_>) -> Output<VarDecl> {
     )(i)
 }
 
+/// Matches a path.
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
     map(separated_list1(punct("::"), ident), move |name| Path { position, name })(i)
 }
 
-// module/use
+// module handling
 
 fn module(i: Input<'_>) -> Output<Module> {
     let position = i.position();
     map(
         preceded(
-            check_flags(word("mod"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
+            check_flags(keyword("mod"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
             terminated(ident, punct(";"))
         ),
         move |ident| Module {
@@ -163,32 +191,31 @@ fn module(i: Input<'_>) -> Output<Module> {
     )(i)
 }
 
-fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
-    alt((
-        map(pair(path, delimited(pair(punct("::"), punct("{")), separated_list1(punct(","), use_item), punct("}") )), |(path, list)| {
-            let mut flattened = Vec::new();
-            let parent = parts_to_path(&path.name);
-            for elements in list  {
-                for (ident, (path, _)) in elements {
-                    flattened.push((ident, (parent.clone() + "::" + &path, false)));
+fn use_decl(i: Input<'_>) -> Output<UseDecl> {
+    fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
+        alt((
+            map(pair(path, delimited(pair(punct("::"), punct("{")), separated_list1(punct(","), use_item), punct("}") )), |(path, list)| {
+                let mut flattened = Vec::new();
+                let parent = parts_to_path(&path.name);
+                for elements in list  {
+                    for (ident, (path, _)) in elements {
+                        flattened.push((ident, (parent.clone() + "::" + &path, false)));
+                    }
                 }
-            }
-            flattened
-        }),
-        map(pair(path, preceded(word("as"), ident)), |(path, ident)| {
-            vec![(ident.name, (parts_to_path(&path.name), false))]
-        }),
-        map(path, |path| {
-            vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
-        }),
-    ))(i)
-}
-
-fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
+                flattened
+            }),
+            map(pair(path, preceded(keyword("as"), ident)), |(path, ident)| {
+                vec![(ident.name, (parts_to_path(&path.name), false))]
+            }),
+            map(path, |path| {
+                vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
+            }),
+        ))(i)
+    }
     let position = i.position();
     map(
         delimited(
-            check_flags(word("use"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }), // TODO: allow in function scope
+            keyword("use"),
             use_item,
             punct(";")
         ),
@@ -206,12 +233,12 @@ fn use_declaration(i: Input<'_>) -> Output<UseDecl> {
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
-        map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
+        map(snap(callable_type), |f| InlineType::CallableDef(Box::new(f))),
+        map(array_type, |a| InlineType::ArrayDef(Box::new(a))),
     ))(i)
 }
 
-fn callable_def(i: Input<'_>) -> Output<CallableDef> {
+fn callable_type(i: Input<'_>) -> Output<CallableType> {
     fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
@@ -220,8 +247,8 @@ fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     }
     let position = i.position();
     map(
-        tuple((word("fn"), type_list, opt(return_part))),
-        move |sig| CallableDef {
+        tuple((keyword("fn"), type_list, opt(return_part))),
+        move |sig| CallableType {
             position,
             args    : sig.1,
             ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
@@ -230,7 +257,7 @@ fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     )(i)
 }
 
-fn enum_def(i: Input<'_>) -> Output<EnumDef> {
+fn enum_type(i: Input<'_>) -> Output<EnumType> {
     fn variant(i: Input<'_>) -> Output<VariantDef> {
         let position = i.position();
         map(
@@ -242,7 +269,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
                     move |fields| VariantKind::Data(None, fields)
                 ),
                 map(
-                    opt(preceded(punct("="), numerical)),
+                    opt(preceded(punct("="), numeric_literal)),
                     move |variant_value| VariantKind::Simple(variant_value)
                 ),
             ))),
@@ -257,7 +284,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     let j = i.clone();
     map_result(
         pair(
-            terminated(opt(word("pub")), check_flags(word("enum"), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
+            terminated(opt(keyword("pub")), check_flags(keyword("enum"), |s| if s.in_function { Some(ParseErrorKind::IllegalEnumDef) } else { None })),
             tuple((ident, punct("{"), separated_list1(punct(","), variant), opt(punct(",")), punct("}")))
         ),
         move |pair| {
@@ -273,7 +300,7 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
             if have_data && have_value {
                 Err(Failure { input: j.clone(), kind: ParseErrorKind::IllegalVariantMix })
             } else {
-                Ok(EnumDef {
+                Ok(EnumType {
                     position: position,
                     ident   : pair.1.0,
                     variants: pair.1.2,
@@ -286,10 +313,10 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     )(i)
 }
 
-fn struct_def(i: Input<'_>) -> Output<StructDef> {
+fn struct_type(i: Input<'_>) -> Output<StructType> {
     fn field(i: Input<'_>) -> Output<(String, InlineType)> {
         map(
-            tuple((label, punct(":"), inline_type)),
+            tuple((word, punct(":"), inline_type)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
@@ -304,10 +331,10 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
     let position = i.position();
     map(
         pair(
-            terminated(opt(word("pub")), check_flags(word("struct"), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
+            terminated(opt(keyword("pub")), check_flags(keyword("struct"), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
             tuple((ident, punct("{"), fields, opt(punct(",")), punct("}")))
         ),
-        move |pair| StructDef {
+        move |pair| StructType {
             position: position,
             ident   : pair.1.0,
             fields  : pair.1.2,
@@ -317,15 +344,15 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
     )(i)
 }
 
-fn trait_def(i: Input<'_>) -> Output<TraitDef> {
+fn trait_type(i: Input<'_>) -> Output<TraitType> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
         pair(
-            terminated(opt(word("pub")), check_flags(word("trait"), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
+            terminated(opt(keyword("pub")), check_flags(keyword("trait"), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
             tuple((ident, punct("{"), with_flags(&|flags| flags.in_trait = true, many0(function)), punct("}")))
         ),
-        move |pair| TraitDef {
+        move |pair| TraitType {
             position,
             functions   : pair.1.2,
             scope_id    : j.scope_id(),
@@ -336,11 +363,11 @@ fn trait_def(i: Input<'_>) -> Output<TraitDef> {
     ))(i)
 }
 
-fn array_def(i: Input<'_>) -> Output<ArrayDef> {
+fn array_type(i: Input<'_>) -> Output<ArrayType> {
     let position = i.position();
     map(
         delimited(punct("["), inline_type, punct("]")),
-        move |ty| ArrayDef {
+        move |ty| ArrayType {
             position    : position,
             element_type: ty,
             type_id     : None,
@@ -355,7 +382,7 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
         preceded(
-            check_flags(word("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            check_flags(keyword("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(inline_type, delimited(punct("{"), many0(function), punct("}")))
         ),
         move |tuple| ImplBlock {
@@ -373,9 +400,9 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
         preceded(
-            check_flags(word("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
+            check_flags(keyword("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(
-                pair(terminated(path, word("for")), inline_type),
+                pair(terminated(path, keyword("for")), inline_type),
                 delimited(punct("{"), many0(function), punct("}"))
             )
         ),
@@ -399,7 +426,7 @@ fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input<'_>) -> Output<LetBinding> {
         let position = i.position();
         map(
-            tuple((opt(word("mut")), var_decl, punct(":"), inline_type)),
+            tuple((opt(keyword("mut")), var_decl, punct(":"), inline_type)),
             move |tuple| LetBinding {
                 position    : position,
                 binding_id  : tuple.1.binding_id,
@@ -434,7 +461,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         map(
             tuple((
-                terminated(opt(word("pub")), check_flags(word("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
+                terminated(opt(keyword("pub")), check_flags(keyword("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
                 terminated(ident, punct("(")), terminated(function_parameter_list, punct(")")), opt(function_return_part)
             )),
             |sig| Signature {
@@ -474,7 +501,7 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
         let position = i.position();
         map(
             preceded(
-                check_flags(word("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
+                check_flags(keyword("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
                 pair(preceded(punct("("), function_parameter_list), preceded(punct(")"), opt(function_return_part)))
             ),
             move |sig| Signature {
@@ -558,7 +585,7 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
     map(
         preceded(
-            check_flags(word("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
+            check_flags(keyword("return"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalReturn) }),
             terminated(opt(expression), punct(";"))
         ),
         move |m| Return {
@@ -570,7 +597,7 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
 
 // literals/expression
 
-fn numerical(i: Input<'_>) -> Output<Literal> {
+fn numeric_literal(i: Input<'_>) -> Output<Literal> {
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
         let tail = if n.len() > 3 {
@@ -670,9 +697,9 @@ fn numerical(i: Input<'_>) -> Output<Literal> {
     Err(nom::Err::Failure(Failure { input: j, kind: ParseErrorKind::InvalidNumerical }))
 }
 
-fn boolean(i: Input<'_>) -> Output<Literal> {
+fn bool_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
-    map(alt((word("true"), word("false"))), move |m| {
+    map(alt((keyword("true"), keyword("false"))), move |m| {
         Literal {
             position    : position,
             value       : LiteralValue::Bool(m == "true"),
@@ -682,7 +709,7 @@ fn boolean(i: Input<'_>) -> Output<Literal> {
     })(i)
 }
 
-fn string(i: Input<'_>) -> Output<Expression> {
+fn string_literal(i: Input<'_>) -> Output<Expression> {
 
     let position = i.position();
 
@@ -790,7 +817,7 @@ fn array_literal(i: Input<'_>) -> Output<Literal> {
 fn struct_literal(i: Input<'_>) -> Output<Literal> {
     fn field(i: Input<'_>) -> Output<(String, Expression)> {
         map(
-            tuple((label, punct(":"), expression)),
+            tuple((word, punct(":"), expression)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
@@ -818,11 +845,11 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
 
 fn literal(i: Input<'_>) -> Output<Expression> {
     alt((
-        map(boolean, |l| Expression::Literal(l)),
-        string,
+        map(bool_literal, |l| Expression::Literal(l)),
+        string_literal,
         map(array_literal, |l| Expression::Literal(l)),
         map(struct_literal, |l| Expression::Literal(l)),
-        map(numerical, |l| Expression::Literal(l)),
+        map(numeric_literal, |l| Expression::Literal(l)),
     ))(i)
 }
 
@@ -930,7 +957,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
         map(
             pair(
-                unary, opt(preceded(word("as"), path))
+                unary, opt(preceded(keyword("as"), path))
             ),
             move |(expr, path)| {
                 if let Some(path) = path {
@@ -1086,8 +1113,8 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
     let position = i.position();
     map(
         preceded(
-            check_flags(word("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
-            tuple((opt(word("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
+            check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
         ),
         move |m| LetBinding {
             position    : position.clone(),
@@ -1123,7 +1150,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
         let position = i.position();
         let j = i.clone();
         preceded(
-            word("else"),
+            keyword("else"),
             alt((
                 map(if_block, move |m| Block::new(position, j.scope_id(), Vec::new(), Some(Expression::IfBlock(Box::new(m))))),
                 block
@@ -1133,7 +1160,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
     let position = i.position();
     let j = i.clone();
     preceded(
-        check_flags(word("if"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        check_flags(keyword("if"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
             tuple((expression, block, opt(else_block))),
             move |m| IfBlock {
@@ -1187,7 +1214,7 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     let position = i.position();
     let j = i.clone();
     preceded(
-        check_flags(word("match"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
+        check_flags(keyword("match"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalIfBlock) }),
         map(
             pair(expression, delimited(punct("{"), match_list, preceded(opt(punct(",")), punct("}")))),
             move |m| MatchBlock {
@@ -1220,8 +1247,8 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     let j = i.clone();
     with_scope(ScopeKind::Block, map(
         preceded(
-            check_flags(word("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((var_decl, word("in"), alt((loop_range, expression)), with_flags(&|flags| flags.in_loop = true, block)))
+            check_flags(keyword("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
+            tuple((var_decl, keyword("in"), alt((loop_range, expression)), with_flags(&|flags| flags.in_loop = true, block)))
         ),
         move |m| ForLoop {
             position: position,
@@ -1245,7 +1272,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let j = i.clone();
     map(
         preceded(
-            check_flags(word("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
+            check_flags(keyword("while"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalWhileLoop) }),
             pair(expression, with_flags(&|flags| flags.in_loop = true, block))
         ),
         move |m| WhileLoop {
@@ -1261,7 +1288,7 @@ fn break_statement(i: Input<'_>) -> Output<Break> {
     let position = i.position();
     map(
         preceded(
-            check_flags(word("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
+            check_flags(keyword("break"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalBreak) }),
             punct(";")
         ),
         move |_| Break { position }
@@ -1272,7 +1299,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
     let position = i.position();
     map(
         preceded(
-            check_flags(word("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
+            check_flags(keyword("continue"), |s| if s.in_loop { None } else { Some(ParseErrorKind::IllegalContinue) }),
             punct(";")
         ),
         move |_| Continue { position }
@@ -1284,7 +1311,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 fn statement(i: Input<'_>) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
-        //root_items,
+        map(use_decl, |m| Statement::Use(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
@@ -1307,14 +1334,14 @@ fn statement(i: Input<'_>) -> Output<Statement> {
 
 fn root_items(i: Input<'_>) -> Output<Statement> {
     alt((
-        map(use_declaration, |m| Statement::Use(m)),
+        map(use_decl, |m| Statement::Use(m)),
         map(module, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
-        map(struct_def, |m| Statement::StructDef(m)),
-        map(enum_def, |m| Statement::EnumDef(m)),
+        map(struct_type, |m| Statement::StructDef(m)),
+        map(enum_type, |m| Statement::EnumDef(m)),
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
-        map(trait_def, |m| Statement::TraitDef(m)),
+        map(trait_type, |m| Statement::TraitDef(m)),
     ))(i)
 }
 

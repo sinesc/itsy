@@ -229,9 +229,9 @@ impl_positioned!(Path);
 pub enum Statement {
     LetBinding(LetBinding),
     Function(Function),
-    StructDef(StructDef),
+    StructDef(StructType),
     ImplBlock(ImplBlock),
-    TraitDef(TraitDef),
+    TraitDef(TraitType),
     ForLoop(ForLoop),
     WhileLoop(WhileLoop),
     IfBlock(IfBlock),
@@ -242,7 +242,7 @@ pub enum Statement {
     Expression(Expression),
     Module(Module),
     Use(UseDecl),
-    EnumDef(EnumDef),
+    EnumDef(EnumType),
 }
 
 impl Statement {
@@ -456,17 +456,17 @@ impl Resolvable for Function {
 
 /// The type signature of an anonymous function/closure.
 #[derive(Debug)]
-pub struct CallableDef {
+pub struct CallableType {
     pub position: Position,
     pub args    : Vec<InlineType>,
     pub ret     : Option<InlineType>,
     pub type_id : Option<TypeId>,
 }
 
-impl_positioned!(CallableDef);
-impl_typeable!(CallableDef);
+impl_positioned!(CallableType);
+impl_typeable!(CallableType);
 
-impl Resolvable for CallableDef {
+impl Resolvable for CallableType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved(bindings))
         + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved(bindings))
@@ -563,8 +563,8 @@ impl Positioned for TypeName {
 #[derive(Debug)]
 pub enum InlineType {
     TypeName(TypeName),
-    ArrayDef(Box<ArrayDef>),
-    CallableDef(Box<CallableDef>),
+    ArrayDef(Box<ArrayType>),
+    CallableDef(Box<CallableType>),
 }
 
 impl Typeable for InlineType {
@@ -596,16 +596,16 @@ impl Resolvable for InlineType {
 
 /// An array definition, e.g. `[ MyInt ]`.
 #[derive(Debug)]
-pub struct ArrayDef {
+pub struct ArrayType {
     pub position    : Position,
     pub element_type: InlineType,
     pub type_id     : Option<TypeId>,
 }
 
-impl_positioned!(ArrayDef);
-impl_typeable!(ArrayDef);
+impl_positioned!(ArrayType);
+impl_typeable!(ArrayType);
 
-impl Resolvable for ArrayDef {
+impl Resolvable for ArrayType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.element_type.num_resolved(bindings)
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -641,7 +641,7 @@ impl Resolvable for VariantDef {
 
 /// An enum definition, e.g. `enum MyEnum { A, B(u32) }`.
 #[derive(Debug)]
-pub struct EnumDef {
+pub struct EnumType {
     pub position: Position,
     pub ident   : Ident,
     pub variants: Vec<VariantDef>,
@@ -650,10 +650,10 @@ pub struct EnumDef {
     pub vis     : Visibility,
 }
 
-impl_positioned!(EnumDef);
-impl_typeable!(EnumDef);
+impl_positioned!(EnumType);
+impl_typeable!(EnumType);
 
-impl EnumDef {
+impl EnumType {
     pub fn is_primitive(self: &Self) -> bool {
         self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_) => true, _ => false })
     }
@@ -665,7 +665,7 @@ impl EnumDef {
     }
 }
 
-impl Resolvable for EnumDef {
+impl Resolvable for EnumType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.variants.iter().fold(Progress::zero(), |variant_acc, fields| variant_acc + fields.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -677,7 +677,7 @@ impl Resolvable for EnumDef {
 
 /// A struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
 #[derive(Debug)]
-pub struct StructDef {
+pub struct StructType {
     pub position: Position,
     pub ident   : Ident,
     pub fields  : Vec<(String, InlineType)>,
@@ -685,10 +685,10 @@ pub struct StructDef {
     pub vis     : Visibility,
 }
 
-impl_positioned!(StructDef);
-impl_typeable!(StructDef);
+impl_positioned!(StructType);
+impl_typeable!(StructType);
 
-impl Resolvable for StructDef {
+impl Resolvable for StructType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -717,7 +717,7 @@ impl Resolvable for ImplBlock {
 
 /// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } }`.
 #[derive(Debug)]
-pub struct TraitDef {
+pub struct TraitType {
     pub position    : Position,
     pub functions   : Vec<Function>,
     pub scope_id    : ScopeId,
@@ -726,10 +726,10 @@ pub struct TraitDef {
     pub vis         : Visibility,
 }
 
-impl_positioned!(TraitDef);
-impl_typeable!(TraitDef);
+impl_positioned!(TraitType);
+impl_typeable!(TraitType);
 
-impl Resolvable for TraitDef {
+impl Resolvable for TraitType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
