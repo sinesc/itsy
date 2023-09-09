@@ -197,7 +197,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
                 Ok(())
             },
-            S::LetBinding(binding) => self.compile_binding(binding),
+            S::LetBinding(binding) => self.compile_let_binding(binding),
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
@@ -433,7 +433,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles a variable binding and optional assignment.
-    fn compile_binding(self: &mut Self, item: &ast::LetBinding) -> CompileResult {
+    fn compile_let_binding(self: &mut Self, item: &ast::LetBinding) -> CompileResult {
         let binding_id = item.binding_id;
         self.init_state.declare(binding_id);
         if let Some(expr) = &item.expr {
