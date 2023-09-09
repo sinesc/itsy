@@ -96,6 +96,27 @@ fn anonymous() {
 }
 
 #[test]
+fn shadowing() {
+    let result = run(stringify!(
+        let a: u8 = 1;
+        ret_u8(a);
+        let capture1 = || -> u8 a;
+        let capture2 = {
+            let a: u8 = 2;
+            ret_u8(a);
+            || -> u8 a
+        };
+        let a: u8 = 3;
+        ret_u8(a);
+        let capture3 = || -> u8 a;
+        ret_u8(capture1());
+        ret_u8(capture2());
+        ret_u8(capture3());
+    ));
+    assert_all(&result, &[ 1u8, 2, 3, 1, 2, 3 ]);
+}
+
+#[test]
 fn capture_ref() {
     let result = run(stringify!(
         let captured_name = "c";

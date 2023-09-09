@@ -102,8 +102,8 @@ fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> w
             let mut state = i.state.borrow_mut();
             if next_binding_id != state.link_state.next_binding_id {
                 state.link_state.next_binding_id = next_binding_id;
-                state.link_state.binding_map.retain(|&binding_id| binding_id < next_binding_id);
-                state.scope_stack.last_mut().unwrap().have_bindings.retain(|_, &mut binding_id| binding_id < next_binding_id);
+                state.link_state.bindings.retain(|&binding_id| binding_id < next_binding_id);
+                //state.scope_stack.last_mut().unwrap().have_bindings.retain(|_, &mut binding_id| binding_id < next_binding_id); // shouldn't be required
             }
             state.link_state.next_scope_id = next_scope_id;
         }
