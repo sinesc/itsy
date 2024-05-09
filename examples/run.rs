@@ -19,7 +19,7 @@ fn main() {
     } else {
         match build::<MyAPI, _>(&args[1]) {
             Ok(program) => {
-                run(program);
+                run(program, &args[2..]);
             }
             Err(err) => {
                 println!("{}", err);
@@ -28,8 +28,8 @@ fn main() {
     }
 }
 
-fn run(program: Program<MyAPI>) {
-    let mut context = Context::new();
+fn run(program: Program<MyAPI>, args: &[ String ]) {
+    let mut context = Context::new(args);
     let mut vm = runtime::VM::new(program);
     vm.run(&mut context).unwrap();
 }

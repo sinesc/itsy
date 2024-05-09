@@ -23,7 +23,7 @@ fn main() {
         let write_logs = std::path::Path::new("./logs/").is_dir();
         match build(&args[1], &mut files, write_logs) {
             Ok(program) => {
-                run(program, write_logs);
+                run(program, &args[2..], write_logs);
             }
             Err(err) => {
                 let module_path = err.module_path();
@@ -34,8 +34,8 @@ fn main() {
     }
 }
 
-fn run(program: Program<MyAPI>, write_logs: bool) {
-    let mut context = Context::new();
+fn run(program: Program<MyAPI>, args: &[ String ], write_logs: bool) {
+    let mut context = Context::new(args);
     let mut vm = runtime::VM::new(program);
     if write_logs {
         log("logs/bytecode.ini", false, &vm.format_program());

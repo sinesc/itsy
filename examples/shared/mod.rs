@@ -7,14 +7,16 @@ use std::{thread, time::{Instant, Duration}, io::{self, Write}};
 pub struct Context {
     pub seed: f64,
     pub last_frame: Instant,
+    pub args: Vec<String>,
 }
 
 #[allow(dead_code)]
 impl Context {
-    pub fn new() -> Self {
+    pub fn new(args: &[ String ]) -> Self {
         Self {
             seed: 1.2345,
             last_frame: Instant::now(),
+            args: args.to_vec(),
         }
     }
 }
@@ -53,6 +55,10 @@ itsy_api! {
             }
             context.last_frame = Instant::now();
             already_expired
+        }
+        /// Returns given argument or empty string. TODO: support array result
+        fn get_arg(&mut context, arg: u64) -> String {
+            context.args.get(arg as usize).cloned().unwrap_or_else(|| "".to_string())
         }
     }
 }

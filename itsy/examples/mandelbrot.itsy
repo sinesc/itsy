@@ -1,9 +1,9 @@
 /*
- * Mandelbrot fractal example.
+ * Mandelbrot fractal example. Run with argument --mono to disable colors.
  *
  * MyAPI provided by userdefined rust api examples/shared/mod.rs
  */
-use MyAPI::{print, println, flush, wait_frame};
+use MyAPI::{print, println, flush, wait_frame, get_arg};
 
 // Mandelbrot parameters for a single frame.
 struct Frame {
@@ -27,16 +27,21 @@ fn main() {
     let runtime = 0;
     let angle = 0.0;
     let frames = generate_frame_parameters();
-    let chars = [
-        "{esc}[90m.", "{esc}[31m,", "{esc}[33m:", "{esc}[32m;", "{esc}[36m>", "{esc}[34m<", "{esc}[35m!", "{esc}[91m?",
-        "{esc}[93m%", "{esc}[92m&", "{esc}[96mO", "{esc}[94m/", "{esc}[95m\\", "{esc}[97m+", "{esc}[37m*"
-    ];
-
     let coordinates = [
         Coordinate { x: 0.32570659879, y: 0.0470399495155 },
         Coordinate { x: -0.1081742949375, y: 0.905426290979918 },
         Coordinate { x: -0.749179973998915, y: 0.100100499971 },
     ];
+
+    // support colors or monochrome output
+    let chars = if get_arg(0) == "--mono" {
+        [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ]
+    } else {
+        [
+            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
+            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.", "{esc}[37m*"
+        ]
+    };
 
     while true {
         for coordinate in coordinates {
