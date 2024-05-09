@@ -56,3 +56,22 @@ itsy_api! {
         }
     }
 }
+
+/// Enable virtual terminal sequences on operating systems that,
+/// don't enable this by default. Does nothing if enabling is not required.
+pub fn enable_virtual_terminal_processing() {
+    #[cfg(windows)]
+    win_enable_virtual_terminal_processing();
+}
+
+#[cfg(windows)]
+fn win_enable_virtual_terminal_processing() {
+    use winapi_util::console::Console;
+
+    if let Ok(mut term) = Console::stdout() {
+        let _ = term.set_virtual_terminal_processing(true);
+    }
+    if let Ok(mut term) = Console::stderr() {
+        let _ = term.set_virtual_terminal_processing(true);
+    }
+}

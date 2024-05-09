@@ -11,6 +11,7 @@ mod shared;
 use shared::{Context, MyAPI};
 
 fn main() {
+    shared::enable_virtual_terminal_processing();
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {

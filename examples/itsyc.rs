@@ -13,6 +13,7 @@ mod shared;
 use shared::MyAPI;
 
 fn main() -> std::io::Result<()> {
+    shared::enable_virtual_terminal_processing();
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 {

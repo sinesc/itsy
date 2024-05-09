@@ -26,6 +26,9 @@ ice_panics = [ ]
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }
 
+[target.'cfg(windows)'.dev-dependencies]
+winapi-util = "0.1"
+
 [lib]
 name = "itsy"
 path = "src/lib.rs"
