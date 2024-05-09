@@ -668,7 +668,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
                         let variants = &self.type_by_id_mut(type_id).as_enum_mut().ice()?.variants;
                         let discriminant = variants[index].1.as_simple().ice()?;
-                        *constant_id = Some(self.scopes.insert_constant(&path, type_id, Some(discriminant_type_id), ConstantValue::Numeric(discriminant)));
+                        *constant_id = Some(self.scopes.insert_constant(&path, type_id, Some(type_id), ConstantValue::Numeric(discriminant)));
                     },
                     _ => { },
                 }
