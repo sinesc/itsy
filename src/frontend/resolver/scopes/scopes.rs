@@ -165,7 +165,7 @@ impl Scopes {
         let constant = self.constant_ref(constant_id);
         match constant.value {
             ConstantValue::Function(function_id) => Some(function_id),
-            //_ => None,
+            _ => None,
         }
     }
 

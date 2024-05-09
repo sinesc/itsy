@@ -12,8 +12,8 @@ use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
-use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, Callable};
+use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path, path_to_parts};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
@@ -71,7 +71,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // create root scope and insert primitives
     let mut scopes = scopes::Scopes::new(
         replace(&mut program.scope_parent_map, UnorderedMap::new()),
-        replace(&mut program.binding_map, Set::new())
+        replace(&mut program.binding_ids, Set::new())
     );
     let mut primitives = UnorderedMap::new();
     primitives.insert(&Type::void, scopes.insert_type(None, Type::void));
@@ -562,24 +562,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.types_resolved(item, None)
     }
 
-    /// Resolves an enum definition.
-    fn resolve_enum_type(self: &mut Self, item: &mut ast::EnumType) -> ResolveResult {
-        if item.type_id.is_some() && item.is_resolved(self) {
-            return Ok(());
-        }
+    // Resolves/generates discriminants for all variants.
+    fn resolve_enum_type_discriminants(self: &mut Self, variant_defs: &mut [ ast::VariantDef ]) -> ResolveResult<(TypeId, Vec<(String, EnumVariant)>)> {
+
+        let mut variants = Vec::new();
+        let mut next_discriminant = Numeric::Unsigned(0);
+        let mut seen_discriminants = Vec::new();
 
         // check whether at least one enum variant specifies a type, default to i32 if none do
-        let simple_type_id = if let Some(named_type) = item.named_type() {
+        let simple_type_name = variant_defs.iter().find_map(|v| match &v.kind {
+            ast::VariantKind::Simple(_, Some(ast::Literal { type_name: Some(type_name), .. })) => Some(type_name),
+            _ => None,
+        });
+
+        let discriminant_type_id = if let Some(named_type) = simple_type_name {
             named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.name))).ice_msg("Invalid variant type")?
         } else {
             self.primitive_type_id(Type::i32)?
         };
 
-        // resolve enum variant fields, assemble variant field lists. TODO: fix ugly mess. should add a const stage and handle discriminant values there
-        let mut variants = Vec::new();
-        let mut next_discriminant = Numeric::Unsigned(0);
-        let mut seen_discriminants = Vec::new();
-        for variant in &mut item.variants {
+        for variant in variant_defs {
             match &mut variant.kind {
                 ast::VariantKind::Data(_, fields) => {
                     let mut field_type_ids = Vec::new();
@@ -589,9 +591,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                     variants.push((variant.ident.name.clone(), EnumVariant::Data(field_type_ids)));
                 },
-                ast::VariantKind::Simple(value_literal) => {
+                ast::VariantKind::Simple(_, value_literal) => {
                     if let Some(value_literal) = value_literal {
-                        self.resolve_literal(value_literal, Some(simple_type_id))?;
+                        self.resolve_literal(value_literal, Some(discriminant_type_id))?;
                         if let Some(numeric) = value_literal.value.as_numeric() {
                             if numeric.is_integer() {
                                 if seen_discriminants.contains(&numeric) {
@@ -618,13 +620,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
+        Ok((discriminant_type_id, variants))
+    }
+
+    /// Resolves an enum definition.
+    fn resolve_enum_type(self: &mut Self, item: &mut ast::EnumType) -> ResolveResult {
+
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(());
+        }
+
+        // resolve enum variant fields, assemble variant field lists.
+        let (discriminant_type_id, variants) = self.resolve_enum_type_discriminants(&mut item.variants)?;
+
         // insert or update type
         if let Some(type_id) = item.type_id {
             self.type_by_id_mut(type_id).as_enum_mut().ice()?.variants = variants;
         } else {
             let qualified = self.make_path(&[ &item.ident.name ]);
             let primitive = if item.is_primitive() {
-                Some((simple_type_id, self.type_by_id(simple_type_id).primitive_size()))
+                Some((discriminant_type_id, self.type_by_id(discriminant_type_id).primitive_size()))
             } else {
                 None
             };
@@ -635,16 +650,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 //self.scopes.alias_type(ScopeId::ROOT, &qualified, type_id);
             }
         }
+
         // create variant constructors
         //let parent_scope_id = self.try_create_scope(&mut item.scope_id);
-        for (index, variant) in item.variants.iter_mut().enumerate() {
-            if variant.is_resolved(self) {
+        if let Some(type_id) = item.type_id {
+            for (index, variant) in item.variants.iter_mut().enumerate() {
                 match &mut variant.kind {
-                    ast::VariantKind::Data(function_id @ None, fields) => {
+                    ast::VariantKind::Data(constant_id @ None, fields) => {
                         let arg_type_ids: Vec<_> = fields.iter().map(|field| field.type_id(self)).collect::<Vec<_>>();
+                        if arg_type_ids.iter().all(|t| t.is_some()) {
+                            let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
+                            let kind = FunctionKind::Variant(item.type_id.ice()?, index as VariantIndex);
+                            *constant_id = Some(self.scopes.insert_function(&path, Some(type_id), arg_type_ids, Some(kind)));
+                        }
+                    },
+                    ast::VariantKind::Simple(constant_id, _) => {
                         let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
-                        let kind = FunctionKind::Variant(item.type_id.ice()?, index as VariantIndex);
-                        *function_id = Some(self.scopes.insert_function(&path, item.type_id, arg_type_ids, Some(kind)));
+                        let variants = &self.type_by_id_mut(type_id).as_enum_mut().ice()?.variants;
+                        let discriminant = variants[index].1.as_simple().ice()?;
+                        *constant_id = Some(self.scopes.insert_constant(&path, type_id, Some(discriminant_type_id), ConstantValue::Numeric(discriminant)));
                     },
                     _ => { },
                 }
@@ -681,7 +705,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     let function_name = &function.shared.sig.ident.name;
                     // check if function is defined in trait
                     if trt.provided.get(function_name).is_none() && trt.required.get(function_name).is_none() {
-                        let trait_name = item.trt.as_ref().ice()?.path.to_string();
+                        let trait_name = item.trt.as_ref().ice()?.path.to_string(0);
                         return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                     }
                     if let Some(constant_id) = function.constant_id {
@@ -890,7 +914,42 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a constant name to a constant.
+    fn try_resolve_constant_enum(self: &mut Self, item: &mut ast::Constant) -> Option<ConstantId> {
+
+        let enum_info = if item.path.name.len() > 1 {
+            // "Enum::Test" -> drop Test, then alias-resolve Enum to e.g. MyModule::Enum
+            let type_name = item.path.to_string(-1);
+            let variant_name = item.path.name[item.path.name.len() - 1].name.clone();
+            Some((self.scopes.alias(self.scope_id, &type_name).map(|a| a.to_string()).unwrap_or_else(|| self.make_path(&[ type_name ])), variant_name))
+        } else {
+            // "Test" -> alias-resolve to MyModule::Enum::Test, then drop Test.
+            let alias = item.path.to_string(0);
+            if let Some(qualified_item) = self.scopes.alias(self.scope_id, &alias) {
+                let mut qualified = path_to_parts(qualified_item);
+                qualified.pop();
+                Some((parts_to_path(&qualified), alias.clone()))
+            } else {
+                None
+            }
+        };
+        if let Some((type_name, variant_name)) = enum_info {
+            if let Some(type_id) = self.scopes.type_id(self.scope_id, &type_name) {
+                let qualified_name = type_name + "::" + &variant_name;
+                self.scopes.constant_id(self.scope_id, &qualified_name, type_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Resolves a constant name to a constant.
     fn resolve_constant(self: &mut Self, item: &mut ast::Constant, expected_result: Option<TypeId>) -> ResolveResult {
+        // try resolving enum first
+        if item.constant_id.is_none() {
+            item.constant_id = self.try_resolve_constant_enum(item);
+        }
         // resolve constant
         if item.constant_id.is_none() {
             let path = self.make_path(&item.path.name);
@@ -904,7 +963,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
             if item.constant_id.is_none() && self.stage.must_exist() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string()), self.module_path));
+                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string(0)), self.module_path));
             }
         }
         // set expected type, if it isn't a trait or we're in final resolver stage

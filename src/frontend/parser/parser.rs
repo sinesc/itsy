@@ -21,6 +21,7 @@ use nomutil::*;
 const KEYWORDS: &[ &'static str ] = &[
     "as",
     "break",
+    "const",
     "continue",
     "enum",
     "false",
@@ -102,7 +103,7 @@ fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> w
             let mut state = i.state.borrow_mut();
             if next_binding_id != state.link_state.next_binding_id {
                 state.link_state.next_binding_id = next_binding_id;
-                state.link_state.bindings.retain(|&binding_id| binding_id < next_binding_id);
+                state.link_state.binding_ids.retain(|&binding_id| binding_id < next_binding_id);
                 //state.scope_stack.last_mut().unwrap().have_bindings.retain(|_, &mut binding_id| binding_id < next_binding_id); // shouldn't be required
             }
             state.link_state.next_scope_id = next_scope_id;
@@ -270,7 +271,7 @@ fn enum_type(i: Input<'_>) -> Output<EnumType> {
                 ),
                 map(
                     opt(preceded(punct("="), numeric_literal)),
-                    move |variant_value| VariantKind::Simple(variant_value)
+                    move |variant_value| VariantKind::Simple(None, variant_value)
                 ),
             ))),
             move |(ident, kind)| VariantDef {
@@ -293,7 +294,7 @@ fn enum_type(i: Input<'_>) -> Output<EnumType> {
             for variant in &pair.1.2 {
                 match &variant.kind {
                     VariantKind::Data(_, _) => have_data = true,
-                    VariantKind::Simple(d) if d.is_some() => have_value = true,
+                    VariantKind::Simple(_, d) if d.is_some() => have_value = true,
                     _ => {}
                 }
             }

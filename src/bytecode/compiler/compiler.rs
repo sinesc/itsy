@@ -467,12 +467,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             ConstantValue::Function(function_id) => {
                 let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                 // load function address
-                comment!(self, "\npush @{}", item.path.to_string());
+                comment!(self, "\npush @{}", item.path);
                 self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
                 // load constructor (none)
                 self.writer.immediate64(0 as u64); // TODO: immediate_sa bla
                 // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
                 self.writer.upload(size_of::<StackAddress>() * 2, 0);
+            },
+            ConstantValue::Numeric(numeric) => {
+                let ty = self.ty(item);
+                self.write_immediate(ty, numeric)?;
             },
         }
         Ok(())

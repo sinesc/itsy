@@ -13,6 +13,7 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConstantValue {
     Function(FunctionId),
+    Numeric(Numeric),
 }
 
 impl_as_getter!(ConstantValue {

@@ -212,8 +212,15 @@ impl Path {
         self.name.push(other);
         self.name.extend(old.into_iter());
     }
-    pub fn to_string(self: &Self) -> String {
-        parts_to_path(&self.name)
+    /// Converts path to string, optionally skipping elements from start (negative skip) or end (positive) of path.
+    pub fn to_string(self: &Self, skip: isize) -> String {
+        if skip < 0 {
+            parts_to_path(&self.name[0..(self.name.len() as isize + skip) as usize])
+        } else if skip > 0 {
+            parts_to_path(&self.name[skip as usize..])
+        } else {
+            parts_to_path(&self.name)
+        }
     }
 }
 
@@ -615,7 +622,7 @@ impl Resolvable for ArrayType {
 /// The kind of a variant, either `Simple` (without associated data) or `Data`.
 #[derive(Debug)]
 pub enum VariantKind {
-    Simple(Option<Literal>),
+    Simple(Option<ConstantId>, Option<Literal>),
     Data(Option<ConstantId>, Vec<InlineType>),
 }
 
@@ -632,9 +639,8 @@ impl_positioned!(VariantDef);
 impl Resolvable for VariantDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         match &self.kind {
-            // TODO why is function id resolution not considered here?
-            VariantKind::Data(_, fields) => fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved(bindings)),
-            VariantKind::Simple(literal) => literal.as_ref().map_or(Progress::new(1, 1), |l| l.num_resolved(bindings)),
+            VariantKind::Data(constant_id, fields) => Progress::new(if constant_id.is_some() { 1 } else { 0 }, 1) + fields.iter().fold(Progress::zero(), |field_acc, field| field_acc + field.num_resolved(bindings)),
+            VariantKind::Simple(constant_id, literal) => Progress::new(if constant_id.is_some() { 1 } else { 0 }, 1) + literal.as_ref().map_or(Progress::new(1, 1), |l| l.num_resolved(bindings)),
         }
     }
 }
@@ -655,13 +661,7 @@ impl_typeable!(EnumType);
 
 impl EnumType {
     pub fn is_primitive(self: &Self) -> bool {
-        self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_) => true, _ => false })
-    }
-    pub fn named_type(self: &Self) -> Option<&TypeName> {
-        self.variants.iter().find_map(|v| match &v.kind {
-            VariantKind::Simple(Some(Literal { type_name: Some(type_name), .. })) => Some(type_name),
-            _ => None,
-        })
+        self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_, _) => true, _ => false })
     }
 }
 
@@ -1286,7 +1286,7 @@ impl Resolvable for Constant {
         self.constant_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
-        ResolveErrorKind::CannotResolve(self.path.to_string())
+        ResolveErrorKind::CannotResolve(self.path.to_string(0))
     }
 }
 
