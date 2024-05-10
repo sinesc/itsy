@@ -115,9 +115,9 @@ fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, r
     let subline_str = "max. iter. {frame.max_iterations} (whitespace < {render_low}), zoom {zoom_str}x ({epsilon_str}×f64::EPSILON)";
 
     print(
-        intro_str + " ".repeat(width as u64 - exit_str.len() - intro_str.len() + 6 /*escapes*/) + exit_str + "\n" +
+        intro_str + " ".repeat(width as u64 - exit_str.len() - (intro_str.len() - 6) /* 6 escapes in intro */) + exit_str + "\n" +
         mandelbrot(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle) + "{esc}[0m" +
-        subline_str + " ".repeat(width as u64 - subline_str.len() - 1) + "{esc}[1;1H"
+        subline_str + " ".repeat(width as u64 - subline_str.len() - 1 /* -1 to keep cursor inside screen at bottom right */)
     );
 
     flush();
