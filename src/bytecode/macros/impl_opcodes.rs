@@ -40,13 +40,19 @@ macro_rules! impl_opcodes {
     (@map_writer_type String) => ( &str );
     (@map_writer_type $ty:tt) => ( $ty );
     // Handle opcode flag setup (before running the opcode)
-    (@setup_flag $self:ident, $prev_pc:ident, check) => { let $prev_pc = $self.pc; };
+    (@setup_flag $self:ident, $prev_pc:ident, check) => {
+        #[cfg(feature="debugging")]
+        let $prev_pc = $self.pc;
+    };
     (@setup_flag $self:ident, $prev_pc:ident, $any:ident) => { };
     // Handle opcode flag (perform action after opcode)
     (@flag $self:ident, $prev_pc:ident, return) => { return };
     (@flag $self:ident, $prev_pc:ident, check) => { match $self.state {
         VMState::Error(_) => {
-            $self.error_pc = $prev_pc - 1; // opcode was already read
+            #[cfg(feature="debugging")]
+            {
+                $self.error_pc = $prev_pc - size_of::<OpCodeType>(); // opcode was already read
+            }
             return;
         },
         _ => { },
