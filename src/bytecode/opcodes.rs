@@ -304,6 +304,96 @@ impl_opcodes!{
         self.stack.push(a + b);
     }
 
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        adds8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        adds16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        adds32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        adds64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        addu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        addu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        addu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        addu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        let result = T::overflowing_add(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        addf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
+        addf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        self.stack.push(a + b);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their sum.
+    fn <
+        adds8_pi<T: i8>(right: i8) [ check ],
+        adds16_pi<T: i16>(right: i16) [ check ],
+        adds32_pi<T: i32>(right: i32) [ check ],
+        adds64_pi<T: i64>(right: i64) [ check ],
+        addu8_pi<T: u8>(right: u8) [ check ],
+        addu16_pi<T: u16>(right: u16) [ check ],
+        addu32_pi<T: u32>(right: u32) [ check ],
+        addu64_pi<T: u64>(right: u64) [ check ],
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        let result = T::overflowing_add(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their sum.
+    fn <
+        addf32_pi<T: f32>(right: f32),
+        addf64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        self.stack.push(a + b);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their sum.
+    fn <
+        adds8_pv<T: i8>(right: FrameAddress) [ check ],
+        adds16_pv<T: i16>(right: FrameAddress) [ check ],
+        adds32_pv<T: i32>(right: FrameAddress) [ check ],
+        adds64_pv<T: i64>(right: FrameAddress) [ check ],
+        addu8_pv<T: u8>(right: FrameAddress) [ check ],
+        addu16_pv<T: u16>(right: FrameAddress) [ check ],
+        addu32_pv<T: u32>(right: FrameAddress) [ check ],
+        addu64_pv<T: u64>(right: FrameAddress) [ check ],
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        let result = T::overflowing_add(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their sum.
+    fn <
+        addf32_pv<T: f32>(right: FrameAddress),
+        addf64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push(a + b);
+    }
+
     /// Pops 2 values from the stack and pushes their difference.
     fn <
         subs8<T: i8>() [ check ],
@@ -366,14 +456,14 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        vmuls8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmuls16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmuls32<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmuls64<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmulu8<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmulu16<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmulu32<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
-        vmulu64<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+        muls8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        muls16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        muls32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        muls64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
         let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
@@ -386,13 +476,78 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        vmulf32<T: f32>(left: FrameAddress, right: FrameAddress),
-        vmulf64<T: f64>(left: FrameAddress, right: FrameAddress)
+        mulf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
+        mulf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
         self.stack.push(a * b);
     }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their product.
+    fn <
+        muls8_pi<T: i8>(right: i8) [ check ],
+        muls16_pi<T: i16>(right: i16) [ check ],
+        muls32_pi<T: i32>(right: i32) [ check ],
+        muls64_pi<T: i64>(right: i64) [ check ],
+        mulu8_pi<T: u8>(right: u8) [ check ],
+        mulu16_pi<T: u16>(right: u16) [ check ],
+        mulu32_pi<T: u32>(right: u32) [ check ],
+        mulu64_pi<T: u64>(right: u64) [ check ],
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        let result = T::overflowing_mul(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their product.
+    fn <
+        mulf32_pi<T: f32>(right: f32),
+        mulf64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        self.stack.push(a * b);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their product.
+    fn <
+        muls8_pv<T: i8>(right: FrameAddress) [ check ],
+        muls16_pv<T: i16>(right: FrameAddress) [ check ],
+        muls32_pv<T: i32>(right: FrameAddress) [ check ],
+        muls64_pv<T: i64>(right: FrameAddress) [ check ],
+        mulu8_pv<T: u8>(right: FrameAddress) [ check ],
+        mulu16_pv<T: u16>(right: FrameAddress) [ check ],
+        mulu32_pv<T: u32>(right: FrameAddress) [ check ],
+        mulu64_pv<T: u64>(right: FrameAddress) [ check ],
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        let result = T::overflowing_mul(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their product.
+    fn <
+        mulf32_pv<T: f32>(right: FrameAddress),
+        mulf64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push(a * b);
+    }
+
+
+
+
+
 
     /// Pops 2 values from the stack and pushes their quotient.
     fn <

@@ -1,6 +1,6 @@
 //! A type that can represent a signed or unsigned integer value.
 
-use crate::{prelude::*, config::StackAddress};
+use crate::prelude::*;
 
 /// Signed integer value.
 pub(crate) type Signed = i64;
@@ -44,29 +44,10 @@ impl Numeric {
             _ => false,
         }
     }
-    /*pub const fn is_signed(self: &Self) -> bool {
-        match self {
-            Numeric::Signed(_) => true,
-            _ => false,
-        }
-    }
-    pub const fn is_unsigned(self: &Self) -> bool {
-        match self {
-            Numeric::Unsigned(_) => true,
-            _ => false,
-        }
-    }*/
     pub const fn is_float(self: &Self) -> bool {
         match self {
             Numeric::Float(_) => true,
             _ => false,
-        }
-    }
-    pub const fn as_unsigned(self: &Self) -> Option<StackAddress> {
-        match self {
-            &Numeric::Signed(v) if v >= 0 => Some(v as StackAddress),
-            &Numeric::Unsigned(v) => Some(v as StackAddress),
-            _ => None,
         }
     }
     pub fn inc(self: Self) -> Self {
@@ -76,18 +57,17 @@ impl Numeric {
             Self::Float(v) => Self::Float(v + 1.0),
         }
     }
-
-    /*pub const fn as_signed(self: &Self) -> Option<i64> {
+    pub const fn as_signed(self: &Self) -> Option<i64> {
         match self {
-            Numeric::Signed(v) => Some(*v as i64),
-            Numeric::Unsigned(v) => Some(*v as i64),
+            &Numeric::Signed(v) => Some(v as i64),
+            &Numeric::Unsigned(v) if v <= i64::MAX as u64 => Some(v as i64),
             _ => None,
         }
     }
     pub const fn as_unsigned(self: &Self) -> Option<u64> {
         match self {
-            Numeric::Signed(v) => Some(*v as u64),
-            Numeric::Unsigned(v) => Some(*v as u64),
+            &Numeric::Signed(v) if v >= 0 => Some(v as u64),
+            &Numeric::Unsigned(v) => Some(v as u64),
             _ => None,
         }
     }
@@ -97,19 +77,6 @@ impl Numeric {
             _ => None,
         }
     }
-    const fn as_f64(self: &Self) -> Option<f64> {
-        match self {
-            Numeric::Float(v) => Some(*v as f64),
-            _ => None,
-        }
-    }
-    const fn as_i128(self: &Self) -> Option<i128> {
-        match self {
-            Numeric::Signed(v) => Some(*v as i128),
-            Numeric::Unsigned(v) => Some(*v as i128),
-            _ => None,
-        }
-    }*/
 }
 
 impl PartialEq for Numeric {

@@ -1061,21 +1061,56 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles the given binary operation.
     fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression};
+        use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression as E};
         let vars = match (&item.left, &item.right) {
-            (
-                Operand::Expression(Expression::Variable(vl)),
-                Operand::Expression(Expression::Variable(vr))
-            ) => Some((vl, vr)),
+            (Operand::Expression(left), Operand::Expression(right)) => Some((left, right)),
             _ => None,
         };
         match (item.op, vars) {
-            (Mul, Some((vl, vr))) => {
+            // TODO: move to future optimizer. here to test whether these opcodes are even beneficial
+            // Multiplication optimizations
+            (Mul, Some((E::Variable(vl), E::Variable(vr)))) => {
                 let addr_l = self.load_variable(vl)?;
                 let addr_r = self.load_variable(vr)?;
-                self.write_vmul(self.ty(&item.left), addr_l, addr_r)?;
+                self.write_mul_vv(self.ty(&item.left), addr_l, addr_r)?;
                 Ok(())
             },
+            (Mul, Some((left, E::Variable(right)))) |
+            (Mul, Some((E::Variable(right), left))) if self.ty(&item.left).is_numeric() => {
+                self.compile_expression(left)?;
+                let addr_r = self.load_variable(right)?;
+                self.write_mul_pv(self.ty(&item.left), addr_r)?;
+                Ok(())
+            },
+            (Mul, Some((left, E::Literal(right)))) |
+            (Mul, Some((E::Literal(right), left))) if self.ty(right).is_numeric() => {
+                self.compile_expression(left)?;
+                let numeric = right.value.as_numeric().ice()?;
+                self.write_mul_pi(self.ty(&item.left), numeric)?;
+                Ok(())
+            },
+            // Addition optimizations
+            (Add, Some((E::Variable(vl), E::Variable(vr)))) if self.ty(&item.left).is_numeric() => {
+                let addr_l = self.load_variable(vl)?;
+                let addr_r = self.load_variable(vr)?;
+                self.write_add_vv(self.ty(&item.left), addr_l, addr_r)?;
+                Ok(())
+            },
+            (Add, Some((left, E::Variable(right)))) |
+            (Add, Some((E::Variable(right), left))) if self.ty(&item.left).is_numeric() => {
+                self.compile_expression(left)?;
+                let addr_r = self.load_variable(right)?;
+                self.write_add_pv(self.ty(&item.left), addr_r)?;
+                Ok(())
+            },
+            (Add, Some((left, E::Literal(right)))) |
+            (Add, Some((E::Literal(right), left))) if self.ty(right).is_numeric() => {
+                self.compile_expression(left)?;
+                let numeric = right.value.as_numeric().ice()?;
+                self.write_add_pi(self.ty(&item.left), numeric)?;
+                Ok(())
+            },
+            // General operations
             (Add | Sub | Mul | Div | Rem | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual, _) => {
                 self.compile_binary_op_simple(item)
             },
@@ -1092,7 +1127,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_binary_op_call(item)
             },
             (Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | Range | RangeInclusive, _) => {
-                Self::ice_at(item, "Unexpected operator in compile__binary_op")
+                Self::ice_at(item, "Unexpected operator in compile_binary_op")
             },
         }
     }
@@ -1811,7 +1846,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Write addition instruction.
+    /// Write general addition instruction.
     fn write_add(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
         Ok(match ty {
             Type::i8 => self.writer.adds8(),
@@ -1829,7 +1864,58 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Write multiplication instruction.
+    /// Write variable+variable addition instruction.
+    fn write_add_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
+        Ok(match ty {
+            Type::i8 => self.writer.adds8_vv(left, right),
+            Type::i16 => self.writer.adds16_vv(left, right),
+            Type::i32 => self.writer.adds32_vv(left, right),
+            Type::i64 => self.writer.adds64_vv(left, right),
+            Type::u8 => self.writer.addu8_vv(left, right),
+            Type::u16 => self.writer.addu16_vv(left, right),
+            Type::u32 => self.writer.addu32_vv(left, right),
+            Type::u64 => self.writer.addu64_vv(left, right),
+            Type::f32 => self.writer.addf32_vv(left, right),
+            Type::f64 => self.writer.addf64_vv(left, right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression+variable addition instruction.
+    fn write_add_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.adds8_pv(right),
+            Type::i16 => self.writer.adds16_pv(right),
+            Type::i32 => self.writer.adds32_pv(right),
+            Type::i64 => self.writer.adds64_pv(right),
+            Type::u8 => self.writer.addu8_pv(right),
+            Type::u16 => self.writer.addu16_pv(right),
+            Type::u32 => self.writer.addu32_pv(right),
+            Type::u64 => self.writer.addu64_pv(right),
+            Type::f32 => self.writer.addf32_pv(right),
+            Type::f64 => self.writer.addf64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression+immediate addition instruction.
+    fn write_add_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.adds8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.adds16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.adds32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.adds64_pi(right.as_signed().ice()? as i64),
+            Type::u8 => self.writer.addu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.addu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.addu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.addu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.addf32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.addf64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write general multiplication instruction.
     fn write_mul(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
         Ok(match ty {
             Type::i8 => self.writer.muls8(),
@@ -1846,19 +1932,53 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Write variable multiplication instruction.
-    fn write_vmul(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
+    /// Write variable*variable multiplication instruction.
+    fn write_mul_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
         Ok(match ty {
-            Type::i8 => self.writer.vmuls8(left, right),
-            Type::i16 => self.writer.vmuls16(left, right),
-            Type::i32 => self.writer.vmuls32(left, right),
-            Type::i64 => self.writer.vmuls64(left, right),
-            Type::u8 => self.writer.vmulu8(left, right),
-            Type::u16 => self.writer.vmulu16(left, right),
-            Type::u32 => self.writer.vmulu32(left, right),
-            Type::u64 => self.writer.vmulu64(left, right),
-            Type::f32 => self.writer.vmulf32(left, right),
-            Type::f64 => self.writer.vmulf64(left, right),
+            Type::i8 => self.writer.muls8_vv(left, right),
+            Type::i16 => self.writer.muls16_vv(left, right),
+            Type::i32 => self.writer.muls32_vv(left, right),
+            Type::i64 => self.writer.muls64_vv(left, right),
+            Type::u8 => self.writer.mulu8_vv(left, right),
+            Type::u16 => self.writer.mulu16_vv(left, right),
+            Type::u32 => self.writer.mulu32_vv(left, right),
+            Type::u64 => self.writer.mulu64_vv(left, right),
+            Type::f32 => self.writer.mulf32_vv(left, right),
+            Type::f64 => self.writer.mulf64_vv(left, right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression*variable multiplication instruction.
+    fn write_mul_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.muls8_pv(right),
+            Type::i16 => self.writer.muls16_pv(right),
+            Type::i32 => self.writer.muls32_pv(right),
+            Type::i64 => self.writer.muls64_pv(right),
+            Type::u8 => self.writer.mulu8_pv(right),
+            Type::u16 => self.writer.mulu16_pv(right),
+            Type::u32 => self.writer.mulu32_pv(right),
+            Type::u64 => self.writer.mulu64_pv(right),
+            Type::f32 => self.writer.mulf32_pv(right),
+            Type::f64 => self.writer.mulf64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression*immediate multiplication instruction.
+    fn write_mul_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.muls8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.muls16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.muls32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.muls64_pi(right.as_signed().ice()? as i64),
+            Type::u8 => self.writer.mulu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.mulu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.mulu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.mulu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.mulf32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.mulf64_pi(right.as_float().ice()? as f64),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
