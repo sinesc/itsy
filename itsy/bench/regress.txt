@@ -1,3 +1,34 @@
+Revision: fd8d0d807c218af4f906015ed2b1d7aa539fbed8
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 11.05.2024 12:43:33
+Message:
+add optimized specialcase add/mul instructions
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy score: 432, avg: 0.2487 min: 0.2312 max: 0.2647 var: 14.491%
+  rust score: 0, avg: 0.0081 min: 0.0078 max: 0.0086 var: 10.123%
+  factor 30.59x
+fib_r
+  itsy score: 596, avg: 0.1804 min: 0.1678 max: 0.1851 var: 10.306%
+  rust score: 0, avg: 0.0037 min: 0.0037 max: 0.0038 var: 2.694%
+  factor 48.43x
+stringcat
+  itsy score: 684, avg: 0.0015 min: 0.0015 max: 0.0017 var: 15.511%
+  rust score: 0, avg: 0.0019 min: 0.0018 max: 0.0022 var: 23.256%
+  factor 0.79x
+upload_struct
+  itsy score: 473, avg: 0.2140 min: 0.2113 max: 0.2171 var: 2.731%
+upload_array
+  itsy score: 445, avg: 0.4537 min: 0.4486 max: 0.4620 var: 2.996%
+string_return
+  itsy score: 1168, avg: 0.0881 min: 0.0856 max: 0.0927 var: 8.319%
+heap_reuse
+  itsy score: 0, avg: 0.1283 min: 0.0657 max: 0.2420 var: 268.150%
+final score 3798 points
+
+
 Revision: e0ef3558b1546065ab4ab4ed43cd6c6654be2ac4
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 10.05.2024 19:10:19
