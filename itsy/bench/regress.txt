@@ -1,3 +1,69 @@
+Revision: e0ef3558b1546065ab4ab4ed43cd6c6654be2ac4
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 10.05.2024 19:10:19
+Message:
+set cursor to bottom of screen when exiting mandelbrot example (avoids leaving last image below shell prompt)
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy score: 386, avg: 0.2704 min: 0.2590 max: 0.2893 var: 11.675%
+  rust score: 0, avg: 0.0080 min: 0.0078 max: 0.0083 var: 6.191%
+  factor 33.61x
+fib_r
+  itsy score: 532, avg: 0.1911 min: 0.1879 max: 0.1936 var: 3.018%
+  rust score: 0, avg: 0.0047 min: 0.0047 max: 0.0049 var: 5.538%
+  factor 40.53x
+stringcat
+  itsy score: 685, avg: 0.0015 min: 0.0015 max: 0.0016 var: 12.134%
+  rust score: 0, avg: 0.0020 min: 0.0019 max: 0.0022 var: 14.043%
+  factor 0.76x
+upload_struct
+  itsy score: 465, avg: 0.2154 min: 0.2146 max: 0.2160 var: 0.665%
+upload_array
+  itsy score: 440, avg: 0.4563 min: 0.4545 max: 0.4571 var: 0.586%
+string_return
+  itsy score: 1179, avg: 0.0876 min: 0.0848 max: 0.0921 var: 8.626%
+heap_reuse
+  itsy score: 0, avg: 0.1224 min: 0.0687 max: 0.2676 var: 289.299%
+final score 3687 points
+
+
+Revision: ef60b6422feaa3509f2817246b106058b623020c
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 09.07.2022 10:56:49
+Message:
+combine primitives within constructors
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy avg: 0.3240 min: 0.3198 max: 0.3357 var: 4.972%
+  rust avg: 0.0078 min: 0.0076 max: 0.0087 var: 14.429%
+  factor 41.30x
+fib_r
+  itsy avg: 0.1687 min: 0.1675 max: 0.1701 var: 1.573%
+  rust avg: 0.0041 min: 0.0040 max: 0.0042 var: 3.779%
+  factor 41.45x
+stringcat
+  itsy avg: 0.0015 min: 0.0014 max: 0.0016 var: 13.793%
+  rust avg: 0.0019 min: 0.0018 max: 0.0021 var: 15.948%
+  factor 0.78x
+upload_struct
+  itsy avg: 0.2106 min: 0.2055 max: 0.2132 var: 3.735%
+upload_array
+  itsy avg: 0.4403 min: 0.4336 max: 0.4453 var: 2.698%
+string_return
+  itsy avg: 0.0870 min: 0.0840 max: 0.0915 var: 8.937%
+heap_reuse
+  itsy avg: 0.1407 min: 0.0983 max: 0.2726 var: 177.440%
+
+
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^ new CPU above, not comparable ^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
 Revision: ef60b6422feaa3509f2817246b106058b623020c
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 09.07.2022 10:56:49
