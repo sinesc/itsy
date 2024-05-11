@@ -16,6 +16,10 @@ struct Frame {
 struct Coordinate {
     x: f64,
     y: f64,
+    i_start: i32,
+    i_max: i32,
+    i_exp: f32,
+    num_frames: i32,
 }
 
 fn main() {
@@ -26,29 +30,41 @@ fn main() {
 
     let runtime = 0;
     let angle = 0.0;
-    let frames = generate_frame_parameters();
     let coordinates = [
-        Coordinate { x: 0.32570659879, y: 0.0470399495155 },
-        Coordinate { x: -0.1081742949375, y: 0.905426290979918 },
-        Coordinate { x: -0.749179973998915, y: 0.100100499971 },
+        Coordinate { x: 0.32570659879, y: 0.0470399495155, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
+        Coordinate { x: -0.1081742949375, y: 0.905426290979918, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
+        Coordinate { x: -0.749179973998915, y: 0.100100499971, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
     ];
 
     // support colors or monochrome output
     let chars = if get_arg(0) == "--mono" {
         [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ]
-    } else {
+    } else if get_arg(0) == "--rainbow" {
         [
             "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
-            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.", "{esc}[37m*"
+            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
+            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
+            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
+            "{esc}[37m*"
+        ]
+    } else {
+        [
+            "{esc}[34m.", "{esc}[34m.", "{esc}[34m.", "{esc}[34m.",
+            "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*",
+            "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*",
+            "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*",
+            "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*",
+            "{esc}[37m*",
         ]
     };
 
     while true {
         for coordinate in coordinates {
+            let frames = generate_frame_parameters(coordinate);
             for _ in 0..2 {
                 for frame in frames {
                     render(chars, frame, coordinate, angle, runtime, 80, 24);
-                    runtime = wait_frame(1000 / 60); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
+                    runtime = wait_frame(1000 / 40); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
                     angle += 0.015;
                 }
                 frames.reverse();
@@ -127,16 +143,15 @@ fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, r
  * Generate zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
  * them later. There is no math involed, the values were simply tweaked to look good.
  */
-fn generate_frame_parameters() -> [ Frame ] {
+fn generate_frame_parameters(c: Coordinate) -> [ Frame ] {
 
     let zoom = 1.0;
     let zoom_multiplier = 0.99;
-    let num_frames = 690;
     let frames: [ Frame ] = [ ];
 
-    for i in 0..num_frames {
+    for i in 0..c.num_frames {
         // adjust max_iterations while zooming to keep a narrow boundary
-        let max_iterations = (20.0f32 + (i as f32 / num_frames as f32).powf(1.8) * 200.0) as u32;
+        let max_iterations = (c.i_start as f32 + (i as f32 / c.num_frames as f32).powf(c.i_exp) * (c.i_max - c.i_start) as f32) as u32;
         frames.push(Frame { max_iterations: max_iterations, zoom: zoom, interp: 1.0 });
         // adjut zoom level ever faster
         zoom = zoom * zoom_multiplier;
