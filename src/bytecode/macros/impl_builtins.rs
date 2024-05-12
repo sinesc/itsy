@@ -281,6 +281,8 @@ macro_rules! impl_builtins {
             }
             #[cfg(feature="runtime")]
             pub(crate) fn from_index(index: $crate::BuiltinIndex) -> Self {
+                // TODO: Turns out this is quite slow. Instead, generate a module containting
+                // integer constants for all the builtins, just like impl_opcodes does it for opcodes.
                 match index {
                     $( // type
                         $( // function

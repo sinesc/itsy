@@ -51,7 +51,7 @@ macro_rules! impl_opcodes {
         VMState::Error(_) => {
             #[cfg(feature="debugging")]
             {
-                $self.error_pc = $prev_pc - size_of::<OpCodeType>(); // opcode was already read
+                $self.error_pc = $prev_pc - size_of::<OpCodeIndex>(); // opcode was already read
             }
             return;
         },
@@ -82,7 +82,7 @@ macro_rules! impl_opcodes {
         )+
     ) => {
 
-        type OpCodeType = u16;
+        type OpCodeIndex = u16;
 
         #[allow(non_camel_case_types)]
         #[repr(u16)]
@@ -105,21 +105,28 @@ macro_rules! impl_opcodes {
             )+
         }
 
+        /// Integer representations of opcodes. These are useful to avoid having to convert the opcode integer
+        /// value from the binary program back to an enum value (which would either require a match block since
+        /// not all valid integers are also valid opcodes or an unsafe cast with a range check).
+        /// Also note: Instead of casting from int to opcode one could instead cast the to be matched opcode to int
+        /// during the main instruction match using match guard, e.g. `x if x == OpCode::$name as OpCodeIndex => ...`.
+        /// Unfortunately this doesn't seem to get optimized and is currently significantly (~2x) slower than matching this
+        /// integer representation directly.
         #[allow(non_upper_case_globals)]
         #[cfg(feature="runtime")]
         mod opcodes {
-            use super::OpCodeType;
+            use super::OpCodeIndex;
             $(
                 $( #[ $attr ] )*
                 // single opcode
                 $(
-                    pub(super) const $name: OpCodeType = super::OpCode::$name as OpCodeType;
+                    pub(super) const $name: OpCodeIndex = super::OpCode::$name as OpCodeIndex;
                 )?
                 // opcode variants
                 $(
                     $(
                         $( #[$vattr] )*
-                        pub(super) const $vname: OpCodeType = super::OpCode::$vname as OpCodeType;
+                        pub(super) const $vname: OpCodeIndex = super::OpCode::$vname as OpCodeIndex;
                     )+
                 )?
             )+
@@ -134,7 +141,7 @@ macro_rules! impl_opcodes {
                 $(
                     pub fn $name(self: &Self, $($arg_name: impl_opcodes!(@map_writer_type $arg_type)),* ) -> StackAddress {
                         let insert_pos = self.position();
-                        impl_opcodes!(@write_arg OpCodeType, OpCode::$name as OpCodeType, self);
+                        impl_opcodes!(@write_arg OpCodeIndex, OpCode::$name as OpCodeIndex, self);
                         $( impl_opcodes!(@write_arg $arg_type, $arg_name, self); )*
                         insert_pos as StackAddress
                     }
@@ -146,7 +153,7 @@ macro_rules! impl_opcodes {
                         $( #[ $vattr ] )*
                         pub fn $vname(self: &Self, $( $varg_name: impl_opcodes!(@map_writer_type $vtype_name) ),* ) -> StackAddress {
                             let insert_pos = self.position();
-                            impl_opcodes!(@write_arg OpCodeType, OpCode::$vname as OpCodeType, self);
+                            impl_opcodes!(@write_arg OpCodeIndex, OpCode::$vname as OpCodeIndex, self);
                             $(
                                 impl_opcodes!(@write_arg $vtype_name, $varg_name, self);
                             )*
@@ -164,7 +171,7 @@ macro_rules! impl_opcodes {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex};
                 loop {
-                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, self.pc);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, self.pc);
                     #[allow(unused_doc_comments)]
                     match instruction {
                         $(
@@ -206,7 +213,7 @@ macro_rules! impl_opcodes {
             /// Execute the next bytecode from the VMs code buffer.
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex};
-                let instruction = impl_opcodes!(@read_arg OpCodeType, self, self.pc);
+                let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, self.pc);
                 #[allow(unused_doc_comments)]
                 match instruction {
                     $(
@@ -246,7 +253,7 @@ macro_rules! impl_opcodes {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, position);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, position);
                     match instruction {
                         $(
                             $( #[ $attr ] )*
@@ -276,18 +283,18 @@ macro_rules! impl_opcodes {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg OpCodeType, self, position);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, position);
                     #[allow(unreachable_patterns)]
                     #[allow(unused_doc_comments)]
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::call_rust => {
-                            let mut result = format!("{} {} ", position - size_of::<OpCodeType>() as StackAddress, stringify!(call_rust));
+                            let mut result = format!("{} {} ", position - size_of::<OpCodeIndex>() as StackAddress, stringify!(call_rust));
                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
                             Some((result, position))
                         }
                         opcodes::comment => {
-                            let start = position - size_of::<OpCodeType>() as StackAddress;
+                            let start = position - size_of::<OpCodeIndex>() as StackAddress;
                             let message = impl_opcodes!(@read_arg String, self, position);
                             let result = if &message[0..1] == "\n" { format!("\n;{} {}", start, &message[1..]) } else { format!(";{} {}", start, message) };
                             Some((result, position))
@@ -297,7 +304,7 @@ macro_rules! impl_opcodes {
                             // single opcode
                             $(
                                 opcodes::$name => {
-                                    let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>(), stringify!($name));
+                                    let mut result = format!("{:?} {} ", position - size_of::<OpCodeIndex>(), stringify!($name));
                                     $(
                                         result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $arg_type, self, position) ));
                                     )*
@@ -309,7 +316,7 @@ macro_rules! impl_opcodes {
                                 $(
                                     $( #[$vattr] )*
                                     opcodes::$vname => {
-                                        let mut result = format!("{:?} {} ", position - size_of::<OpCodeType>(), stringify!($vname));
+                                        let mut result = format!("{:?} {} ", position - size_of::<OpCodeIndex>(), stringify!($vname));
                                         $(
                                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $vtype_name, self, position) ));
                                         )*
