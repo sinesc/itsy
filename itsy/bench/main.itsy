@@ -23,81 +23,13 @@ struct Result {
     score: u32,
 }
 
-fn print_results(results: [ [ Result ] ]) {
-
-    let total_score = 0;
-
-    for t in 0..results[0].len() {
-
-        let itsy_avg = 0.0;
-        let rust_avg = 0.0;
-        println(results[0][t].name);
-
-        for source in [ "itsy", "rust" ] {
-
-            let min = 0.0;
-            let max = 0.0;
-            let sum = 0.0;
-            let max_score = 0;
-
-            for p in 0..results.len() {
-                let time = if source == "itsy" { results[p][t].itsy_time } else { results[p][t].rust_time };
-                let score = if source == "itsy" { results[p][t].score } else { 0 };
-                sum += time;
-                if (min == 0.0 || min > time) {
-                    min = time;
-                }
-                if (max < time) {
-                    max = time;
-                }
-                if (max_score < score) {
-                    max_score = score;
-                }
-            }
-
-            let avg = sum / results.len() as f64;
-            total_score += max_score;
-
-            if source == "itsy" {
-                itsy_avg = avg
-            } else {
-                rust_avg = avg
-            }
-
-            if sum > 0.0 {
-                println("  {source} score: {max_score}, avg: {avg.fmt(4)} min: {min.fmt(4)} max: {max.fmt(4)} var: {((max-min)/min*100.0).fmt(3)}%");
-            }
-        }
-
-        if rust_avg > 0.0 {
-            println("  factor {(itsy_avg / rust_avg).fmt(2)}x");
-        }
-    }
-
-    println("final score {total_score} points");
-}
-
-fn bench_single(name: String, rating: u32, itsy: fn(), results: [ Result ]) {
-    start_time();
-    itsy();
-    let itsy_time = stop_time();
-    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: 0.0, itsy_time: itsy_time });
-}
-
-fn bench_compare(name: String, rating: u32, itsy: fn() -> String, rust: fn() -> String, results: [ Result ]) {
-    start_time();
-    let rust_result = rust();
-    let rust_time = stop_time();
-    start_time();
-    let itsy_result = itsy();
-    let itsy_time = stop_time();
-    if itsy_result != rust_result {
-        print("ERROR: {itsy_result} != {rust_result}");
-    }
-    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: rust_time, itsy_time: itsy_time });
-}
-
 fn main() {
+    /*let test_array: [ u32 ] = [];
+
+    for i in 0..10000 {
+        test_array.push(i*3);
+    }*/
+
     let compares = [
         CompareBench { name: "mandelbrot", rating: 100, itsy: fn() -> String { itsy_mandelbrot(800, 600) }, rust: fn() -> String { rust_mandelbrot(800, 600) } },
         CompareBench { name: "fib_r", rating: 100, itsy: fn() -> String { itsy_fib_r(32) as String }, rust: fn() -> String { rust_fib_r(32) as String } },
@@ -108,6 +40,9 @@ fn main() {
         SingleBench { name: "upload_array", rating: 200, itsy: itsy_upload_array },
         SingleBench { name: "string_return", rating: 100, itsy: itsy_string_return },
         SingleBench { name: "heap_reuse", rating: 0, itsy: itsy_heap_reuse }, // too unstable to include in rating
+        SingleBench { name: "for_index", rating: 10, itsy: itsy_for_index },
+        //SingleBench { name: "for_array", rating: 10, itsy: || itsy_for_array(test_array) }, // FIXME closures with heap captures still broken
+        SingleBench { name: "while", rating: 10, itsy: itsy_while },
     ];
     let num_passes = 5;
     let results: [ [ Result ] ] = [ ];
@@ -132,6 +67,71 @@ fn main() {
     println("");
     print_results(results);
 }
+
+fn print_results(results: [ [ Result ] ]) {
+    let total_score = 0;
+    for t in 0..results[0].len() {
+        let itsy_avg = 0.0;
+        let rust_avg = 0.0;
+        println(results[0][t].name);
+        for source in [ "itsy", "rust" ] {
+            let min = 0.0;
+            let max = 0.0;
+            let sum = 0.0;
+            let max_score = 0;
+            for p in 0..results.len() {
+                let time = if source == "itsy" { results[p][t].itsy_time } else { results[p][t].rust_time };
+                let score = if source == "itsy" { results[p][t].score } else { 0 };
+                sum += time;
+                if (min == 0.0 || min > time) {
+                    min = time;
+                }
+                if (max < time) {
+                    max = time;
+                }
+                if (max_score < score) {
+                    max_score = score;
+                }
+            }
+            let avg = sum / results.len() as f64;
+            total_score += max_score;
+            if source == "itsy" {
+                itsy_avg = avg
+            } else {
+                rust_avg = avg
+            }
+            if sum > 0.0 {
+                let rust_avg_str = if rust_avg > 0.0 { ", {(itsy_avg / rust_avg).fmt(2)}x" } else { "" };
+                println("  {source} score: {max_score}, avg: {avg.fmt(4)} min: {min.fmt(4)} max: {max.fmt(4)} var: {((max-min)/min*100.0).fmt(3)}%{rust_avg_str}");
+            }
+        }
+    }
+    println("final score {total_score} points");
+}
+
+fn bench_single(name: String, rating: u32, itsy: fn(), results: [ Result ]) {
+    start_time();
+    itsy();
+    let itsy_time = stop_time();
+    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: 0.0, itsy_time: itsy_time });
+}
+
+fn bench_compare(name: String, rating: u32, itsy: fn() -> String, rust: fn() -> String, results: [ Result ]) {
+    start_time();
+    let rust_result = rust();
+    let rust_time = stop_time();
+    start_time();
+    let itsy_result = itsy();
+    let itsy_time = stop_time();
+    if itsy_result != rust_result {
+        print("ERROR: {itsy_result} != {rust_result}");
+    }
+    results.push(Result { name: name, score: (rating as f64 / itsy_time) as u32, rust_time: rust_time, itsy_time: itsy_time });
+}
+
+// -------------------------------
+// benchmark implementations below
+// -------------------------------
 
 struct ConstructTestInner {
     c: i32,
@@ -225,5 +225,22 @@ fn itsy_string_return() {
 fn itsy_heap_reuse() {
     for i in 0..9000 {
         let item = "Hello".repeat(50000);
+    }
+}
+
+fn itsy_for_index() {
+    for i in 0..10000000 {
+    }
+}
+
+fn itsy_while() {
+    let i = 0;
+    while i < 10000000 {
+        i += 1;
+    }
+}
+
+fn itsy_for_array(data: [ u32 ]) {
+    for i in data {
     }
 }
