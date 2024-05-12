@@ -3,7 +3,7 @@
  *
  * MyAPI provided by userdefined rust api examples/shared/mod.rs
  */
-use MyAPI::{print, println, flush, wait_frame, get_arg};
+use MyAPI::{print, println, flush, wait_frame, has_arg, exit, runtime, fastbrot};
 
 // Mandelbrot parameters for a single frame.
 struct Frame {
@@ -28,7 +28,8 @@ fn main() {
     print("{esc}[2J");
     flush();
 
-    let runtime = 0;
+    let use_rust = has_arg("--rust");
+    let frametime = 0;
     let angle = 0.0;
     let coordinates = [
         Coordinate { x: 0.32570659879, y: 0.0470399495155, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
@@ -37,9 +38,9 @@ fn main() {
     ];
 
     // support colors or monochrome output
-    let chars = if get_arg(0) == "--mono" {
+    let chars = if has_arg("--mono") {
         [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ]
-    } else if get_arg(0) == "--rainbow" {
+    } else if has_arg("--rainbow") {
         [
             "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
             "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
@@ -58,14 +59,20 @@ fn main() {
         ]
     };
 
+    let is_timed = has_arg("--time");
+
     while true {
         for coordinate in coordinates {
             let frames = generate_frame_parameters(coordinate);
             for _ in 0..2 {
                 for frame in frames {
-                    render(chars, frame, coordinate, angle, runtime, 80, 24);
-                    runtime = wait_frame(1000 / 40); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
+                    render(chars, frame, coordinate, angle, frametime, 80, 24, use_rust);
+                    frametime = wait_frame(if is_timed { 0 } else { 1000 / 40 }); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
                     angle += 0.015;
+                }
+                if (is_timed) {
+                    println("\nCompleted in {runtime()}ms");
+                    exit(0);
                 }
                 frames.reverse();
             }
@@ -78,32 +85,38 @@ fn main() {
  * max_iterations - chars.len() iterations will be rendered as whitespace, the remaining points with a character based
  * on the number of required iterations.
  */
-fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64) -> String {
+fn mandelbrot(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64, use_rust: bool) -> String {
 
-    let start_depth = if depth > chars.len() as u32 { depth - chars.len() as u32 } else { 0 };
+    let start_depth = if max_depth > chars.len() as u32 { max_depth - chars.len() as u32 } else { 0 };
     let x0 = -2.0f64 + ((2.0 + center_x) * (1.0 - zoom));
     let y0 = -1.4f64 + ((1.4 + center_y) * (1.0 - zoom));
     let result = "";
+    let last_n = 0;
 
     let y = y0;
     for _ in 0..rows {
         let x = x0;
         for _ in 0..columns {
-            let r = 0f64;
-            let i = 0f64;
-            let n = 0;
             let rx = (x - center_x) * angle.cos() - (y - center_y) * angle.sin() + center_x;
             let ry = (x - center_x) * angle.sin() + (y - center_y) * angle.cos() + center_y;
-            while n < depth {
-                let i_tmp = i * i;
-                if 4.0 <= r * r + i_tmp {
-                    break;
+            // Compute mandelbrot value for rx/ry either using rust or itsy.
+            let n = if use_rust {
+                fastbrot(max_depth, rx, ry)
+            } else {
+                let depth = 0;
+                let r = 0f64;
+                let i = 0f64;
+                while depth < max_depth && 4.0 > r * r + i * i {
+                    let i_tmp = i * i;
+                    i = r * i * 2.0 + ry;
+                    r = r * r - i_tmp + rx;
+                    depth += 1;
                 }
-                i = r * i * 2.0 + ry;
-                r = r * r - i_tmp + rx;
-                n += 1;
-            }
-            result += if n > start_depth { chars[(n-start_depth-1) as u64] } else { " " };
+                depth
+            };
+            // Output the character, omit color code if same as last char to improve terminal performance.
+            result += get_char(start_depth, n, chars, last_n != n);
+            last_n = n;
             x += 4.0 / columns as f64 * zoom;
         }
         result += "\n";
@@ -113,10 +126,26 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, depth: u32, zoom: f64,
     result
 }
 
+/**
+ * Returns the character to output for the given depth.
+ */
+fn get_char(start_depth: u32, depth: u32, chars: [ String ], allow_color: bool) -> String {
+    if depth > start_depth {
+        let char = chars[(depth - start_depth - 1) as u64];
+        if allow_color {
+            return char;
+        } else {
+            return char.slice(char.len() - 1, 1);
+        }
+    } else {
+        return " ";
+    }
+}
+
 /*
  * Renders the mandelbrot set with some additional information to the console.
  */
-fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32) {
+fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32, use_rust: bool) {
     // move cursor to top left position and print fractal
     let esc = String::from_ascii(27);
     let x = coordinate.x * frame.interp;
@@ -132,7 +161,7 @@ fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, r
 
     print(
         intro_str + " ".repeat(width as u64 - exit_str.len() - (intro_str.len() - 6) /* 6 escapes in intro */) + exit_str + "\n" +
-        mandelbrot(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle) + "{esc}[0m" +
+        mandelbrot(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle, use_rust) + "{esc}[0m" +
         subline_str + " ".repeat(width as u64 - subline_str.len() - 1 /* -1 to keep cursor inside screen at bottom right */)
     );
 

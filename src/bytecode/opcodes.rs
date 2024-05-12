@@ -544,11 +544,6 @@ impl_opcodes!{
         self.stack.push(a * b);
     }
 
-
-
-
-
-
     /// Pops 2 values from the stack and pushes their quotient.
     fn <
         divs8<T: i8>() [ check ],

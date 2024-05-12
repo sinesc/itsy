@@ -6,6 +6,7 @@ use std::{thread, time::{Instant, Duration}, io::{self, Write}};
 #[allow(dead_code)]
 pub struct Context {
     pub seed: f64,
+    pub started: Instant,
     pub last_frame: Instant,
     pub args: Vec<String>,
 }
@@ -15,6 +16,7 @@ impl Context {
     pub fn new(args: &[ String ]) -> Self {
         Self {
             seed: 1.2345,
+            started: Instant::now(),
             last_frame: Instant::now(),
             args: args.to_vec(),
         }
@@ -36,11 +38,19 @@ itsy_api! {
         fn flush(&mut context) {
             io::stdout().flush().unwrap();
         }
-        /// Returns a random number between 0.0 and non-inclusive 1.0
+        /// Returns a (bad) pseudo-random number between 0.0 and non-inclusive 1.0
         fn random(&mut context) -> f64 {
             context.seed += 1.0;
             let large = context.seed.sin() * 100000000.0;
             large - large.floor()
+        }
+        /// Terminates the process.
+        fn exit(&mut context, code: i32) {
+            std::process::exit(code);
+        }
+        /// Milliseconds since context initialization.
+        fn runtime(&mut context) -> u64 {
+            (Instant::now() - context.started).as_millis() as u64
         }
         /// Pauses for the given number of milliseconds.
         fn sleep(&mut context, milliseconds: u64) {
@@ -59,6 +69,23 @@ itsy_api! {
         /// Returns given argument or empty string. TODO: support array result
         fn get_arg(&mut context, arg: u64) -> String {
             context.args.get(arg as usize).cloned().unwrap_or_else(|| "".to_string())
+        }
+        /// Returns whether given argument is present.
+        fn has_arg(&mut context, arg: String) -> bool {
+            context.args.contains(&arg)
+        }
+        /// Compute mandelbrot value for given point.
+        fn fastbrot(&mut context, depth: u32, x: f64, y: f64) -> u32 {
+            let mut n = 0;
+            let mut r = 0.0f64;
+            let mut i = 0.0f64;
+            while n < depth && 4.0 > r * r + i * i {
+                let i_tmp = i * i;
+                i = r * i * 2.0 + y;
+                r = r * r - i_tmp + x;
+                n += 1;
+            }
+            n
         }
     }
 }
