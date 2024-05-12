@@ -19,7 +19,7 @@
             //"environment": [],
             //"console": "integratedTerminal"
             "sourceLanguages": ["rust"],
-            "preLaunchTask": "cargo build debug-runner (example)", // annoyingly this puts the task at the top of recent tasks, so I've set the task to hidden
+            "preLaunchTask": "build: debug-runner (example)", // annoyingly this puts the task at the top of recent tasks, so I've set the task to hidden
         }/*,
         {
             "name": "lldb release",
@@ -42,7 +42,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "integratedTerminal",
-            "preLaunchTask": "cargo build debug-runner (example)"
+            "preLaunchTask": "build: debug-runner (example)"
         }/*,
         {
             "name": "vsdebug release",
