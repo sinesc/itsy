@@ -625,7 +625,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
             self.write_lte(iter_ty)?;                                         // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123);                // stack: upper
-            self.write_dec(iter_ty)?;                                        // stack: upper=upper-1
+            self.write_sub_pi(iter_ty, Numeric::Unsigned(1))?;                                        // stack: upper=upper-1
             skip_jump
         } else {
             // inclusive range: check if lower bound greater than upper bound.
@@ -670,7 +670,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_clone_ref();                                         // stack &array &array
         self.write_builtin(array_ty, BuiltinType::Array(builtin_types::Array::len))?;             // stack &array len
         let exit_jump = self.writer.j0sa_nc(123);
-        let loop_start = self.write_dec(&STACK_ADDRESS_TYPE)?;        // stack &array index (indexing from the end to be able to count downwards from len)
+        let loop_start = self.write_sub_pi(&STACK_ADDRESS_TYPE, Numeric::Unsigned(1))?;        // stack &array index (indexing from the end to be able to count downwards from len)
 
         let element_ty = self.ty(&element_type_id);
         self.write_heap_tail_element_nc(array_ty, element_ty)?;   // stack &array index element
@@ -1818,17 +1818,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::i16 => self.writer.zclampi16(),
             Type::i32 => self.writer.zclampi32(),
             Type::i64 => self.writer.zclampi64(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
-    }
-
-    /// Write decrement instruction.
-    fn write_dec(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i64 | Type::u64 => self.writer.deci64(1),
-            Type::i32 | Type::u32 => self.writer.deci32(1),
-            Type::i16 | Type::u16 => self.writer.deci16(1),
-            Type::i8 | Type::u8 => self.writer.deci8(1),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }

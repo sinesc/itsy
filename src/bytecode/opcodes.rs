@@ -124,17 +124,6 @@ impl_opcodes!{
         }
     }
 
-    /// Decrements the value at the top of the stack.
-    fn <
-        deci8<T: i8>(decr: i8),
-        deci16<T: i16>(decr: i8),
-        deci32<T: i32>(decr: i8),
-        deci64<T: i64>(decr: i8)
-    >(&mut self) {
-        let a: T = self.stack.pop();
-        self.stack.push(T::wrapping_sub(a, decr as T));
-    }
-
     /// Decrements the stackvalue at given stackframe-offset and pushes the result onto the stack.
     fn <
         predeci8<T: i8>(loc: FrameAddress, decr: i8),
