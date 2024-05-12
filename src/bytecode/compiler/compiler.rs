@@ -285,12 +285,20 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles an assignment to a variable.
     fn compile_assignment_to_var(self: &mut Self, item: &ast::Assignment) -> CompileResult {
-        use crate::frontend::ast::BinaryOperator as BO;
+        //use crate::frontend::ast::BinaryOperator as BO;
+        use ast::{BinaryOperator::*, Expression as E};
         comment!(self, "direct assignment");
         let binding_id = item.left.as_variable().ice()?.binding_id;
         let loc = self.locals.lookup(binding_id);
-        match item.op {
-            BO::Assign => {
+
+        match (item.op, &item.right) {
+            (AddAssign, E::Literal(r)) if self.ty(&item.left).is_numeric() => {
+                self.write_add_vi(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
+            },
+            (SubAssign, E::Literal(r)) if self.ty(&item.left).is_numeric() => {
+                self.write_sub_vi(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
+            },
+            (Assign, _) => {
                 self.compile_expression(&item.right)?;
                 self.write_store(self.ty(&item.left), loc, Some(binding_id))?;
                 self.init_state.initialize(binding_id);
@@ -301,11 +309,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_expression(&item.right)?; // stack: left right
                 let ty = self.ty(&item.left);
                 match item.op { // stack: result
-                    BO::AddAssign => self.write_add(ty)?,
-                    BO::SubAssign => self.write_sub(ty)?,
-                    BO::MulAssign => self.write_mul(ty)?,
-                    BO::DivAssign => self.write_div(ty)?,
-                    BO::RemAssign => self.write_rem(ty)?,
+                    AddAssign => self.write_add(ty)?,
+                    SubAssign => self.write_sub(ty)?,
+                    MulAssign => self.write_mul(ty)?,
+                    DivAssign => self.write_div(ty)?,
+                    RemAssign => self.write_rem(ty)?,
                     _ => Self::ice_at(item, "Invalid assignment operator while assigning to var")?,
                 };
                 self.write_store(self.ty(&item.left), loc, Some(binding_id))?; // stack --
@@ -1062,11 +1070,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles the given binary operation.
     fn compile_binary_op(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
         use ast::{BinaryOperand as Operand, BinaryOperator::*, Expression as E};
-        let vars = match (&item.left, &item.right) {
+        let exprs = match (&item.left, &item.right) {
             (Operand::Expression(left), Operand::Expression(right)) => Some((left, right)),
             _ => None,
         };
-        match (item.op, vars) {
+        match (item.op, exprs) {
             // TODO: move to future optimizer. here to test whether these opcodes are even beneficial
             // Multiplication optimizations
             (Mul, Some((E::Variable(vl), E::Variable(vr)))) => {
@@ -1758,18 +1766,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Swap topmost 2 stack values.
-    fn write_swap(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        Ok(match ty.primitive_size() {
-            1 => self.writer.swap8(),
-            2 => self.writer.swap16(),
-            4 => self.writer.swap32(),
-            8 => self.writer.swap64(),
-            //16 => self.writer.swap128(),
-            size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-        })
-    }
-
     /// Clone stack value at (negative of) given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type) -> StackAddress {
         self.writer.clone(ty.primitive_size())
@@ -1916,6 +1912,23 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
+    /// Write variable+=immediate subtraction instruction.
+    fn write_sub_vi(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.subs8_vi(left, right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.subs16_vi(left, right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.subs32_vi(left, right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.subs64_vi(left, right.as_signed().ice()? as i64),
+            Type::u8 => self.writer.subu8_vi(left, right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.subu16_vi(left, right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.subu32_vi(left, right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.subu64_vi(left, right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.subf32_vi(left, right.as_float().ice()? as f32),
+            Type::f64 => self.writer.subf64_vi(left, right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
     /// Write general addition instruction.
     fn write_add(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
         Ok(match ty {
@@ -1981,6 +1994,23 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u64 => self.writer.addu64_pi(right.as_unsigned().ice()? as u64),
             Type::f32 => self.writer.addf32_pi(right.as_float().ice()? as f32),
             Type::f64 => self.writer.addf64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write variable+=immediate addition instruction.
+    fn write_add_vi(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+            Type::i8 => self.writer.adds8_vi(left, right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.adds16_vi(left, right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.adds32_vi(left, right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.adds64_vi(left, right.as_signed().ice()? as i64),
+            Type::u8 => self.writer.addu8_vi(left, right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.addu16_vi(left, right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.addu32_vi(left, right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.addu64_vi(left, right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.addf32_vi(left, right.as_float().ice()? as f32),
+            Type::f64 => self.writer.addf64_vi(left, right.as_float().ice()? as f64),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }

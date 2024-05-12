@@ -124,21 +124,6 @@ impl_opcodes!{
         }
     }
 
-    /// Swap the 2 topmost stack values.
-    fn <
-        swap8<T: Data8>(),
-        swap16<T: Data16>(),
-        swap32<T: Data32>(),
-        swap64<T: Data64>(),
-    >(&mut self) {
-        let pos_a = self.stack.sp() - size_of::<T>() as StackAddress;
-        let pos_b = pos_a - size_of::<T>() as StackAddress;
-        let a: T = self.stack.load(pos_a);
-        let b: T = self.stack.load(pos_b);
-        self.stack.store(pos_a, b);
-        self.stack.store(pos_b, a);
-    }
-
     /// Decrements the value at the top of the stack.
     fn <
         deci8<T: i8>(decr: i8),
@@ -394,6 +379,36 @@ impl_opcodes!{
         self.stack.push(a + b);
     }
 
+    /// Loads left variable and takes immediate argument right and pushes their sum.
+    fn <
+        adds8_vi<T: i8>(left: FrameAddress, right: i8) [ check ],
+        adds16_vi<T: i16>(left: FrameAddress, right: i16) [ check ],
+        adds32_vi<T: i32>(left: FrameAddress, right: i32) [ check ],
+        adds64_vi<T: i64>(left: FrameAddress, right: i64) [ check ],
+        addu8_vi<T: u8>(left: FrameAddress, right: u8) [ check ],
+        addu16_vi<T: u16>(left: FrameAddress, right: u16) [ check ],
+        addu32_vi<T: u32>(left: FrameAddress, right: u32) [ check ],
+        addu64_vi<T: u64>(left: FrameAddress, right: u64) [ check ],
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.load_fp(left);
+        let result = T::overflowing_add(a, b);
+        self.stack.store_fp(left, result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Loads left variable and takes immediate argument right and pushes their sum.
+    fn <
+        addf32_vi<T: f32>(left: FrameAddress, right: f32),
+        addf64_vi<T: f64>(left: FrameAddress, right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.load_fp(left);
+        self.stack.store_fp(left, a + b);
+    }
+
     /// Pops 2 values from the stack and pushes their difference.
     fn <
         subs8<T: i8>() [ check ],
@@ -512,6 +527,36 @@ impl_opcodes!{
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
         self.stack.push(a - b);
+    }
+
+    /// Loads left variable and takes immediate argument right and pushes their sum.
+    fn <
+        subs8_vi<T: i8>(left: FrameAddress, right: i8) [ check ],
+        subs16_vi<T: i16>(left: FrameAddress, right: i16) [ check ],
+        subs32_vi<T: i32>(left: FrameAddress, right: i32) [ check ],
+        subs64_vi<T: i64>(left: FrameAddress, right: i64) [ check ],
+        subu8_vi<T: u8>(left: FrameAddress, right: u8) [ check ],
+        subu16_vi<T: u16>(left: FrameAddress, right: u16) [ check ],
+        subu32_vi<T: u32>(left: FrameAddress, right: u32) [ check ],
+        subu64_vi<T: u64>(left: FrameAddress, right: u64) [ check ],
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.load_fp(left);
+        let result = T::overflowing_sub(a, b);
+        self.stack.store_fp(left, result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Loads left variable and takes immediate argument right and pushes their sum.
+    fn <
+        subf32_vi<T: f32>(left: FrameAddress, right: f32),
+        subf64_vi<T: f64>(left: FrameAddress, right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.load_fp(left);
+        self.stack.store_fp(left, a - b);
     }
 
     /// Pops 2 values from the stack and pushes their product.
