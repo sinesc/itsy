@@ -614,7 +614,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().ice()?;
         self.compile_expression(binary_op.left.as_expression().ice()?)?;          // stack current=lower
-        self.write_store(self.ty(&iter_type_id), iter_loc, None)?;                      // stack -         // TODO this doesn't do a storex, why does it work anyways?
+        self.write_store(self.ty(&iter_type_id), iter_loc, None)?;                      // stack -
         // push upper range bound
         self.compile_expression(binary_op.right.as_expression().ice()?)?;             // stack upper
         // precheck bounds
@@ -642,11 +642,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let loop_controls = self.loop_control.pop();
         // load bounds, increment and compare
         let iter_ty = self.ty(&iter_type_id);
-        //let increment_target = self.write_while(iter_loc as FrameOffset, -(iter_ty.primitive_size() as FrameOffset), start_target, iter_ty);    // stack: upper
-        let increment_target = self.write_clone(iter_ty);       // stack upper upper
-        self.write_preinc(iter_ty, iter_loc)?;      // stack upper upper new_current(=current+1)
-        self.write_lt(iter_ty)?;                                                    // stack upper new_current>upper
-        self.writer.j0(start_target);                                              // stack upper        // fix jump addresses
+        let increment_target = self.write_loop(iter_ty, iter_loc, start_target)?;    // stack: upper
         // exit loop
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
@@ -1822,13 +1818,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Write pre-increment instruction.
-    fn write_preinc(self: &Self, ty: &Type, loc: FrameAddress) -> CompileResult<StackAddress> {
+    /// Write loop instruction.
+    fn write_loop(self: &Self, ty: &Type, iter: FrameAddress, start: StackAddress) -> CompileResult<StackAddress> {
         Ok(match ty {
-            Type::i64 | Type::u64 => self.writer.predeci64(loc, -1),
-            Type::i32 | Type::u32 => self.writer.predeci32(loc, -1),
-            Type::i16 | Type::u16 => self.writer.predeci16(loc, -1),
-            Type::i8 | Type::u8 => self.writer.predeci8(loc, -1),
+            Type::i8 => self.writer.loops8(iter, start),
+            Type::i16 => self.writer.loops16(iter, start),
+            Type::i32 => self.writer.loops32(iter, start),
+            Type::i64 => self.writer.loops64(iter, start),
+            Type::u8 => self.writer.loopu8(iter, start),
+            Type::u16 => self.writer.loopu16(iter, start),
+            Type::u32 => self.writer.loopu32(iter, start),
+            Type::u64 => self.writer.loopu64(iter, start),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }

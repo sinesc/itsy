@@ -124,17 +124,27 @@ impl_opcodes!{
         }
     }
 
-    /// Decrements the stackvalue at given stackframe-offset and pushes the result onto the stack.
+    /// Sets program counter to start if value in variable iter is less than or equal to the top
+    /// value on the stack. Does not consume top stack value.
     fn <
-        predeci8<T: i8>(loc: FrameAddress, decr: i8),
-        predeci16<T: i16>(loc: FrameAddress, decr: i8),
-        predeci32<T: i32>(loc: FrameAddress, decr: i8),
-        predeci64<T: i64>(loc: FrameAddress, decr: i8)
+        loops8<T: i8>(iter: FrameAddress, start: StackAddress),
+        loops16<T: i16>(iter: FrameAddress, start: StackAddress),
+        loops32<T: i32>(iter: FrameAddress, start: StackAddress),
+        loops64<T: i64>(iter: FrameAddress, start: StackAddress),
+        loopu8<T: u8>(iter: FrameAddress, start: StackAddress),
+        loopu16<T: u16>(iter: FrameAddress, start: StackAddress),
+        loopu32<T: u32>(iter: FrameAddress, start: StackAddress),
+        loopu64<T: u64>(iter: FrameAddress, start: StackAddress)
     >(&mut self) {
-        let mut value: T = self.stack.load_fp(loc);
-        value = T::wrapping_sub(value, decr as T);
-        self.stack.store_fp(loc, value);
-        self.stack.push(value);
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let upper: T = self.stack.load_sp(size_of::<T>());
+        let iter_fp = self.stack.offset_fp(iter as StackAddress);
+        let mut current: T = self.stack.load(iter_fp);
+        current = T::wrapping_add(current, 1 as T);
+        if current <= upper {
+            self.pc = start;
+        }
+        self.stack.store(iter_fp, current);
     }
 
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
