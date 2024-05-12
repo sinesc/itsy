@@ -170,8 +170,14 @@ impl InitState {
 
     /// Returns a mutable reference to the state of a binding.
     fn current_mut(self: &mut Self, binding_id: BindingId) -> &mut BranchingBinding {
-        self.branchings.last_mut().unwrap()
+        let initialized = self.initialized(binding_id);
+        let parent = self.branchings.last_mut().unwrap();
+        let new_parent_state = match parent.current_path {
+            BranchingPath::A => (initialized, BranchingState::Uninitialized),
+            BranchingPath::B => (BranchingState::Uninitialized, initialized),
+        };
+        parent
             .bindings.entry(binding_id)
-            .or_insert(BranchingBinding { declared: false, path_a: BranchingState::Uninitialized, path_b: BranchingState::Uninitialized })
+            .or_insert(BranchingBinding { declared: false, path_a: new_parent_state.0, path_b: new_parent_state.1 })
     }
 }
