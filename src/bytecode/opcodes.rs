@@ -424,6 +424,96 @@ impl_opcodes!{
         self.stack.push(a - b);
     }
 
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        subs8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        subs16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        subs32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        subs64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        subu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        subu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        subu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        subu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        let result = T::overflowing_sub(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Loads 2 values from the stack and pushes their product.
+    fn <
+        subf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
+        subf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+    >(&mut self) {
+        let a: T = self.stack.load_fp(left);
+        let b: T = self.stack.load_fp(right);
+        self.stack.push(a - b);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their sum.
+    fn <
+        subs8_pi<T: i8>(right: i8) [ check ],
+        subs16_pi<T: i16>(right: i16) [ check ],
+        subs32_pi<T: i32>(right: i32) [ check ],
+        subs64_pi<T: i64>(right: i64) [ check ],
+        subu8_pi<T: u8>(right: u8) [ check ],
+        subu16_pi<T: u16>(right: u16) [ check ],
+        subu32_pi<T: u32>(right: u32) [ check ],
+        subu64_pi<T: u64>(right: u64) [ check ],
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        let result = T::overflowing_sub(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes their sum.
+    fn <
+        subf32_pi<T: f32>(right: f32),
+        subf64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        self.stack.push(a - b);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their sum.
+    fn <
+        subs8_pv<T: i8>(right: FrameAddress) [ check ],
+        subs16_pv<T: i16>(right: FrameAddress) [ check ],
+        subs32_pv<T: i32>(right: FrameAddress) [ check ],
+        subs64_pv<T: i64>(right: FrameAddress) [ check ],
+        subu8_pv<T: u8>(right: FrameAddress) [ check ],
+        subu16_pv<T: u16>(right: FrameAddress) [ check ],
+        subu32_pv<T: u32>(right: FrameAddress) [ check ],
+        subu64_pv<T: u64>(right: FrameAddress) [ check ],
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        let result = T::overflowing_sub(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops left from the stack and loads argument right and pushes their sum.
+    fn <
+        subf32_pv<T: f32>(right: FrameAddress),
+        subf64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push(a - b);
+    }
+
     /// Pops 2 values from the stack and pushes their product.
     fn <
         muls8<T: i8>() [ check ],
@@ -720,6 +810,42 @@ impl_opcodes!{
         self.stack.push((a <= b) as Data8);
     }
 
+    /// Pops two values and pushes a 1 if the first value is greater than the second, otherwise a 0.
+    fn <
+        cgts8<T: i8>(),
+        cgtu8<T: u8>(),
+        cgts16<T: i16>(),
+        cgtu16<T: u16>(),
+        cgts32<T: i32>(),
+        cgtu32<T: u32>(),
+        cgts64<T: i64>(),
+        cgtu64<T: u64>(),
+        cgtf32<T: f32>(),
+        cgtf64<T: f64>()
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push((a > b) as Data8);
+    }
+
+    /// Pops two values and pushes a 1 if the first value is greater or equal the second, otherwise a 0.
+    fn <
+        cgtes8<T: i8>(),
+        cgteu8<T: u8>(),
+        cgtes16<T: i16>(),
+        cgteu16<T: u16>(),
+        cgtes32<T: i32>(),
+        cgteu32<T: u32>(),
+        cgtes64<T: i64>(),
+        cgteu64<T: u64>(),
+        cgtef32<T: f32>(),
+        cgtef64<T: f64>()
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push((a >= b) as Data8);
+    }
+
     /// Jumps unconditionally to the given address.
     fn jmp(&mut self, addr: StackAddress) {
         self.pc = addr;
@@ -917,6 +1043,26 @@ impl_opcodes!{
         let b: HeapRef = self.stack.pop();
         let a: HeapRef = self.stack.pop();
         let equals = self.heap.compare_string(a, b, HeapCmp::Lte);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
+    }
+
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result. Drops temporary references.
+    fn string_cgt(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Gt);
+        self.stack.push(equals as Data8);
+        self.heap.ref_item(a.index(), HeapRefOp::Free);
+        self.heap.ref_item(b.index(), HeapRefOp::Free);
+    }
+
+    /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result. Drops temporary references.
+    fn string_cgte(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.heap.compare_string(a, b, HeapCmp::Gte);
         self.stack.push(equals as Data8);
         self.heap.ref_item(a.index(), HeapRefOp::Free);
         self.heap.ref_item(b.index(), HeapRefOp::Free);
