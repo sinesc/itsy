@@ -6,7 +6,7 @@
     },
     "tasks": [
         {
-            "label": "cargo build library",
+            "label": "build: library",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -17,7 +17,7 @@
             "hide": true,
         },
         {
-            "label": "cargo build library (release)",
+            "label": "build: library (release)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -29,7 +29,7 @@
             "hide": true,
         },
         {
-            "label": "cargo test",
+            "label": "exec: tests",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -43,10 +43,11 @@
                 }
             },
             "group": "test",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo build itsyc (example)",
+            "label": "build: itsyc (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -58,10 +59,11 @@
                 "itsyc"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo build itsyvm (example)",
+            "label": "build: itsyvm (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -73,25 +75,27 @@
                 "itsyvm"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo build debug-runner (example)",
+            "label": "build: debug-runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
                 "build",
                 "--features=\"debugging\"",
                 "--features=\"symbols\"",
+                "--features=\"ice_panics\"",
                 "--example",
                 "debug-run",
             ],
             "group": "build",
             "problemMatcher": [],
-            "hide": true,
+            "hide": false,
         },
         {
-            "label": "cargo build profile-runner (example)",
+            "label": "build: profile-runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -103,10 +107,10 @@
             ],
             "group": "build",
             "problemMatcher": [],
-            "hide": true,
+            "hide": false,
         },
         {
-            "label": "cargo build runner (example)",
+            "label": "build: runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -117,10 +121,10 @@
             ],
             "group": "build",
             "problemMatcher": [],
-            "hide": true,
+            "hide": false,
         },
         {
-            "label": "cargo run file in debug-runner (example)",
+            "label": "exec: run file in debug-runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -139,10 +143,11 @@
                 }
             },
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo run file in profile-runner (example)",
+            "label": "exec: run file in profile-runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -155,10 +160,11 @@
                 "${relativeFile}"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo run file in runner (example)",
+            "label": "exec: run file in runner (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -170,10 +176,11 @@
                 "${relativeFile}"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo run bench (example)",
+            "label": "exec: bench (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -183,28 +190,31 @@
                 "bench"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo clean",
+            "label": "misc: cargo clean",
             "type": "shell",
             "command": "cargo",
             "args": [
                 "clean"
             ],
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo update",
+            "label": "misc: cargo update",
             "type": "shell",
             "command": "cargo",
             "args": [
                 "update"
             ],
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo rustdoc",
+            "label": "misc: cargo rustdoc",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -213,10 +223,11 @@
                 //"--",
                 //"--document-private-items",
             ],
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
         {
-            "label": "cargo rustdoc (private)",
+            "label": "misc: cargo rustdoc (private)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -225,7 +236,8 @@
                 "--",
                 "--document-private-items",
             ],
-            "problemMatcher": []
+            "problemMatcher": [],
+            "hide": false,
         },
     ]
 }
