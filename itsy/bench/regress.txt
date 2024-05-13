@@ -1,3 +1,38 @@
+Revision: 6d7a8433eec33a0ea4a1228338b73108c9030d28
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 13.05.2024 06:12:46
+Message:
+add for-in-array bench (before making changes to loop compilation)
+
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 5 passes, pass 1...2...3...4...5...
+mandelbrot
+  itsy score: 430, avg: 0.2388 min: 0.2322 max: 0.2411 var: 3.861%
+  rust score: 0, avg: 0.0078 min: 0.0077 max: 0.0080 var: 3.965%, 30.73x
+fib_r
+  itsy score: 706, avg: 0.1607 min: 0.1416 max: 0.1759 var: 24.188%
+  rust score: 0, avg: 0.0038 min: 0.0037 max: 0.0039 var: 4.911%, 41.97x
+stringcat
+  itsy score: 673, avg: 0.0016 min: 0.0015 max: 0.0017 var: 11.636%
+  rust score: 0, avg: 0.0020 min: 0.0018 max: 0.0024 var: 31.633%, 0.78x
+upload_struct
+  itsy score: 499, avg: 0.2065 min: 0.2001 max: 0.2102 var: 5.061%
+upload_array
+  itsy score: 458, avg: 0.4501 min: 0.4358 max: 0.4605 var: 5.671%
+string_return
+  itsy score: 1134, avg: 0.0898 min: 0.0881 max: 0.0932 var: 5.766%
+heap_reuse
+  itsy score: 0, avg: 0.1351 min: 0.0670 max: 0.2150 var: 220.811%
+for_index
+  itsy score: 444, avg: 0.0243 min: 0.0225 max: 0.0249 var: 10.582%
+for_array_tmp
+  itsy score: 409, avg: 0.2517 min: 0.2445 max: 0.2563 var: 4.849%
+while
+  itsy score: 462, avg: 0.1214 min: 0.1080 max: 0.1290 var: 19.468%
+final score 5215 points
+
+
 Revision: fd8d0d807c218af4f906015ed2b1d7aa539fbed8
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 11.05.2024 12:43:33
