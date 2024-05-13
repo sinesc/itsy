@@ -51,8 +51,10 @@ fn run(program: Program<MyAPI>, args: &[ String ], write_logs: bool) {
             println!("\n---\nRuntime error: {e}");
             println!("Stack: {:?}", vm.stack.data());
             println!("Heap: {:?}", vm.heap.data());
-            println!("Resuming vm...\n---");
-            vm.clear_error().unwrap();
+            if vm.state() != runtime::VMState::Terminated {
+                println!("Resuming vm...\n---");
+                vm.clear_error().unwrap();
+            }
         }
         if let Some(instruction_label) = opcode_label {
             if instruction_label.starts_with("[") == false && instruction_label.starts_with("\n") == false {
