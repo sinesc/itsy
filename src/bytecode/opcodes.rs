@@ -49,23 +49,23 @@ impl_opcodes!{
     }
 
     /// Discards the top num_bytes bytes on the stack.
-    fn discard(&mut self, num_bytes: u8) {
+    fn discard(&mut self, num_bytes: FrameAddress) {
         self.stack.truncate(self.stack.sp() - num_bytes as StackAddress);
     }
 
     /// Clones the top num_bytes bytes on the stack.
-    fn clone(&mut self, num_bytes: u8) {
+    fn clone(&mut self, num_bytes: FrameAddress) {
         self.stack.extend(self.stack.sp() - num_bytes as StackAddress, num_bytes as StackAddress);
     }
 
     /// Pushes given value onto the stack.
     fn <
         immediate8(value: Data8),
-        immediate16_8(value: Data8 as Data16),
+        //immediate16_8(value: Data8 as Data16),
         immediate16(value: Data16),
-        immediate32_8(value: Data8 as Data32),
+        //immediate32_8(value: Data8 as Data32),
         immediate32(value: Data32),
-        immediate64_8(value: Data8 as Data64),
+        //immediate64_8(value: Data8 as Data64),
         immediate64(value: Data64),
     >(&mut self) {
         self.stack.push(value);
@@ -73,10 +73,10 @@ impl_opcodes!{
 
     /// Loads data from stack at given stackframe-offset and pushes it onto the stack.
     fn <
-        load8_8<T: Data8>(loc: u8 as FrameAddress),
-        load16_8<T: Data16>(loc: u8 as FrameAddress),
-        load32_8<T: Data32>(loc: u8 as FrameAddress),
-        load64_8<T: Data64>(loc: u8 as FrameAddress),
+        //load8_8<T: Data8>(loc: u8 as FrameAddress),
+        //load16_8<T: Data16>(loc: u8 as FrameAddress),
+        //load32_8<T: Data32>(loc: u8 as FrameAddress),
+        //load64_8<T: Data64>(loc: u8 as FrameAddress),
         load8_16<T: Data8>(loc: FrameAddress),
         load16_16<T: Data16>(loc: FrameAddress),
         load32_16<T: Data32>(loc: FrameAddress),
@@ -88,10 +88,10 @@ impl_opcodes!{
 
     /// Pops data off the stack and stores it at the given stackframe-offset.
     fn <
-        store8_8<T: Data8>(loc: u8 as FrameAddress),
-        store16_8<T: Data16>(loc: u8 as FrameAddress),
-        store32_8<T: Data32>(loc: u8 as FrameAddress),
-        store64_8<T: Data64>(loc: u8 as FrameAddress),
+        //store8_8<T: Data8>(loc: u8 as FrameAddress),
+        //store16_8<T: Data16>(loc: u8 as FrameAddress),
+        //store32_8<T: Data32>(loc: u8 as FrameAddress),
+        //store64_8<T: Data64>(loc: u8 as FrameAddress),
         store8_16<T: Data8>(loc: FrameAddress),
         store16_16<T: Data16>(loc: FrameAddress),
         store32_16<T: Data32>(loc: FrameAddress),
@@ -1039,7 +1039,7 @@ impl_opcodes!{
 
     /// Pops a heap reference off the stack and performs a reference count operation.
     fn <
-        cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
+        //cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
         cnt_16(constructor: u16 as StackAddress, op: HeapRefOp),
         cnt_sa(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
@@ -1049,7 +1049,7 @@ impl_opcodes!{
 
     /// Performs a non-consuming reference count operation for the top heap reference on the stack.
     fn <
-        cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
+        //cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
         cnt_16_nc(constructor: u16 as StackAddress, op: HeapRefOp),
         cnt_sa_nc(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
@@ -1158,7 +1158,7 @@ impl_opcodes!{
     }
 
     /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
-    fn index(&mut self, element_size: u8) {
+    fn index(&mut self, element_size: u16) {
         let element_index: StackAddress = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
         item.add_offset(element_index as StackOffset * element_size as StackOffset);
@@ -1167,7 +1167,7 @@ impl_opcodes!{
 
     /// Offsets the heap address at the top of the stack by given value.
     fn <
-        offsetx_8(offset: u8),
+        //offsetx_8(offset: u8),
         offsetx_16(offset: FrameAddress)
     >(&mut self) {
         let mut item: HeapRef = self.stack.pop();

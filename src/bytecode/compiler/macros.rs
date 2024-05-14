@@ -7,9 +7,9 @@ macro_rules! comment {
     }
 }
 pub(crate) use comment;
-
-// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
-/*macro_rules! select_signed_opcode {
+/*
+/// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
+macro_rules! select_signed_opcode {
     (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { panic!("Unsupported sa-sized variant.") };
     (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
         $self.writer.$variant_sa($value as StackOffset $(, $more)*)
@@ -25,9 +25,9 @@ pub(crate) use comment;
         }
     }}
 }
-pub(crate) use select_signed_opcode;*/
+pub(crate) use select_signed_opcode;
 
-// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
+/// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
 macro_rules! select_unsigned_opcode {
     (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { panic!("Unsupported sa-sized variant.") };
     (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
@@ -45,3 +45,4 @@ macro_rules! select_unsigned_opcode {
     }}
 }
 pub(crate) use select_unsigned_opcode;
+*/

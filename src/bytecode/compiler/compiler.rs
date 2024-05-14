@@ -8,7 +8,7 @@ mod init_state;
 
 use crate::config::FrameAddress;
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
+use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::BuiltinType};
@@ -16,7 +16,7 @@ use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
-use macros::{comment, select_unsigned_opcode};
+use macros::comment;
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub(crate) struct Compiler<T> {
@@ -1008,7 +1008,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             IndexWrite => {
                 comment!(self, "[{}] (writing)", &item.right);
                 // compute and push the address of the reference-target
-                self.writer.index(result_type.primitive_size());
+                self.writer.index(result_type.primitive_size() as u16);
             },
             Access => {
                 comment!(self, ".{}", &item.right);
@@ -1439,7 +1439,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes given numeric as an immediate value. // FIXME: this will cause endianess issues when compiled/run on different endianess
     fn write_immediate(self: &Self, ty: &Type, numeric: Numeric) -> CompileResult<StackAddress> {
-        let small_immediate = |value: u8, ty: &Type| -> CompileResult<StackAddress> {
+        /*let small_immediate = |value: u8, ty: &Type| -> CompileResult<StackAddress> {
             Ok(match ty.primitive_size() {
                 1 => self.writer.immediate8(value),
                 2 => self.writer.immediate16_8(value),
@@ -1447,10 +1447,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 8 => self.writer.immediate64_8(value),
                 size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             })
-        };
+        };*/
         Ok(match numeric {
-            Numeric::Unsigned(v) if v <= u8::MAX as u64 => small_immediate(v as u8, ty)?,
-            Numeric::Signed(v) if v >= u8::MIN as i64 && v <= u8::MAX as i64 => small_immediate(v as u8, ty)?,
+            //Numeric::Unsigned(v) if v <= u8::MAX as u64 => small_immediate(v as u8, ty)?,
+            //Numeric::Signed(v) if v >= u8::MIN as i64 && v <= u8::MAX as i64 => small_immediate(v as u8, ty)?,
             Numeric::Signed(v) => {
                 match ty {
                     Type::i8 => self.writer.immediate8(v as u8),
@@ -1590,9 +1590,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn write_cnt(self: &Self, ty: &Type, nc: bool, op: HeapRefOp) -> CompileResult<StackAddress> {
         Ok(if ty.is_ref() {
             let constructor = self.constructor(ty)?;
-            match nc {
-                true => select_unsigned_opcode!(self, cnt_8_nc, cnt_16_nc, cnt_sa_nc, constructor, op),
-                false => select_unsigned_opcode!(self, cnt_8, cnt_16, cnt_sa, constructor, op),
+            let small = constructor as StackAddress <= u16::MAX as StackAddress;
+            match (nc, small) {
+                (true, true)  => self.writer.cnt_16_nc(constructor as FrameAddress, op),
+                (true, false)  => self.writer.cnt_sa_nc(constructor, op),
+                (false, true)  => self.writer.cnt_16(constructor as FrameAddress, op),
+                (false, false)  => self.writer.cnt_sa(constructor, op),
             }
         } else {
             self.writer.position()
@@ -1602,7 +1605,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes instructions to compute member offset for access on a struct.
     fn write_member_offset(self: &Self, offset: StackAddress) {
         if offset > 0 {
-            select_unsigned_opcode!(self, offsetx_8, offsetx_16, none, offset as StackOffset);
+            self.writer.offsetx_16(offset as FrameAddress);
         }
     }
 
@@ -1687,10 +1690,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
         } else {
             match ty.primitive_size() {
-                1 => select_unsigned_opcode!(self, store8_8, store8_16, none, loc),
-                2 => select_unsigned_opcode!(self, store16_8, store16_16, none, loc),
-                4 => select_unsigned_opcode!(self, store32_8, store32_16, none, loc),
-                8 => select_unsigned_opcode!(self, store64_8, store64_16, none, loc),
+                1 => self.writer.store8_16(loc),
+                2 => self.writer.store16_16(loc),
+                4 => self.writer.store32_16(loc),
+                8 => self.writer.store64_16(loc),
                 size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
             }
         })
@@ -1699,10 +1702,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, ty: &Type, loc: FrameAddress) -> CompileResult<StackAddress> {
         Ok(match ty.primitive_size() {
-            1 => select_unsigned_opcode!(self, load8_8, load8_16, none, loc),
-            2 => select_unsigned_opcode!(self, load16_8, load16_16, none, loc),
-            4 => select_unsigned_opcode!(self, load32_8, load32_16, none, loc),
-            8 => select_unsigned_opcode!(self, load64_8, load64_16, none, loc),
+            1 => self.writer.load8_16(loc),
+            2 => self.writer.load16_16(loc),
+            4 => self.writer.load32_16(loc),
+            8 => self.writer.load64_16(loc),
             size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
         })
     }
@@ -1713,18 +1716,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_cnt(ty, true, HeapRefOp::Free)?;
         }
         if ty.primitive_size() > 0 {
-            self.writer.discard(ty.primitive_size());
+            self.writer.discard(ty.primitive_size() as FrameAddress);
         }
         Ok(())
     }
 
     /// Clone stack value at (negative of) given offset to the top of the stack.
     fn write_clone(self: &Self, ty: &Type) -> StackAddress {
-        self.writer.clone(ty.primitive_size())
+        self.writer.clone(ty.primitive_size() as FrameAddress)
     }
 
     fn write_clone_ref(self: &Self) -> StackAddress {
-        self.writer.clone(size_of::<crate::HeapAddress>() as u8)
+        self.writer.clone(size_of::<crate::HeapAddress>() as FrameAddress)
     }
 
     /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
