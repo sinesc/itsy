@@ -19,7 +19,7 @@
             //"environment": [],
             //"console": "integratedTerminal"
             "sourceLanguages": ["rust"],
-            "preLaunchTask": "build: debug-runner (example)", // annoyingly this puts the task at the top of recent tasks, so I've set the task to hidden
+            "preLaunchTask": "debug: debug-runner (example)", // annoyingly this puts the task at the top of recent tasks, so using a hidden clone of build debug runner
         }/*,
         {
             "name": "lldb release",
@@ -42,7 +42,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "integratedTerminal",
-            "preLaunchTask": "build: debug-runner (example)"
+            "preLaunchTask": "debug: debug-runner (example)" // annoyingly this puts the task at the top of recent tasks, so using a hidden clone of build debug runner
         }/*,
         {
             "name": "vsdebug release",

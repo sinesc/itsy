@@ -14,7 +14,7 @@
             ],
             "group": "build",
             "problemMatcher": [],
-            "hide": true,
+            "hide": false,
         },
         {
             "label": "build: library (release)",
@@ -26,7 +26,7 @@
             ],
             "group": "build",
             "problemMatcher": [],
-            "hide": true,
+            "hide": false,
         },
         {
             "label": "exec: tests",
@@ -238,6 +238,24 @@
             ],
             "problemMatcher": [],
             "hide": false,
+        },
+        // hidden, used by launch.json, identical to "build: debug-runner (example)" which would be shown
+        // as the last used task in task list if we didn't use this hidden task instead.
+        {
+            "label": "debug: debug-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--features=\"debugging\"",
+                "--features=\"symbols\"",
+                "--features=\"ice_panics\"",
+                "--example",
+                "debug-run",
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "hide": true,
         },
     ]
 }
