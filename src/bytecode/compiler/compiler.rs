@@ -482,9 +482,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
                 self.writer.upload(size_of::<StackAddress>() * 2, 0);
             },
-            ConstantValue::Numeric(numeric) => {
+            ConstantValue::Discriminant(numeric) => {
                 let ty = self.ty(item);
-                self.write_immediate(ty, numeric)?;
+                let primitive_type_id = ty.as_enum().ice()?.primitive.ice()?.0;
+                let primitive_type = self.ty(&primitive_type_id);
+                self.write_immediate(primitive_type, numeric)?;
             },
         }
         Ok(())

@@ -13,7 +13,7 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConstantValue {
     Function(FunctionId),
-    Numeric(Numeric),
+    Discriminant(Numeric),
 }
 
 impl_as_getter!(ConstantValue {
@@ -54,7 +54,7 @@ impl EnumVariant {
 pub struct Enum {
     pub variants: Vec<(String, EnumVariant)>,
     pub impl_traits: Map<TypeId, ImplTrait>,
-    pub primitive: Option<(TypeId, u8)>,
+    pub primitive: Option<(TypeId, u8)>, // note: including primitive size here so Type::primitive_size() can return the correct size (can't do a type lookup there)
 }
 
 impl Enum {
