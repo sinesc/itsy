@@ -157,7 +157,7 @@ impl<T, U> VM<T, U> {
         }
         let constructor = self.construct_read_op(&mut constructor_offset);
         let epoch = self.heap.new_epoch();
-        self.refcount_recurse(constructor, item, &mut constructor_offset, op, epoch);
+        self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op, epoch);
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.

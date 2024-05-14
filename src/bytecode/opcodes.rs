@@ -5,7 +5,7 @@ use crate::{FrameAddress, StackAddress, ItemIndex};
 use crate::bytecode::{HeapRefOp, builtins::Builtin, macros::impl_opcodes};
 #[cfg(feature="runtime")]
 use crate::{
-    StackOffset, HeapAddress,
+    StackOffset,
     bytecode::{
         HeapRef,
         runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState}
@@ -137,14 +137,37 @@ impl_opcodes!{
         loopu64<T: u64>(iter: FrameAddress, start: StackAddress)
     >(&mut self) {
         use crate::bytecode::runtime::stack::StackOffsetOp;
-        let upper: T = self.stack.load_sp(size_of::<T>());
-        let iter_fp = self.stack.offset_fp(iter as StackAddress);
-        let mut current: T = self.stack.load(iter_fp);
+        let iter_loc = self.stack.offset_fp(iter as StackAddress);
+        let upper_loc = self.stack.offset_sp(size_of::<T>());
+        let upper: T = self.stack.load(upper_loc);
+        let mut current: T = self.stack.load(iter_loc);
         current = T::wrapping_add(current, 1 as T);
         if current <= upper {
             self.pc = start;
         }
-        self.stack.store(iter_fp, current);
+        self.stack.store(iter_loc, current);
+    }
+
+    /// Pops heap reference. Sets program counter to exit and returns if the reference
+    /// offset points at the end of the referenced heap object.
+    /// Otherwise fetches element at reference offset, moves offset to the next element,
+    /// pushes the modified reference and stores the data in element.
+    fn <
+        arrayiter8<T: Data8>(element: FrameAddress, exit: StackAddress),
+        arrayiter16<T: Data16>(element: FrameAddress, exit: StackAddress),
+        arrayiter32<T: Data32>(element: FrameAddress, exit: StackAddress),
+        arrayiter64<T: Data64>(element: FrameAddress, exit: StackAddress)
+    >(&mut self) {
+        let mut item: HeapRef = self.stack.pop();
+        if item.offset() >= self.heap.item(item.index()).data.len() {
+            self.stack.push(item);
+            self.pc = exit;
+            return;
+        }
+        let data: T = self.heap.read(item);
+        item.add_offset(size_of::<T>() as StackOffset);
+        self.stack.push(item);
+        self.stack.store_fp(element, data);
     }
 
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
@@ -1243,21 +1266,6 @@ impl_opcodes!{
         self.heap.ref_item(data.index(), HeapRefOp::Inc); // non recursive is fine since we only want to prevent it from being dropped and will reverse the change immediately
         self.refcount_value(item, constructor, HeapRefOp::Free);
         self.heap.ref_item(data.index(), HeapRefOp::DecNoFree);
-        self.stack.push(data);
-    }
-
-    /// Read an element index (at top) and heap reference (just below) and push the heap value at element index from the end of the heap object onto the stack. Drops temporary references.
-    fn <
-        heap_tail_element8_nc<T: Data8>(constructor: StackAddress),
-        heap_tail_element16_nc<T: Data16>(constructor: StackAddress),
-        heap_tail_element32_nc<T: Data32>(constructor: StackAddress),
-        heap_tail_element64_nc<T: Data64>(constructor: StackAddress),
-    >(&mut self) {
-        let element_index: StackAddress = self.stack.top();
-        let item: HeapRef = self.stack.load_sp((size_of::<StackAddress>() + size_of::<HeapAddress>()) as StackAddress);
-        let offset = self.heap.item(item.index()).data.len() as StackAddress - size_of::<T>() as StackAddress * (element_index + 1);
-        let data: T = self.heap.read(item.with_offset(offset as StackOffset));
-        self.refcount_value(item, constructor, HeapRefOp::Free);
         self.stack.push(data);
     }
 

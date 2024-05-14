@@ -8,10 +8,10 @@ mod init_state;
 
 use crate::config::FrameAddress;
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, STACK_ADDRESS_TYPE};
+use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{builtin_types, BuiltinType}};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::BuiltinType};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use util::{LoopControlStack, LoopControl, Functions};
@@ -660,61 +660,27 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
 
-        self.compile_expression(&item.expr)?;                       // stack &array
-        let array_ty = self.ty(&item.expr);
-        self.write_cnt(array_ty, true, HeapRefOp::Inc)?;
-        self.write_clone_ref();                                         // stack &array &array
-        self.write_builtin(array_ty, BuiltinType::Array(builtin_types::Array::len))?;             // stack &array len
-        let exit_jump = self.writer.j0sa_nc(123);
-        let loop_start = self.write_sub_pi(&STACK_ADDRESS_TYPE, Numeric::Unsigned(1))?;        // stack &array index (indexing from the end to be able to count downwards from len)
+        self.compile_expression(&item.expr)?;
+        self.write_cnt(self.ty(&item.expr), true, HeapRefOp::Inc)?;
+        let loop_start = self.write_arrayiter(self.ty(&element_type_id), element_loc, 123)?;
 
-        let element_ty = self.ty(&element_type_id);
-        self.write_heap_tail_element_nc(array_ty, element_ty)?;   // stack &array index element
-
-        if element_ty.is_ref() {
-            self.write_clone(element_ty);                                   // stack &array index element element
-            self.write_cnt(element_ty, true, HeapRefOp::Inc)?;
-        }
-
-        self.write_store(element_ty, element_loc, None)?;                        // stack &array index <is_ref ? element>  // TODO: this doesn't do storex, why does it work?
         self.loop_control.push();
-        self.compile_block(&item.block)?;                           // stack &array index <is_ref ? element>
+        self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
 
-        let element_ty = self.ty(&element_type_id);
-
-        let cnt_target = if element_ty.is_ref() {
-            Some(self.write_cnt(element_ty, false, HeapRefOp::Dec)?)
-        } else {                                                          // stack &array index
-            None
-        };
-
-        let cond_target = self.writer.jn0sa_nc(loop_start);
-
-        // if the loop contains a break we need a target for the break jump that decrefs the potential element
-        // reference but doesn't jump back to the start of the loop. the normal loop exit has to jump over this.
-        let break_target = if element_ty.is_ref() && loop_controls.iter().find(|&lc| matches!(lc, LoopControl::Break(_))).is_some() {
-            let exit_skip_target = self.writer.jmp(123);
-            let break_target = self.write_cnt(element_ty, false, HeapRefOp::Dec)?;
-            let exit_target = self.writer.position();
-            self.writer.overwrite(exit_skip_target, |w| w.jmp(exit_target));
-            Some(break_target)
-        } else {
-            None
-        };
+        self.writer.jmp(loop_start);
+        let exit_target = self.writer.position();
+        self.writer.overwrite(loop_start, |_| self.write_arrayiter(self.ty(&element_type_id), element_loc, exit_target).unwrap(/*TODO*/));
 
         // fix jump addresses
         let exit_target = self.writer.position();
-        self.writer.overwrite(exit_jump, |w| w.j0sa_nc(exit_target));
         for loop_control in &loop_controls {
             match loop_control {
-                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(break_target.unwrap_or(exit_target))),
-                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(cnt_target.unwrap_or(cond_target))),
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
             };
         }
-        // discard counter
-        self.write_discard(&STACK_ADDRESS_TYPE)?;    // stack &array
-        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;         // stack --
+        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;
         Ok(())
     }
 
@@ -1706,18 +1672,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
-    /// Writes instructions to fetch an element from the end of the array whose reference is at the top of the stack.
-    fn write_heap_tail_element_nc(self: &Self, container_type: &Type, result_type: &Type) -> CompileResult<StackAddress> {
-        let constructor = self.constructor(container_type)?;
-        Ok(match result_type.primitive_size() {
-            1 => self.writer.heap_tail_element8_nc(constructor),
-            2 => self.writer.heap_tail_element16_nc(constructor),
-            4 => self.writer.heap_tail_element32_nc(constructor),
-            8 => self.writer.heap_tail_element64_nc(constructor),
-            size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
-        })
-    }
-
     /// Writes an appropriate variant of the store instruction.
     /// If the value being written is a heap reference, its refcount will be increased and unless the local is not active
     /// and the replaced value will have its refcount decreased.
@@ -1830,6 +1784,21 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Type::u32 => self.writer.loopu32(iter, start),
             Type::u64 => self.writer.loopu64(iter, start),
             _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write loop instruction.
+    fn write_arrayiter(self: &Self, element_ty: &Type, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
+        Ok(if element_ty.is_ref() {
+            self.writer.arrayiter64(element, exit)
+        } else {
+            match element_ty.primitive_size() {
+                1 => self.writer.arrayiter8(element, exit),
+                2 => self.writer.arrayiter16(element, exit),
+                4 => self.writer.arrayiter32(element, exit),
+                8 => self.writer.arrayiter64(element, exit),
+                size @ _ => Self::ice(&format!("Unsupported size {} for element type {:?}", size, element_ty))?,
+            }
         })
     }
 
