@@ -1,9 +1,42 @@
+Revision: e572d15cf5886d8aed16d724592a061947c53e3b
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 14.05.2024 07:05:19
+Message:
+replace clunky heap_tail_element that was only used for array iteration with dedicated arrayiter instruction
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 10 passes, pass 1...2...3...4...5...6...7...8...9...10...
+mandelbrot
+  itsy score: 468, avg: 0.2240 min: 0.2137 max: 0.2410 var: 12.773%
+  rust score: 0, avg: 0.0079 min: 0.0073 max: 0.0084 var: 13.809%, 28.30x
+fib_r
+  itsy score: 702, avg: 0.1570 min: 0.1423 max: 0.1660 var: 16.607%
+  rust score: 0, avg: 0.0040 min: 0.0040 max: 0.0041 var: 3.067%, 39.28x
+stringcat
+  itsy score: 681, avg: 0.0015 min: 0.0015 max: 0.0016 var: 11.216%
+  rust score: 0, avg: 0.0019 min: 0.0018 max: 0.0022 var: 18.254%, 0.78x
+upload_struct
+  itsy score: 498, avg: 0.2045 min: 0.2005 max: 0.2071 var: 3.272%
+upload_array
+  itsy score: 446, avg: 0.4553 min: 0.4475 max: 0.4610 var: 3.024%
+string_return
+  itsy score: 1156, avg: 0.0893 min: 0.0865 max: 0.0929 var: 7.452%
+heap_reuse
+  itsy score: 0, avg: 0.1230 min: 0.0657 max: 0.2373 var: 261.237%
+for_index
+  itsy score: 484, avg: 0.0223 min: 0.0206 max: 0.0228 var: 10.718%
+for_array_tmp
+  itsy score: 1023, avg: 0.1024 min: 0.0977 max: 0.1039 var: 6.262%
+while
+  itsy score: 425, avg: 0.1323 min: 0.1176 max: 0.1372 var: 16.684%
+final score 5883 points
+
+
 Revision: 6d7a8433eec33a0ea4a1228338b73108c9030d28
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 13.05.2024 06:12:46
 Message:
 add for-in-array bench (before making changes to loop compilation)
-
 
 Ballpark Bench™ - Measuring in approximate baseball fields
 running 5 passes, pass 1...2...3...4...5...

@@ -45,7 +45,7 @@ fn main() {
         SingleBench { name: "for_array_tmp", rating: 100, itsy: itsy_for_array_tmp },
         SingleBench { name: "while", rating: 50, itsy: itsy_while },
     ];
-    let num_passes = 5;
+    let num_passes = 10;
     let results: [ [ Result ] ] = [ ];
 
     println("Ballpark Bench™ - Measuring in approximate baseball fields");
