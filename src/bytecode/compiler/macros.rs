@@ -2,7 +2,7 @@
 // Writes a comment to the bytecode if the symbols feature is enabled.
 macro_rules! comment {
     ($self:ident, $format:literal $(, $value:expr)*) => {
-        #[cfg(feature="symbols")]
+        #[cfg(all(feature="symbols", feature="comments"))]
         $self.writer.comment(&format!($format $(, $value)*));
     }
 }

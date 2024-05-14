@@ -293,6 +293,7 @@ macro_rules! impl_opcodes {
                             result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
                             Some((result, position))
                         }
+                        #[cfg(feature="comments")]
                         opcodes::comment => {
                             let start = position - size_of::<OpCodeIndex>() as StackAddress;
                             let message = impl_opcodes!(@read_arg String, self, position);

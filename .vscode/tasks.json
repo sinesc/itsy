@@ -86,6 +86,7 @@
                 "build",
                 "--features=\"debugging\"",
                 "--features=\"symbols\"",
+                "--features=\"comments\"",
                 "--features=\"ice_panics\"",
                 "--example",
                 "debug-run",
@@ -125,6 +126,30 @@
         },
         {
             "label": "exec: run file in debug-runner (example)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--features=\"debugging\"",
+                "--features=\"symbols\"",
+                "--features=\"comments\"",
+                "--features=\"ice_panics\"",
+                "--example",
+                "debug-run",
+                "--",
+                "${relativeFile}"
+            ],
+            "options": {
+                "env": {
+                    "RUST_BACKTRACE": "1"
+                }
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "hide": false,
+        },
+        {
+            "label": "exec: run file in debug-runner, no comments (example)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -249,6 +274,7 @@
                 "build",
                 "--features=\"debugging\"",
                 "--features=\"symbols\"",
+                "--features=\"comments\"",
                 "--features=\"ice_panics\"",
                 "--example",
                 "debug-run",

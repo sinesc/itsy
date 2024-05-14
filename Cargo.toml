@@ -21,6 +21,7 @@ compiler = [ "nom" ]
 runtime = [ ]
 debugging = [ ]
 symbols = [ ]
+comments = [ ]
 ice_panics = [ ]
 
 [dependencies]

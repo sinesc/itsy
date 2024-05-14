@@ -265,7 +265,10 @@ impl<T, U> VM<T, U> {
         match self.state {
             VMState::Terminated if self.heap.len() > 1 => Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None)),
             VMState::Error(kind) => {
+                #[cfg(feature="symbols")]
                 let opcode = self.describe_instruction(self.error_pc).map(|result| result.0);
+                #[cfg(not(feature="symbols"))]
+                let opcode = None;
                 Err(RuntimeError::new(self.pc, kind, opcode))
             },
             VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(self.state),
