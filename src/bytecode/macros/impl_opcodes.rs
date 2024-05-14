@@ -1,5 +1,30 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
+
+    // New read from slice, either one or multiple bytes
+    (@inc_pc RustFn, $pc:expr) => (
+        $pc += std::mem::size_of::<RustFnIndex>()
+    );
+    (@inc_pc $ty:tt, $pc:expr) => (
+        $pc += std::mem::size_of::<$ty>()
+    );
+    (@read_bytes2 $ty:tt, $from:ident) => ( {
+        let (int_bytes, rest) = $from.split_at(std::mem::size_of::<$ty>());
+        *$from = rest;
+        $ty::from_le_bytes(int_bytes.try_into().unwrap())
+    });
+    // New read opcode arguments
+    (@read_arg2 String, $from:ident) => ( {
+        let len = impl_opcodes!(@read_bytes2 StackAddress, $from, $counter);
+        let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
+        $counter += len;
+        ::std::str::from_utf8(slice).unwrap().to_string()
+    });
+    (@read_arg2 RustFn, $from:ident) => ( T::from_index(impl_opcodes!(@read_bytes2 RustFnIndex, $from)) );
+    (@read_arg2 Builtin, $from:ident) => ( Builtin::from_index(impl_opcodes!(@read_bytes2 BuiltinIndex, $from)) );
+    (@read_arg2 HeapRefOp, $from:ident) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes2 u8, $from)) );
+    (@read_arg2 $size:ident, $from:ident) => ( impl_opcodes!(@read_bytes2 $size, $from) );
+
     // Read from slice, either one or multiple bytes
     (@read_bytes u8, $from:expr, $counter:expr) => ( {
         let dest = $from.instructions[$counter as usize];
@@ -171,7 +196,8 @@ macro_rules! impl_opcodes {
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex};
                 loop {
-                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, self.pc);
+                    let instructions = &mut &self.instructions[self.pc..];
+                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
                     #[allow(unused_doc_comments)]
                     match instruction {
                         $(
@@ -180,7 +206,17 @@ macro_rules! impl_opcodes {
                             $(
                                 opcodes::$name => {
                                     $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
-                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg $arg_type, self, self.pc) ),* );
+
+                                    let ( (), $( $arg_name ),* ) = (
+                                        (),
+                                        $( impl_opcodes!(@read_arg2 $arg_type, instructions) ),*
+                                    );
+
+                                    let mut size = 0;
+                                    impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                    $( impl_opcodes!(@inc_pc $arg_type, size); )*
+                                    self.pc += size;
+
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
                                     $( impl_opcodes!(@flag self, prev_pc, $flag); )?
@@ -192,9 +228,16 @@ macro_rules! impl_opcodes {
                                     $( #[$vattr] )*
                                     opcodes::$vname => {
                                         $( impl_opcodes!(@setup_flag self, prev_pc, $vflag); )?
+
                                         $(
-                                            let $varg_name: $vtype_name = impl_opcodes!(@read_arg $vtype_name, self, self.pc);
+                                            let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions);
                                         )*
+
+                                        let mut size = 0;
+                                        impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                        $( impl_opcodes!(@inc_pc $vtype_name, size); )*
+                                        self.pc += size;
+
                                         self.$vname( $( $varg_name ),* );
                                         $( impl_opcodes!(@flag self, prev_pc, $vflag); )?
                                     }
