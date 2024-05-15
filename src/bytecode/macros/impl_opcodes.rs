@@ -168,6 +168,7 @@ macro_rules! impl_opcodes {
                         let insert_pos = self.position();
                         impl_opcodes!(@write_arg OpCodeIndex, OpCode::$name as OpCodeIndex, self);
                         $( impl_opcodes!(@write_arg $arg_type, $arg_name, self); )*
+                        self.write_pad(insert_pos);
                         insert_pos as StackAddress
                     }
                 )?
@@ -179,9 +180,8 @@ macro_rules! impl_opcodes {
                         pub fn $vname(self: &Self, $( $varg_name: impl_opcodes!(@map_writer_type $vtype_name) ),* ) -> StackAddress {
                             let insert_pos = self.position();
                             impl_opcodes!(@write_arg OpCodeIndex, OpCode::$vname as OpCodeIndex, self);
-                            $(
-                                impl_opcodes!(@write_arg $vtype_name, $varg_name, self);
-                            )*
+                            $( impl_opcodes!(@write_arg $vtype_name, $varg_name, self); )*
+                            self.write_pad(insert_pos);
                             insert_pos as StackAddress
                         }
                     )+
@@ -194,7 +194,8 @@ macro_rules! impl_opcodes {
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
             /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
-                use crate::{RustFnIndex, BuiltinIndex};
+                use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
+                const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
                 loop {
                     let instructions = &mut &self.instructions[self.pc..];
                     let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
@@ -215,6 +216,7 @@ macro_rules! impl_opcodes {
                                     let mut size = 0;
                                     impl_opcodes!(@inc_pc OpCodeIndex, size);
                                     $( impl_opcodes!(@inc_pc $arg_type, size); )*
+                                    size = (size + ADD_MASK) & !ADD_MASK;
                                     self.pc += size;
 
                                     $(let $context: &mut U = context;)?
@@ -236,6 +238,7 @@ macro_rules! impl_opcodes {
                                         let mut size = 0;
                                         impl_opcodes!(@inc_pc OpCodeIndex, size);
                                         $( impl_opcodes!(@inc_pc $vtype_name, size); )*
+                                        size = (size + ADD_MASK) & !ADD_MASK;
                                         self.pc += size;
 
                                         self.$vname( $( $varg_name ),* );

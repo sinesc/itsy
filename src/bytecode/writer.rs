@@ -1,7 +1,7 @@
 //! Bytecode buffer and writer.
 
 use crate::prelude::*;
-use crate::StackAddress;
+use crate::{StackAddress, INSTRUCTION_ALIGNMENT};
 use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor, Constructor};
 use std::cell::{Cell, RefCell, RefMut};
 
@@ -62,6 +62,18 @@ impl<T> Writer<T> where T: VMFunc<T> {
             self.program().instructions.splice(position as usize .. end as usize, buf.iter().cloned());
         }
         self.position.set(self.position.get() + buf_len);
+    }
+    /// Zero pad length of program to next multiple of 8.
+    pub(crate) fn write_pad(self: &Self, insert_pos: StackAddress) {
+        if INSTRUCTION_ALIGNMENT > 0 {
+            const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
+            let buf_len = self.position() - insert_pos;
+            let zero_len = ((buf_len + ADD_MASK) & !ADD_MASK) - buf_len;
+            for _ in 0..zero_len {
+                self.program().instructions.push(0);
+            }
+            self.position.set(self.position.get() + zero_len);
+        }
     }
     /// Returns the current length of the const pool.
     pub fn const_len(self: &Self) -> StackAddress {

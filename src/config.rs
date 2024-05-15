@@ -17,5 +17,8 @@ pub type ItemIndex = u16;
 /// Address relative to the start of the current stack frame.
 pub type FrameAddress = u16;
 
-// Address either relative to the start of the current stack frame or downwards relative to the top of the stack if the value is negative.
+/// Address either relative to the start of the current stack frame or downwards relative to the top of the stack if the value is negative.
 pub type FrameOffset = i16;
+
+/// Bytecode instruction alignment size.
+pub const INSTRUCTION_ALIGNMENT: usize = 2;
