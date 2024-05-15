@@ -1,3 +1,37 @@
+Revision: c282e172bd70dda45d6afcae0b24dbd0cec9458a
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 15.05.2024 19:54:43
+Message:
+refactor debug readers to also use new instruction reader approach
+
+Ballpark Bench™ - Measuring in approximate baseball fields
+running 10 passes, pass 1...2...3...4...5...6...7...8...9...10...
+mandelbrot
+  itsy score: 487, avg: 0.2106 min: 0.2050 max: 0.2220 var: 8.300%
+  rust score: 0, avg: 0.0080 min: 0.0075 max: 0.0086 var: 15.196%, 26.30x
+fib_r
+  itsy score: 698, avg: 0.1475 min: 0.1431 max: 0.1537 var: 7.438%
+  rust score: 0, avg: 0.0047 min: 0.0047 max: 0.0049 var: 4.050%, 31.09x
+stringcat
+  itsy score: 697, avg: 0.0015 min: 0.0014 max: 0.0017 var: 16.500%
+  rust score: 0, avg: 0.0019 min: 0.0018 max: 0.0021 var: 20.046%, 0.78x
+upload_struct
+  itsy score: 497, avg: 0.2028 min: 0.2011 max: 0.2065 var: 2.682%
+upload_array
+  itsy score: 454, avg: 0.4460 min: 0.4402 max: 0.4552 var: 3.405%
+string_return
+  itsy score: 1170, avg: 0.0898 min: 0.0855 max: 0.0934 var: 9.322%
+heap_reuse
+  itsy score: 0, avg: 0.1133 min: 0.0677 max: 0.2570 var: 279.673%
+for_index
+  itsy score: 487, avg: 0.0221 min: 0.0205 max: 0.0228 var: 11.135%
+for_array_tmp
+  itsy score: 1297, avg: 0.0782 min: 0.0771 max: 0.0795 var: 3.101%
+while
+  itsy score: 450, avg: 0.1144 min: 0.1111 max: 0.1170 var: 5.389%
+final score 6237 points
+
+
 Revision: ef1a44ac9178c5b5724814d200d8b1343097ece5
 Author: Dennis Möhlmann <dmo479@gmail.com>
 Date: 14.05.2024 20:27:18
