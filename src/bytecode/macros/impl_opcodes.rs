@@ -1,7 +1,10 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
 
-    // New read from slice, either one or multiple bytes
+    // Read from slice
+    (@inc_pc String, $pc:expr) => (
+        $pc += std::mem::size_of::<StackAddress>()
+    );
     (@inc_pc RustFn, $pc:expr) => (
         $pc += std::mem::size_of::<RustFnIndex>()
     );
@@ -13,41 +16,18 @@ macro_rules! impl_opcodes {
         *$from = rest;
         $ty::from_le_bytes(int_bytes.try_into().unwrap())
     });
-    // New read opcode arguments
-    (@read_arg2 String, $from:ident) => ( {
-        let len = impl_opcodes!(@read_bytes2 StackAddress, $from, $counter);
-        let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
-        $counter += len;
-        ::std::str::from_utf8(slice).unwrap().to_string()
-    });
-    (@read_arg2 RustFn, $from:ident) => ( T::from_index(impl_opcodes!(@read_bytes2 RustFnIndex, $from)) );
-    (@read_arg2 Builtin, $from:ident) => ( Builtin::from_index(impl_opcodes!(@read_bytes2 BuiltinIndex, $from)) );
-    (@read_arg2 HeapRefOp, $from:ident) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes2 u8, $from)) );
-    (@read_arg2 $size:ident, $from:ident) => ( impl_opcodes!(@read_bytes2 $size, $from) );
-
-    // Read from slice, either one or multiple bytes
-    (@read_bytes u8, $from:expr, $counter:expr) => ( {
-        let dest = $from.instructions[$counter as usize];
-        $counter += 1;
-        dest
-    });
-    (@read_bytes $ty:tt, $from:ident, $counter:expr) => ( {
-        let slice = &$from.instructions[$counter as usize..$counter as usize + ::std::mem::size_of::<$ty>()];
-        let dest: $ty = $ty::from_le_bytes( slice.try_into().unwrap() );
-        $counter += ::std::mem::size_of::<$ty>() as StackAddress;
-        dest
-    });
     // Read opcode arguments
-    (@read_arg String, $from:ident, $counter:expr) => ( {
-        let len = impl_opcodes!(@read_bytes StackAddress, $from, $counter);
-        let slice = &$from.instructions[$counter as usize..($counter + len) as usize];
+    (@read_arg2 String, $from:ident, $counter:ident) => ( {
+        let len = impl_opcodes!(@read_bytes2 StackAddress, $from);
+        let (str_bytes, rest) = $from.split_at(len);
+        *$from = rest;
         $counter += len;
-        ::std::str::from_utf8(slice).unwrap().to_string()
+        ::std::str::from_utf8(str_bytes).unwrap().to_string()
     });
-    (@read_arg RustFn, $from:ident, $counter:expr) => ( T::from_index(impl_opcodes!(@read_bytes RustFnIndex, $from, $counter)) );
-    (@read_arg Builtin, $from:ident, $counter:expr) => ( Builtin::from_index(impl_opcodes!(@read_bytes BuiltinIndex, $from, $counter)) );
-    (@read_arg HeapRefOp, $from:ident, $counter:expr) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes u8, $from, $counter)) );
-    (@read_arg $size:ident, $from:ident, $counter:expr) => ( impl_opcodes!(@read_bytes $size, $from, $counter) );
+    (@read_arg2 RustFn, $from:ident $(, $counter:ident )?) => ( T::from_index(impl_opcodes!(@read_bytes2 RustFnIndex, $from)) );
+    (@read_arg2 Builtin, $from:ident $(, $counter:ident )?) => ( Builtin::from_index(impl_opcodes!(@read_bytes2 BuiltinIndex, $from)) );
+    (@read_arg2 HeapRefOp, $from:ident $(, $counter:ident )?) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes2 u8, $from)) );
+    (@read_arg2 $ty:ident, $from:ident $(, $counter:ident )?) => ( impl_opcodes!(@read_bytes2 $ty, $from) );
     // Map parameter type names to reader types
     (@map_reader_type RustFn) => ( T );
     (@map_reader_type $ty:tt) => ( $ty );
@@ -208,12 +188,9 @@ macro_rules! impl_opcodes {
                                 opcodes::$name => {
                                     $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
 
-                                    let ( (), $( $arg_name ),* ) = (
-                                        (),
-                                        $( impl_opcodes!(@read_arg2 $arg_type, instructions) ),*
-                                    );
-
                                     let mut size = 0;
+                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg2 $arg_type, instructions, size) ),* );
+
                                     impl_opcodes!(@inc_pc OpCodeIndex, size);
                                     $( impl_opcodes!(@inc_pc $arg_type, size); )*
                                     size = (size + ADD_MASK) & !ADD_MASK;
@@ -221,6 +198,7 @@ macro_rules! impl_opcodes {
 
                                     $(let $context: &mut U = context;)?
                                     self.$name( $($context,)? $( $arg_name ),* );
+
                                     $( impl_opcodes!(@flag self, prev_pc, $flag); )?
                                 }
                             )?
@@ -231,11 +209,9 @@ macro_rules! impl_opcodes {
                                     opcodes::$vname => {
                                         $( impl_opcodes!(@setup_flag self, prev_pc, $vflag); )?
 
-                                        $(
-                                            let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions);
-                                        )*
-
                                         let mut size = 0;
+                                        $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions, size); )*
+
                                         impl_opcodes!(@inc_pc OpCodeIndex, size);
                                         $( impl_opcodes!(@inc_pc $vtype_name, size); )*
                                         size = (size + ADD_MASK) & !ADD_MASK;
@@ -258,8 +234,10 @@ macro_rules! impl_opcodes {
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
             /// Execute the next bytecode from the VMs code buffer.
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
-                use crate::{RustFnIndex, BuiltinIndex};
-                let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, self.pc);
+                use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
+                const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
+                let instructions = &mut &self.instructions[self.pc..];
+                let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
                 #[allow(unused_doc_comments)]
                 match instruction {
                     $(
@@ -268,7 +246,15 @@ macro_rules! impl_opcodes {
                         $(
                             opcodes::$name => {
                                 $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
-                                let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg $arg_type, self, self.pc) ),* );
+
+                                let mut size = 0;
+                                let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg2 $arg_type, instructions, size) ),* );
+
+                                impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                $( impl_opcodes!(@inc_pc $arg_type, size); )*
+                                size = (size + ADD_MASK) & !ADD_MASK;
+                                self.pc += size;
+
                                 $(let $context: &mut U = context;)?
                                 self.$name( $($context,)? $( $arg_name ),* );
                                 $( impl_opcodes!(@flag self, prev_pc, $flag); )?
@@ -280,9 +266,15 @@ macro_rules! impl_opcodes {
                                 $( #[$vattr] )*
                                 opcodes::$vname => {
                                     $( impl_opcodes!(@setup_flag self, prev_pc, $vflag); )?
-                                    $(
-                                        let $varg_name: $vtype_name = impl_opcodes!(@read_arg $vtype_name, self, self.pc);
-                                    )*
+
+                                    let mut size = 0;
+                                    $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions, size); )*
+
+                                    impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                    $( impl_opcodes!(@inc_pc $vtype_name, size); )*
+                                    size = (size + ADD_MASK) & !ADD_MASK;
+                                    self.pc += size;
+
                                     self.$vname( $( $varg_name ),* );
                                     $( impl_opcodes!(@flag self, prev_pc, $vflag); )?
                                 }
@@ -295,11 +287,12 @@ macro_rules! impl_opcodes {
 
             #[allow(unused_assignments)]
             #[allow(unused_doc_comments)]
-            pub(crate) fn read_instruction(self: &Self, mut position: StackAddress) -> Option<OpCode> {
+            pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<OpCode> {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, position);
+                    let instructions = &mut &self.instructions[position..];
+                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
                     match instruction {
                         $(
                             $( #[ $attr ] )*
@@ -324,38 +317,52 @@ macro_rules! impl_opcodes {
             //#[allow(unused_imports)]
             #[allow(unused_mut)]
             #[cfg(feature="symbols")]
-            pub(crate) fn describe_instruction(self: &Self, mut position: StackAddress) -> Option<(String, StackAddress)> {
-                use crate::{RustFnIndex, BuiltinIndex};
+            pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
+                use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
+                const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
-                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, self, position);
+                    let instructions = &mut &self.instructions[position..];
+                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
                     #[allow(unreachable_patterns)]
                     #[allow(unused_doc_comments)]
                     match instruction {
                         // implement special formatting for some opcodes
                         opcodes::call_rust => {
-                            let mut result = format!("{} {} ", position - size_of::<OpCodeIndex>() as StackAddress, stringify!(call_rust));
-                            result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, self, position)));
-                            Some((result, position))
+                            let mut size = 0;
+                            let mut result = format!("{} {} ", position, stringify!(call_rust));
+                            result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 RustFn, instructions, size)));
+                            impl_opcodes!(@inc_pc OpCodeIndex, size);
+                            impl_opcodes!(@inc_pc RustFn, size);
+                            size = (size + ADD_MASK) & !ADD_MASK;
+                            Some((result, position + size))
                         }
                         #[cfg(feature="comments")]
                         opcodes::comment => {
-                            let start = position - size_of::<OpCodeIndex>() as StackAddress;
-                            let message = impl_opcodes!(@read_arg String, self, position);
+                            let mut size = 0;
+                            let start = position;
+                            let message = impl_opcodes!(@read_arg2 String, instructions, size);
                             let result = if &message[0..1] == "\n" { format!("\n;{} {}", start, &message[1..]) } else { format!(";{} {}", start, message) };
-                            Some((result, position))
+                            impl_opcodes!(@inc_pc OpCodeIndex, size);
+                            impl_opcodes!(@inc_pc String, size);
+                            size = (size + ADD_MASK) & !ADD_MASK;
+                            Some((result, position + size))
                         }
                         $(
                             $( #[ $attr ] )*
                             // single opcode
                             $(
                                 opcodes::$name => {
-                                    let mut result = format!("{:?} {} ", position - size_of::<OpCodeIndex>(), stringify!($name));
-                                    $(
-                                        result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $arg_type, self, position) ));
-                                    )*
-                                    Some((result, position))
+                                    let mut size = 0;
+                                    let mut result = format!("{:?} {} ", position, stringify!($name));
+                                    $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 $arg_type, instructions, size) )); )*
+
+                                    impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                    $( impl_opcodes!(@inc_pc $arg_type, size); )*
+                                    size = (size + ADD_MASK) & !ADD_MASK;
+
+                                    Some((result, position + size))
                                 }
                             )?
                             // opcode variants
@@ -363,11 +370,15 @@ macro_rules! impl_opcodes {
                                 $(
                                     $( #[$vattr] )*
                                     opcodes::$vname => {
-                                        let mut result = format!("{:?} {} ", position - size_of::<OpCodeIndex>(), stringify!($vname));
-                                        $(
-                                            result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $vtype_name, self, position) ));
-                                        )*
-                                        Some((result, position))
+                                        let mut size = 0;
+                                        let mut result = format!("{:?} {} ", position, stringify!($vname));
+                                        $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 $vtype_name, instructions, size) )); )*
+
+                                        impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                        $( impl_opcodes!(@inc_pc $vtype_name, size); )*
+                                        size = (size + ADD_MASK) & !ADD_MASK;
+
+                                        Some((result, position + size))
                                     }
                                 )+
                             )?
