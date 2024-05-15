@@ -35,7 +35,7 @@ impl ParsedModule {
         self.ast
             .iter()
             .filter_map(|s| match s {
-                Statement::Use(u) => Some(u.mapping.iter().map(|(k, v)| (k, &v.0))),
+                Statement::UseDecl(u) => Some(u.mapping.iter().map(|(k, v)| (k, &v.0))),
                 _ => None,
             })
             .flatten()

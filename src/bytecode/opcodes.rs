@@ -61,11 +61,8 @@ impl_opcodes!{
     /// Pushes given value onto the stack.
     fn <
         immediate8(value: Data8),
-        //immediate16_8(value: Data8 as Data16),
         immediate16(value: Data16),
-        //immediate32_8(value: Data8 as Data32),
         immediate32(value: Data32),
-        //immediate64_8(value: Data8 as Data64),
         immediate64(value: Data64),
     >(&mut self) {
         self.stack.push(value);
@@ -73,10 +70,6 @@ impl_opcodes!{
 
     /// Loads data from stack at given stackframe-offset and pushes it onto the stack.
     fn <
-        //load8_8<T: Data8>(loc: u8 as FrameAddress),
-        //load16_8<T: Data16>(loc: u8 as FrameAddress),
-        //load32_8<T: Data32>(loc: u8 as FrameAddress),
-        //load64_8<T: Data64>(loc: u8 as FrameAddress),
         load8_16<T: Data8>(loc: FrameAddress),
         load16_16<T: Data16>(loc: FrameAddress),
         load32_16<T: Data32>(loc: FrameAddress),
@@ -88,10 +81,6 @@ impl_opcodes!{
 
     /// Pops data off the stack and stores it at the given stackframe-offset.
     fn <
-        //store8_8<T: Data8>(loc: u8 as FrameAddress),
-        //store16_8<T: Data16>(loc: u8 as FrameAddress),
-        //store32_8<T: Data32>(loc: u8 as FrameAddress),
-        //store64_8<T: Data64>(loc: u8 as FrameAddress),
         store8_16<T: Data8>(loc: FrameAddress),
         store16_16<T: Data16>(loc: FrameAddress),
         store32_16<T: Data32>(loc: FrameAddress),

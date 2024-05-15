@@ -314,7 +314,6 @@ macro_rules! impl_opcodes {
             }
 
             /// Returns disassembled opcode as string at given position along with the next opcode position.
-            //#[allow(unused_imports)]
             #[allow(unused_mut)]
             #[cfg(feature="symbols")]
             pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {

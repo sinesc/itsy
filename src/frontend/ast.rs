@@ -138,7 +138,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, Use, EnumDef)
+        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, UseDecl, EnumDef)
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member, TypeName)
@@ -236,9 +236,9 @@ impl_positioned!(Path);
 pub enum Statement {
     LetBinding(LetBinding),
     Function(Function),
-    StructDef(StructType),
+    StructDef(StructDef),
     ImplBlock(ImplBlock),
-    TraitDef(TraitType),
+    TraitDef(TraitDef),
     ForLoop(ForLoop),
     WhileLoop(WhileLoop),
     IfBlock(IfBlock),
@@ -248,8 +248,8 @@ pub enum Statement {
     Continue(Continue),
     Expression(Expression),
     Module(Module),
-    Use(UseDecl),
-    EnumDef(EnumType),
+    UseDecl(UseDecl),
+    EnumDef(EnumDef),
 }
 
 impl Statement {
@@ -463,17 +463,17 @@ impl Resolvable for Function {
 
 /// The type signature of an anonymous function/closure.
 #[derive(Debug)]
-pub struct CallableType {
+pub struct CallableDef {
     pub position: Position,
     pub args    : Vec<InlineType>,
     pub ret     : Option<InlineType>,
     pub type_id : Option<TypeId>,
 }
 
-impl_positioned!(CallableType);
-impl_typeable!(CallableType);
+impl_positioned!(CallableDef);
+impl_typeable!(CallableDef);
 
-impl Resolvable for CallableType {
+impl Resolvable for CallableDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved(bindings))
         + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved(bindings))
@@ -570,8 +570,8 @@ impl Positioned for TypeName {
 #[derive(Debug)]
 pub enum InlineType {
     TypeName(TypeName),
-    ArrayDef(Box<ArrayType>),
-    CallableDef(Box<CallableType>),
+    ArrayDef(Box<ArrayDef>),
+    CallableDef(Box<CallableDef>),
 }
 
 impl Typeable for InlineType {
@@ -603,16 +603,16 @@ impl Resolvable for InlineType {
 
 /// An array definition, e.g. `[ MyInt ]`.
 #[derive(Debug)]
-pub struct ArrayType {
+pub struct ArrayDef {
     pub position    : Position,
     pub element_type: InlineType,
     pub type_id     : Option<TypeId>,
 }
 
-impl_positioned!(ArrayType);
-impl_typeable!(ArrayType);
+impl_positioned!(ArrayDef);
+impl_typeable!(ArrayDef);
 
-impl Resolvable for ArrayType {
+impl Resolvable for ArrayDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.element_type.num_resolved(bindings)
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -647,7 +647,7 @@ impl Resolvable for VariantDef {
 
 /// An enum definition, e.g. `enum MyEnum { A, B(u32) }`.
 #[derive(Debug)]
-pub struct EnumType {
+pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
     pub variants: Vec<VariantDef>,
@@ -656,16 +656,16 @@ pub struct EnumType {
     pub vis     : Visibility,
 }
 
-impl_positioned!(EnumType);
-impl_typeable!(EnumType);
+impl_positioned!(EnumDef);
+impl_typeable!(EnumDef);
 
-impl EnumType {
+impl EnumDef {
     pub fn is_primitive(self: &Self) -> bool {
         self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_, _) => true, _ => false })
     }
 }
 
-impl Resolvable for EnumType {
+impl Resolvable for EnumDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.variants.iter().fold(Progress::zero(), |variant_acc, fields| variant_acc + fields.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -677,7 +677,7 @@ impl Resolvable for EnumType {
 
 /// A struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
 #[derive(Debug)]
-pub struct StructType {
+pub struct StructDef {
     pub position: Position,
     pub ident   : Ident,
     pub fields  : Vec<(String, InlineType)>,
@@ -685,10 +685,10 @@ pub struct StructType {
     pub vis     : Visibility,
 }
 
-impl_positioned!(StructType);
-impl_typeable!(StructType);
+impl_positioned!(StructDef);
+impl_typeable!(StructDef);
 
-impl Resolvable for StructType {
+impl Resolvable for StructDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -717,7 +717,7 @@ impl Resolvable for ImplBlock {
 
 /// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } }`.
 #[derive(Debug)]
-pub struct TraitType {
+pub struct TraitDef {
     pub position    : Position,
     pub functions   : Vec<Function>,
     pub scope_id    : ScopeId,
@@ -726,10 +726,10 @@ pub struct TraitType {
     pub vis         : Visibility,
 }
 
-impl_positioned!(TraitType);
-impl_typeable!(TraitType);
+impl_positioned!(TraitDef);
+impl_typeable!(TraitDef);
 
-impl Resolvable for TraitType {
+impl Resolvable for TraitDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.functions.iter().fold(Progress::zero(), |acc, function| acc + function.num_resolved(bindings))
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))

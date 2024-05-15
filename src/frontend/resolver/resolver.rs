@@ -410,7 +410,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Block(block) => self.resolve_block(block, None),
             Return(ret) => self.resolve_return(ret),
             Expression(expression) => self.resolve_expression(expression, None),
-            Use(use_declaration) => self.resolve_use_decl(use_declaration),
+            UseDecl(use_declaration) => self.resolve_use_decl(use_declaration),
             EnumDef(enum_def) => self.resolve_enum_type(enum_def),
             Module(_) | Break(_) | Continue(_) => { Ok(()) /* nothing to do here */ },
         }
@@ -469,7 +469,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_callable_type(self: &mut Self, item: &mut ast::CallableType) -> ResolveResult<Option<TypeId>> {
+    fn resolve_callable_type(self: &mut Self, item: &mut ast::CallableDef) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
@@ -519,7 +519,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an array definition.
-    fn resolve_array_type(self: &mut Self, item: &mut ast::ArrayType) -> ResolveResult<Option<TypeId>> {
+    fn resolve_array_type(self: &mut Self, item: &mut ast::ArrayDef) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
         }
@@ -535,7 +535,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a struct definition.
-    fn resolve_struct_type(self: &mut Self, item: &mut ast::StructType) -> ResolveResult {
+    fn resolve_struct_type(self: &mut Self, item: &mut ast::StructDef) -> ResolveResult {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
         }
@@ -624,7 +624,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an enum definition.
-    fn resolve_enum_type(self: &mut Self, item: &mut ast::EnumType) -> ResolveResult {
+    fn resolve_enum_type(self: &mut Self, item: &mut ast::EnumDef) -> ResolveResult {
 
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(());
@@ -722,7 +722,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a trait definition block.
-    fn resolve_trait_type(self: &mut Self, item: &mut ast::TraitType) -> ResolveResult {
+    fn resolve_trait_type(self: &mut Self, item: &mut ast::TraitDef) -> ResolveResult {
         let parent_scope_id = self.scope_id;
         self.scope_id = item.scope_id;
         // ensure trait exists

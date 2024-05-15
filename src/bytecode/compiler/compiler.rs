@@ -165,7 +165,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         match item {
             S::StructDef(_) => Ok(()),
             S::Module(_) => Ok(()),
-            S::Use(_) => Ok(()),
+            S::UseDecl(_) => Ok(()),
             S::EnumDef(_) => Ok(()),
             S::Function(function) => self.compile_function(function),
             S::ImplBlock(impl_block) => {
@@ -285,7 +285,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Compiles an assignment to a variable.
     fn compile_assignment_to_var(self: &mut Self, item: &ast::Assignment) -> CompileResult {
-        //use crate::frontend::ast::BinaryOperator as BO;
         use ast::{BinaryOperator::*, Expression as E};
         comment!(self, "direct assignment");
         let binding_id = item.left.as_variable().ice()?.binding_id;
@@ -863,13 +862,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => Self::ice_at(item, "Unexpected boolean literal type")?,
                 };
             },
-            /*LiteralValue::Variant(ref variant) if ty.as_enum().map_or(false, |e| e.primitive.is_some()) => {
-                // primitive enums don't need to be heap allocated
-                let enum_def = ty.as_enum().or_ice_msg("Non-enum type on enum variant")?;
-                let enum_ty = self.ty(&enum_def.primitive.or_ice()?.0);
-                let variant_value = enum_def.variant_value(&variant.ident.name).or_ice()?;
-                self.write_immediate(enum_ty, variant_value)?;
-            },*/
             LiteralValue::String(ref string_literal) => {
                 // store string on const pool and write instruction to load it from const pool directly onto th heap
                 // note: we get the offset from current const_len() and not the store_const() result as that points to
@@ -901,16 +893,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let type_id = item.type_id(self).ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
-            /*LiteralValue::Variant(variant) => {
-                // write instructions to construct the data-variant enum on the stack and once complete, upload it to the heap
-                let enum_def = self.ty(item).as_enum().or_ice_msg("Encountered non-enum type on enum variant")?;
-                let index_type = Type::unsigned(size_of::<VariantIndex>());
-                let variant_index = enum_def.variant_index(&variant.ident.name).or_ice()?;
-                self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
-                let size = index_type.primitive_size() as StackAddress;
-                let type_id = item.type_id(self).or_ice()?;
-                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
-            },*/
         }
         Ok(())
     }
@@ -1439,18 +1421,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes given numeric as an immediate value. // FIXME: this will cause endianess issues when compiled/run on different endianess
     fn write_immediate(self: &Self, ty: &Type, numeric: Numeric) -> CompileResult<StackAddress> {
-        /*let small_immediate = |value: u8, ty: &Type| -> CompileResult<StackAddress> {
-            Ok(match ty.primitive_size() {
-                1 => self.writer.immediate8(value),
-                2 => self.writer.immediate16_8(value),
-                4 => self.writer.immediate32_8(value),
-                8 => self.writer.immediate64_8(value),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-            })
-        };*/
         Ok(match numeric {
-            //Numeric::Unsigned(v) if v <= u8::MAX as u64 => small_immediate(v as u8, ty)?,
-            //Numeric::Signed(v) if v >= u8::MIN as i64 && v <= u8::MAX as i64 => small_immediate(v as u8, ty)?,
             Numeric::Signed(v) => {
                 match ty {
                     Type::i8 => self.writer.immediate8(v as u8),
@@ -1616,7 +1587,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             2 => self.writer.heap_fetch16(),
             4 => self.writer.heap_fetch32(),
             8 => self.writer.heap_fetch64(),
-            //16 => { self.writer.heap_fetch128(); },
             size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
         })
     }
@@ -1654,7 +1624,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.heap_fetch_member16(offset, constructor),
                 4 => self.writer.heap_fetch_member32(offset, constructor),
                 8 => self.writer.heap_fetch_member64(offset, constructor),
-                //16 => { self.writer.heap_fetch_member128(offset); },
                 size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
             }
         })
@@ -1671,7 +1640,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 2 => self.writer.heap_fetch_element16(constructor),
                 4 => self.writer.heap_fetch_element32(constructor),
                 8 => self.writer.heap_fetch_element64(constructor),
-                //16 => { self.writer.heap_fetch_element128(); },
                 size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
             }
         })

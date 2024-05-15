@@ -239,7 +239,7 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
     ))(i)
 }
 
-fn callable_type(i: Input<'_>) -> Output<CallableType> {
+fn callable_type(i: Input<'_>) -> Output<CallableDef> {
     fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
@@ -249,7 +249,7 @@ fn callable_type(i: Input<'_>) -> Output<CallableType> {
     let position = i.position();
     map(
         tuple((keyword("fn"), type_list, opt(return_part))),
-        move |sig| CallableType {
+        move |sig| CallableDef {
             position,
             args    : sig.1,
             ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
@@ -258,7 +258,7 @@ fn callable_type(i: Input<'_>) -> Output<CallableType> {
     )(i)
 }
 
-fn enum_type(i: Input<'_>) -> Output<EnumType> {
+fn enum_type(i: Input<'_>) -> Output<EnumDef> {
     fn variant(i: Input<'_>) -> Output<VariantDef> {
         let position = i.position();
         map(
@@ -301,7 +301,7 @@ fn enum_type(i: Input<'_>) -> Output<EnumType> {
             if have_data && have_value {
                 Err(Failure { input: j.clone(), kind: ParseErrorKind::IllegalVariantMix })
             } else {
-                Ok(EnumType {
+                Ok(EnumDef {
                     position: position,
                     ident   : pair.1.0,
                     variants: pair.1.2,
@@ -314,7 +314,7 @@ fn enum_type(i: Input<'_>) -> Output<EnumType> {
     )(i)
 }
 
-fn struct_type(i: Input<'_>) -> Output<StructType> {
+fn struct_type(i: Input<'_>) -> Output<StructDef> {
     fn field(i: Input<'_>) -> Output<(String, InlineType)> {
         map(
             tuple((word, punct(":"), inline_type)),
@@ -335,7 +335,7 @@ fn struct_type(i: Input<'_>) -> Output<StructType> {
             terminated(opt(keyword("pub")), check_flags(keyword("struct"), |s| if s.in_function { Some(ParseErrorKind::IllegalStructDef) } else { None })),
             tuple((ident, punct("{"), fields, opt(punct(",")), punct("}")))
         ),
-        move |pair| StructType {
+        move |pair| StructDef {
             position: position,
             ident   : pair.1.0,
             fields  : pair.1.2,
@@ -345,7 +345,7 @@ fn struct_type(i: Input<'_>) -> Output<StructType> {
     )(i)
 }
 
-fn trait_type(i: Input<'_>) -> Output<TraitType> {
+fn trait_type(i: Input<'_>) -> Output<TraitDef> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
@@ -353,7 +353,7 @@ fn trait_type(i: Input<'_>) -> Output<TraitType> {
             terminated(opt(keyword("pub")), check_flags(keyword("trait"), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
             tuple((ident, punct("{"), with_flags(&|flags| flags.in_trait = true, many0(function)), punct("}")))
         ),
-        move |pair| TraitType {
+        move |pair| TraitDef {
             position,
             functions   : pair.1.2,
             scope_id    : j.scope_id(),
@@ -364,11 +364,11 @@ fn trait_type(i: Input<'_>) -> Output<TraitType> {
     ))(i)
 }
 
-fn array_type(i: Input<'_>) -> Output<ArrayType> {
+fn array_type(i: Input<'_>) -> Output<ArrayDef> {
     let position = i.position();
     map(
         delimited(punct("["), inline_type, punct("]")),
-        move |ty| ArrayType {
+        move |ty| ArrayDef {
             position    : position,
             element_type: ty,
             type_id     : None,
@@ -1312,7 +1312,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 fn statement(i: Input<'_>) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
-        map(use_decl, |m| Statement::Use(m)),
+        map(use_decl, |m| Statement::UseDecl(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),
@@ -1335,7 +1335,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
 
 fn root_items(i: Input<'_>) -> Output<Statement> {
     alt((
-        map(use_decl, |m| Statement::Use(m)),
+        map(use_decl, |m| Statement::UseDecl(m)),
         map(module, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
         map(struct_type, |m| Statement::StructDef(m)),
