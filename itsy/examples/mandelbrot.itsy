@@ -85,7 +85,7 @@ fn main() {
  * max_iterations - chars.len() iterations will be rendered as whitespace, the remaining points with a character based
  * on the number of required iterations.
  */
-fn mandelbrot(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64, use_rust: bool) -> String {
+fn mandelbrot_frame(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64, use_rust: bool) -> String {
 
     let start_depth = if max_depth > chars.len() as u32 { max_depth - chars.len() as u32 } else { 0 };
     let x0 = -2.0f64 + ((2.0 + center_x) * (1.0 - zoom));
@@ -103,16 +103,7 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: 
             let n = if use_rust {
                 fastbrot(max_depth, rx, ry)
             } else {
-                let depth = 0;
-                let r = 0f64;
-                let i = 0f64;
-                while depth < max_depth && 4.0 > r * r + i * i {
-                    let i_tmp = i * i;
-                    i = r * i * 2.0 + ry;
-                    r = r * r - i_tmp + rx;
-                    depth += 1;
-                }
-                depth
+                mandelbrot(max_depth, rx, ry)
             };
             // Output the character, omit color code if same as last char to improve terminal performance.
             result += get_char(start_depth, n, chars, last_n != n);
@@ -124,6 +115,22 @@ fn mandelbrot(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: 
     }
 
     result
+}
+
+/**
+ * Returns mandelbroth depth for given point.
+ */
+fn mandelbrot(max_depth: u32, x: f64, y: f64) -> u32 {
+    let depth = 0;
+    let r = 0f64;
+    let i = 0f64;
+    while depth < max_depth && 4.0 > r * r + i * i {
+        let i_tmp = i * i;
+        i = r * i * 2.0 + y;
+        r = r * r - i_tmp + x;
+        depth += 1;
+    }
+    depth
 }
 
 /**
@@ -161,7 +168,7 @@ fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, r
 
     print(
         intro_str + " ".repeat(width as u64 - exit_str.len() - (intro_str.len() - 6) /* 6 escapes in intro */) + exit_str + "\n" +
-        mandelbrot(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle, use_rust) + "{esc}[0m" +
+        mandelbrot_frame(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle, use_rust) + "{esc}[0m" +
         subline_str + " ".repeat(width as u64 - subline_str.len() - 1 /* -1 to keep cursor inside screen at bottom right */)
     );
 
