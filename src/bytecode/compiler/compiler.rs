@@ -1021,65 +1021,74 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             _ => None,
         };
         match (item.op, exprs) {
-            // TODO: move to future optimizer. here to test whether these opcodes are even beneficial
+            // TODO: move to future optimizer. here to test whether these opcodes are even beneficial (they are)
             // Multiplication optimizations
-            (Mul, Some((E::Variable(vl), E::Variable(vr)))) => {
-                let addr_l = self.load_variable(vl)?;
-                let addr_r = self.load_variable(vr)?;
+            (Mul, Some((E::Variable(var_l), E::Variable(var_r)))) => {
+                let addr_l = self.load_variable(var_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
                 self.write_mul_vv(self.ty(&item.left), addr_l, addr_r)?;
                 Ok(())
             },
-            (Mul, Some((left, E::Variable(right)))) |
-            (Mul, Some((E::Variable(right), left))) if self.ty(&item.left).is_numeric() => {
-                self.compile_expression(left)?;
-                let addr_r = self.load_variable(right)?;
+            (Mul, Some((exp_l, E::Variable(var_r)))) |
+            (Mul, Some((E::Variable(var_r), exp_l))) if self.ty(&item.left).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}", item.op, var_r.ident);
                 self.write_mul_pv(self.ty(&item.left), addr_r)?;
                 Ok(())
             },
-            (Mul, Some((left, E::Literal(right)))) |
-            (Mul, Some((E::Literal(right), left))) if self.ty(right).is_numeric() => {
-                self.compile_expression(left)?;
-                let numeric = right.value.as_numeric().ice()?;
+            (Mul, Some((exp_l, E::Literal(lit_r)))) |
+            (Mul, Some((E::Literal(lit_r), exp_l))) if self.ty(lit_r).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let numeric = lit_r.value.as_numeric().ice()?;
+                comment!(self, "{}{}", item.op, numeric);
                 self.write_mul_pi(self.ty(&item.left), numeric)?;
                 Ok(())
             },
             // Addition optimizations
-            (Add, Some((E::Variable(vl), E::Variable(vr)))) if self.ty(&item.left).is_numeric() => {
-                let addr_l = self.load_variable(vl)?;
-                let addr_r = self.load_variable(vr)?;
+            (Add, Some((E::Variable(var_l), E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
+                let addr_l = self.load_variable(var_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
                 self.write_add_vv(self.ty(&item.left), addr_l, addr_r)?;
                 Ok(())
             },
-            (Add, Some((left, E::Variable(right)))) |
-            (Add, Some((E::Variable(right), left))) if self.ty(&item.left).is_numeric() => {
-                self.compile_expression(left)?;
-                let addr_r = self.load_variable(right)?;
+            (Add, Some((exp_l, E::Variable(var_r)))) |
+            (Add, Some((E::Variable(var_r), exp_l))) if self.ty(&item.left).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}", item.op, var_r.ident);
                 self.write_add_pv(self.ty(&item.left), addr_r)?;
                 Ok(())
             },
-            (Add, Some((left, E::Literal(right)))) |
-            (Add, Some((E::Literal(right), left))) if self.ty(right).is_numeric() => {
-                self.compile_expression(left)?;
-                let numeric = right.value.as_numeric().ice()?;
+            (Add, Some((exp_l, E::Literal(lit_r)))) |
+            (Add, Some((E::Literal(lit_r), exp_l))) if self.ty(lit_r).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let numeric = lit_r.value.as_numeric().ice()?;
+                comment!(self, "{}{}", item.op, numeric);
                 self.write_add_pi(self.ty(&item.left), numeric)?;
                 Ok(())
             },
             // Subtraction optimizations
-            (Sub, Some((E::Variable(vl), E::Variable(vr)))) if self.ty(&item.left).is_numeric() => {
-                let addr_l = self.load_variable(vl)?;
-                let addr_r = self.load_variable(vr)?;
+            (Sub, Some((E::Variable(var_l), E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
+                let addr_l = self.load_variable(var_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
                 self.write_sub_vv(self.ty(&item.left), addr_l, addr_r)?;
                 Ok(())
             },
-            (Sub, Some((left, E::Variable(right)))) if self.ty(&item.left).is_numeric() => {
-                self.compile_expression(left)?;
-                let addr_r = self.load_variable(right)?;
+            (Sub, Some((exp_l, E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let addr_r = self.load_variable(var_r)?;
+                comment!(self, "{}{}", item.op, var_r.ident);
                 self.write_sub_pv(self.ty(&item.left), addr_r)?;
                 Ok(())
             },
-            (Sub, Some((left, E::Literal(right)))) if self.ty(right).is_numeric() => {
-                self.compile_expression(left)?;
-                let numeric = right.value.as_numeric().ice()?;
+            (Sub, Some((exp_l, E::Literal(lit_r)))) if self.ty(lit_r).is_numeric() => {
+                self.compile_expression(exp_l)?;
+                let numeric = lit_r.value.as_numeric().ice()?;
+                comment!(self, "{}{}", item.op, numeric);
                 self.write_sub_pi(self.ty(&item.left), numeric)?;
                 Ok(())
             },
