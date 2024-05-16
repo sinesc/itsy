@@ -16,7 +16,7 @@ use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use util::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
-use macros::comment;
+use macros::{comment, select_integer_type, select_numeric_type, select_numeric_cast_type, select_primitive_size};
 
 /// Bytecode emitter. Compiles bytecode from resolved program (AST).
 pub(crate) struct Compiler<T> {
@@ -292,10 +292,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         match (item.op, &item.right) {
             (AddAssign, E::Literal(r)) if self.ty(&item.left).is_numeric() => {
-                self.write_add_vi(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
+                self.write_addvc(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
             },
             (SubAssign, E::Literal(r)) if self.ty(&item.left).is_numeric() => {
-                self.write_sub_vi(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
+                self.write_subvc(self.ty(&item.left), loc, r.value.as_numeric().ice()?)?;
             },
             (Assign, _) => {
                 self.compile_expression(&item.right)?;
@@ -626,7 +626,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
             self.write_clte(iter_ty)?;                                         // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123);                // stack: upper
-            self.write_sub_pi(iter_ty, Numeric::Unsigned(1))?;                                        // stack: upper=upper-1
+            self.write_subxc(iter_ty, Numeric::Unsigned(1))?;                                        // stack: upper=upper-1
             skip_jump
         } else {
             // inclusive range: check if lower bound greater than upper bound.
@@ -1028,13 +1028,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
                 match op {
-                    Mul         => self.write_mul_vv(self.ty(&item.left), addr_l, addr_r)?,
-                    Add         => self.write_add_vv(self.ty(&item.left), addr_l, addr_r)?,
-                    Sub         => self.write_sub_vv(self.ty(&item.left), addr_l, addr_r)?,
-                    Less        => self.write_clt_vv(self.ty(&item.left), addr_l, addr_r)?,
-                    LessOrEq    => self.write_clte_vv(self.ty(&item.left), addr_l, addr_r)?,
-                    Greater     => self.write_clt_vv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>b equals b<a
-                    GreaterOrEq => self.write_clte_vv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>=b equals b<=a
+                    Mul         => self.write_mulvv(self.ty(&item.left), addr_l, addr_r)?,
+                    Add         => self.write_addvv(self.ty(&item.left), addr_l, addr_r)?,
+                    Sub         => self.write_subvv(self.ty(&item.left), addr_l, addr_r)?,
+                    Less        => self.write_cltvv(self.ty(&item.left), addr_l, addr_r)?,
+                    LessOrEq    => self.write_cltevv(self.ty(&item.left), addr_l, addr_r)?,
+                    Greater     => self.write_cltvv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>b equals b<a
+                    GreaterOrEq => self.write_cltevv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>=b equals b<=a
                     _ => unreachable!(),
                 };
                 Ok(())
@@ -1045,13 +1045,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}", item.op, var_r.ident);
                 match op {
-                    Mul         => self.write_mul_pv(self.ty(&item.left), addr_r)?,
-                    Add         => self.write_add_pv(self.ty(&item.left), addr_r)?,
-                    Sub         => self.write_sub_pv(self.ty(&item.left), addr_r)?,
-                    Less        => self.write_clt_pv(self.ty(&item.left), addr_r)?,
-                    LessOrEq    => self.write_clte_pv(self.ty(&item.left), addr_r)?,
-                    Greater     => self.write_cgt_pv(self.ty(&item.left), addr_r)?,
-                    GreaterOrEq => self.write_cgte_pv(self.ty(&item.left), addr_r)?,
+                    Mul         => self.write_mulxv(self.ty(&item.left), addr_r)?,
+                    Add         => self.write_addxv(self.ty(&item.left), addr_r)?,
+                    Sub         => self.write_subxv(self.ty(&item.left), addr_r)?,
+                    Less        => self.write_cltxv(self.ty(&item.left), addr_r)?,
+                    LessOrEq    => self.write_cltexv(self.ty(&item.left), addr_r)?,
+                    Greater     => self.write_cgtxv(self.ty(&item.left), addr_r)?,
+                    GreaterOrEq => self.write_cgtexv(self.ty(&item.left), addr_r)?,
                     _ => unreachable!(),
                 };
                 Ok(())
@@ -1062,13 +1062,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}", item.op, var_r.ident);
                 match op {
-                    Mul => self.write_mul_pv(self.ty(&item.left), addr_r)?,
-                    Add => self.write_add_pv(self.ty(&item.left), addr_r)?,
+                    Mul         => self.write_mulxv(self.ty(&item.left), addr_r)?,
+                    Add         => self.write_addxv(self.ty(&item.left), addr_r)?,
                     // Sub is not commuatative
-                    Less        => self.write_cgt_pv(self.ty(&item.left), addr_r)?, // swapped gt/lt
-                    LessOrEq    => self.write_cgte_pv(self.ty(&item.left), addr_r)?,
-                    Greater     => self.write_clt_pv(self.ty(&item.left), addr_r)?,
-                    GreaterOrEq => self.write_clte_pv(self.ty(&item.left), addr_r)?,
+                    Less        => self.write_cgtxv(self.ty(&item.left), addr_r)?, // swapped gt/lt
+                    LessOrEq    => self.write_cgtexv(self.ty(&item.left), addr_r)?,
+                    Greater     => self.write_cltxv(self.ty(&item.left), addr_r)?,
+                    GreaterOrEq => self.write_cltexv(self.ty(&item.left), addr_r)?,
                     _ => unreachable!(),
                 };
                 Ok(())
@@ -1079,13 +1079,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let numeric = lit_r.value.as_numeric().ice()?;
                 comment!(self, "{}{}", item.op, numeric);
                 match op {
-                    Mul         => self.write_mul_pi(self.ty(&item.left), numeric)?,
-                    Add         => self.write_add_pi(self.ty(&item.left), numeric)?,
-                    Sub         => self.write_sub_pi(self.ty(&item.left), numeric)?,
-                    Less        => self.write_clt_pi(self.ty(&item.left), numeric)?,
-                    LessOrEq    => self.write_clte_pi(self.ty(&item.left), numeric)?,
-                    Greater     => self.write_cgt_pi(self.ty(&item.left), numeric)?,
-                    GreaterOrEq => self.write_cgte_pi(self.ty(&item.left), numeric)?,
+                    Mul         => self.write_mulxc(self.ty(&item.left), numeric)?,
+                    Add         => self.write_addxc(self.ty(&item.left), numeric)?,
+                    Sub         => self.write_subxc(self.ty(&item.left), numeric)?,
+                    Less        => self.write_cltxc(self.ty(&item.left), numeric)?,
+                    LessOrEq    => self.write_cltexc(self.ty(&item.left), numeric)?,
+                    Greater     => self.write_cgtxc(self.ty(&item.left), numeric)?,
+                    GreaterOrEq => self.write_cgtexc(self.ty(&item.left), numeric)?,
                     _ => unreachable!(),
                 };
                 Ok(())
@@ -1096,13 +1096,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let numeric = lit_r.value.as_numeric().ice()?;
                 comment!(self, "{}{}", item.op, numeric);
                 match op {
-                    Mul         => self.write_mul_pi(self.ty(&item.left), numeric)?,
-                    Add         => self.write_add_pi(self.ty(&item.left), numeric)?,
+                    Mul         => self.write_mulxc(self.ty(&item.left), numeric)?,
+                    Add         => self.write_addxc(self.ty(&item.left), numeric)?,
                     // Sub is not commuatative
-                    Less        => self.write_cgt_pi(self.ty(&item.left), numeric)?, // swapped gt/lt
-                    LessOrEq    => self.write_cgte_pi(self.ty(&item.left), numeric)?,
-                    Greater     => self.write_clt_pi(self.ty(&item.left), numeric)?,
-                    GreaterOrEq => self.write_clte_pi(self.ty(&item.left), numeric)?,
+                    Less        => self.write_cgtxc(self.ty(&item.left), numeric)?, // swapped gt/lt
+                    LessOrEq    => self.write_cgtexc(self.ty(&item.left), numeric)?,
+                    Greater     => self.write_cltxc(self.ty(&item.left), numeric)?,
+                    GreaterOrEq => self.write_cltexc(self.ty(&item.left), numeric)?,
                     _ => unreachable!(),
                 };
                 Ok(())
@@ -1587,10 +1587,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let constructor = self.constructor(ty)?;
             let small = constructor as StackAddress <= u16::MAX as StackAddress;
             match (nc, small) {
-                (true, true)  => self.writer.cnt_16_nc(constructor as FrameAddress, op),
-                (true, false)  => self.writer.cnt_sa_nc(constructor, op),
-                (false, true)  => self.writer.cnt_16(constructor as FrameAddress, op),
-                (false, false)  => self.writer.cnt_sa(constructor, op),
+                (true, true) => self.writer.cnt_16_nc(constructor as FrameAddress, op),
+                (true, false) => self.writer.cnt_sa_nc(constructor, op),
+                (false, true) => self.writer.cnt_16(constructor as FrameAddress, op),
+                (false, false) => self.writer.cnt_sa(constructor, op),
             }
         } else {
             self.writer.position()
@@ -1606,13 +1606,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Writes instructions to fetch a value of the given size from the target of the top heap reference on the stack.
     fn write_heap_fetch(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        Ok(match ty.primitive_size() {
-            1 => self.writer.heap_fetch8(),
-            2 => self.writer.heap_fetch16(),
-            4 => self.writer.heap_fetch32(),
-            8 => self.writer.heap_fetch64(),
-            size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-        })
+        Ok(select_primitive_size!(self, ty, heap_fetch))
     }
 
     /// Writes instructions to put a value of the given type at the target of the top heap reference on the stack.
@@ -1627,13 +1621,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.writer.heap_putx_new(constructor)
             }
         } else {
-            match ty.primitive_size() {
-                1 => self.writer.heap_put8(),
-                2 => self.writer.heap_put16(),
-                4 => self.writer.heap_put32(),
-                8 => self.writer.heap_put64(),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-            }
+            select_primitive_size!(self, ty, heap_put)
         })
     }
 
@@ -1643,13 +1631,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(if result_type.is_ref() {
             self.writer.heap_fetch_memberx(offset, constructor)
         } else {
-            match result_type.primitive_size() {
-                1 => self.writer.heap_fetch_member8(offset, constructor),
-                2 => self.writer.heap_fetch_member16(offset, constructor),
-                4 => self.writer.heap_fetch_member32(offset, constructor),
-                8 => self.writer.heap_fetch_member64(offset, constructor),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
-            }
+            select_primitive_size!(self, result_type, heap_fetch_member, offset, constructor)
         })
     }
 
@@ -1659,13 +1641,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(if result_type.is_ref() {
             self.writer.heap_fetch_elementx(constructor)
         } else {
-            match result_type.primitive_size() {
-                1 => self.writer.heap_fetch_element8(constructor),
-                2 => self.writer.heap_fetch_element16(constructor),
-                4 => self.writer.heap_fetch_element32(constructor),
-                8 => self.writer.heap_fetch_element64(constructor),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, result_type))?,
-            }
+            select_primitive_size!(self, result_type, heap_fetch_element, constructor)
         })
     }
 
@@ -1681,25 +1657,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 BranchingState::MaybeInitialized => self.writer.storex_replace(loc, constructor), // used to be separate instruction, replace now handles both
             }
         } else {
-            match ty.primitive_size() {
-                1 => self.writer.store8_16(loc),
-                2 => self.writer.store16_16(loc),
-                4 => self.writer.store32_16(loc),
-                8 => self.writer.store64_16(loc),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-            }
+            select_primitive_size!(self, ty, store, loc)
         })
     }
 
     /// Writes an appropriate variant of the load instruction.
     fn write_load(self: &Self, ty: &Type, loc: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty.primitive_size() {
-            1 => self.writer.load8_16(loc),
-            2 => self.writer.load16_16(loc),
-            4 => self.writer.load32_16(loc),
-            8 => self.writer.load64_16(loc),
-            size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-        })
+        Ok(select_primitive_size!(self, ty, load, loc))
     }
 
     /// Discard topmost stack value and drop temporaries for reference types.
@@ -1771,17 +1735,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     /// Write loop instruction.
     fn write_loop(self: &Self, ty: &Type, iter: FrameAddress, start: StackAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.loops8(iter, start),
-            Type::i16 => self.writer.loops16(iter, start),
-            Type::i32 => self.writer.loops32(iter, start),
-            Type::i64 => self.writer.loops64(iter, start),
-            Type::u8 => self.writer.loopu8(iter, start),
-            Type::u16 => self.writer.loopu16(iter, start),
-            Type::u32 => self.writer.loopu32(iter, start),
-            Type::u64 => self.writer.loopu64(iter, start),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+        Ok(select_integer_type!(self, ty, loop, iter, start))
     }
 
     /// Write loop instruction.
@@ -1789,291 +1743,95 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(if element_ty.is_ref() {
             self.writer.arrayiter64(element, exit)
         } else {
-            match element_ty.primitive_size() {
-                1 => self.writer.arrayiter8(element, exit),
-                2 => self.writer.arrayiter16(element, exit),
-                4 => self.writer.arrayiter32(element, exit),
-                8 => self.writer.arrayiter64(element, exit),
-                size @ _ => Self::ice(&format!("Unsupported size {} for element type {:?}", size, element_ty))?,
-            }
+            select_primitive_size!(self, element_ty, arrayiter, element, exit)
         })
     }
 
     /// Write subtraction instruction.
     fn write_sub(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.subs8(),
-            Type::i16 => self.writer.subs16(),
-            Type::i32 => self.writer.subs32(),
-            Type::i64 => self.writer.subs64(),
-            Type::u8 => self.writer.subu8(),
-            Type::u16 => self.writer.subu16(),
-            Type::u32 => self.writer.subu32(),
-            Type::u64 => self.writer.subu64(),
-            Type::f32 => self.writer.subf32(),
-            Type::f64 => self.writer.subf64(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+        Ok(select_numeric_type!(self, ty, sub))
     }
 
     /// Write variable+variable subtraction instruction.
-    fn write_sub_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.subs8_vv(left, right),
-            Type::i16 => self.writer.subs16_vv(left, right),
-            Type::i32 => self.writer.subs32_vv(left, right),
-            Type::i64 => self.writer.subs64_vv(left, right),
-            Type::u8 => self.writer.subu8_vv(left, right),
-            Type::u16 => self.writer.subu16_vv(left, right),
-            Type::u32 => self.writer.subu32_vv(left, right),
-            Type::u64 => self.writer.subu64_vv(left, right),
-            Type::f32 => self.writer.subf32_vv(left, right),
-            Type::f64 => self.writer.subf64_vv(left, right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_subvv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, subvv, left, right))
     }
 
     /// Write expression+variable subtraction instruction.
-    fn write_sub_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.subs8_pv(right),
-            Type::i16 => self.writer.subs16_pv(right),
-            Type::i32 => self.writer.subs32_pv(right),
-            Type::i64 => self.writer.subs64_pv(right),
-            Type::u8 => self.writer.subu8_pv(right),
-            Type::u16 => self.writer.subu16_pv(right),
-            Type::u32 => self.writer.subu32_pv(right),
-            Type::u64 => self.writer.subu64_pv(right),
-            Type::f32 => self.writer.subf32_pv(right),
-            Type::f64 => self.writer.subf64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_subxv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, subxv, right))
     }
 
     /// Write expression+immediate subtraction instruction.
-    fn write_sub_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.subs8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.subs16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.subs32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.subs64_pi(right.as_signed().ice()? as i64),
-            Type::u8 => self.writer.subu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.subu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.subu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.subu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.subf32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.subf64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_subxc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, subxc, right))
     }
 
     /// Write variable+=immediate subtraction instruction.
-    fn write_sub_vi(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.subs8_vi(left, right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.subs16_vi(left, right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.subs32_vi(left, right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.subs64_vi(left, right.as_signed().ice()? as i64),
-            Type::u8 => self.writer.subu8_vi(left, right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.subu16_vi(left, right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.subu32_vi(left, right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.subu64_vi(left, right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.subf32_vi(left, right.as_float().ice()? as f32),
-            Type::f64 => self.writer.subf64_vi(left, right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_subvc(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, subvc [ left ] , right))
     }
 
     /// Write general addition instruction.
-    fn write_add(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
+    fn write_add(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(match ty {
-            Type::i8 => self.writer.adds8(),
-            Type::i16 => self.writer.adds16(),
-            Type::i32 => self.writer.adds32(),
-            Type::i64 => self.writer.adds64(),
-            Type::u8 => self.writer.addu8(),
-            Type::u16 => self.writer.addu16(),
-            Type::u32 => self.writer.addu32(),
-            Type::u64 => self.writer.addu64(),
-            Type::f32 => self.writer.addf32(),
-            Type::f64 => self.writer.addf64(),
             Type::String => self.writer.string_concatx(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+            _ => select_numeric_type!(self, ty, add),
         })
     }
 
     /// Write variable+variable addition instruction.
-    fn write_add_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.adds8_vv(left, right),
-            Type::i16 => self.writer.adds16_vv(left, right),
-            Type::i32 => self.writer.adds32_vv(left, right),
-            Type::i64 => self.writer.adds64_vv(left, right),
-            Type::u8 => self.writer.addu8_vv(left, right),
-            Type::u16 => self.writer.addu16_vv(left, right),
-            Type::u32 => self.writer.addu32_vv(left, right),
-            Type::u64 => self.writer.addu64_vv(left, right),
-            Type::f32 => self.writer.addf32_vv(left, right),
-            Type::f64 => self.writer.addf64_vv(left, right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_addvv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, addvv, left, right))
     }
 
     /// Write expression+variable addition instruction.
-    fn write_add_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.adds8_pv(right),
-            Type::i16 => self.writer.adds16_pv(right),
-            Type::i32 => self.writer.adds32_pv(right),
-            Type::i64 => self.writer.adds64_pv(right),
-            Type::u8 => self.writer.addu8_pv(right),
-            Type::u16 => self.writer.addu16_pv(right),
-            Type::u32 => self.writer.addu32_pv(right),
-            Type::u64 => self.writer.addu64_pv(right),
-            Type::f32 => self.writer.addf32_pv(right),
-            Type::f64 => self.writer.addf64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_addxv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, addxv, right))
     }
 
     /// Write expression+immediate addition instruction.
-    fn write_add_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.adds8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.adds16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.adds32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.adds64_pi(right.as_signed().ice()? as i64),
-            Type::u8 => self.writer.addu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.addu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.addu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.addu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.addf32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.addf64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_addxc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, addxc, right))
     }
 
     /// Write variable+=immediate addition instruction.
-    fn write_add_vi(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.adds8_vi(left, right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.adds16_vi(left, right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.adds32_vi(left, right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.adds64_vi(left, right.as_signed().ice()? as i64),
-            Type::u8 => self.writer.addu8_vi(left, right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.addu16_vi(left, right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.addu32_vi(left, right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.addu64_vi(left, right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.addf32_vi(left, right.as_float().ice()? as f32),
-            Type::f64 => self.writer.addf64_vi(left, right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_addvc(self: &Self, ty: &Type, left: FrameAddress, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, addvc [ left ] , right))
     }
 
     /// Write general multiplication instruction.
     fn write_mul(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.muls8(),
-            Type::i16 => self.writer.muls16(),
-            Type::i32 => self.writer.muls32(),
-            Type::i64 => self.writer.muls64(),
-            Type::u8 => self.writer.mulu8(),
-            Type::u16 => self.writer.mulu16(),
-            Type::u32 => self.writer.mulu32(),
-            Type::u64 => self.writer.mulu64(),
-            Type::f32 => self.writer.mulf32(),
-            Type::f64 => self.writer.mulf64(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+        Ok(select_numeric_type!(self, ty, mul))
     }
 
     /// Write variable*variable multiplication instruction.
-    fn write_mul_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.muls8_vv(left, right),
-            Type::i16 => self.writer.muls16_vv(left, right),
-            Type::i32 => self.writer.muls32_vv(left, right),
-            Type::i64 => self.writer.muls64_vv(left, right),
-            Type::u8 => self.writer.mulu8_vv(left, right),
-            Type::u16 => self.writer.mulu16_vv(left, right),
-            Type::u32 => self.writer.mulu32_vv(left, right),
-            Type::u64 => self.writer.mulu64_vv(left, right),
-            Type::f32 => self.writer.mulf32_vv(left, right),
-            Type::f64 => self.writer.mulf64_vv(left, right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_mulvv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, mulvv, left, right))
     }
 
     /// Write expression*variable multiplication instruction.
-    fn write_mul_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.muls8_pv(right),
-            Type::i16 => self.writer.muls16_pv(right),
-            Type::i32 => self.writer.muls32_pv(right),
-            Type::i64 => self.writer.muls64_pv(right),
-            Type::u8 => self.writer.mulu8_pv(right),
-            Type::u16 => self.writer.mulu16_pv(right),
-            Type::u32 => self.writer.mulu32_pv(right),
-            Type::u64 => self.writer.mulu64_pv(right),
-            Type::f32 => self.writer.mulf32_pv(right),
-            Type::f64 => self.writer.mulf64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_mulxv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, mulxv, right))
     }
 
     /// Write expression*immediate multiplication instruction.
-    fn write_mul_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-            Type::i8 => self.writer.muls8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.muls16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.muls32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.muls64_pi(right.as_signed().ice()? as i64),
-            Type::u8 => self.writer.mulu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.mulu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.mulu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.mulu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.mulf32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.mulf64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_mulxc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, mulxc, right))
     }
 
     /// Write division instruction.
-    fn write_div(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.divs8(),
-            Type::i16 => self.writer.divs16(),
-            Type::i32 => self.writer.divs32(),
-            Type::i64 => self.writer.divs64(),
-            Type::u8 => self.writer.divu8(),
-            Type::u16 => self.writer.divu16(),
-            Type::u32 => self.writer.divu32(),
-            Type::u64 => self.writer.divu64(),
-            Type::f32 => self.writer.divf32(),
-            Type::f64 => self.writer.divf64(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_div(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, div))
     }
 
     /// Write remainder instruction.
-    fn write_rem(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.rems8(),
-            Type::i16 => self.writer.rems16(),
-            Type::i32 => self.writer.rems32(),
-            Type::i64 => self.writer.rems64(),
-            Type::u8 => self.writer.remu8(),
-            Type::u16 => self.writer.remu16(),
-            Type::u32 => self.writer.remu32(),
-            Type::u64 => self.writer.remu64(),
-            Type::f32 => self.writer.remf32(),
-            Type::f64 => self.writer.remf64(),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_rem(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, rem))
     }
 
     /// Write negation instruction.
-    fn write_neg(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
+    fn write_neg(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(match ty {
             Type::i8 => self.writer.negs8(),
             Type::i16 => self.writer.negs16(),
@@ -2086,15 +1844,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write compare equal instruction.
-    fn write_ceq(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
+    fn write_ceq(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty.primitive_size() {
-                1 => self.writer.ceq8(),
-                2 => self.writer.ceq16(),
-                4 => self.writer.ceq32(),
-                8 => self.writer.ceq64(),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-            }
+            select_primitive_size!(self, ty, ceq)
         } else if ty.is_string() {
             self.writer.string_ceq()
         } else {
@@ -2105,13 +1857,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write compare not equal instruction.
     fn write_cneq(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty.primitive_size() {
-                1 => self.writer.cneq8(),
-                2 => self.writer.cneq16(),
-                4 => self.writer.cneq32(),
-                8 => self.writer.cneq64(),
-                size @ _ => Self::ice(&format!("Unsupported size {} for type {:?}", size, ty))?,
-            }
+            select_primitive_size!(self, ty, cneq)
         } else if ty.is_string() {
             self.writer.string_cneq()
         } else {
@@ -2122,19 +1868,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write compare less than instruction.
     fn write_clt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty {
-                Type::i8 => self.writer.clts8(),
-                Type::i16 => self.writer.clts16(),
-                Type::i32 => self.writer.clts32(),
-                Type::i64 => self.writer.clts64(),
-                Type::u8 => self.writer.cltu8(),
-                Type::u16 => self.writer.cltu16(),
-                Type::u32 => self.writer.cltu32(),
-                Type::u64 => self.writer.cltu64(),
-                Type::f32 => self.writer.cltf32(),
-                Type::f64 => self.writer.cltf64(),
-                _ => Self::ice(&format!("Unsupported operation for type {ty}"))?,
-            }
+            select_numeric_type!(self, ty, clt)
         } else if ty.is_string() {
             self.writer.string_clt()
         } else {
@@ -2143,72 +1877,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write variable<variable comparison instruction.
-    fn write_clt_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.clts8_vv(left, right),
-            Type::i16 => self.writer.clts16_vv(left, right),
-            Type::i32 => self.writer.clts32_vv(left, right),
-            Type::i64 => self.writer.clts64_vv(left, right),
-            Type::u8 => self.writer.cltu8_vv(left, right),
-            Type::u16 => self.writer.cltu16_vv(left, right),
-            Type::u32 => self.writer.cltu32_vv(left, right),
-            Type::u64 => self.writer.cltu64_vv(left, right),
-            Type::f32 => self.writer.cltf32_vv(left, right),
-            Type::f64 => self.writer.cltf64_vv(left, right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltvv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cltvv, left, right))
     }
 
     /// Write expression<immediate comparison instruction.
-    fn write_clt_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.clts8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.clts16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.clts32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.clts64_pi(right.as_signed().ice()? as i64),
-             Type::u8 => self.writer.cltu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.cltu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.cltu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.cltu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.cltf32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.cltf64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltxc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, cltxc, right))
     }
 
     /// Write expression<variable comparison instruction.
-    fn write_clt_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.clts8_pv(right),
-            Type::i16 => self.writer.clts16_pv(right),
-            Type::i32 => self.writer.clts32_pv(right),
-            Type::i64 => self.writer.clts64_pv(right),
-             Type::u8 => self.writer.cltu8_pv(right),
-            Type::u16 => self.writer.cltu16_pv(right),
-            Type::u32 => self.writer.cltu32_pv(right),
-            Type::u64 => self.writer.cltu64_pv(right),
-            Type::f32 => self.writer.cltf32_pv(right),
-            Type::f64 => self.writer.cltf64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltxv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cltxv, right))
     }
 
     /// Write compare less than or equal instruction.
     fn write_clte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty {
-                Type::i8 => self.writer.cltes8(),
-                Type::i16 => self.writer.cltes16(),
-                Type::i32 => self.writer.cltes32(),
-                Type::i64 => self.writer.cltes64(),
-                Type::u8 => self.writer.clteu8(),
-                Type::u16 => self.writer.clteu16(),
-                Type::u32 => self.writer.clteu32(),
-                Type::u64 => self.writer.clteu64(),
-                Type::f32 => self.writer.cltef32(),
-                Type::f64 => self.writer.cltef64(),
-                _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-            }
+            select_numeric_type!(self, ty, clte)
         } else if ty.is_string() {
             self.writer.string_clte()
         } else {
@@ -2217,72 +1903,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write variable<=variable comparison instruction.
-    fn write_clte_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
-        Ok(match ty {
-            Type::i8 => self.writer.cltes8_vv(left, right),
-            Type::i16 => self.writer.cltes16_vv(left, right),
-            Type::i32 => self.writer.cltes32_vv(left, right),
-            Type::i64 => self.writer.cltes64_vv(left, right),
-            Type::u8 => self.writer.clteu8_vv(left, right),
-            Type::u16 => self.writer.clteu16_vv(left, right),
-            Type::u32 => self.writer.clteu32_vv(left, right),
-            Type::u64 => self.writer.clteu64_vv(left, right),
-            Type::f32 => self.writer.cltef32_vv(left, right),
-            Type::f64 => self.writer.cltef64_vv(left, right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltevv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cltevv, left, right))
     }
 
     /// Write expression<=immediate comparison instruction.
-    fn write_clte_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cltes8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.cltes16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.cltes32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.cltes64_pi(right.as_signed().ice()? as i64),
-             Type::u8 => self.writer.clteu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.clteu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.clteu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.clteu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.cltef32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.cltef64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltexc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, cltexc, right))
     }
 
     /// Write expression<=variable comparison instruction.
-    fn write_clte_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cltes8_pv(right),
-            Type::i16 => self.writer.cltes16_pv(right),
-            Type::i32 => self.writer.cltes32_pv(right),
-            Type::i64 => self.writer.cltes64_pv(right),
-             Type::u8 => self.writer.clteu8_pv(right),
-            Type::u16 => self.writer.clteu16_pv(right),
-            Type::u32 => self.writer.clteu32_pv(right),
-            Type::u64 => self.writer.clteu64_pv(right),
-            Type::f32 => self.writer.cltef32_pv(right),
-            Type::f64 => self.writer.cltef64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cltexv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cltexv, right))
     }
 
     /// Write compare greater than instruction.
     fn write_cgt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty {
-                Type::i8 => self.writer.cgts8(),
-                Type::i16 => self.writer.cgts16(),
-                Type::i32 => self.writer.cgts32(),
-                Type::i64 => self.writer.cgts64(),
-                Type::u8 => self.writer.cgtu8(),
-                Type::u16 => self.writer.cgtu16(),
-                Type::u32 => self.writer.cgtu32(),
-                Type::u64 => self.writer.cgtu64(),
-                Type::f32 => self.writer.cgtf32(),
-                Type::f64 => self.writer.cgtf64(),
-                _ => Self::ice(&format!("Unsupported operation for type {ty}"))?,
-            }
+            select_numeric_type!(self, ty, cgt)
         } else if ty.is_string() {
             self.writer.string_cgt()
         } else {
@@ -2291,55 +1929,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write expression<=immediate comparison instruction.
-    fn write_cgt_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cgts8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.cgts16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.cgts32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.cgts64_pi(right.as_signed().ice()? as i64),
-             Type::u8 => self.writer.cgtu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.cgtu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.cgtu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.cgtu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.cgtf32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.cgtf64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cgtxc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, cgtxc, right))
     }
 
     /// Write expression<=variable comparison instruction.
-    fn write_cgt_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cgts8_pv(right),
-            Type::i16 => self.writer.cgts16_pv(right),
-            Type::i32 => self.writer.cgts32_pv(right),
-            Type::i64 => self.writer.cgts64_pv(right),
-             Type::u8 => self.writer.cgtu8_pv(right),
-            Type::u16 => self.writer.cgtu16_pv(right),
-            Type::u32 => self.writer.cgtu32_pv(right),
-            Type::u64 => self.writer.cgtu64_pv(right),
-            Type::f32 => self.writer.cgtf32_pv(right),
-            Type::f64 => self.writer.cgtf64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cgtxv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cgtxv, right))
     }
 
     /// Write compare greater than or equal instruction.
     fn write_cgte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
-            match ty {
-                Type::i8 => self.writer.cgtes8(),
-                Type::i16 => self.writer.cgtes16(),
-                Type::i32 => self.writer.cgtes32(),
-                Type::i64 => self.writer.cgtes64(),
-                Type::u8 => self.writer.cgteu8(),
-                Type::u16 => self.writer.cgteu16(),
-                Type::u32 => self.writer.cgteu32(),
-                Type::u64 => self.writer.cgteu64(),
-                Type::f32 => self.writer.cgtef32(),
-                Type::f64 => self.writer.cgtef64(),
-                _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-            }
+            select_numeric_type!(self, ty, cgte)
         } else if ty.is_string() {
             self.writer.string_cgte()
         } else {
@@ -2348,37 +1950,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write expression<=immediate comparison instruction.
-    fn write_cgte_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cgtes8_pi(right.as_signed().ice()? as i8),
-            Type::i16 => self.writer.cgtes16_pi(right.as_signed().ice()? as i16),
-            Type::i32 => self.writer.cgtes32_pi(right.as_signed().ice()? as i32),
-            Type::i64 => self.writer.cgtes64_pi(right.as_signed().ice()? as i64),
-             Type::u8 => self.writer.cgteu8_pi(right.as_unsigned().ice()? as u8),
-            Type::u16 => self.writer.cgteu16_pi(right.as_unsigned().ice()? as u16),
-            Type::u32 => self.writer.cgteu32_pi(right.as_unsigned().ice()? as u32),
-            Type::u64 => self.writer.cgteu64_pi(right.as_unsigned().ice()? as u64),
-            Type::f32 => self.writer.cgtef32_pi(right.as_float().ice()? as f32),
-            Type::f64 => self.writer.cgtef64_pi(right.as_float().ice()? as f64),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cgtexc(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(select_numeric_cast_type!(self, ty, cgtexc, right))
     }
 
     /// Write expression<=variable comparison instruction.
-    fn write_cgte_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
-        Ok(match ty {
-             Type::i8 => self.writer.cgtes8_pv(right),
-            Type::i16 => self.writer.cgtes16_pv(right),
-            Type::i32 => self.writer.cgtes32_pv(right),
-            Type::i64 => self.writer.cgtes64_pv(right),
-             Type::u8 => self.writer.cgteu8_pv(right),
-            Type::u16 => self.writer.cgteu16_pv(right),
-            Type::u32 => self.writer.cgteu32_pv(right),
-            Type::u64 => self.writer.cgteu64_pv(right),
-            Type::f32 => self.writer.cgtef32_pv(right),
-            Type::f64 => self.writer.cgtef64_pv(right),
-            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
-        })
+    fn write_cgtexv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(select_numeric_type!(self, ty, cgtexv, right))
     }
 }
 

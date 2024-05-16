@@ -7,42 +7,87 @@ macro_rules! comment {
     }
 }
 pub(crate) use comment;
-/*
-/// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one signed argument.
-macro_rules! select_signed_opcode {
-    (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { panic!("Unsupported sa-sized variant.") };
-    (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
-        $self.writer.$variant_sa($value as StackOffset $(, $more)*)
-    };
-    ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
-        use core::{i8, i16};
-        if $value as StackOffset >= i8::MIN as StackOffset && $value as StackOffset <= i8::MAX as StackOffset {
-            $self.writer.$variant_8($value as i8 $(, $more)*)
-        } else if $value as StackOffset >= i16::MIN as StackOffset && $value as StackOffset <= i16::MAX as StackOffset {
-            $self.writer.$variant_16($value as i16 $(, $more)*)
-        } else {
-            select_signed_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
-        }
-    }}
-}
-pub(crate) use select_signed_opcode;
 
-/// Writes an 8bit, 16bit or StackAddress sized variant of an instruction that takes one unsigned argument.
-macro_rules! select_unsigned_opcode {
-    (@if_sa none, $self:ident, $value:expr $(, $more:expr)*) => { panic!("Unsupported sa-sized variant.") };
-    (@if_sa $variant_sa:ident, $self:ident, $value:expr $(, $more:expr)*) => {
-        $self.writer.$variant_sa($value as StackAddress $(, $more)*)
-    };
-    ($self:ident, $variant_8:ident, $variant_16:ident, $variant_sa:ident, $value:expr $(, $more:expr)*) => {{
-        use core::{u8, u16};
-        if $value as StackAddress <= u8::MAX as StackAddress {
-            $self.writer.$variant_8($value as u8 $(, $more)*)
-        } else if $value as StackAddress <= u16::MAX as StackAddress {
-            $self.writer.$variant_16($value as u16 $(, $more)*)
-        } else {
-            select_unsigned_opcode!(@if_sa $variant_sa, $self, $value $(, $more)*)
+// Selects an opcode variant based on type-size.
+macro_rules! select_primitive_size {
+    ($self:ident, $result_type:ident, $instruction:ident $(, $more:expr)*) => {{
+        use paste::paste;
+        paste! {
+            match $result_type.primitive_size() {
+                1 => $self.writer.[<$instruction 8>]($($more),*),
+                2 => $self.writer.[<$instruction 16>]($($more),*),
+                4 => $self.writer.[<$instruction 32>]($($more),*),
+                8 => $self.writer.[<$instruction 64>]($($more),*),
+                size @ _ => Self::ice(&format!("{}: Unsupported size {} of type {:?}", stringify!($instruction), size, $result_type))?,
+            }
         }
     }}
 }
-pub(crate) use select_unsigned_opcode;
-*/
+pub(crate) use select_primitive_size;
+
+// Selects an integer opcode variant based on type.
+macro_rules! select_integer_type {
+    ($self:ident, $result_type:ident, $instruction:ident $(, $more:expr)*) => {{
+        use paste::paste;
+        paste! {
+            match $result_type {
+                Type::i8 => $self.writer.[<$instruction s8>]($($more),*),
+                Type::i16 => $self.writer.[<$instruction s16>]($($more),*),
+                Type::i32 => $self.writer.[<$instruction s32>]($($more),*),
+                Type::i64 => $self.writer.[<$instruction s64>]($($more),*),
+                Type::u8 => $self.writer.[<$instruction u8>]($($more),*),
+                Type::u16 => $self.writer.[<$instruction u16>]($($more),*),
+                Type::u32 => $self.writer.[<$instruction u32>]($($more),*),
+                Type::u64 => $self.writer.[<$instruction u64>]($($more),*),
+                _ => Self::ice(&format!("{}: Unsupported type {:?}", stringify!($instruction), $result_type))?,
+            }
+        }
+    }}
+}
+pub(crate) use select_integer_type;
+
+// Selects a numeric opcode variant based on type.
+macro_rules! select_numeric_type {
+    ($self:ident, $result_type:ident, $instruction:ident $(, $more:expr)*) => {{
+        use paste::paste;
+        paste! {
+            match $result_type {
+                Type::i8 => $self.writer.[<$instruction s8>]($($more),*),
+                Type::i16 => $self.writer.[<$instruction s16>]($($more),*),
+                Type::i32 => $self.writer.[<$instruction s32>]($($more),*),
+                Type::i64 => $self.writer.[<$instruction s64>]($($more),*),
+                Type::u8 => $self.writer.[<$instruction u8>]($($more),*),
+                Type::u16 => $self.writer.[<$instruction u16>]($($more),*),
+                Type::u32 => $self.writer.[<$instruction u32>]($($more),*),
+                Type::u64 => $self.writer.[<$instruction u64>]($($more),*),
+                Type::f32 => $self.writer.[<$instruction f32>]($($more),*),
+                Type::f64 => $self.writer.[<$instruction f64>]($($more),*),
+                _ => Self::ice(&format!("{}: Unsupported type {:?}", stringify!($instruction), $result_type))?,
+            }
+        }
+    }}
+}
+pub(crate) use select_numeric_type;
+
+// Selects a numeric opcode variant based on type.
+macro_rules! select_numeric_cast_type {
+    ($self:ident, $result_type:ident, $instruction:ident $([ $extra:expr ])? $(, $more:expr)*) => {{
+        use paste::paste;
+        paste! {
+            match $result_type {
+                Type::i8 => $self.writer.[<$instruction s8>]($($extra,)? $($more.as_signed().ice()? as i8),*),
+                Type::i16 => $self.writer.[<$instruction s16>]($($extra,)? $($more.as_signed().ice()? as i16),*),
+                Type::i32 => $self.writer.[<$instruction s32>]($($extra,)? $($more.as_signed().ice()? as i32),*),
+                Type::i64 => $self.writer.[<$instruction s64>]($($extra,)? $($more.as_signed().ice()? as i64),*),
+                Type::u8 => $self.writer.[<$instruction u8>]($($extra,)? $($more.as_unsigned().ice()? as u8),*),
+                Type::u16 => $self.writer.[<$instruction u16>]($($extra,)? $($more.as_unsigned().ice()? as u16),*),
+                Type::u32 => $self.writer.[<$instruction u32>]($($extra,)? $($more.as_unsigned().ice()? as u32),*),
+                Type::u64 => $self.writer.[<$instruction u64>]($($extra,)? $($more.as_unsigned().ice()? as u64),*),
+                Type::f32 => $self.writer.[<$instruction f32>]($($extra,)? $($more.as_float().ice()? as f32),*),
+                Type::f64 => $self.writer.[<$instruction f64>]($($extra,)? $($more.as_float().ice()? as f64),*),
+                _ => Self::ice(&format!("{}: Unsupported type {:?}", stringify!($instruction), $result_type))?,
+            }
+        }
+    }}
+}
+pub(crate) use select_numeric_cast_type;

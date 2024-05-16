@@ -25,14 +25,24 @@ impl_opcodes!{
         ///
         /// Instructions with multiple variants use the following naming convention:
         ///
-        /// `<op>[<suffix1>][_<suffix2>[_nc]]`
+        /// `<op>[<infix>][<suffix1>][_<suffix2>[_nc]]`
         ///
+        /// `infix` refers to specialized variants that take instruction arguments to avoid stack operations\
         /// `suffix1` refers to stack inputs/outputs\
         /// `suffix2` refers to bytecode (compiletime) arguments
         ///
-        /// `f`/`s`/`u`/`i`/`x`      float/signed/unsigned/any integer/heap reference (instruction performs refcounting)\
-        /// `8`/`16`/`32`/`64`/`sa`  size in bits, sa=StackAddress sized\
-        /// `nc`                     operation is non-consuming, meaning stack arguments will be read but not removed
+        /// Suffixes:
+        ///
+        /// `f`/`s`/`u`/`i`/`x`     float/signed/unsigned/any integer/heap reference (instruction performs refcounting)\
+        /// `8`/`16`/`32`/`64`/`sa` size in bits, sa=StackAddress sized\
+        /// `nc`                    operation is non-consuming, meaning stack arguments will be read but not removed
+        ///
+        /// Infixes:
+        ///
+        /// `vv` load two values from the two frame-relative address(fra) arguments\
+        /// `xc` pop one value off the stack and use the argument as immediate\
+        /// `xv` pop one value off the stack and load one value from the fra argument\
+        /// `vc` load one value from the fra argument, use the other argument as immediate and write the result back to the fra argument
         ///
         /// # Examples
         /// `addi32`    add two 32 bit integer\
@@ -70,10 +80,10 @@ impl_opcodes!{
 
     /// Loads data from stack at given stackframe-offset and pushes it onto the stack.
     fn <
-        load8_16<T: Data8>(loc: FrameAddress),
-        load16_16<T: Data16>(loc: FrameAddress),
-        load32_16<T: Data32>(loc: FrameAddress),
-        load64_16<T: Data64>(loc: FrameAddress),
+        load8<T: Data8>(loc: FrameAddress),
+        load16<T: Data16>(loc: FrameAddress),
+        load32<T: Data32>(loc: FrameAddress),
+        load64<T: Data64>(loc: FrameAddress),
     >(&mut self) {
         let local: T = self.stack.load_fp(loc);
         self.stack.push(local);
@@ -81,10 +91,10 @@ impl_opcodes!{
 
     /// Pops data off the stack and stores it at the given stackframe-offset.
     fn <
-        store8_16<T: Data8>(loc: FrameAddress),
-        store16_16<T: Data16>(loc: FrameAddress),
-        store32_16<T: Data32>(loc: FrameAddress),
-        store64_16<T: Data64>(loc: FrameAddress),
+        store8<T: Data8>(loc: FrameAddress),
+        store16<T: Data16>(loc: FrameAddress),
+        store32<T: Data32>(loc: FrameAddress),
+        store64<T: Data64>(loc: FrameAddress),
     >(&mut self) {
         let local: T = self.stack.pop();
         self.stack.store_fp(loc, local);
@@ -302,14 +312,14 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        adds8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
-        adds16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
-        adds32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
-        adds64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
-        addu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
-        addu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
-        addu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
-        addu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvs8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvs16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvs32<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvs64<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvu8<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvu16<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvu32<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        addvvu64<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -322,8 +332,8 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        addf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
-        addf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+        addvvf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        addvvf64<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -332,14 +342,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their sum.
     fn <
-        adds8_pi<T: i8>(right: i8) [ check ],
-        adds16_pi<T: i16>(right: i16) [ check ],
-        adds32_pi<T: i32>(right: i32) [ check ],
-        adds64_pi<T: i64>(right: i64) [ check ],
-        addu8_pi<T: u8>(right: u8) [ check ],
-        addu16_pi<T: u16>(right: u16) [ check ],
-        addu32_pi<T: u32>(right: u32) [ check ],
-        addu64_pi<T: u64>(right: u64) [ check ],
+        addxcs8<T: i8>(right: i8) [ check ],
+        addxcs16<T: i16>(right: i16) [ check ],
+        addxcs32<T: i32>(right: i32) [ check ],
+        addxcs64<T: i64>(right: i64) [ check ],
+        addxcu8<T: u8>(right: u8) [ check ],
+        addxcu16<T: u16>(right: u16) [ check ],
+        addxcu32<T: u32>(right: u32) [ check ],
+        addxcu64<T: u64>(right: u64) [ check ],
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -352,8 +362,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their sum.
     fn <
-        addf32_pi<T: f32>(right: f32),
-        addf64_pi<T: f64>(right: f64)
+        addxcf32<T: f32>(right: f32),
+        addxcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -362,14 +372,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their sum.
     fn <
-        adds8_pv<T: i8>(right: FrameAddress) [ check ],
-        adds16_pv<T: i16>(right: FrameAddress) [ check ],
-        adds32_pv<T: i32>(right: FrameAddress) [ check ],
-        adds64_pv<T: i64>(right: FrameAddress) [ check ],
-        addu8_pv<T: u8>(right: FrameAddress) [ check ],
-        addu16_pv<T: u16>(right: FrameAddress) [ check ],
-        addu32_pv<T: u32>(right: FrameAddress) [ check ],
-        addu64_pv<T: u64>(right: FrameAddress) [ check ],
+        addxvs8<T: i8>(right: FrameAddress) [ check ],
+        addxvs16<T: i16>(right: FrameAddress) [ check ],
+        addxvs32<T: i32>(right: FrameAddress) [ check ],
+        addxvs64<T: i64>(right: FrameAddress) [ check ],
+        addxvu8<T: u8>(right: FrameAddress) [ check ],
+        addxvu16<T: u16>(right: FrameAddress) [ check ],
+        addxvu32<T: u32>(right: FrameAddress) [ check ],
+        addxvu64<T: u64>(right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -382,8 +392,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their sum.
     fn <
-        addf32_pv<T: f32>(right: FrameAddress),
-        addf64_pv<T: f64>(right: FrameAddress)
+        addxvf32<T: f32>(right: FrameAddress),
+        addxvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -392,14 +402,14 @@ impl_opcodes!{
 
     /// Loads left variable and takes immediate argument right and pushes their sum.
     fn <
-        adds8_vi<T: i8>(left: FrameAddress, right: i8) [ check ],
-        adds16_vi<T: i16>(left: FrameAddress, right: i16) [ check ],
-        adds32_vi<T: i32>(left: FrameAddress, right: i32) [ check ],
-        adds64_vi<T: i64>(left: FrameAddress, right: i64) [ check ],
-        addu8_vi<T: u8>(left: FrameAddress, right: u8) [ check ],
-        addu16_vi<T: u16>(left: FrameAddress, right: u16) [ check ],
-        addu32_vi<T: u32>(left: FrameAddress, right: u32) [ check ],
-        addu64_vi<T: u64>(left: FrameAddress, right: u64) [ check ],
+        addvcs8<T: i8>(left: FrameAddress, right: i8) [ check ],
+        addvcs16<T: i16>(left: FrameAddress, right: i16) [ check ],
+        addvcs32<T: i32>(left: FrameAddress, right: i32) [ check ],
+        addvcs64<T: i64>(left: FrameAddress, right: i64) [ check ],
+        addvcu8<T: u8>(left: FrameAddress, right: u8) [ check ],
+        addvcu16<T: u16>(left: FrameAddress, right: u16) [ check ],
+        addvcu32<T: u32>(left: FrameAddress, right: u32) [ check ],
+        addvcu64<T: u64>(left: FrameAddress, right: u64) [ check ],
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.load_fp(left);
@@ -412,8 +422,8 @@ impl_opcodes!{
 
     /// Loads left variable and takes immediate argument right and pushes their sum.
     fn <
-        addf32_vi<T: f32>(left: FrameAddress, right: f32),
-        addf64_vi<T: f64>(left: FrameAddress, right: f64)
+        addvcf32<T: f32>(left: FrameAddress, right: f32),
+        addvcf64<T: f64>(left: FrameAddress, right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.load_fp(left);
@@ -452,14 +462,14 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        subs8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
-        subs16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
-        subs32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
-        subs64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
-        subu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
-        subu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
-        subu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
-        subu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvs8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvs16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvs32<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvs64<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvu8<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvu16<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvu32<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        subvvu64<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -472,8 +482,8 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        subf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
-        subf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+        subvvf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        subvvf64<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -482,14 +492,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their sum.
     fn <
-        subs8_pi<T: i8>(right: i8) [ check ],
-        subs16_pi<T: i16>(right: i16) [ check ],
-        subs32_pi<T: i32>(right: i32) [ check ],
-        subs64_pi<T: i64>(right: i64) [ check ],
-        subu8_pi<T: u8>(right: u8) [ check ],
-        subu16_pi<T: u16>(right: u16) [ check ],
-        subu32_pi<T: u32>(right: u32) [ check ],
-        subu64_pi<T: u64>(right: u64) [ check ],
+        subxcs8<T: i8>(right: i8) [ check ],
+        subxcs16<T: i16>(right: i16) [ check ],
+        subxcs32<T: i32>(right: i32) [ check ],
+        subxcs64<T: i64>(right: i64) [ check ],
+        subxcu8<T: u8>(right: u8) [ check ],
+        subxcu16<T: u16>(right: u16) [ check ],
+        subxcu32<T: u32>(right: u32) [ check ],
+        subxcu64<T: u64>(right: u64) [ check ],
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -502,8 +512,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their sum.
     fn <
-        subf32_pi<T: f32>(right: f32),
-        subf64_pi<T: f64>(right: f64)
+        subxcf32<T: f32>(right: f32),
+        subxcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -512,14 +522,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their sum.
     fn <
-        subs8_pv<T: i8>(right: FrameAddress) [ check ],
-        subs16_pv<T: i16>(right: FrameAddress) [ check ],
-        subs32_pv<T: i32>(right: FrameAddress) [ check ],
-        subs64_pv<T: i64>(right: FrameAddress) [ check ],
-        subu8_pv<T: u8>(right: FrameAddress) [ check ],
-        subu16_pv<T: u16>(right: FrameAddress) [ check ],
-        subu32_pv<T: u32>(right: FrameAddress) [ check ],
-        subu64_pv<T: u64>(right: FrameAddress) [ check ],
+        subxvs8<T: i8>(right: FrameAddress) [ check ],
+        subxvs16<T: i16>(right: FrameAddress) [ check ],
+        subxvs32<T: i32>(right: FrameAddress) [ check ],
+        subxvs64<T: i64>(right: FrameAddress) [ check ],
+        subxvu8<T: u8>(right: FrameAddress) [ check ],
+        subxvu16<T: u16>(right: FrameAddress) [ check ],
+        subxvu32<T: u32>(right: FrameAddress) [ check ],
+        subxvu64<T: u64>(right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -532,8 +542,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their sum.
     fn <
-        subf32_pv<T: f32>(right: FrameAddress),
-        subf64_pv<T: f64>(right: FrameAddress)
+        subxvf32<T: f32>(right: FrameAddress),
+        subxvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -542,14 +552,14 @@ impl_opcodes!{
 
     /// Loads left variable and takes immediate argument right and pushes their sum.
     fn <
-        subs8_vi<T: i8>(left: FrameAddress, right: i8) [ check ],
-        subs16_vi<T: i16>(left: FrameAddress, right: i16) [ check ],
-        subs32_vi<T: i32>(left: FrameAddress, right: i32) [ check ],
-        subs64_vi<T: i64>(left: FrameAddress, right: i64) [ check ],
-        subu8_vi<T: u8>(left: FrameAddress, right: u8) [ check ],
-        subu16_vi<T: u16>(left: FrameAddress, right: u16) [ check ],
-        subu32_vi<T: u32>(left: FrameAddress, right: u32) [ check ],
-        subu64_vi<T: u64>(left: FrameAddress, right: u64) [ check ],
+        subvcs8<T: i8>(left: FrameAddress, right: i8) [ check ],
+        subvcs16<T: i16>(left: FrameAddress, right: i16) [ check ],
+        subvcs32<T: i32>(left: FrameAddress, right: i32) [ check ],
+        subvcs64<T: i64>(left: FrameAddress, right: i64) [ check ],
+        subvcu8<T: u8>(left: FrameAddress, right: u8) [ check ],
+        subvcu16<T: u16>(left: FrameAddress, right: u16) [ check ],
+        subvcu32<T: u32>(left: FrameAddress, right: u32) [ check ],
+        subvcu64<T: u64>(left: FrameAddress, right: u64) [ check ],
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.load_fp(left);
@@ -562,8 +572,8 @@ impl_opcodes!{
 
     /// Loads left variable and takes immediate argument right and pushes their sum.
     fn <
-        subf32_vi<T: f32>(left: FrameAddress, right: f32),
-        subf64_vi<T: f64>(left: FrameAddress, right: f64)
+        subvcf32<T: f32>(left: FrameAddress, right: f32),
+        subvcf64<T: f64>(left: FrameAddress, right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.load_fp(left);
@@ -602,14 +612,14 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        muls8_vv<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
-        muls16_vv<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
-        muls32_vv<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
-        muls64_vv<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
-        mulu8_vv<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
-        mulu16_vv<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
-        mulu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
-        mulu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvs8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvs16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvs32<T: i32>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvs64<T: i64>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvu8<T: u8>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvu16<T: u16>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvu32<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
+        mulvvu64<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -622,8 +632,8 @@ impl_opcodes!{
 
     /// Loads 2 values from the stack and pushes their product.
     fn <
-        mulf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
-        mulf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+        mulvvf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        mulvvf64<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -632,14 +642,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their product.
     fn <
-        muls8_pi<T: i8>(right: i8) [ check ],
-        muls16_pi<T: i16>(right: i16) [ check ],
-        muls32_pi<T: i32>(right: i32) [ check ],
-        muls64_pi<T: i64>(right: i64) [ check ],
-        mulu8_pi<T: u8>(right: u8) [ check ],
-        mulu16_pi<T: u16>(right: u16) [ check ],
-        mulu32_pi<T: u32>(right: u32) [ check ],
-        mulu64_pi<T: u64>(right: u64) [ check ],
+        mulxcs8<T: i8>(right: i8) [ check ],
+        mulxcs16<T: i16>(right: i16) [ check ],
+        mulxcs32<T: i32>(right: i32) [ check ],
+        mulxcs64<T: i64>(right: i64) [ check ],
+        mulxcu8<T: u8>(right: u8) [ check ],
+        mulxcu16<T: u16>(right: u16) [ check ],
+        mulxcu32<T: u32>(right: u32) [ check ],
+        mulxcu64<T: u64>(right: u64) [ check ],
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -652,8 +662,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes their product.
     fn <
-        mulf32_pi<T: f32>(right: f32),
-        mulf64_pi<T: f64>(right: f64)
+        mulxcf32<T: f32>(right: f32),
+        mulxcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -662,14 +672,14 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their product.
     fn <
-        muls8_pv<T: i8>(right: FrameAddress) [ check ],
-        muls16_pv<T: i16>(right: FrameAddress) [ check ],
-        muls32_pv<T: i32>(right: FrameAddress) [ check ],
-        muls64_pv<T: i64>(right: FrameAddress) [ check ],
-        mulu8_pv<T: u8>(right: FrameAddress) [ check ],
-        mulu16_pv<T: u16>(right: FrameAddress) [ check ],
-        mulu32_pv<T: u32>(right: FrameAddress) [ check ],
-        mulu64_pv<T: u64>(right: FrameAddress) [ check ],
+        mulxvs8<T: i8>(right: FrameAddress) [ check ],
+        mulxvs16<T: i16>(right: FrameAddress) [ check ],
+        mulxvs32<T: i32>(right: FrameAddress) [ check ],
+        mulxvs64<T: i64>(right: FrameAddress) [ check ],
+        mulxvu8<T: u8>(right: FrameAddress) [ check ],
+        mulxvu16<T: u16>(right: FrameAddress) [ check ],
+        mulxvu32<T: u32>(right: FrameAddress) [ check ],
+        mulxvu64<T: u64>(right: FrameAddress) [ check ],
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -682,8 +692,8 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes their product.
     fn <
-        mulf32_pv<T: f32>(right: FrameAddress),
-        mulf64_pv<T: f64>(right: FrameAddress)
+        mulxvf32<T: f32>(right: FrameAddress),
+        mulxvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -850,16 +860,16 @@ impl_opcodes!{
 
     /// Loads two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn <
-        clts8_vv<T: i8>(left: FrameAddress, right: FrameAddress),
-        cltu8_vv<T: u8>(left: FrameAddress, right: FrameAddress),
-        clts16_vv<T: i16>(left: FrameAddress, right: FrameAddress),
-        cltu16_vv<T: u16>(left: FrameAddress, right: FrameAddress),
-        clts32_vv<T: i32>(left: FrameAddress, right: FrameAddress),
-        cltu32_vv<T: u32>(left: FrameAddress, right: FrameAddress),
-        clts64_vv<T: i64>(left: FrameAddress, right: FrameAddress),
-        cltu64_vv<T: u64>(left: FrameAddress, right: FrameAddress),
-        cltf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
-        cltf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+        cltvvs8<T: i8>(left: FrameAddress, right: FrameAddress),
+        cltvvu8<T: u8>(left: FrameAddress, right: FrameAddress),
+        cltvvs16<T: i16>(left: FrameAddress, right: FrameAddress),
+        cltvvu16<T: u16>(left: FrameAddress, right: FrameAddress),
+        cltvvs32<T: i32>(left: FrameAddress, right: FrameAddress),
+        cltvvu32<T: u32>(left: FrameAddress, right: FrameAddress),
+        cltvvs64<T: i64>(left: FrameAddress, right: FrameAddress),
+        cltvvu64<T: u64>(left: FrameAddress, right: FrameAddress),
+        cltvvf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        cltvvf64<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -868,16 +878,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes a 1 if the first value is lesser than the second, otherwise a 0.
     fn <
-        clts8_pv<T: i8>(right: FrameAddress),
-        clts16_pv<T: i16>(right: FrameAddress),
-        clts32_pv<T: i32>(right: FrameAddress),
-        clts64_pv<T: i64>(right: FrameAddress),
-        cltu8_pv<T: u8>(right: FrameAddress),
-        cltu16_pv<T: u16>(right: FrameAddress),
-        cltu32_pv<T: u32>(right: FrameAddress),
-        cltu64_pv<T: u64>(right: FrameAddress),
-        cltf32_pv<T: f32>(right: FrameAddress),
-        cltf64_pv<T: f64>(right: FrameAddress)
+        cltxvs8<T: i8>(right: FrameAddress),
+        cltxvs16<T: i16>(right: FrameAddress),
+        cltxvs32<T: i32>(right: FrameAddress),
+        cltxvs64<T: i64>(right: FrameAddress),
+        cltxvu8<T: u8>(right: FrameAddress),
+        cltxvu16<T: u16>(right: FrameAddress),
+        cltxvu32<T: u32>(right: FrameAddress),
+        cltxvu64<T: u64>(right: FrameAddress),
+        cltxvf32<T: f32>(right: FrameAddress),
+        cltxvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -886,16 +896,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
     fn <
-        clts8_pi<T: i8>(right: i8),
-        clts16_pi<T: i16>(right: i16),
-        clts32_pi<T: i32>(right: i32),
-        clts64_pi<T: i64>(right: i64),
-        cltu8_pi<T: u8>(right: u8),
-        cltu16_pi<T: u16>(right: u16),
-        cltu32_pi<T: u32>(right: u32),
-        cltu64_pi<T: u64>(right: u64),
-        cltf32_pi<T: f32>(right: f32),
-        cltf64_pi<T: f64>(right: f64)
+        cltxcs8<T: i8>(right: i8),
+        cltxcs16<T: i16>(right: i16),
+        cltxcs32<T: i32>(right: i32),
+        cltxcs64<T: i64>(right: i64),
+        cltxcu8<T: u8>(right: u8),
+        cltxcu16<T: u16>(right: u16),
+        cltxcu32<T: u32>(right: u32),
+        cltxcu64<T: u64>(right: u64),
+        cltxcf32<T: f32>(right: f32),
+        cltxcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -922,16 +932,16 @@ impl_opcodes!{
 
     /// Loads two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn <
-        cltes8_vv<T: i8>(left: FrameAddress, right: FrameAddress),
-        clteu8_vv<T: u8>(left: FrameAddress, right: FrameAddress),
-        cltes16_vv<T: i16>(left: FrameAddress, right: FrameAddress),
-        clteu16_vv<T: u16>(left: FrameAddress, right: FrameAddress),
-        cltes32_vv<T: i32>(left: FrameAddress, right: FrameAddress),
-        clteu32_vv<T: u32>(left: FrameAddress, right: FrameAddress),
-        cltes64_vv<T: i64>(left: FrameAddress, right: FrameAddress),
-        clteu64_vv<T: u64>(left: FrameAddress, right: FrameAddress),
-        cltef32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
-        cltef64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+        cltevvs8<T: i8>(left: FrameAddress, right: FrameAddress),
+        cltevvu8<T: u8>(left: FrameAddress, right: FrameAddress),
+        cltevvs16<T: i16>(left: FrameAddress, right: FrameAddress),
+        cltevvu16<T: u16>(left: FrameAddress, right: FrameAddress),
+        cltevvs32<T: i32>(left: FrameAddress, right: FrameAddress),
+        cltevvu32<T: u32>(left: FrameAddress, right: FrameAddress),
+        cltevvs64<T: i64>(left: FrameAddress, right: FrameAddress),
+        cltevvu64<T: u64>(left: FrameAddress, right: FrameAddress),
+        cltevvf32<T: f32>(left: FrameAddress, right: FrameAddress),
+        cltevvf64<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.load_fp(left);
@@ -940,16 +950,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
     fn <
-        cltes8_pv<T: i8>(right: FrameAddress),
-        cltes16_pv<T: i16>(right: FrameAddress),
-        cltes32_pv<T: i32>(right: FrameAddress),
-        cltes64_pv<T: i64>(right: FrameAddress),
-        clteu8_pv<T: u8>(right: FrameAddress),
-        clteu16_pv<T: u16>(right: FrameAddress),
-        clteu32_pv<T: u32>(right: FrameAddress),
-        clteu64_pv<T: u64>(right: FrameAddress),
-        cltef32_pv<T: f32>(right: FrameAddress),
-        cltef64_pv<T: f64>(right: FrameAddress)
+        cltexvs8<T: i8>(right: FrameAddress),
+        cltexvs16<T: i16>(right: FrameAddress),
+        cltexvs32<T: i32>(right: FrameAddress),
+        cltexvs64<T: i64>(right: FrameAddress),
+        cltexvu8<T: u8>(right: FrameAddress),
+        cltexvu16<T: u16>(right: FrameAddress),
+        cltexvu32<T: u32>(right: FrameAddress),
+        cltexvu64<T: u64>(right: FrameAddress),
+        cltexvf32<T: f32>(right: FrameAddress),
+        cltexvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -958,16 +968,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
     fn <
-        cltes8_pi<T: i8>(right: i8),
-        cltes16_pi<T: i16>(right: i16),
-        cltes32_pi<T: i32>(right: i32),
-        cltes64_pi<T: i64>(right: i64),
-        clteu8_pi<T: u8>(right: u8),
-        clteu16_pi<T: u16>(right: u16),
-        clteu32_pi<T: u32>(right: u32),
-        clteu64_pi<T: u64>(right: u64),
-        cltef32_pi<T: f32>(right: f32),
-        cltef64_pi<T: f64>(right: f64)
+        cltexcs8<T: i8>(right: i8),
+        cltexcs16<T: i16>(right: i16),
+        cltexcs32<T: i32>(right: i32),
+        cltexcs64<T: i64>(right: i64),
+        cltexcu8<T: u8>(right: u8),
+        cltexcu16<T: u16>(right: u16),
+        cltexcu32<T: u32>(right: u32),
+        cltexcu64<T: u64>(right: u64),
+        cltexcf32<T: f32>(right: f32),
+        cltexcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -994,16 +1004,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes a 1 if the first value is greater than the second, otherwise a 0.
     fn <
-        cgts8_pv<T: i8>(right: FrameAddress),
-        cgts16_pv<T: i16>(right: FrameAddress),
-        cgts32_pv<T: i32>(right: FrameAddress),
-        cgts64_pv<T: i64>(right: FrameAddress),
-        cgtu8_pv<T: u8>(right: FrameAddress),
-        cgtu16_pv<T: u16>(right: FrameAddress),
-        cgtu32_pv<T: u32>(right: FrameAddress),
-        cgtu64_pv<T: u64>(right: FrameAddress),
-        cgtf32_pv<T: f32>(right: FrameAddress),
-        cgtf64_pv<T: f64>(right: FrameAddress)
+        cgtxvs8<T: i8>(right: FrameAddress),
+        cgtxvs16<T: i16>(right: FrameAddress),
+        cgtxvs32<T: i32>(right: FrameAddress),
+        cgtxvs64<T: i64>(right: FrameAddress),
+        cgtxvu8<T: u8>(right: FrameAddress),
+        cgtxvu16<T: u16>(right: FrameAddress),
+        cgtxvu32<T: u32>(right: FrameAddress),
+        cgtxvu64<T: u64>(right: FrameAddress),
+        cgtxvf32<T: f32>(right: FrameAddress),
+        cgtxvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -1012,16 +1022,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is greater than the second, otherwise a 0.
     fn <
-        cgts8_pi<T: i8>(right: i8),
-        cgts16_pi<T: i16>(right: i16),
-        cgts32_pi<T: i32>(right: i32),
-        cgts64_pi<T: i64>(right: i64),
-        cgtu8_pi<T: u8>(right: u8),
-        cgtu16_pi<T: u16>(right: u16),
-        cgtu32_pi<T: u32>(right: u32),
-        cgtu64_pi<T: u64>(right: u64),
-        cgtf32_pi<T: f32>(right: f32),
-        cgtf64_pi<T: f64>(right: f64)
+        cgtxcs8<T: i8>(right: i8),
+        cgtxcs16<T: i16>(right: i16),
+        cgtxcs32<T: i32>(right: i32),
+        cgtxcs64<T: i64>(right: i64),
+        cgtxcu8<T: u8>(right: u8),
+        cgtxcu16<T: u16>(right: u16),
+        cgtxcu32<T: u32>(right: u32),
+        cgtxcu64<T: u64>(right: u64),
+        cgtxcf32<T: f32>(right: f32),
+        cgtxcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -1048,16 +1058,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and loads argument right and pushes a 1 if the first value is greater or equal than the second, otherwise a 0.
     fn <
-        cgtes8_pv<T: i8>(right: FrameAddress),
-        cgtes16_pv<T: i16>(right: FrameAddress),
-        cgtes32_pv<T: i32>(right: FrameAddress),
-        cgtes64_pv<T: i64>(right: FrameAddress),
-        cgteu8_pv<T: u8>(right: FrameAddress),
-        cgteu16_pv<T: u16>(right: FrameAddress),
-        cgteu32_pv<T: u32>(right: FrameAddress),
-        cgteu64_pv<T: u64>(right: FrameAddress),
-        cgtef32_pv<T: f32>(right: FrameAddress),
-        cgtef64_pv<T: f64>(right: FrameAddress)
+        cgtexvs8<T: i8>(right: FrameAddress),
+        cgtexvs16<T: i16>(right: FrameAddress),
+        cgtexvs32<T: i32>(right: FrameAddress),
+        cgtexvs64<T: i64>(right: FrameAddress),
+        cgtexvu8<T: u8>(right: FrameAddress),
+        cgtexvu16<T: u16>(right: FrameAddress),
+        cgtexvu32<T: u32>(right: FrameAddress),
+        cgtexvu64<T: u64>(right: FrameAddress),
+        cgtexvf32<T: f32>(right: FrameAddress),
+        cgtexvf64<T: f64>(right: FrameAddress)
     >(&mut self) {
         let b: T = self.stack.load_fp(right);
         let a: T = self.stack.pop();
@@ -1066,16 +1076,16 @@ impl_opcodes!{
 
     /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is greater or equal than the second, otherwise a 0.
     fn <
-        cgtes8_pi<T: i8>(right: i8),
-        cgtes16_pi<T: i16>(right: i16),
-        cgtes32_pi<T: i32>(right: i32),
-        cgtes64_pi<T: i64>(right: i64),
-        cgteu8_pi<T: u8>(right: u8),
-        cgteu16_pi<T: u16>(right: u16),
-        cgteu32_pi<T: u32>(right: u32),
-        cgteu64_pi<T: u64>(right: u64),
-        cgtef32_pi<T: f32>(right: f32),
-        cgtef64_pi<T: f64>(right: f64)
+        cgtexcs8<T: i8>(right: i8),
+        cgtexcs16<T: i16>(right: i16),
+        cgtexcs32<T: i32>(right: i32),
+        cgtexcs64<T: i64>(right: i64),
+        cgtexcu8<T: u8>(right: u8),
+        cgtexcu16<T: u16>(right: u16),
+        cgtexcu32<T: u32>(right: u32),
+        cgtexcu64<T: u64>(right: u64),
+        cgtexcf32<T: f32>(right: f32),
+        cgtexcf64<T: f64>(right: f64)
     >(&mut self) {
         let b: T = right;
         let a: T = self.stack.pop();
@@ -1208,7 +1218,6 @@ impl_opcodes!{
 
     /// Pops a heap reference off the stack and performs a reference count operation.
     fn <
-        //cnt_8(constructor: u8 as StackAddress, op: HeapRefOp),
         cnt_16(constructor: u16 as StackAddress, op: HeapRefOp),
         cnt_sa(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
@@ -1218,7 +1227,6 @@ impl_opcodes!{
 
     /// Performs a non-consuming reference count operation for the top heap reference on the stack.
     fn <
-        //cnt_8_nc(constructor: u8 as StackAddress, op: HeapRefOp),
         cnt_16_nc(constructor: u16 as StackAddress, op: HeapRefOp),
         cnt_sa_nc(constructor: StackAddress, op: HeapRefOp),
     >(&mut self) {
@@ -1335,10 +1343,7 @@ impl_opcodes!{
     }
 
     /// Offsets the heap address at the top of the stack by given value.
-    fn <
-        //offsetx_8(offset: u8),
-        offsetx_16(offset: FrameAddress)
-    >(&mut self) {
+    fn offsetx_16(&mut self, offset: FrameAddress) {
         let mut item: HeapRef = self.stack.pop();
         item.add_offset(offset as StackOffset);
         self.stack.push(item);

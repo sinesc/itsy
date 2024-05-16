@@ -26,6 +26,7 @@ ice_panics = [ ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }
+paste = "1.0"
 
 [target.'cfg(windows)'.dev-dependencies]
 winapi-util = "0.1"
