@@ -116,7 +116,7 @@ impl_opcodes!{
     /// Sets program counter to start if value in variable iter is less than or equal to the top
     /// value on the stack. Does not consume top stack value.
     fn <
-        loops8<T: i8>(iter: FrameAddress, start: StackAddress),
+        loops8<T: i8>(iter: FrameAddress, start: StackAddress), // TODO refactor to check at start of loop like arrayiter
         loops16<T: i16>(iter: FrameAddress, start: StackAddress),
         loops32<T: i32>(iter: FrameAddress, start: StackAddress),
         loops64<T: i64>(iter: FrameAddress, start: StackAddress),
@@ -311,8 +311,8 @@ impl_opcodes!{
         addu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
         addu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         let result = T::overflowing_add(a, b);
         self.stack.push(result.0);
         if result.1 {
@@ -325,8 +325,8 @@ impl_opcodes!{
         addf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
         addf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         self.stack.push(a + b);
     }
 
@@ -461,8 +461,8 @@ impl_opcodes!{
         subu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
         subu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         let result = T::overflowing_sub(a, b);
         self.stack.push(result.0);
         if result.1 {
@@ -475,8 +475,8 @@ impl_opcodes!{
         subf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
         subf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         self.stack.push(a - b);
     }
 
@@ -611,8 +611,8 @@ impl_opcodes!{
         mulu32_vv<T: u32>(left: FrameAddress, right: FrameAddress) [ check ],
         mulu64_vv<T: u64>(left: FrameAddress, right: FrameAddress) [ check ],
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         let result = T::overflowing_mul(a, b);
         self.stack.push(result.0);
         if result.1 {
@@ -625,8 +625,8 @@ impl_opcodes!{
         mulf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
         mulf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
     >(&mut self) {
-        let a: T = self.stack.load_fp(left);
         let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
         self.stack.push(a * b);
     }
 
@@ -848,6 +848,60 @@ impl_opcodes!{
         self.stack.push((a < b) as Data8);
     }
 
+    /// Loads two values and pushes a 1 if the first value is lesser than the second, otherwise a 0.
+    fn <
+        clts8_vv<T: i8>(left: FrameAddress, right: FrameAddress),
+        cltu8_vv<T: u8>(left: FrameAddress, right: FrameAddress),
+        clts16_vv<T: i16>(left: FrameAddress, right: FrameAddress),
+        cltu16_vv<T: u16>(left: FrameAddress, right: FrameAddress),
+        clts32_vv<T: i32>(left: FrameAddress, right: FrameAddress),
+        cltu32_vv<T: u32>(left: FrameAddress, right: FrameAddress),
+        clts64_vv<T: i64>(left: FrameAddress, right: FrameAddress),
+        cltu64_vv<T: u64>(left: FrameAddress, right: FrameAddress),
+        cltf32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
+        cltf64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
+        self.stack.push((a < b) as Data8);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes a 1 if the first value is lesser than the second, otherwise a 0.
+    fn <
+        clts8_pv<T: i8>(right: FrameAddress),
+        clts16_pv<T: i16>(right: FrameAddress),
+        clts32_pv<T: i32>(right: FrameAddress),
+        clts64_pv<T: i64>(right: FrameAddress),
+        cltu8_pv<T: u8>(right: FrameAddress),
+        cltu16_pv<T: u16>(right: FrameAddress),
+        cltu32_pv<T: u32>(right: FrameAddress),
+        cltu64_pv<T: u64>(right: FrameAddress),
+        cltf32_pv<T: f32>(right: FrameAddress),
+        cltf64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push((a < b) as Data8);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
+    fn <
+        clts8_pi<T: i8>(right: i8),
+        clts16_pi<T: i16>(right: i16),
+        clts32_pi<T: i32>(right: i32),
+        clts64_pi<T: i64>(right: i64),
+        cltu8_pi<T: u8>(right: u8),
+        cltu16_pi<T: u16>(right: u16),
+        cltu32_pi<T: u32>(right: u32),
+        cltu64_pi<T: u64>(right: u64),
+        cltf32_pi<T: f32>(right: f32),
+        cltf64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        self.stack.push((a < b) as Data8);
+    }
+
     /// Pops two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
     fn <
         cltes8<T: i8>(),
@@ -862,6 +916,60 @@ impl_opcodes!{
         cltef64<T: f64>()
     >(&mut self) {
         let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push((a <= b) as Data8);
+    }
+
+    /// Loads two values and pushes a 1 if the first value is lesser or equal the second, otherwise a 0.
+    fn <
+        cltes8_vv<T: i8>(left: FrameAddress, right: FrameAddress),
+        clteu8_vv<T: u8>(left: FrameAddress, right: FrameAddress),
+        cltes16_vv<T: i16>(left: FrameAddress, right: FrameAddress),
+        clteu16_vv<T: u16>(left: FrameAddress, right: FrameAddress),
+        cltes32_vv<T: i32>(left: FrameAddress, right: FrameAddress),
+        clteu32_vv<T: u32>(left: FrameAddress, right: FrameAddress),
+        cltes64_vv<T: i64>(left: FrameAddress, right: FrameAddress),
+        clteu64_vv<T: u64>(left: FrameAddress, right: FrameAddress),
+        cltef32_vv<T: f32>(left: FrameAddress, right: FrameAddress),
+        cltef64_vv<T: f64>(left: FrameAddress, right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.load_fp(left);
+        self.stack.push((a <= b) as Data8);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
+    fn <
+        cltes8_pv<T: i8>(right: FrameAddress),
+        cltes16_pv<T: i16>(right: FrameAddress),
+        cltes32_pv<T: i32>(right: FrameAddress),
+        cltes64_pv<T: i64>(right: FrameAddress),
+        clteu8_pv<T: u8>(right: FrameAddress),
+        clteu16_pv<T: u16>(right: FrameAddress),
+        clteu32_pv<T: u32>(right: FrameAddress),
+        clteu64_pv<T: u64>(right: FrameAddress),
+        cltef32_pv<T: f32>(right: FrameAddress),
+        cltef64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push((a <= b) as Data8);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is lesser or equal than the second, otherwise a 0.
+    fn <
+        cltes8_pi<T: i8>(right: i8),
+        cltes16_pi<T: i16>(right: i16),
+        cltes32_pi<T: i32>(right: i32),
+        cltes64_pi<T: i64>(right: i64),
+        clteu8_pi<T: u8>(right: u8),
+        clteu16_pi<T: u16>(right: u16),
+        clteu32_pi<T: u32>(right: u32),
+        clteu64_pi<T: u64>(right: u64),
+        cltef32_pi<T: f32>(right: f32),
+        cltef64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
         let a: T = self.stack.pop();
         self.stack.push((a <= b) as Data8);
     }
@@ -884,6 +992,42 @@ impl_opcodes!{
         self.stack.push((a > b) as Data8);
     }
 
+    /// Pops left from the stack and loads argument right and pushes a 1 if the first value is greater than the second, otherwise a 0.
+    fn <
+        cgts8_pv<T: i8>(right: FrameAddress),
+        cgts16_pv<T: i16>(right: FrameAddress),
+        cgts32_pv<T: i32>(right: FrameAddress),
+        cgts64_pv<T: i64>(right: FrameAddress),
+        cgtu8_pv<T: u8>(right: FrameAddress),
+        cgtu16_pv<T: u16>(right: FrameAddress),
+        cgtu32_pv<T: u32>(right: FrameAddress),
+        cgtu64_pv<T: u64>(right: FrameAddress),
+        cgtf32_pv<T: f32>(right: FrameAddress),
+        cgtf64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push((a > b) as Data8);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is greater than the second, otherwise a 0.
+    fn <
+        cgts8_pi<T: i8>(right: i8),
+        cgts16_pi<T: i16>(right: i16),
+        cgts32_pi<T: i32>(right: i32),
+        cgts64_pi<T: i64>(right: i64),
+        cgtu8_pi<T: u8>(right: u8),
+        cgtu16_pi<T: u16>(right: u16),
+        cgtu32_pi<T: u32>(right: u32),
+        cgtu64_pi<T: u64>(right: u64),
+        cgtf32_pi<T: f32>(right: f32),
+        cgtf64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
+        let a: T = self.stack.pop();
+        self.stack.push((a > b) as Data8);
+    }
+
     /// Pops two values and pushes a 1 if the first value is greater or equal the second, otherwise a 0.
     fn <
         cgtes8<T: i8>(),
@@ -898,6 +1042,42 @@ impl_opcodes!{
         cgtef64<T: f64>()
     >(&mut self) {
         let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push((a >= b) as Data8);
+    }
+
+    /// Pops left from the stack and loads argument right and pushes a 1 if the first value is greater or equal than the second, otherwise a 0.
+    fn <
+        cgtes8_pv<T: i8>(right: FrameAddress),
+        cgtes16_pv<T: i16>(right: FrameAddress),
+        cgtes32_pv<T: i32>(right: FrameAddress),
+        cgtes64_pv<T: i64>(right: FrameAddress),
+        cgteu8_pv<T: u8>(right: FrameAddress),
+        cgteu16_pv<T: u16>(right: FrameAddress),
+        cgteu32_pv<T: u32>(right: FrameAddress),
+        cgteu64_pv<T: u64>(right: FrameAddress),
+        cgtef32_pv<T: f32>(right: FrameAddress),
+        cgtef64_pv<T: f64>(right: FrameAddress)
+    >(&mut self) {
+        let b: T = self.stack.load_fp(right);
+        let a: T = self.stack.pop();
+        self.stack.push((a >= b) as Data8);
+    }
+
+    /// Pops left from the stack and takes immediate argument right and pushes a 1 if the first value is greater or equal than the second, otherwise a 0.
+    fn <
+        cgtes8_pi<T: i8>(right: i8),
+        cgtes16_pi<T: i16>(right: i16),
+        cgtes32_pi<T: i32>(right: i32),
+        cgtes64_pi<T: i64>(right: i64),
+        cgteu8_pi<T: u8>(right: u8),
+        cgteu16_pi<T: u16>(right: u16),
+        cgteu32_pi<T: u32>(right: u32),
+        cgteu64_pi<T: u64>(right: u64),
+        cgtef32_pi<T: f32>(right: f32),
+        cgtef64_pi<T: f64>(right: f64)
+    >(&mut self) {
+        let b: T = right;
         let a: T = self.stack.pop();
         self.stack.push((a >= b) as Data8);
     }

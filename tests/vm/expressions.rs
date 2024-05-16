@@ -63,6 +63,7 @@ fn expression_short_circuit() {
         false,       false,         false,
     ]);
 }
+
 #[test]
 fn stack_value_expressions() {
     let result = run(stringify!(
@@ -190,4 +191,141 @@ fn assign_stack_target() {
         ret_u8(value);
     ));
     assert_all(&result, &[ 2u8, 10, 12, 22 ]);
+}
+
+#[test]
+fn optimized_arith() {
+    let result = run(stringify!(
+        // TOOD loop with a few values
+        let x = 5i32;
+        let y = 2i32;
+        // vv
+        ret_i32(x + y);
+        ret_i32(x - y);
+        ret_i32(x * y);
+        ret_i32(x / y);
+        // pv
+        ret_i32(x + (x-y));
+        ret_i32(x - (x-y));
+        ret_i32(x * (x-y));
+        ret_i32(x / (x-y));
+        ret_i32((x-y) + x);
+        ret_i32((x+y) - x);
+        ret_i32((x-y) * x);
+        ret_i32((x-y) / x);
+        // pi
+        ret_i32(3 + (x-y));
+        ret_i32(3 - (x-y));
+        ret_i32(3 * (x-y));
+        ret_i32(3 / (x-y));
+        ret_i32((x-y) + 3);
+        ret_i32((x+y) - 3);
+        ret_i32((x-y) * 3);
+        ret_i32((x-y) / 3);
+    ));
+    let x = 5i32;
+    let y = 2i32;
+    assert_all(&result, &[
+        x + y,
+        x - y,
+        x * y,
+        x / y,
+        // pv
+        x + (x-y),
+        x - (x-y),
+        x * (x-y),
+        x / (x-y),
+        (x-y) + x,
+        (x+y) - x,
+        (x-y) * x,
+        (x-y) / x,
+        // pi
+        3 + (x-y),
+        3 - (x-y),
+        3 * (x-y),
+        3 / (x-y),
+        (x-y) + 3,
+        (x+y) - 3,
+        (x-y) * 3,
+        (x-y) / 3,
+    ]);
+}
+
+#[test]
+fn optimized_compare() {
+    let result = run(stringify!(
+        // TOOD loop with a few values to flip a couple of results
+        let x = 5i32;
+        let y = 2i32;
+        // vv
+        ret_bool(x == y);
+        ret_bool(x != y);
+        ret_bool(x > y);
+        ret_bool(x >= y);
+        ret_bool(x < y);
+        ret_bool(x <= y);
+        // pv
+        ret_bool(x == (y+1));
+        ret_bool(x != (y+1));
+        ret_bool(x > (y+1));
+        ret_bool(x >= (y+1));
+        ret_bool(x < (y+1));
+        ret_bool(x <= (y+1));
+        ret_bool((x+1) == y);
+        ret_bool((x+1) != y);
+        ret_bool((x+1) > y);
+        ret_bool((x+1) >= y);
+        ret_bool((x+1) < y);
+        ret_bool((x+1) <= y);
+        // pi
+        ret_bool(5 == (y+1));
+        ret_bool(5 != (y+1));
+        ret_bool(5 > (y+1));
+        ret_bool(5 >= (y+1));
+        ret_bool(5 < (y+1));
+        ret_bool(5 <= (y+1));
+        ret_bool((x+1) == 2);
+        ret_bool((x+1) != 2);
+        ret_bool((x+1) > 2);
+        ret_bool((x+1) >= 2);
+        ret_bool((x+1) < 2);
+        ret_bool((x+1) <= 2);
+    ));
+    let x = 5i32;
+    let y = 2i32;
+    assert_all(&result, &[
+        // vv
+        x == y,
+        x != y,
+        x > y,
+        x >= y,
+        x < y,
+        x <= y,
+        // pv
+        x == (y+1),
+        x != (y+1),
+        x > (y+1),
+        x >= (y+1),
+        x < (y+1),
+        x <= (y+1),
+        (x+1) == y,
+        (x+1) != y,
+        (x+1) > y,
+        (x+1) >= y,
+        (x+1) < y,
+        (x+1) <= y,
+        // pi
+        5 == (y+1),
+        5 != (y+1),
+        5 > (y+1),
+        5 >= (y+1),
+        5 < (y+1),
+        5 <= (y+1),
+        (x+1) == 2,
+        (x+1) != 2,
+        (x+1) > 2,
+        (x+1) >= 2,
+        (x+1) < 2,
+        (x+1) <= 2,
+    ]);
 }

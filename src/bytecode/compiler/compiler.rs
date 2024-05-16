@@ -624,7 +624,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
             self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
-            self.write_lte(iter_ty)?;                                         // stack: upper upper_lte_lower
+            self.write_clte(iter_ty)?;                                         // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123);                // stack: upper
             self.write_sub_pi(iter_ty, Numeric::Unsigned(1))?;                                        // stack: upper=upper-1
             skip_jump
@@ -633,7 +633,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             let iter_ty = self.ty(&iter_type_id);
             self.write_clone(iter_ty);                                   // stack: upper upper
             self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
-            self.write_lt(iter_ty)?;                                         // stack: upper upper_lte_lower
+            self.write_clt(iter_ty)?;                                         // stack: upper upper_lte_lower
             self.writer.jn0(123)                                    // stack: upper
         };
         // compile block
@@ -936,12 +936,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::Div => self.write_div(ty_result)?,
             BO::Rem => self.write_rem(ty_result)?,
             // comparison
-            BO::Greater     => self.write_gt(ty_left)?,
-            BO::GreaterOrEq => self.write_gte(ty_left)?,
-            BO::Less        => self.write_lt(ty_left)?,
-            BO::LessOrEq    => self.write_lte(ty_left)?,
-            BO::Equal       => self.write_eq(ty_left)?,
-            BO::NotEqual    => self.write_neq(ty_left)?,
+            BO::Greater     => self.write_cgt(ty_left)?,
+            BO::GreaterOrEq => self.write_cgte(ty_left)?,
+            BO::Less        => self.write_clt(ty_left)?,
+            BO::LessOrEq    => self.write_clte(ty_left)?,
+            BO::Equal       => self.write_ceq(ty_left)?,
+            BO::NotEqual    => self.write_cneq(ty_left)?,
             _ => Self::ice_at(item, "Invalid simple-operation")?,
         };
         Ok(())
@@ -1022,74 +1022,89 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         };
         match (item.op, exprs) {
             // TODO: move to future optimizer. here to test whether these opcodes are even beneficial (they are)
-            // Multiplication optimizations
-            (Mul, Some((E::Variable(var_l), E::Variable(var_r)))) => {
+            // Variable/variable optimizations
+            (op @ (Mul | Add | Sub | Less | LessOrEq | Greater | GreaterOrEq), Some((E::Variable(var_l), E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
                 let addr_l = self.load_variable(var_l)?;
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
-                self.write_mul_vv(self.ty(&item.left), addr_l, addr_r)?;
+                match op {
+                    Mul         => self.write_mul_vv(self.ty(&item.left), addr_l, addr_r)?,
+                    Add         => self.write_add_vv(self.ty(&item.left), addr_l, addr_r)?,
+                    Sub         => self.write_sub_vv(self.ty(&item.left), addr_l, addr_r)?,
+                    Less        => self.write_clt_vv(self.ty(&item.left), addr_l, addr_r)?,
+                    LessOrEq    => self.write_clte_vv(self.ty(&item.left), addr_l, addr_r)?,
+                    Greater     => self.write_clt_vv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>b equals b<a
+                    GreaterOrEq => self.write_clte_vv(self.ty(&item.left), addr_r, addr_l)?, // swapped arguments, a>=b equals b<=a
+                    _ => unreachable!(),
+                };
                 Ok(())
             },
-            (Mul, Some((exp_l, E::Variable(var_r)))) |
-            (Mul, Some((E::Variable(var_r), exp_l))) if self.ty(&item.left).is_numeric() => {
+            // Expression/variable optimizations
+            (op @ (Mul | Add | Sub), Some((exp_l, E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
                 self.compile_expression(exp_l)?;
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}", item.op, var_r.ident);
-                self.write_mul_pv(self.ty(&item.left), addr_r)?;
+                match op {
+                    Mul         => self.write_mul_pv(self.ty(&item.left), addr_r)?,
+                    Add         => self.write_add_pv(self.ty(&item.left), addr_r)?,
+                    Sub         => self.write_sub_pv(self.ty(&item.left), addr_r)?,
+                    Less        => self.write_clt_pv(self.ty(&item.left), addr_r)?,
+                    LessOrEq    => self.write_clte_pv(self.ty(&item.left), addr_r)?,
+                    Greater     => self.write_cgt_pv(self.ty(&item.left), addr_r)?,
+                    GreaterOrEq => self.write_cgte_pv(self.ty(&item.left), addr_r)?,
+                    _ => unreachable!(),
+                };
                 Ok(())
             },
-            (Mul, Some((exp_l, E::Literal(lit_r)))) |
-            (Mul, Some((E::Literal(lit_r), exp_l))) if self.ty(lit_r).is_numeric() => {
-                self.compile_expression(exp_l)?;
-                let numeric = lit_r.value.as_numeric().ice()?;
-                comment!(self, "{}{}", item.op, numeric);
-                self.write_mul_pi(self.ty(&item.left), numeric)?;
-                Ok(())
-            },
-            // Addition optimizations
-            (Add, Some((E::Variable(var_l), E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
-                let addr_l = self.load_variable(var_l)?;
-                let addr_r = self.load_variable(var_r)?;
-                comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
-                self.write_add_vv(self.ty(&item.left), addr_l, addr_r)?;
-                Ok(())
-            },
-            (Add, Some((exp_l, E::Variable(var_r)))) |
-            (Add, Some((E::Variable(var_r), exp_l))) if self.ty(&item.left).is_numeric() => {
+            // Variable/expression (swapped) optimizations
+            (op @ (Mul | Add), Some((E::Variable(var_r), exp_l))) if self.ty(&item.left).is_numeric() => {
                 self.compile_expression(exp_l)?;
                 let addr_r = self.load_variable(var_r)?;
                 comment!(self, "{}{}", item.op, var_r.ident);
-                self.write_add_pv(self.ty(&item.left), addr_r)?;
+                match op {
+                    Mul => self.write_mul_pv(self.ty(&item.left), addr_r)?,
+                    Add => self.write_add_pv(self.ty(&item.left), addr_r)?,
+                    // Sub is not commuatative
+                    Less        => self.write_cgt_pv(self.ty(&item.left), addr_r)?, // swapped gt/lt
+                    LessOrEq    => self.write_cgte_pv(self.ty(&item.left), addr_r)?,
+                    Greater     => self.write_clt_pv(self.ty(&item.left), addr_r)?,
+                    GreaterOrEq => self.write_clte_pv(self.ty(&item.left), addr_r)?,
+                    _ => unreachable!(),
+                };
                 Ok(())
             },
-            (Add, Some((exp_l, E::Literal(lit_r)))) |
-            (Add, Some((E::Literal(lit_r), exp_l))) if self.ty(lit_r).is_numeric() => {
+            // Expression/literal optimizations
+            (op @ (Mul | Add | Sub | Less | LessOrEq | Greater | GreaterOrEq), Some((exp_l, E::Literal(lit_r)))) if self.ty(lit_r).is_numeric() => {
                 self.compile_expression(exp_l)?;
                 let numeric = lit_r.value.as_numeric().ice()?;
                 comment!(self, "{}{}", item.op, numeric);
-                self.write_add_pi(self.ty(&item.left), numeric)?;
+                match op {
+                    Mul         => self.write_mul_pi(self.ty(&item.left), numeric)?,
+                    Add         => self.write_add_pi(self.ty(&item.left), numeric)?,
+                    Sub         => self.write_sub_pi(self.ty(&item.left), numeric)?,
+                    Less        => self.write_clt_pi(self.ty(&item.left), numeric)?,
+                    LessOrEq    => self.write_clte_pi(self.ty(&item.left), numeric)?,
+                    Greater     => self.write_cgt_pi(self.ty(&item.left), numeric)?,
+                    GreaterOrEq => self.write_cgte_pi(self.ty(&item.left), numeric)?,
+                    _ => unreachable!(),
+                };
                 Ok(())
             },
-            // Subtraction optimizations
-            (Sub, Some((E::Variable(var_l), E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
-                let addr_l = self.load_variable(var_l)?;
-                let addr_r = self.load_variable(var_r)?;
-                comment!(self, "{}{}{}", var_l.ident, item.op, var_r.ident);
-                self.write_sub_vv(self.ty(&item.left), addr_l, addr_r)?;
-                Ok(())
-            },
-            (Sub, Some((exp_l, E::Variable(var_r)))) if self.ty(&item.left).is_numeric() => {
-                self.compile_expression(exp_l)?;
-                let addr_r = self.load_variable(var_r)?;
-                comment!(self, "{}{}", item.op, var_r.ident);
-                self.write_sub_pv(self.ty(&item.left), addr_r)?;
-                Ok(())
-            },
-            (Sub, Some((exp_l, E::Literal(lit_r)))) if self.ty(lit_r).is_numeric() => {
+            // Literal/Expression (swapped) optimizations
+            (op @ (Mul | Add | Less | LessOrEq | Greater | GreaterOrEq), Some((E::Literal(lit_r), exp_l))) if self.ty(lit_r).is_numeric() => {
                 self.compile_expression(exp_l)?;
                 let numeric = lit_r.value.as_numeric().ice()?;
                 comment!(self, "{}{}", item.op, numeric);
-                self.write_sub_pi(self.ty(&item.left), numeric)?;
+                match op {
+                    Mul         => self.write_mul_pi(self.ty(&item.left), numeric)?,
+                    Add         => self.write_add_pi(self.ty(&item.left), numeric)?,
+                    // Sub is not commuatative
+                    Less        => self.write_cgt_pi(self.ty(&item.left), numeric)?, // swapped gt/lt
+                    LessOrEq    => self.write_cgte_pi(self.ty(&item.left), numeric)?,
+                    Greater     => self.write_clt_pi(self.ty(&item.left), numeric)?,
+                    GreaterOrEq => self.write_clte_pi(self.ty(&item.left), numeric)?,
+                    _ => unreachable!(),
+                };
                 Ok(())
             },
             // General operations
@@ -2071,7 +2086,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write compare equal instruction.
-    fn write_eq(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
+    fn write_ceq(self: &Self, ty: &Type) -> CompileResult<StackAddress>{
         Ok(if ty.is_primitive() {
             match ty.primitive_size() {
                 1 => self.writer.ceq8(),
@@ -2088,7 +2103,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write compare not equal instruction.
-    fn write_neq(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+    fn write_cneq(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
             match ty.primitive_size() {
                 1 => self.writer.cneq8(),
@@ -2105,7 +2120,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Write compare less than instruction.
-    fn write_lt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+    fn write_clt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.clts8(),
@@ -2127,8 +2142,59 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
+    /// Write variable<variable comparison instruction.
+    fn write_clt_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
+        Ok(match ty {
+            Type::i8 => self.writer.clts8_vv(left, right),
+            Type::i16 => self.writer.clts16_vv(left, right),
+            Type::i32 => self.writer.clts32_vv(left, right),
+            Type::i64 => self.writer.clts64_vv(left, right),
+            Type::u8 => self.writer.cltu8_vv(left, right),
+            Type::u16 => self.writer.cltu16_vv(left, right),
+            Type::u32 => self.writer.cltu32_vv(left, right),
+            Type::u64 => self.writer.cltu64_vv(left, right),
+            Type::f32 => self.writer.cltf32_vv(left, right),
+            Type::f64 => self.writer.cltf64_vv(left, right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<immediate comparison instruction.
+    fn write_clt_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.clts8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.clts16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.clts32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.clts64_pi(right.as_signed().ice()? as i64),
+             Type::u8 => self.writer.cltu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.cltu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.cltu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.cltu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.cltf32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.cltf64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<variable comparison instruction.
+    fn write_clt_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.clts8_pv(right),
+            Type::i16 => self.writer.clts16_pv(right),
+            Type::i32 => self.writer.clts32_pv(right),
+            Type::i64 => self.writer.clts64_pv(right),
+             Type::u8 => self.writer.cltu8_pv(right),
+            Type::u16 => self.writer.cltu16_pv(right),
+            Type::u32 => self.writer.cltu32_pv(right),
+            Type::u64 => self.writer.cltu64_pv(right),
+            Type::f32 => self.writer.cltf32_pv(right),
+            Type::f64 => self.writer.cltf64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
     /// Write compare less than or equal instruction.
-    fn write_lte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+    fn write_clte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.cltes8(),
@@ -2150,8 +2216,59 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
+    /// Write variable<=variable comparison instruction.
+    fn write_clte_vv(self: &Self, ty: &Type, left: FrameAddress, right: FrameAddress) -> CompileResult<StackAddress>{
+        Ok(match ty {
+            Type::i8 => self.writer.cltes8_vv(left, right),
+            Type::i16 => self.writer.cltes16_vv(left, right),
+            Type::i32 => self.writer.cltes32_vv(left, right),
+            Type::i64 => self.writer.cltes64_vv(left, right),
+            Type::u8 => self.writer.clteu8_vv(left, right),
+            Type::u16 => self.writer.clteu16_vv(left, right),
+            Type::u32 => self.writer.clteu32_vv(left, right),
+            Type::u64 => self.writer.clteu64_vv(left, right),
+            Type::f32 => self.writer.cltef32_vv(left, right),
+            Type::f64 => self.writer.cltef64_vv(left, right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<=immediate comparison instruction.
+    fn write_clte_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cltes8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.cltes16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.cltes32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.cltes64_pi(right.as_signed().ice()? as i64),
+             Type::u8 => self.writer.clteu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.clteu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.clteu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.clteu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.cltef32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.cltef64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<=variable comparison instruction.
+    fn write_clte_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cltes8_pv(right),
+            Type::i16 => self.writer.cltes16_pv(right),
+            Type::i32 => self.writer.cltes32_pv(right),
+            Type::i64 => self.writer.cltes64_pv(right),
+             Type::u8 => self.writer.clteu8_pv(right),
+            Type::u16 => self.writer.clteu16_pv(right),
+            Type::u32 => self.writer.clteu32_pv(right),
+            Type::u64 => self.writer.clteu64_pv(right),
+            Type::f32 => self.writer.cltef32_pv(right),
+            Type::f64 => self.writer.cltef64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
     /// Write compare greater than instruction.
-    fn write_gt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+    fn write_cgt(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.cgts8(),
@@ -2173,8 +2290,42 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         })
     }
 
+    /// Write expression<=immediate comparison instruction.
+    fn write_cgt_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cgts8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.cgts16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.cgts32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.cgts64_pi(right.as_signed().ice()? as i64),
+             Type::u8 => self.writer.cgtu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.cgtu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.cgtu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.cgtu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.cgtf32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.cgtf64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<=variable comparison instruction.
+    fn write_cgt_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cgts8_pv(right),
+            Type::i16 => self.writer.cgts16_pv(right),
+            Type::i32 => self.writer.cgts32_pv(right),
+            Type::i64 => self.writer.cgts64_pv(right),
+             Type::u8 => self.writer.cgtu8_pv(right),
+            Type::u16 => self.writer.cgtu16_pv(right),
+            Type::u32 => self.writer.cgtu32_pv(right),
+            Type::u64 => self.writer.cgtu64_pv(right),
+            Type::f32 => self.writer.cgtf32_pv(right),
+            Type::f64 => self.writer.cgtf64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
     /// Write compare greater than or equal instruction.
-    fn write_gte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+    fn write_cgte(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(if ty.is_primitive() {
             match ty {
                 Type::i8 => self.writer.cgtes8(),
@@ -2193,6 +2344,40 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.string_cgte()
         } else {
             Self::ice(&format!("Unsupported type {ty} for gt operation"))?
+        })
+    }
+
+    /// Write expression<=immediate comparison instruction.
+    fn write_cgte_pi(self: &Self, ty: &Type, right: Numeric) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cgtes8_pi(right.as_signed().ice()? as i8),
+            Type::i16 => self.writer.cgtes16_pi(right.as_signed().ice()? as i16),
+            Type::i32 => self.writer.cgtes32_pi(right.as_signed().ice()? as i32),
+            Type::i64 => self.writer.cgtes64_pi(right.as_signed().ice()? as i64),
+             Type::u8 => self.writer.cgteu8_pi(right.as_unsigned().ice()? as u8),
+            Type::u16 => self.writer.cgteu16_pi(right.as_unsigned().ice()? as u16),
+            Type::u32 => self.writer.cgteu32_pi(right.as_unsigned().ice()? as u32),
+            Type::u64 => self.writer.cgteu64_pi(right.as_unsigned().ice()? as u64),
+            Type::f32 => self.writer.cgtef32_pi(right.as_float().ice()? as f32),
+            Type::f64 => self.writer.cgtef64_pi(right.as_float().ice()? as f64),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
+        })
+    }
+
+    /// Write expression<=variable comparison instruction.
+    fn write_cgte_pv(self: &Self, ty: &Type, right: FrameAddress) -> CompileResult<StackAddress> {
+        Ok(match ty {
+             Type::i8 => self.writer.cgtes8_pv(right),
+            Type::i16 => self.writer.cgtes16_pv(right),
+            Type::i32 => self.writer.cgtes32_pv(right),
+            Type::i64 => self.writer.cgtes64_pv(right),
+             Type::u8 => self.writer.cgteu8_pv(right),
+            Type::u16 => self.writer.cgteu16_pv(right),
+            Type::u32 => self.writer.cgteu32_pv(right),
+            Type::u64 => self.writer.cgteu64_pv(right),
+            Type::f32 => self.writer.cgtef32_pv(right),
+            Type::f64 => self.writer.cgtef64_pv(right),
+            _ => Self::ice(&format!("Unsupported operation for type {:?}", ty))?,
         })
     }
 }
