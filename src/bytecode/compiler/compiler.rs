@@ -1850,7 +1850,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_ceq()
         } else {
-            unimplemented!("General heap compare");
+            Self::ice(&format!("ceq: Unsupported type {:?}", ty))?
         })
     }
 
@@ -1861,7 +1861,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cneq()
         } else {
-            unimplemented!("General heap compare");
+            Self::ice(&format!("cneq: Unsupported type {:?}", ty))?
         })
     }
 
@@ -1872,7 +1872,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_clt()
         } else {
-            Self::ice(&format!("Unsupported type {ty} for lt operation"))?
+            Self::ice(&format!("clt: Unsupported type {:?}", ty))?
         })
     }
 
@@ -1898,7 +1898,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_clte()
         } else {
-            Self::ice(&format!("Unsupported type {ty} for lt operation"))?
+            Self::ice(&format!("clte: Unsupported type {:?}", ty))?
         })
     }
 
@@ -1924,7 +1924,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cgt()
         } else {
-            Self::ice(&format!("Unsupported type {ty} for lt operation"))?
+            Self::ice(&format!("cgt: Unsupported type {:?}", ty))?
         })
     }
 
@@ -1945,7 +1945,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else if ty.is_string() {
             self.writer.string_cgte()
         } else {
-            Self::ice(&format!("Unsupported type {ty} for gt operation"))?
+            Self::ice(&format!("cgte: Unsupported type {:?}", ty))?
         })
     }
 
