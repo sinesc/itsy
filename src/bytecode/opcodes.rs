@@ -139,12 +139,11 @@ impl_opcodes!{
         let iter_loc = self.stack.offset_fp(iter as StackAddress);
         let upper_loc = self.stack.offset_sp(size_of::<T>());
         let upper: T = self.stack.load(upper_loc);
-        let mut current: T = self.stack.load(iter_loc);
-        current = T::wrapping_add(current, 1 as T);
-        if current <= upper {
+        let current: T = self.stack.load(iter_loc);
+        if current != upper {
             self.pc = start;
         }
-        self.stack.store(iter_loc, current);
+        self.stack.store(iter_loc, T::wrapping_add(current, 1 as T));
     }
 
     /// Pops heap reference. Sets program counter to exit and returns if the reference
@@ -157,15 +156,16 @@ impl_opcodes!{
         arrayiter32<T: Data32>(element: FrameAddress, exit: StackAddress),
         arrayiter64<T: Data64>(element: FrameAddress, exit: StackAddress)
     >(&mut self) {
-        let mut item: HeapRef = self.stack.pop();
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
         if item.offset() >= self.heap.item(item.index()).data.len() {
-            self.stack.push(item);
             self.pc = exit;
             return;
         }
         let data: T = self.heap.read(item);
         item.add_offset(size_of::<T>() as StackOffset);
-        self.stack.push(item);
+        self.stack.store(top_loc, item);
         self.stack.store_fp(element, data);
     }
 

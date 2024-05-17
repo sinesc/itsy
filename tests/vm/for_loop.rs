@@ -142,3 +142,27 @@ fn for_in_inference() {
     ));
     assert_all(&result, &[ 1u8, 2, 3, 4 ]);
 }
+
+#[test]
+fn for_range_min_max() {
+    let result = run(stringify!(
+        let c = 0;
+        for i in -128i8..=127 {
+            ret_i8(i);
+            c += 1;
+            if c > 256 {
+                break; // stop loop if it won't on its own
+            }
+        }
+    ));
+    if result.len() > 256 {
+        panic!("Loop failed to stop looping");
+    } else if result.len() < 256 {
+        panic!("Loop ended prematurely");
+    }
+    let mut expected = Vec::new();
+    for i in -128i8..=127 {
+        expected.push(i);
+    }
+    assert_all(&result, &expected);
+}

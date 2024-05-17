@@ -614,39 +614,40 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "for in range");
         // store lower range bound in iter variable
         let binary_op = item.expr.as_binary_op().ice()?;
-        self.compile_expression(binary_op.left.as_expression().ice()?)?;          // stack current=lower
-        self.write_store(self.ty(&iter_type_id), iter_loc, None)?;                      // stack -
+        self.compile_expression(binary_op.left.as_expression().ice()?)?; // stack current=lower
+        self.write_store(self.ty(&iter_type_id), iter_loc, None)?; // stack -
         // push upper range bound
-        self.compile_expression(binary_op.right.as_expression().ice()?)?;             // stack upper
-        // precheck bounds
+        self.compile_expression(binary_op.right.as_expression().ice()?)?; // stack upper
+        // precheck bounds (otherwise we'd always be looping at least one time)
         let skip_jump = if binary_op.op == ast::BinaryOperator::Range {
             // non-inclusive range: check if lower bound greater than or equal to upper bound. also note, while is always inclusive, so we have to subtract 1 from upper bound
             let iter_ty = self.ty(&iter_type_id);
-            self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
-            self.write_clte(iter_ty)?;                                         // stack: upper upper_lte_lower
-            let skip_jump = self.writer.jn0(123);                // stack: upper
-            self.write_subxc(iter_ty, Numeric::Unsigned(1))?;                                        // stack: upper=upper-1
+            self.write_clone(iter_ty); // stack: upper upper
+            self.write_load(iter_ty, iter_loc)?; // stack: upper upper lower
+            self.write_clte(iter_ty)?; // stack: upper upper_lte_lower
+            let skip_jump = self.writer.jn0(123); // stack: upper
+            self.write_subxc(iter_ty, Numeric::Unsigned(1))?; // stack: upper=upper-1
             skip_jump
         } else {
             // inclusive range: check if lower bound greater than upper bound.
             let iter_ty = self.ty(&iter_type_id);
-            self.write_clone(iter_ty);                                   // stack: upper upper
-            self.write_load(iter_ty, iter_loc)?;                   // stack: upper upper lower
-            self.write_clt(iter_ty)?;                                         // stack: upper upper_lte_lower
-            self.writer.jn0(123)                                    // stack: upper
+            self.write_clone(iter_ty); // stack: upper upper
+            self.write_load(iter_ty, iter_loc)?; // stack: upper upper lower
+            self.write_clt(iter_ty)?; // stack: upper upper_lte_lower
+            self.writer.jn0(123) // stack: upper
         };
-        // compile block
-        let start_target = self.writer.position();              // stack: upper
+        // compile inner block
+        let start_target = self.writer.position(); // stack: upper
         self.loop_control.push();
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
-        // load bounds, increment and compare
+        // loop instruction will check iter and either do nothing or increment and jump back to start
         let iter_ty = self.ty(&iter_type_id);
-        let increment_target = self.write_loop(iter_ty, iter_loc, start_target)?;    // stack: upper
-        // exit loop
+        let increment_target = self.write_loop(iter_ty, iter_loc, start_target)?; // stack: upper
+        // get exit location, fix skip_jump location to point here
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
+        // fix break/continue addresses
         for loop_control in &loop_controls {
             match loop_control {
                 &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
@@ -660,21 +661,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
     fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
-
+        // put array reference on top of stack, will be updated by arrayiter
         self.compile_expression(&item.expr)?;
         self.write_cnt(self.ty(&item.expr), true, HeapRefOp::Inc)?;
         let loop_start = self.write_arrayiter(self.ty(&element_type_id), element_loc, 123)?;
-
+        // compile inner block
         self.loop_control.push();
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
-
+        // repeat/exit loop, fix exit address
         self.writer.jmp(loop_start);
         let exit_target = self.writer.position();
         self.writer.overwrite(loop_start, |_| self.write_arrayiter(self.ty(&element_type_id), element_loc, exit_target).unwrap(/*TODO*/));
-
-        // fix jump addresses
-        let exit_target = self.writer.position();
+        // fix break/continue addresses
         for loop_control in &loop_controls {
             match loop_control {
                 &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
@@ -1738,7 +1737,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(select_integer_type!(self, ty, loop, iter, start))
     }
 
-    /// Write loop instruction.
+    /// Write arrayiter instruction.
     fn write_arrayiter(self: &Self, element_ty: &Type, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
         Ok(if element_ty.is_ref() {
             self.writer.arrayiter64(element, exit)
