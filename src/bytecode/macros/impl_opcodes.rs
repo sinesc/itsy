@@ -1,33 +1,29 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_opcodes {
 
+    // Increment read counter
+    (@inc_pc $ty:tt, $counter:expr) => (
+        $counter += std::mem::size_of::<$ty>()
+    );
     // Read from slice
-    (@inc_pc String, $pc:expr) => (
-        $pc += std::mem::size_of::<StackAddress>()
-    );
-    (@inc_pc RustFn, $pc:expr) => (
-        $pc += std::mem::size_of::<RustFnIndex>()
-    );
-    (@inc_pc $ty:tt, $pc:expr) => (
-        $pc += std::mem::size_of::<$ty>()
-    );
-    (@read_bytes2 $ty:tt, $from:ident) => ( {
+    (@read_bytes $ty:tt, $from:ident $(, $counter:ident )?) => ( {
         let (int_bytes, rest) = $from.split_at(std::mem::size_of::<$ty>());
         *$from = rest;
+        $( impl_opcodes!(@inc_pc $ty, $counter); )?
         $ty::from_le_bytes(int_bytes.try_into().unwrap())
     });
     // Read opcode arguments
-    (@read_arg2 String, $from:ident, $counter:ident) => ( {
-        let len = impl_opcodes!(@read_bytes2 StackAddress, $from);
+    (@read_arg String, $from:ident, $counter:ident) => ( {
+        let len = impl_opcodes!(@read_bytes StackAddress, $from);
         let (str_bytes, rest) = $from.split_at(len);
         *$from = rest;
-        $counter += len;
+        $counter += len + std::mem::size_of::<StackAddress>();
         ::std::str::from_utf8(str_bytes).unwrap().to_string()
     });
-    (@read_arg2 RustFn, $from:ident $(, $counter:ident )?) => ( T::from_index(impl_opcodes!(@read_bytes2 RustFnIndex, $from)) );
-    (@read_arg2 Builtin, $from:ident $(, $counter:ident )?) => ( Builtin::from_index(impl_opcodes!(@read_bytes2 BuiltinIndex, $from)) );
-    (@read_arg2 HeapRefOp, $from:ident $(, $counter:ident )?) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes2 u8, $from)) );
-    (@read_arg2 $ty:ident, $from:ident $(, $counter:ident )?) => ( impl_opcodes!(@read_bytes2 $ty, $from) );
+    (@read_arg RustFn, $from:ident $(, $counter:ident )?) => ( T::from_index(impl_opcodes!(@read_bytes RustFnIndex, $from $(, $counter )?)) );
+    (@read_arg Builtin, $from:ident $(, $counter:ident )?) => ( Builtin::from_index(impl_opcodes!(@read_bytes BuiltinIndex, $from $(, $counter )?)) );
+    (@read_arg HeapRefOp, $from:ident $(, $counter:ident )?) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes u8, $from $(, $counter )?)) );
+    (@read_arg $ty:ident, $from:ident $(, $counter:ident )?) => ( impl_opcodes!(@read_bytes $ty, $from $(, $counter )?) );
     // Map parameter type names to reader types
     (@map_reader_type RustFn) => ( T );
     (@map_reader_type $ty:tt) => ( $ty );
@@ -178,7 +174,7 @@ macro_rules! impl_opcodes {
                 const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
                 loop {
                     let instructions = &mut &self.instructions[self.pc..];
-                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, instructions);
                     #[allow(unused_doc_comments)]
                     match instruction {
                         $(
@@ -189,10 +185,8 @@ macro_rules! impl_opcodes {
                                     $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
 
                                     let mut size = 0;
-                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg2 $arg_type, instructions, size) ),* );
-
+                                    let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg $arg_type, instructions, size) ),* );
                                     impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                    $( impl_opcodes!(@inc_pc $arg_type, size); )*
                                     size = (size + ADD_MASK) & !ADD_MASK;
                                     self.pc += size;
 
@@ -210,10 +204,8 @@ macro_rules! impl_opcodes {
                                         $( impl_opcodes!(@setup_flag self, prev_pc, $vflag); )?
 
                                         let mut size = 0;
-                                        $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions, size); )*
-
+                                        $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg $vtype_name, instructions, size); )*
                                         impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                        $( impl_opcodes!(@inc_pc $vtype_name, size); )*
                                         size = (size + ADD_MASK) & !ADD_MASK;
                                         self.pc += size;
 
@@ -237,7 +229,7 @@ macro_rules! impl_opcodes {
                 use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
                 const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
                 let instructions = &mut &self.instructions[self.pc..];
-                let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
+                let instruction = impl_opcodes!(@read_arg OpCodeIndex, instructions);
                 #[allow(unused_doc_comments)]
                 match instruction {
                     $(
@@ -248,10 +240,8 @@ macro_rules! impl_opcodes {
                                 $( impl_opcodes!(@setup_flag self, prev_pc, $flag); )?
 
                                 let mut size = 0;
-                                let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg2 $arg_type, instructions, size) ),* );
-
+                                let ( (), $( $arg_name ),* ) = ( (), $( impl_opcodes!(@read_arg $arg_type, instructions, size) ),* );
                                 impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                $( impl_opcodes!(@inc_pc $arg_type, size); )*
                                 size = (size + ADD_MASK) & !ADD_MASK;
                                 self.pc += size;
 
@@ -268,10 +258,8 @@ macro_rules! impl_opcodes {
                                     $( impl_opcodes!(@setup_flag self, prev_pc, $vflag); )?
 
                                     let mut size = 0;
-                                    $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg2 $vtype_name, instructions, size); )*
-
+                                    $( let $varg_name: $vtype_name = impl_opcodes!(@read_arg $vtype_name, instructions, size); )*
                                     impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                    $( impl_opcodes!(@inc_pc $vtype_name, size); )*
                                     size = (size + ADD_MASK) & !ADD_MASK;
                                     self.pc += size;
 
@@ -292,7 +280,7 @@ macro_rules! impl_opcodes {
                     None
                 } else {
                     let instructions = &mut &self.instructions[position..];
-                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, instructions);
                     match instruction {
                         $(
                             $( #[ $attr ] )*
@@ -323,7 +311,7 @@ macro_rules! impl_opcodes {
                     None
                 } else {
                     let instructions = &mut &self.instructions[position..];
-                    let instruction = impl_opcodes!(@read_arg2 OpCodeIndex, instructions);
+                    let instruction = impl_opcodes!(@read_arg OpCodeIndex, instructions);
                     #[allow(unreachable_patterns)]
                     #[allow(unused_doc_comments)]
                     match instruction {
@@ -331,9 +319,8 @@ macro_rules! impl_opcodes {
                         opcodes::call_rust => {
                             let mut size = 0;
                             let mut result = format!("{} {} ", position, stringify!(call_rust));
-                            result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 RustFn, instructions, size)));
+                            result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg RustFn, instructions, size)));
                             impl_opcodes!(@inc_pc OpCodeIndex, size);
-                            impl_opcodes!(@inc_pc RustFn, size);
                             size = (size + ADD_MASK) & !ADD_MASK;
                             Some((result, position + size))
                         }
@@ -341,10 +328,9 @@ macro_rules! impl_opcodes {
                         opcodes::comment => {
                             let mut size = 0;
                             let start = position;
-                            let message = impl_opcodes!(@read_arg2 String, instructions, size);
+                            let message = impl_opcodes!(@read_arg String, instructions, size);
                             let result = if &message[0..1] == "\n" { format!("\n;{} {}", start, &message[1..]) } else { format!(";{} {}", start, message) };
                             impl_opcodes!(@inc_pc OpCodeIndex, size);
-                            impl_opcodes!(@inc_pc String, size);
                             size = (size + ADD_MASK) & !ADD_MASK;
                             Some((result, position + size))
                         }
@@ -355,12 +341,9 @@ macro_rules! impl_opcodes {
                                 opcodes::$name => {
                                     let mut size = 0;
                                     let mut result = format!("{:?} {} ", position, stringify!($name));
-                                    $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 $arg_type, instructions, size) )); )*
-
+                                    $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $arg_type, instructions, size) )); )*
                                     impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                    $( impl_opcodes!(@inc_pc $arg_type, size); )*
                                     size = (size + ADD_MASK) & !ADD_MASK;
-
                                     Some((result, position + size))
                                 }
                             )?
@@ -371,12 +354,9 @@ macro_rules! impl_opcodes {
                                     opcodes::$vname => {
                                         let mut size = 0;
                                         let mut result = format!("{:?} {} ", position, stringify!($vname));
-                                        $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg2 $vtype_name, instructions, size) )); )*
-
+                                        $( result.push_str(&format!("{:?} ", impl_opcodes!(@read_arg $vtype_name, instructions, size) )); )*
                                         impl_opcodes!(@inc_pc OpCodeIndex, size);
-                                        $( impl_opcodes!(@inc_pc $vtype_name, size); )*
                                         size = (size + ADD_MASK) & !ADD_MASK;
-
                                         Some((result, position + size))
                                     }
                                 )+

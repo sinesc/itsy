@@ -126,7 +126,7 @@ impl_opcodes!{
     /// Sets program counter to start if value in variable iter is less than or equal to the top
     /// value on the stack. Does not consume top stack value.
     fn <
-        loops8<T: i8>(iter: FrameAddress, start: StackAddress), // TODO refactor to check at start of loop like arrayiter
+        loops8<T: i8>(iter: FrameAddress, start: StackAddress),
         loops16<T: i16>(iter: FrameAddress, start: StackAddress),
         loops32<T: i32>(iter: FrameAddress, start: StackAddress),
         loops64<T: i64>(iter: FrameAddress, start: StackAddress),

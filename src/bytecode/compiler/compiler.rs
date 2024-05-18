@@ -7,7 +7,7 @@ mod util;
 mod init_state;
 
 use crate::config::FrameAddress;
-use crate::prelude::*;
+use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
@@ -342,9 +342,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             _ => {
                 self.compile_expression(&item.left)?;       // stack: &left
-                self.write_clone_ref();                     // stack: &left &left
-                let ty = self.ty(&item.left);
-                self.write_heap_fetch(ty)?;                      // stack: &left left
+                self.writer.clone(size_of::<HeapAddress>() as FrameAddress);// stack: &left &left
+                self.write_heap_fetch(self.ty(&item.left))?;// stack: &left left
                 self.compile_expression(&item.right)?;      // stack: &left left right
                 let ty = self.ty(&item.left);
                 match item.op {                                 // stack: &left result
@@ -1696,16 +1695,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Clone stack value at (negative of) given offset to the top of the stack.
+    /// Write instruction to clone the top stack value.
     fn write_clone(self: &Self, ty: &Type) -> StackAddress {
         self.writer.clone(ty.primitive_size() as FrameAddress)
     }
 
-    fn write_clone_ref(self: &Self) -> StackAddress {
-        self.writer.clone(size_of::<crate::HeapAddress>() as FrameAddress)
-    }
-
-    /// Writes a call instruction. If the function address is not known yet, a placeholder will be written.
+    /// Write call instruction. If the function address is not known yet, a placeholder will be written.
     fn write_call(self: &mut Self, function_id: FunctionId) -> StackAddress {
         let function_addr = self.functions.register_call(function_id, self.writer.position(), false);
         let function_arg_size = self.resolved.function(function_id).arg_size(self);
