@@ -481,9 +481,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                 // load function address
                 comment!(self, "\npush @{}", item.path);
-                self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+                self.write_immediate_sa(function_addr)?;
                 // load constructor (none)
-                self.writer.immediate64(0 as u64); // TODO: immediate_sa bla
+                self.write_immediate_sa(0)?;
                 // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
                 self.writer.upload(size_of::<StackAddress>() * 2, 0);
             },
@@ -728,9 +728,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
         // load function address
         comment!(self, "\npush @{}", item.shared.sig.ident.name);
-        self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization
+        self.write_immediate_sa(function_addr)?;
         // load constructor (none)
-        self.writer.immediate64(0 as u64); // TODO: immediate_sa bla
+        self.write_immediate_sa(0)?;
         // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
         self.writer.upload(size_of::<StackAddress>() * 2, 0);
         Ok(())
@@ -756,11 +756,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_load(ty, loc)?;
         }
         // load function address
-        self.writer.immediate64(function_addr as u64); // TODO: depends on stack address size but may not use small immediate optimization, implement immediate_sa
+        self.write_immediate_sa(function_addr)?;
         size += size_of::<StackAddress>();
         // load constructor
         let constructor = self.constructor(self.ty(&item.struct_type_id))?;
-        self.writer.immediate64(constructor as u64); // TODO: immediate_sa bla
+        self.write_immediate_sa(constructor)?;
         size += size_of::<StackAddress>();
         // upload captures, address and constructor into heap object
         comment!(self, "push @{}", item.shared.sig.ident.name);
@@ -817,7 +817,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             for &(call_address, load_only) in calls.iter() {
                 self.writer.set_position(call_address);
                 if load_only {
-                    self.writer.immediate64(position as u64); // TODO: depends on stack address size but may not use small immediate optimization
+                    self.write_immediate_sa(position)?;
                 } else {
                     self.writer.call(position, arg_size);
                 }
@@ -1479,6 +1479,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => Self::ice(&format!("Unexpected float literal type: {:?}", ty))?,
                 }
             },
+        })
+    }
+
+    fn write_immediate_sa(self: &Self, v: StackAddress) -> CompileResult<StackAddress> {
+        Ok(match size_of::<StackAddress>() {
+            1 => self.writer.immediate8(v as u8),
+            2 => self.writer.immediate16(v as u16),
+            4 => self.writer.immediate32(v as u32),
+            8 => self.writer.immediate64(v as u64),
+            size @ _ => Self::ice(&format!("Invalid stack address size: {:?}", size))?,
         })
     }
 
