@@ -24,27 +24,34 @@ struct Result {
 }
 
 fn main() {
-    /*let test_array: [ u32 ] = [];
+    // some test data
 
-    for i in 0..10000 {
+    let test_array: [ u32 ] = [];
+
+    for i in 0..10_000 {
         test_array.push(i*3);
-    }*/
+    }
+
+    // benchmarks comparing against rust
 
     let compares = [
-        CompareBench { name: "mandelbrot", rating: 100, itsy: fn() -> String { itsy_mandelbrot(800, 600) }, rust: fn() -> String { rust_mandelbrot(800, 600) } },
-        CompareBench { name: "fib_r", rating: 100, itsy: fn() -> String { itsy_fib_r(32) as String }, rust: fn() -> String { rust_fib_r(32) as String } },
-        CompareBench { name: "stringcat", rating: 1, itsy: fn() -> String { itsy_stringcat(5000) }, rust: fn() -> String { rust_stringcat(5000) } },
+        CompareBench { name: "mandelbrot", rating: 100, itsy: || -> String { itsy_mandelbrot(800, 600) }, rust: || -> String { rust_mandelbrot(800, 600) } },
+        CompareBench { name: "fib_r", rating: 100, itsy: || -> String { itsy_fib_r(32) as String }, rust: || -> String { rust_fib_r(32) as String } },
+        CompareBench { name: "stringcat", rating: 1, itsy: || -> String { itsy_stringcat(5000) }, rust: || -> String { rust_stringcat(5000) } },
     ];
+
+    // regular benchmarks
+
     let singles = [
         SingleBench { name: "upload_struct", rating: 100, itsy: itsy_upload_struct },
         SingleBench { name: "upload_array", rating: 200, itsy: itsy_upload_array },
-        SingleBench { name: "string_return", rating: 100, itsy: itsy_string_return },
+        SingleBench { name: "string_return", rating: 50, itsy: itsy_string_return },
         SingleBench { name: "heap_reuse", rating: 0, itsy: itsy_heap_reuse }, // too unstable to include in rating
         SingleBench { name: "for_index", rating: 10, itsy: itsy_for_index },
-        //SingleBench { name: "for_array", rating: 10, itsy: || itsy_for_array(test_array) }, // FIXME closures with heap captures still broken
-        SingleBench { name: "for_array_tmp", rating: 100, itsy: itsy_for_array_tmp },
+        SingleBench { name: "for_array", rating: 30, itsy: || itsy_for_array(test_array) },
         SingleBench { name: "while", rating: 50, itsy: itsy_while },
     ];
+
     let num_passes = 10;
     let results: [ [ Result ] ] = [ ];
 
@@ -196,14 +203,14 @@ fn itsy_stringcat(n: i32) -> String {
 }
 
 fn itsy_upload_struct() {
-    for i in 0..1000000 {
+    for i in 0..1_000_000 {
         // partially dynamic contents -> upload opcode
         let item = ConstructTest { a: ConstructTestInner { c: 14, d: i, e: 3.14, f: -21 }, b: 17, c: i as i64, d: 1.7, e: [ 1, 2, i, 8, 131231 ] };
     }
 }
 
 fn itsy_upload_array() {
-    for i in 0..1000000 {
+    for i in 0..1_000_000 {
         // static contents -> construct opcode
         let item = [
             [ 1u64, i, 3, 4 ],
@@ -230,26 +237,20 @@ fn itsy_heap_reuse() {
 }
 
 fn itsy_for_index() {
-    for i in 0..10000000 {
+    for i in 0..10_000_000 {
     }
 }
 
 fn itsy_while() {
     let i = 0;
-    while i < 10000000 {
+    while i < 10_000_000 {
         i += 1;
     }
 }
 
 fn itsy_for_array(data: [ u32 ]) {
-    for i in data {
-    }
-}
-
-fn itsy_for_array_tmp() { // remove once closures are fixed and we can just pass in the array to avoid counting construction time
-    let data = [ 11u32, 22, 33, 44, 55, 66, 77, 88, 99, 111 ];
-    for i in 0..1000000 {
-        for d in data {
+    for c in 0..1000 {
+        for i in data {
         }
     }
 }
