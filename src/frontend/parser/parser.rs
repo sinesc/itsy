@@ -4,7 +4,7 @@ pub mod error;
 mod nomutil;
 pub mod types;
 
-use nom::character::{is_alphanumeric, is_alphabetic, complete::{one_of, digit0, char, digit1}};
+use nom::character::{complete::{char, digit0, one_of}, is_alphabetic, is_alphanumeric, is_digit};
 use nom::bytes::complete::{take_while, take_while1, tag};
 use nom::combinator::{recognize, opt, all_consuming, map, not, verify};
 use nom::multi::{separated_list0, separated_list1, many0, fold_many0, fold_many1};
@@ -647,13 +647,21 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
         }
     }
 
+    /// Matches string starting with a digit and optionally continuing with digits and underscores.
+    fn digits1(i: Input<'_>) -> Output<Input<'_>> {
+        recognize(pair(
+            take_while1(|m| is_digit(m as u8) || m == '_'),
+            take_while(|m| is_digit(m as u8) || m == '_')
+        ))(i)
+    }
+
     let position = i.position();
     let j = i.clone();
 
     let (remaining, numerical) = terminated(
         recognize(tuple((
             opt(recognize(alt((punct("+"), punct("-"))))),
-            digit1,
+            digits1,
             opt(recognize(tuple((tag("."), not(punct(".")), digit0)))), // not(.) to avoid matching ranges
             opt(recognize(tuple((one_of("iuf"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
         ))),
@@ -663,7 +671,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
     let (value, type_name) = splits_numerical_suffix(*numerical);
 
     if value.contains(".") || type_name == Some("f32") || type_name == Some("f64") {
-        if let Ok(float) = str::parse::<f64>(&value.replace(" ", "")) {
+        if let Ok(float) = str::parse::<f64>(&value.replace(&[ ' ', '_' ], "")) {
             return Ok((remaining, Literal {
                 position    : position,
                 value       : LiteralValue::Numeric(Numeric::Float(float)),
@@ -672,7 +680,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
             }));
         }
     } else if value.starts_with("-") || type_name == Some("i8") || type_name == Some("i16") || type_name == Some("i32") || type_name == Some("i64") {
-        if let Ok(integer) = str::parse::<i64>(&value.replace(" ", "")) {
+        if let Ok(integer) = str::parse::<i64>(&value.replace(&[ ' ', '_' ], "")) {
             if check_signed_range(integer, type_name) {
                 return Ok((remaining, Literal {
                     position    : position,
@@ -683,7 +691,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
             }
         }
     } else {
-        if let Ok(integer) = str::parse::<u64>(value) {
+        if let Ok(integer) = str::parse::<u64>(&value.replace(&[ ' ', '_' ], "")) {
             if check_unsigned_range(integer, type_name) {
                 return Ok((remaining, Literal {
                     position    : position,
