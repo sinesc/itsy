@@ -796,7 +796,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // clone closed over variables
         for &binding_id in closure_captures {
             frame.insert(binding_id, frame.arg_pos);
-            self.init_state.declare(binding_id);
             self.init_state.initialize(binding_id);
             let capture_type = self.binding_by_id(binding_id).type_id.ice()?;
             frame.arg_pos += self.ty(&capture_type).primitive_size() as FrameAddress;
