@@ -202,7 +202,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
                     let result_type = self.ty(result);
-                    comment!(self, "discarding result");
+                    if result_type.primitive_size() > 0 {
+                        comment!(self, "discard if result");
+                    }
                     self.write_discard(result_type)?;
                 }
                 Ok(())
@@ -213,7 +215,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_block(block)?;
                 if let Some(result) = &block.result {
                     let result_type = self.ty(result);
-                    comment!(self, "discarding result");
+                    if result_type.primitive_size() > 0 {
+                        comment!(self, "discard block result");
+                    }
                     self.write_discard(result_type)?;
                 }
                 Ok(())
@@ -221,7 +225,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::Expression(expression) => {
                 self.compile_expression(expression)?;
                 let result_type = self.ty(expression);
-                comment!(self, "discarding result");
+                if result_type.primitive_size() > 0 {
+                    comment!(self, "discard expression result");
+                }
                 self.write_discard(result_type)?;
                 Ok(())
             },
@@ -626,11 +632,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_load(iter_ty, iter_loc)?; // stack: upper upper lower
             self.write_clte(iter_ty)?; // stack: upper upper_lte_lower
             let skip_jump = self.writer.jn0(123); // stack: upper
+            comment!(self, "push upper bound - 1");
             self.write_subxc(iter_ty, Numeric::Unsigned(1))?; // stack: upper=upper-1
             skip_jump
         } else {
             // inclusive range: check if lower bound greater than upper bound.
             let iter_ty = self.ty(&iter_type_id);
+            comment!(self, "clone upper bound");
             self.write_clone(iter_ty); // stack: upper upper
             self.write_load(iter_ty, iter_loc)?; // stack: upper upper lower
             self.write_clt(iter_ty)?; // stack: upper upper_lte_lower
@@ -655,6 +663,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             };
         }
         // discard counter
+        comment!(self, "discard upper bound");
         self.write_discard(iter_ty)?;
         Ok(())
     }
