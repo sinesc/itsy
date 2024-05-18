@@ -106,6 +106,57 @@ macro_rules! impl_opcodes {
             )+
         }
 
+        impl OpCode {
+            /**
+             * Super clunky helper method to get the max OpCode without having to rely on a fixed last opcode.
+             */
+            #[allow(unused_variables)]
+            #[allow(unused_doc_comments)]
+            const fn max() -> OpCodeIndex {
+                $(
+                    $( #[ $attr ] )*
+                    // single opcode
+                    $(
+                        let max = OpCode::$name as OpCodeIndex;
+                    )?
+                    // opcode variants
+                    $(
+                        $(
+                            $( #[$vattr] )*
+                            let max = OpCode::$vname as OpCodeIndex;
+                        )+
+                    )?
+                )+
+                max
+            }
+            /// Index of the largest valid opcode.
+            pub const MAX: OpCodeIndex = Self::max();
+        }
+
+        impl TryFrom<OpCodeIndex> for OpCode {
+            type Error = &'static str;
+            #[allow(unused_doc_comments)]
+            fn try_from(value: OpCodeIndex) -> Result<Self, Self::Error> {
+                match value {
+                    $(
+                        $( #[ $attr ] )*
+                        // single opcode
+                        $(
+                            x if x == Self::$name as OpCodeIndex => Ok(Self::$name),
+                        )?
+                        // opcode variants
+                        $(
+                            $(
+                                $( #[$vattr] )*
+                                x if x == Self::$vname as OpCodeIndex => Ok(Self::$vname),
+                            )+
+                        )?
+                    )+
+                    _ => Err("Not a valid opcode"),
+                }
+            }
+        }
+
         /// Integer representations of opcodes. These are useful to avoid having to convert the opcode integer
         /// value from the binary program back to an enum value (which would either require a match block since
         /// not all valid integers are also valid opcodes or an unsafe cast with a range check).
@@ -281,23 +332,7 @@ macro_rules! impl_opcodes {
                 } else {
                     let instructions = &mut &self.instructions[position..];
                     let instruction = impl_opcodes!(@read_arg OpCodeIndex, instructions);
-                    match instruction {
-                        $(
-                            $( #[ $attr ] )*
-                            // single opcode
-                            $(
-                                opcodes::$name => Some(OpCode::$name),
-                            )?
-                            // opcode variants
-                            $(
-                                $(
-                                    $( #[$vattr] )*
-                                    opcodes::$vname => Some(OpCode::$vname),
-                                )+
-                            )?
-                        )+
-                        _ => None,
-                    }
+                    OpCode::try_from(instruction).ok()
                 }
             }
 
@@ -324,7 +359,7 @@ macro_rules! impl_opcodes {
                             size = (size + ADD_MASK) & !ADD_MASK;
                             Some((result, position + size))
                         }
-                        #[cfg(feature="comments")]
+                        #[cfg(all(feature="symbols", feature="comments"))]
                         opcodes::comment => {
                             let mut size = 0;
                             let start = position;
