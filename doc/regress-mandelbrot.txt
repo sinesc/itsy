@@ -1,0 +1,453 @@
+Revision: 4ca782c4c5369bebdce48f4f749fc01d8eb31f67
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 17.05.2024 19:01:49
+Message:
+fix infinite loop when looping up to max value of loop type
+
+Completed in 5923ms
+Completed in 5913ms
+Completed in 5901ms
+
+
+Revision: cfb2df30eb9924bad31751e77a3297a352142158
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 16.05.2024 07:52:07
+Message:
+refactor code to generate optimized operations, add comparison optimizations
+
+Completed in 5956ms
+Completed in 5898ms
+Completed in 5873ms
+
+
+Revision: 994d2e7c80f18036928acfce811a94e074319934
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 14.05.2024 22:34:54
+Message:
+remove some 1-byte-argument instruction variants
+
+Completed in 6744ms
+Completed in 6804ms
+Completed in 6794ms
+
+
+Revision: 80dee1d90f278d018802eb63138a4ad915fd83b1
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 15.05.2024 07:19:08
+Message:
+implement configurable instruction alignment
+
+Completed in 6849ms
+Completed in 6876ms
+Completed in 6768ms
+
+
+Revision: ef1a44ac9178c5b5724814d200d8b1343097ece5
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 14.05.2024 20:27:18
+Message:
+implement faster instruction reader
+
+Completed in 6804ms
+Completed in 6771ms
+Completed in 6820ms
+
+
+Revision: e572d15cf5886d8aed16d724592a061947c53e3b
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 14.05.2024 07:05:19
+Message:
+replace clunky heap_tail_element that was only used for array iteration with dedicated arrayiter instruction
+
+Completed in 7336ms
+Completed in 7308ms
+Completed in 7347ms
+
+
+Revision: dde3c84e9e7ae95fc60973b556b89523401d5989
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 12.05.2024 16:38:25
+Message:
+replace predec with loop instruction (was only used for loops, now reduces #instructions required to implement a loop)
+
+Completed in 7342ms
+Completed in 7365ms
+Completed in 7363ms
+
+
+Revision: e3565ea4abbd186bca5a6f823e2ee9d9e59f4ac5
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 12.05.2024 15:23:23
+Message:
+remove dec instruction, replace with previously implemented sub_pi
+
+Completed in 7005ms
+Completed in 6998ms
+Completed in 7020ms
+
+
+Revision: 0c93e39c37831ec62b2b7adf90b69d4ab0995d42
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 12.05.2024 15:17:22
+Message:
+add more optimized specialcase add/sub instructions
+
+Completed in 7652ms
+Completed in 7546ms
+Completed in 7638ms
+
+
+Revision: ccafa8e3a6a520d2ee09a53383e12e3a82c231cf
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 12.05.2024 12:12:09
+Message:
+add gt/gte and specialized sub instructions
+
+Completed in 7609ms
+Completed in 7644ms
+Completed in 7664ms
+
+
+Revision: fd8d0d807c218af4f906015ed2b1d7aa539fbed8
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 11.05.2024 12:43:33
+Message:
+add optimized specialcase add/mul instructions
+
+Completed in 8109ms
+Completed in 8075ms
+Completed in 8093ms
+
+
+Revision: 24d2f794e9b64e733d513796a479fc4ce1dd1eb9
+Author: Dennis Möhlmann <dmo479@gmail.com>
+Date: 11.05.2024 07:01:10
+Message:
+update bench result log
+
+Completed in 9414ms
+Completed in 9374ms
+Completed in 9307ms
+
+===============================================================================
+
+Always using this mandelbrot demo implementation and example API (below):
+
+-------------------------------------------------------------------------------
+
+/*
+ * Mandelbrot fractal example. Run with argument --mono to disable colors.
+ *
+ * MyAPI provided by userdefined rust api examples/shared/mod.rs
+ */
+use MyAPI::{print, println, flush, wait_frame, has_arg, exit, runtime, fastbrot};
+
+// Mandelbrot parameters for a single frame.
+struct Frame {
+    max_iterations: u32,
+    zoom: f64,
+    interp: f64,
+}
+
+// A target coordinate to zoom into.
+struct Coordinate {
+    x: f64,
+    y: f64,
+    i_start: i32,
+    i_max: i32,
+    i_exp: f32,
+    num_frames: i32,
+}
+
+fn main() {
+    // clear screen
+    let esc = String::from_ascii(27);
+    print("{esc}[2J");
+    flush();
+
+    let use_rust = has_arg("--rust");
+    let frametime = 0;
+    let angle = 0.0;
+    let coordinates = [
+        Coordinate { x: 0.32570659879, y: 0.0470399495155, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
+        Coordinate { x: -0.1081742949375, y: 0.905426290979918, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
+        Coordinate { x: -0.749179973998915, y: 0.100100499971, i_start: 32, i_exp: 2.0, i_max: 240, num_frames: 690 },
+    ];
+
+    // support colors or monochrome output
+    let chars = if has_arg("--mono") {
+        [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ]
+    } else if has_arg("--rainbow") {
+        [
+            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
+            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
+            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
+            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
+            "{esc}[37m*"
+        ]
+    } else {
+        [
+            "{esc}[34m.", "{esc}[34m.", "{esc}[34m.", "{esc}[34m.",
+            "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*",
+            "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*",
+            "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*", "{esc}[94m*", "{esc}[34m*",
+            "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*", "{esc}[96m*", "{esc}[36m*",
+            "{esc}[37m*",
+        ]
+    };
+
+    let is_timed = has_arg("--time");
+
+    while true {
+        for coordinate in coordinates {
+            let frames = generate_frame_parameters(coordinate);
+            for _ in 0..2 {
+                for frame in frames {
+                    render(chars, frame, coordinate, angle, frametime, 80, 24, use_rust);
+                    frametime = wait_frame(if is_timed { 0 } else { 1000 / 40 }); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
+                    angle += 0.015;
+                }
+                if (is_timed) {
+                    println("\nCompleted in {runtime()}ms");
+                    exit(0);
+                }
+                frames.reverse();
+            }
+        }
+    }
+}
+
+/*
+ * Render mandelbrot set for the given parameters into a string. Points that fall into the set in less than
+ * max_iterations - chars.len() iterations will be rendered as whitespace, the remaining points with a character based
+ * on the number of required iterations.
+ */
+fn mandelbrot(chars: [ String ], columns: u32, rows: u32, max_depth: u32, zoom: f64, center_x: f64, center_y: f64, angle: f64, use_rust: bool) -> String {
+
+    let start_depth = if max_depth > chars.len() as u32 { max_depth - chars.len() as u32 } else { 0 };
+    let x0 = -2.0f64 + ((2.0 + center_x) * (1.0 - zoom));
+    let y0 = -1.4f64 + ((1.4 + center_y) * (1.0 - zoom));
+    let result = "";
+    let last_n = 0;
+
+    let y = y0;
+    for _ in 0..rows {
+        let x = x0;
+        for _ in 0..columns {
+            let rx = (x - center_x) * angle.cos() - (y - center_y) * angle.sin() + center_x;
+            let ry = (x - center_x) * angle.sin() + (y - center_y) * angle.cos() + center_y;
+            // Compute mandelbrot value for rx/ry either using rust or itsy.
+            let n = if use_rust {
+                fastbrot(max_depth, rx, ry)
+            } else {
+                let depth = 0;
+                let r = 0f64;
+                let i = 0f64;
+                while depth < max_depth && 4.0 > r * r + i * i {
+                    let i_tmp = i * i;
+                    i = r * i * 2.0 + ry;
+                    r = r * r - i_tmp + rx;
+                    depth += 1;
+                }
+                depth
+            };
+            // Output the character, omit color code if same as last char to improve terminal performance.
+            result += get_char(start_depth, n, chars, last_n != n);
+            last_n = n;
+            x += 4.0 / columns as f64 * zoom;
+        }
+        result += "\n";
+        y += 2.80 / rows as f64 * zoom;
+    }
+
+    result
+}
+
+/**
+ * Returns the character to output for the given depth.
+ */
+fn get_char(start_depth: u32, depth: u32, chars: [ String ], allow_color: bool) -> String {
+    if depth > start_depth {
+        let char = chars[(depth - start_depth - 1) as u64];
+        if allow_color {
+            return char;
+        } else {
+            return char.slice(char.len() - 1, 1);
+        }
+    } else {
+        return " ";
+    }
+}
+
+/*
+ * Renders the mandelbrot set with some additional information to the console.
+ */
+fn render(chars: [ String ], frame: Frame, coordinate: Coordinate, angle: f64, runtime: u64, width: u32, height: u32, use_rust: bool) {
+    // move cursor to top left position and print fractal
+    let esc = String::from_ascii(27);
+    let x = coordinate.x * frame.interp;
+    let y = coordinate.y * frame.interp;
+    let zoom_str = (1.0/frame.zoom).fmt(if frame.zoom > 0.1 { 1 } else { 0 });
+    let num_epsilon = frame.zoom / f64::EPSILON();
+    let epsilon_str = num_epsilon.fmt(if num_epsilon < 10.0 { 2 } else { 0 });
+    let render_low = i32::max(frame.max_iterations as i32 - chars.len() as i32, 0);
+
+    let intro_str = "{esc}[1;1HMandelbrot set {x.fmt(14)} {y.fmt(14)}i";
+    let exit_str = "{runtime}ms/f, CTRL+C to exit";
+    let subline_str = "max. iter. {frame.max_iterations} (whitespace < {render_low}), zoom {zoom_str}x ({epsilon_str}×f64::EPSILON)";
+
+    print(
+        intro_str + " ".repeat(width as u64 - exit_str.len() - (intro_str.len() - 6) /* 6 escapes in intro */) + exit_str + "\n" +
+        mandelbrot(chars, width, height - 2, frame.max_iterations, frame.zoom, x, y, angle, use_rust) + "{esc}[0m" +
+        subline_str + " ".repeat(width as u64 - subline_str.len() - 1 /* -1 to keep cursor inside screen at bottom right */)
+    );
+
+    flush();
+}
+
+/*
+ * Generate zoom and max_iterations for each frame. We compute these into an array so we can easily reverse
+ * them later. There is no math involed, the values were simply tweaked to look good.
+ */
+fn generate_frame_parameters(c: Coordinate) -> [ Frame ] {
+
+    let zoom = 1.0;
+    let zoom_multiplier = 0.99;
+    let frames: [ Frame ] = [ ];
+
+    for i in 0..c.num_frames {
+        // adjust max_iterations while zooming to keep a narrow boundary
+        let max_iterations = (c.i_start as f32 + (i as f32 / c.num_frames as f32).powf(c.i_exp) * (c.i_max - c.i_start) as f32) as u32;
+        frames.push(Frame { max_iterations: max_iterations, zoom: zoom, interp: 1.0 });
+        // adjut zoom level ever faster
+        zoom = zoom * zoom_multiplier;
+        zoom_multiplier -= 0.000115;
+    }
+
+    // Duplicate some frames to delay zoom for a few seconds.
+    for i in 0..100 {
+        frames.insert(0, Frame { max_iterations: frames[0].max_iterations, zoom: frames[0].zoom, interp: frames[0].interp });
+    }
+
+    // Interpolation value used when moving from one coordinate to the next
+    for i in 0..180 {
+        frames[i].interp = (i as f64 / 180.0);
+    }
+
+    frames
+}
+
+
+-------------------------------------------------------------------------------
+
+
+use itsy::itsy_api;
+#[allow(unused_imports)]
+use std::{thread, time::{Instant, Duration}, io::{self, Write}};
+
+/// Demo context data.
+#[allow(dead_code)]
+pub struct Context {
+    pub seed: f64,
+    pub started: Instant,
+    pub last_frame: Instant,
+    pub args: Vec<String>,
+}
+
+#[allow(dead_code)]
+impl Context {
+    pub fn new(args: &[ String ]) -> Self {
+        Self {
+            seed: 1.2345,
+            started: Instant::now(),
+            last_frame: Instant::now(),
+            args: args.to_vec(),
+        }
+    }
+}
+
+itsy_api! {
+    /// Demo API providing some basic functionality
+    pub MyAPI<Context> {
+        /// Prints the given string to standard output.
+        fn print(&mut context, value: String) {
+            print!("{}", value);
+        }
+        /// Prints the given string followed by a newline to standard output.
+        fn println(&mut context, value: String) {
+            println!("{}", value);
+        }
+        /// Flushes standard output.
+        fn flush(&mut context) {
+            io::stdout().flush().unwrap();
+        }
+        /// Returns a (bad) pseudo-random number between 0.0 and non-inclusive 1.0
+        fn random(&mut context) -> f64 {
+            context.seed += 1.0;
+            let large = context.seed.sin() * 100000000.0;
+            large - large.floor()
+        }
+        /// Terminates the process.
+        fn exit(&mut context, code: i32) {
+            std::process::exit(code);
+        }
+        /// Milliseconds since context initialization.
+        fn runtime(&mut context) -> u64 {
+            (Instant::now() - context.started).as_millis() as u64
+        }
+        /// Pauses for the given number of milliseconds.
+        fn sleep(&mut context, milliseconds: u64) {
+            thread::sleep(Duration::from_millis(milliseconds));
+        }
+        /// Pauses for the given number of milliseconds minus the number of milliseconds since the last call.
+        fn wait_frame(&mut context, milliseconds: u64) -> u64 {
+            let already_expired = (Instant::now() - context.last_frame).as_millis() as u64;
+            if already_expired < milliseconds {
+                let remaining = milliseconds - already_expired;
+                thread::sleep(Duration::from_millis(remaining));
+            }
+            context.last_frame = Instant::now();
+            already_expired
+        }
+        /// Returns given argument or empty string. TODO: support array result
+        fn get_arg(&mut context, arg: u64) -> String {
+            context.args.get(arg as usize).cloned().unwrap_or_else(|| "".to_string())
+        }
+        /// Returns whether given argument is present.
+        fn has_arg(&mut context, arg: String) -> bool {
+            context.args.contains(&arg)
+        }
+        /// Compute mandelbrot value for given point.
+        fn fastbrot(&mut context, depth: u32, x: f64, y: f64) -> u32 {
+            let mut n = 0;
+            let mut r = 0.0f64;
+            let mut i = 0.0f64;
+            while n < depth && 4.0 > r * r + i * i {
+                let i_tmp = i * i;
+                i = r * i * 2.0 + y;
+                r = r * r - i_tmp + x;
+                n += 1;
+            }
+            n
+        }
+    }
+}
+
+/// Enable virtual terminal sequences on operating systems that,
+/// don't enable this by default. Does nothing if enabling is not required.
+pub fn enable_virtual_terminal_processing() {
+    #[cfg(windows)]
+    win_enable_virtual_terminal_processing();
+}
+
+#[cfg(windows)]
+fn win_enable_virtual_terminal_processing() {
+    use winapi_util::console::Console;
+
+    if let Ok(mut term) = Console::stdout() {
+        let _ = term.set_virtual_terminal_processing(true);
+    }
+    if let Ok(mut term) = Console::stderr() {
+        let _ = term.set_virtual_terminal_processing(true);
+    }
+}
