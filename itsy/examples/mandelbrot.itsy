@@ -42,11 +42,12 @@ fn main() {
         [ ".", ",", ":", ";", ">", "<", "!", "?", "%", "&", "O", "/", "\\", "+", "*" ]
     } else if has_arg("--rainbow") {
         [
-            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
-            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
-            "{esc}[90m.", "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.", "{esc}[91m.",
-            "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.", "{esc}[97m.",
-            "{esc}[37m*"
+            "{esc}[90m.",
+            "{esc}[31m.", "{esc}[33m.", "{esc}[32m.", "{esc}[36m.", "{esc}[34m.", "{esc}[35m.",
+            "{esc}[91m.", "{esc}[93m.", "{esc}[92m.", "{esc}[96m.", "{esc}[94m.", "{esc}[95m.",
+            "{esc}[31m*", "{esc}[33m*", "{esc}[32m*", "{esc}[36m*", "{esc}[34m*", "{esc}[35m*",
+            "{esc}[91m*", "{esc}[93m*", "{esc}[92m*", "{esc}[96m*", "{esc}[94m*", "{esc}[95m*",
+            "{esc}[97m*", "{esc}[37m*"
         ]
     } else {
         [
@@ -60,13 +61,14 @@ fn main() {
     };
 
     let is_timed = has_arg("--time");
+    let scale = if has_arg("--double") { 2 } else { 1 };
 
     while true {
         for coordinate in coordinates {
             let frames = generate_frame_parameters(coordinate);
             for _ in 0..2 {
                 for frame in frames {
-                    render(chars, frame, coordinate, angle, frametime, 80, 24, use_rust);
+                    render(chars, frame, coordinate, angle, frametime, 80 * scale, 24 * scale, use_rust);
                     frametime = wait_frame(if is_timed { 0 } else { 1000 / 40 }); // wait_frame is provided by userdefined rust api examples/shared/mod.rs
                     angle += 0.015;
                 }
