@@ -1385,10 +1385,10 @@ pub fn parse_module(link_state: &mut LinkState, src: &str, module_path: &str) ->
 ///
 /// fn main() {
 ///     let source_file = "itsy/rustdoc/parse.itsy";
-///     let parsed = parser::parse(|module_path| {
+///     let parsed = parser::parse(|module_path, state| {
 ///         let filename = parser::module_filename(source_file, module_path, false);
 ///         let file = fs::read_to_string(filename)?;
-///         parser::parse_module(&file, module_path)
+///         parser::parse_module(state, &file, module_path)
 ///     }).unwrap();
 /// }
 /// ```

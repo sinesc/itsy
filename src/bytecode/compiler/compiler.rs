@@ -63,7 +63,8 @@ pub(crate) struct Compiler<T> {
 /// });
 ///
 /// fn main() {
-///     let module = parser::parse_module("
+///     let mut state = parser::LinkState::new();
+///     let module = parser::parse_module(&mut state, "
 ///         // An Itsy program that calls the Rust 'print' function.
 ///         fn main() {
 ///             MyAPI::print(\"Hello from Itsy!\");
@@ -71,6 +72,7 @@ pub(crate) struct Compiler<T> {
 ///     ", "").unwrap();
 ///     let mut parsed = parser::ParsedProgram::new();
 ///     parsed.add_module(module);
+///     parsed.set_link_state(state);
 ///     let resolved = resolver::resolve::<MyAPI>(parsed, "main").unwrap();
 ///     let compiled = compiler::compile(resolved).unwrap();
 /// }
