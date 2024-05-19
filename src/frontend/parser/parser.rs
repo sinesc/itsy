@@ -132,8 +132,6 @@ fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
     map(terminated(tag(p), space0), |s: Input<'_>| *s)
 }
 
-// keywords, identifier and paths
-
 /// Matches a valid identifier.
 fn ident(i: Input<'_>) -> Output<Ident> {
     let position = i.position();
@@ -173,31 +171,31 @@ fn var_decl(i: Input<'_>) -> Output<VarDecl> {
 /// Matches a path.
 fn path(i: Input<'_>) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(punct("::"), ident), move |name| Path { position, name })(i)
+    map(separated_list1(punct("::"), ident), move |name| Path { position, segments: name })(i)
 }
 
-// module handling
-
-fn module(i: Input<'_>) -> Output<Module> {
+// Matches a module declaration, e.g. `mod mymodule;`.
+fn module_decl(i: Input<'_>) -> Output<ModuleDecl> {
     let position = i.position();
     map(
         preceded(
             check_flags(keyword("mod"), |s| if s.in_function { Some(ParseErrorKind::IllegalModuleDef) } else { None }),
             terminated(ident, punct(";"))
         ),
-        move |ident| Module {
+        move |ident| ModuleDecl {
             position: position,
             ident   : ident,
         }
     )(i)
 }
 
+/// Matches a use declaration, e.g. `use frontend::parse_module;`.
 fn use_decl(i: Input<'_>) -> Output<UseDecl> {
     fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
         alt((
             map(pair(path, delimited(pair(punct("::"), punct("{")), separated_list1(punct(","), use_item), punct("}") )), |(path, list)| {
                 let mut flattened = Vec::new();
-                let parent = parts_to_path(&path.name);
+                let parent = parts_to_path(&path.segments);
                 for elements in list  {
                     for (ident, (path, _)) in elements {
                         flattened.push((ident, (parent.clone() + "::" + &path, false)));
@@ -206,10 +204,10 @@ fn use_decl(i: Input<'_>) -> Output<UseDecl> {
                 flattened
             }),
             map(pair(path, preceded(keyword("as"), ident)), |(path, ident)| {
-                vec![(ident.name, (parts_to_path(&path.name), false))]
+                vec![(ident.name, (parts_to_path(&path.segments), false))]
             }),
             map(path, |path| {
-                vec![(path.name.last().unwrap().name.clone(), (parts_to_path(&path.name), false))]
+                vec![(path.segments.last().unwrap().name.clone(), (parts_to_path(&path.segments), false))]
             }),
         ))(i)
     }
@@ -229,17 +227,17 @@ fn use_decl(i: Input<'_>) -> Output<UseDecl> {
     )(i)
 }
 
-// type definitions
-
+/// Matches an inlineable type, e.g. `MyStruct` or `[ MyInt; 16 ]`.
 fn inline_type(i: Input<'_>) -> Output<InlineType> {
     alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
-        map(snap(callable_type), |f| InlineType::CallableDef(Box::new(f))),
-        map(array_type, |a| InlineType::ArrayDef(Box::new(a))),
+        map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
+        map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     ))(i)
 }
 
-fn callable_type(i: Input<'_>) -> Output<CallableDef> {
+/// Matches a callable type definition, e.g. `fn(u8) -> u16`.
+fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
@@ -258,7 +256,8 @@ fn callable_type(i: Input<'_>) -> Output<CallableDef> {
     )(i)
 }
 
-fn enum_type(i: Input<'_>) -> Output<EnumDef> {
+/// Matches an enum type definition.
+fn enum_def(i: Input<'_>) -> Output<EnumDef> {
     fn variant(i: Input<'_>) -> Output<VariantDef> {
         let position = i.position();
         map(
@@ -314,7 +313,8 @@ fn enum_type(i: Input<'_>) -> Output<EnumDef> {
     )(i)
 }
 
-fn struct_type(i: Input<'_>) -> Output<StructDef> {
+/// Matches a struct type definition.
+fn struct_def(i: Input<'_>) -> Output<StructDef> {
     fn field(i: Input<'_>) -> Output<(String, InlineType)> {
         map(
             tuple((word, punct(":"), inline_type)),
@@ -345,7 +345,8 @@ fn struct_type(i: Input<'_>) -> Output<StructDef> {
     )(i)
 }
 
-fn trait_type(i: Input<'_>) -> Output<TraitDef> {
+/// Matches a trait definition.
+fn trait_def(i: Input<'_>) -> Output<TraitDef> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
@@ -364,7 +365,8 @@ fn trait_type(i: Input<'_>) -> Output<TraitDef> {
     ))(i)
 }
 
-fn array_type(i: Input<'_>) -> Output<ArrayDef> {
+/// Matches an array type definition, e.g. `[ MyInt; 16 ]`
+fn array_def(i: Input<'_>) -> Output<ArrayDef> {
     let position = i.position();
     map(
         delimited(punct("["), inline_type, punct("]")),
@@ -376,8 +378,7 @@ fn array_type(i: Input<'_>) -> Output<ArrayDef> {
     )(i)
 }
 
-// type implementations
-
+/// Matches an impl block, e.g. `impl MyStruct { ... }`
 fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
@@ -396,6 +397,7 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
     ))(i)
 }
 
+/// Matches a trait impl block, e.g. `impl MyTrait for MyStruct { ... }`
 fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
@@ -417,12 +419,12 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
     ))(i)
 }
 
-// function/closure/return
-
+/// Matches the return type part of a function definition, e.g. `-> u8`.
 fn function_return_part(i: Input<'_>) -> Output<InlineType> {
     preceded(punct("->"), inline_type)(i)
 }
 
+/// Matches the parameter list of a function definition, e.g. `param1: u8, param2: f64`.
 fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input<'_>) -> Output<LetBinding> {
         let position = i.position();
@@ -441,6 +443,7 @@ fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     separated_list0(punct(","), parameter)(i)
 }
 
+/// Transforms AST block results to explicit return statements, where possible.
 fn function_transform_result(block: &mut Block, position: Position) {
     // transform block result to return statement
     if let Some(returns) = block.result.take() {
@@ -458,6 +461,7 @@ fn function_transform_result(block: &mut Block, position: Position) {
     }
 }
 
+/// Matches a function implementation, e.g. `fn my_func(param: u64) -> f64 { ... }`.
 fn function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         map(
@@ -497,6 +501,7 @@ fn function(i: Input<'_>) -> Output<Function> {
     ))(i)
 }
 
+/// Matches an anonymous function implementation, e.g. `fn(param: u64) -> f64 { ... }`.
 fn anonymous_function(i: Input<'_>) -> Output<Function> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         let position = i.position();
@@ -532,6 +537,7 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
     ))(i)
 }
 
+/// Matches a closure implementation, e.g. `|x: u8| -> u8 { x * 2 }`.
 fn closure(i: Input<'_>) -> Output<Closure> {
     fn signature(i: Input<'_>) -> Output<Signature> {
         let position = i.position();
@@ -582,6 +588,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
     ))(i)
 }
 
+/// Matches a return statement.
 fn return_statement(i: Input<'_>) -> Output<Return> {
     let position = i.position();
     map(
@@ -596,8 +603,7 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
     )(i)
 }
 
-// literals/expression
-
+/// Matches a literal numeric value, e.g. `3.14f64`.
 fn numeric_literal(i: Input<'_>) -> Output<Literal> {
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
@@ -706,6 +712,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
     Err(nom::Err::Failure(Failure { input: j, kind: ParseErrorKind::InvalidNumerical }))
 }
 
+/// Matches a literal boolean value, e.g. `true`.
 fn bool_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(alt((keyword("true"), keyword("false"))), move |m| {
@@ -718,6 +725,7 @@ fn bool_literal(i: Input<'_>) -> Output<Literal> {
     })(i)
 }
 
+/// Matches a string. Since strings support variable interpolation they need to be represented as expressions.
 fn string_literal(i: Input<'_>) -> Output<Expression> {
 
     let position = i.position();
@@ -808,6 +816,8 @@ fn string_literal(i: Input<'_>) -> Output<Expression> {
     })(i)
 }
 
+/// Matches an array literal, e.g. `[ 1u8, 2, 3 ]`. Even though array literals may contain expressions, these are
+/// wrapped in a literal value, allowing us to return a Literal here.
 fn array_literal(i: Input<'_>) -> Output<Literal> {
     let position = i.position();
     map(
@@ -823,6 +833,7 @@ fn array_literal(i: Input<'_>) -> Output<Literal> {
     )(i)
 }
 
+/// Matches a struct literal, e.g. `MyStruct { left: 123, right: 234 }`.
 fn struct_literal(i: Input<'_>) -> Output<Literal> {
     fn field(i: Input<'_>) -> Output<(String, Expression)> {
         map(
@@ -852,6 +863,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
     )(i)
 }
 
+/// Matches a literal, i.e. one of the above.
 fn literal(i: Input<'_>) -> Output<Expression> {
     alt((
         map(bool_literal, |l| Expression::Literal(l)),
@@ -862,6 +874,7 @@ fn literal(i: Input<'_>) -> Output<Expression> {
     ))(i)
 }
 
+/// Matches an expression, e.g. `3.0 * 4.0 * f64::PI`.
 fn expression(i: Input<'_>) -> Output<Expression> {
     fn argument_list(i: Input<'_>) -> Output<ArgumentList> {
         let position = i.position();
@@ -886,14 +899,14 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             parens,
             map(path, move |mut m| {
                 // single element paths may be variables if their names exist in the current scope
-                if m.name.len() == 1 {
-                    match j.has_binding(&m.name[0].name) {
+                if m.segments.len() == 1 {
+                    match j.has_binding(&m.segments[0].name) {
                         // local variable binding
-                        ScopeBindingType::Local(binding_id) => return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id }),
+                        ScopeBindingType::Local(binding_id) => return Expression::Variable(Variable { position: m.position, ident: m.segments.pop().unwrap(), binding_id }),
                         // a binding originating in a parent of the current closure
                         ScopeBindingType::Parent(binding_id) => {
                             j.require_binding(binding_id);
-                            return Expression::Variable(Variable { position: m.position, ident: m.name.pop().unwrap(), binding_id });
+                            return Expression::Variable(Variable { position: m.position, ident: m.segments.pop().unwrap(), binding_id });
                         },
                         // not a binding, fall through to handle name.len() != 1 case as well
                         _ => {},
@@ -1043,101 +1056,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
     ))(i)
 }
 
-// let/assignment
-
-fn assignment(i: Input<'_>) -> Output<Assignment> {
-    fn assignable(i: Input<'_>) -> Output<Expression> {
-        let var_position = i.position();
-        let j = i.clone();
-        let init = map(ident, |m| {
-            if let Some(binding_id) = j.has_binding(&m.name).binding_id() {
-                Expression::Variable(Variable {
-                    position    : var_position,
-                    binding_id  : binding_id,
-                    ident       : m,
-                })
-            } else {
-                // We don't have a binding id - it is not defined. But we cannot error yet because
-                // there's a really high chance this isn't even supposed to be an assignment and the parent
-                // parser is just going through alt() options.
-                // We have to wait until the whole assignment is parsed and identified to actually be an
-                // assignment before generating an error.
-                // There's probably a way to handle this with nom error handling but I can't figure it out,
-                // so instead we'll just return a constant and check for that somewhere downstream.
-                Expression::Constant(Constant {
-                    position    : var_position,
-                    constant_id : None,
-                    path        : Path { name: vec![ m ], position: var_position },
-                })
-            }
-        })(i)?;
-        let op_position = init.0.position();
-        fold_many0_mut(
-            alt((
-                map(delimited(punct("["), expression, punct("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
-                map(preceded(punct("."), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position, ident: i, type_id: None, constant_id: None })))
-            )),
-            init.1,
-            |mut acc, (op, val)| {
-                // update left part of the expression to ensure only the final index/access is a write operation. // TODO: find less clunky solution
-                match &mut acc {
-                    Expression::BinaryOp(exp) => {
-                        if exp.op == BinaryOperator::AccessWrite {
-                            exp.op = BinaryOperator::Access;
-                        } else if exp.op == BinaryOperator::IndexWrite {
-                            exp.op = BinaryOperator::Index;
-                        }
-                    }
-                    _ => {}
-                }
-                Expression::BinaryOp(Box::new(BinaryOp { position: op_position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
-            }
-        )(init.0)
-    }
-    fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
-        map(
-            alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="))),
-            |o| {
-                BinaryOperator::from_string(o)
-            }
-        )(i)
-    }
-    let position = i.position();
-    map(
-        tuple((assignable, assignment_operator, expression)),
-        move |m| {
-            // TODO: check that left is not a constant
-            Assignment {
-                position: position,
-                op      : m.1,
-                left    : m.0,
-                right   : m.2,
-                type_id : None,
-            }
-        }
-    )(i)
-}
-
-fn let_binding(i: Input<'_>) -> Output<LetBinding> {
-    let position = i.position();
-    map(
-        preceded(
-            check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
-            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
-        ),
-        move |m| LetBinding {
-            position    : position.clone(),
-            binding_id  : m.1.binding_id,
-            ident       : m.1.ident,
-            mutable     : m.0.is_some(),
-            expr        : m.3,
-            ty          : m.2,
-        }
-    )(i)
-}
-
-// blocks
-
+/// Matches a block scope expression.
 fn block(i: Input<'_>) -> Output<Block> {
     let position = i.position();
     let j = i.clone();
@@ -1154,6 +1073,7 @@ fn block(i: Input<'_>) -> Output<Block> {
     ))(i)
 }
 
+/// Matches an if- and potentially else-block expression.
 fn if_block(i: Input<'_>) -> Output<IfBlock> {
     fn else_block(i: Input<'_>) -> Output<Block> {
         let position = i.position();
@@ -1183,6 +1103,7 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
     )(i)
 }
 
+/// Matches a match block expression.
 fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     /*fn variant_literal(i: Input<'_>) -> Output<Literal> {
         let position = i.position();
@@ -1236,8 +1157,100 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
     )(i)
 }
 
-// loops/loop control
+/// Matches an assignment, e.g. `x = 3` or `mystruct.y = 4`.
+fn assignment(i: Input<'_>) -> Output<Assignment> {
+    fn assignable(i: Input<'_>) -> Output<Expression> {
+        let var_position = i.position();
+        let j = i.clone();
+        let init = map(ident, |m| {
+            if let Some(binding_id) = j.has_binding(&m.name).binding_id() {
+                Expression::Variable(Variable {
+                    position    : var_position,
+                    binding_id  : binding_id,
+                    ident       : m,
+                })
+            } else {
+                // We don't have a binding id - it is not defined. But we cannot error yet because
+                // there's a really high chance this isn't even supposed to be an assignment and the parent
+                // parser is just going through alt() options.
+                // We have to wait until the whole assignment is parsed and identified to actually be an
+                // assignment before generating an error.
+                // There's probably a way to handle this with nom error handling but I can't figure it out,
+                // so instead we'll just return a constant and check for that somewhere downstream.
+                Expression::Constant(Constant {
+                    position    : var_position,
+                    constant_id : None,
+                    path        : Path { segments: vec![ m ], position: var_position },
+                })
+            }
+        })(i)?;
+        let op_position = init.0.position();
+        fold_many0_mut(
+            alt((
+                map(delimited(punct("["), expression, punct("]")), |e| (BinaryOperator::IndexWrite, BinaryOperand::Expression(e))),
+                map(preceded(punct("."), ident), |i| (BinaryOperator::AccessWrite, BinaryOperand::Member(Member { position: op_position, ident: i, type_id: None, constant_id: None })))
+            )),
+            init.1,
+            |mut acc, (op, val)| {
+                // update left part of the expression to ensure only the final index/access is a write operation. // TODO: find less clunky solution
+                match &mut acc {
+                    Expression::BinaryOp(exp) => {
+                        if exp.op == BinaryOperator::AccessWrite {
+                            exp.op = BinaryOperator::Access;
+                        } else if exp.op == BinaryOperator::IndexWrite {
+                            exp.op = BinaryOperator::Index;
+                        }
+                    }
+                    _ => {}
+                }
+                Expression::BinaryOp(Box::new(BinaryOp { position: op_position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
+            }
+        )(init.0)
+    }
+    fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
+        map(
+            alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="))),
+            |o| {
+                BinaryOperator::from_string(o)
+            }
+        )(i)
+    }
+    let position = i.position();
+    map(
+        tuple((assignable, assignment_operator, expression)),
+        move |m| {
+            // TODO: check that left is not a constant
+            Assignment {
+                position: position,
+                op      : m.1,
+                left    : m.0,
+                right   : m.2,
+                type_id : None,
+            }
+        }
+    )(i)
+}
 
+/// Matches a let binding.
+fn let_binding(i: Input<'_>) -> Output<LetBinding> {
+    let position = i.position();
+    map(
+        preceded(
+            check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
+        ),
+        move |m| LetBinding {
+            position    : position.clone(),
+            binding_id  : m.1.binding_id,
+            ident       : m.1.ident,
+            mutable     : m.0.is_some(),
+            expr        : m.3,
+            ty          : m.2,
+        }
+    )(i)
+}
+
+/// Matches a for loop statement.
 fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     fn loop_range(i: Input<'_>) -> Output<Expression> {
         let position = i.position();
@@ -1276,6 +1289,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
     ))(i)
 }
 
+/// Matches a while loop statement.
 fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     let position = i.position();
     let j = i.clone();
@@ -1293,6 +1307,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
     )(i)
 }
 
+/// Matches a break loop-control statement.
 fn break_statement(i: Input<'_>) -> Output<Break> {
     let position = i.position();
     map(
@@ -1304,6 +1319,7 @@ fn break_statement(i: Input<'_>) -> Output<Break> {
     )(i)
 }
 
+/// Matches a continue loop-control statement.
 fn continue_statement(i: Input<'_>) -> Output<Continue> {
     let position = i.position();
     map(
@@ -1315,8 +1331,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
     )(i)
 }
 
-// statement
-
+/// Matches a statement.
 fn statement(i: Input<'_>) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
@@ -1339,18 +1354,17 @@ fn statement(i: Input<'_>) -> Output<Statement> {
     output
 }
 
-// root
-
+/// Matches language items that are allowed in the root scope of a module.
 fn root_items(i: Input<'_>) -> Output<Statement> {
     alt((
         map(use_decl, |m| Statement::UseDecl(m)),
-        map(module, |m| Statement::Module(m)),
+        map(module_decl, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
-        map(struct_type, |m| Statement::StructDef(m)),
-        map(enum_type, |m| Statement::EnumDef(m)),
+        map(struct_def, |m| Statement::StructDef(m)),
+        map(enum_def, |m| Statement::EnumDef(m)),
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
-        map(trait_type, |m| Statement::TraitDef(m)),
+        map(trait_def, |m| Statement::TraitDef(m)),
     ))(i)
 }
 

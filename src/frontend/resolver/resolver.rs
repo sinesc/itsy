@@ -375,7 +375,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         constant = Some(
                             ast::Constant {
                                 position: member.position,
-                                path: ast::Path { position: member.ident.position, name: vec![ member.ident.clone() ]},
+                                path: ast::Path { position: member.ident.position, segments: vec![ member.ident.clone() ]},
                                 constant_id: member.constant_id,
                             }
                         );
@@ -511,7 +511,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             return Ok(item.type_id);
         }
         if item.type_id.is_none() {
-            item.type_id = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.name));
+            item.type_id = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.segments));
         }
         if let (Some(item_type_id), Some(expected_result)) = (item.type_id, expected_result) {
             self.check_type_accepted_for(item, item_type_id, expected_result)?;
@@ -578,7 +578,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         });
 
         let discriminant_type_id = if let Some(named_type) = simple_type_name {
-            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.name))).ice_msg("Invalid variant type")?
+            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.segments))).ice_msg("Invalid variant type")?
         } else {
             self.primitive_type_id(Type::i32)?
         };
@@ -918,10 +918,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a constant name to a constant.
     fn try_resolve_constant_enum(self: &mut Self, item: &mut ast::Constant) -> Option<ConstantId> {
 
-        let enum_info = if item.path.name.len() > 1 {
+        let enum_info = if item.path.segments.len() > 1 {
             // "Enum::Test" -> drop Test, then alias-resolve Enum to e.g. MyModule::Enum
             let type_name = item.path.to_string(-1);
-            let variant_name = item.path.name[item.path.name.len() - 1].name.clone();
+            let variant_name = item.path.segments[item.path.segments.len() - 1].name.clone();
             Some((self.scopes.alias(self.scope_id, &type_name).map(|a| a.to_string()).unwrap_or_else(|| self.make_path(&[ type_name ])), variant_name))
         } else {
             // "Test" -> alias-resolve to MyModule::Enum::Test, then drop Test.
@@ -954,12 +954,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // resolve constant
         if item.constant_id.is_none() {
-            let path = self.make_path(&item.path.name);
+            let path = self.make_path(&item.path.segments);
             item.constant_id = self.scopes.constant_id(self.scope_id, &path, TypeId::VOID);
             // builtin function
-            if item.path.name.len() == 2 {
-                if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.name[0]) {
-                    if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.name[1].name, type_id)? {
+            if item.path.segments.len() == 2 {
+                if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.segments[0]) {
+                    if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.segments[1].name, type_id)? {
                         item.constant_id = Some(constant_id);
                     }
                 }

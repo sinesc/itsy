@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::frontend::{ast::{Statement, Position, Module, Ident}, parser::error::ParseErrorKind};
+use crate::frontend::{ast::{Statement, Position, ModuleDecl, Ident}, parser::error::ParseErrorKind};
 use crate::shared::typed_ids::{BindingId, ScopeId};
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -22,7 +22,7 @@ impl ParsedModule {
         }
     }
     /// Returns an iterator over all submodules of the module.
-    pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&Module> {
+    pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&ModuleDecl> {
         self.ast
             .iter()
             .filter_map(|s| match s {

@@ -112,25 +112,25 @@ macro_rules! impl_opcodes {
              */
             #[allow(unused_variables)]
             #[allow(unused_doc_comments)]
-            const fn max() -> OpCodeIndex {
+            const fn max() -> OpCode {
                 $(
                     $( #[ $attr ] )*
                     // single opcode
                     $(
-                        let max = OpCode::$name as OpCodeIndex;
+                        let max = OpCode::$name;
                     )?
                     // opcode variants
                     $(
                         $(
                             $( #[$vattr] )*
-                            let max = OpCode::$vname as OpCodeIndex;
+                            let max = OpCode::$vname;
                         )+
                     )?
                 )+
                 max
             }
             /// Index of the largest valid opcode.
-            pub const MAX: OpCodeIndex = Self::max();
+            pub const MAX: OpCodeIndex = Self::max() as OpCodeIndex;
         }
 
         impl TryFrom<OpCodeIndex> for OpCode {
@@ -219,7 +219,7 @@ macro_rules! impl_opcodes {
         /// Bytecode execution/output.
         #[cfg(feature="runtime")]
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
-            /// Executes bytecode from the VMs code buffer until an instruction triggers a yield/terminate/error.
+            /// Executes instructions from the VMs code buffer until an instruction triggers a yield/terminate/error.
             pub(crate) fn exec(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
                 const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
@@ -275,7 +275,8 @@ macro_rules! impl_opcodes {
         /// Bytecode debugging.
         #[cfg(all(feature="runtime", feature="debugging"))]
         impl<T, U> crate::bytecode::runtime::vm::VM<T, U> where T: crate::bytecode::VMFunc<T> + crate::bytecode::VMData<T, U> {
-            /// Execute the next bytecode from the VMs code buffer.
+            /// Execute the next instruction from the VMs code buffer.
+            // TODO: unify this with exec to reduce generated code/speed up rust compilation.
             pub(crate) fn exec_step(self: &mut Self, context: &mut U) {
                 use crate::{RustFnIndex, BuiltinIndex, INSTRUCTION_ALIGNMENT};
                 const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
@@ -324,9 +325,10 @@ macro_rules! impl_opcodes {
                 }
             }
 
+            /// Returns the instruction opcode at given position in the program.
             #[allow(unused_assignments)]
             #[allow(unused_doc_comments)]
-            pub(crate) fn read_instruction(self: &Self, position: StackAddress) -> Option<OpCode> {
+            pub(crate) fn read_opcode(self: &Self, position: StackAddress) -> Option<OpCode> {
                 if position >= self.instructions.len() as StackAddress {
                     None
                 } else {
@@ -336,7 +338,7 @@ macro_rules! impl_opcodes {
                 }
             }
 
-            /// Returns disassembled opcode as string at given position along with the next opcode position.
+            /// Returns disassembled instruction at given position as a string along with the next valid instruction position.
             #[allow(unused_mut)]
             #[cfg(feature="symbols")]
             pub(crate) fn describe_instruction(self: &Self, position: StackAddress) -> Option<(String, StackAddress)> {
@@ -413,7 +415,7 @@ macro_rules! impl_opcodes {
                 // single opcode
                 $(
                     #[cfg_attr(not(debug_assertions), inline(always))]
-                    fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(@map_reader_type $arg_type)),* ) {
+                    pub(crate) fn $name ( $self: &mut Self, $($context: &mut U,)? $($arg_name: impl_opcodes!(@map_reader_type $arg_type)),* ) {
                         #[allow(dead_code)]
                         /// Single variant opcodes don't provide T. This definition of T is intended to shadow the VM's generic T in order to trigger an error on accidental use. This is not the T you are looking for.
                         trait T { }
@@ -428,7 +430,7 @@ macro_rules! impl_opcodes {
                     $(
                         $( #[$vattr] )*
                         #[cfg_attr(not(debug_assertions), inline(always))]
-                        fn $vname ( $vself: &mut Self, $( $varg_name: impl_opcodes!(@map_reader_type $vtype_name) ),* ) {
+                        pub(crate) fn $vname ( $vself: &mut Self, $( $varg_name: impl_opcodes!(@map_reader_type $vtype_name) ),* ) {
                             $(
                                 $( type $vgeneric_name = $vgeneric_type; )+
                             )?

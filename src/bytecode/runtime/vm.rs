@@ -34,6 +34,8 @@ pub struct VM<T, U> {
     pub heap                : Heap,
 }
 
+// todo check where bounds here, some seam pointless
+
 /// Public VM methods.
 impl<T, U> VM<T, U> {
     /// Create a new VM instance with the given Program.
@@ -55,7 +57,7 @@ impl<T, U> VM<T, U> {
         }
     }
 
-    /// Executes bytecode until it terminates.
+    /// Executes the current program until it yields or terminates.
     pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult<VMState> where T: VMFunc<T> + VMData<T, U> {
         if self.state != VMState::Ready && self.state != VMState::Yielded {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
@@ -294,9 +296,9 @@ impl<T, U> VM<T, U> {
         self.describe_instruction(self.pc).map(|result| result.0)
     }
 
-    /// Returns the current instruction
-    pub fn get_instruction(self: &Self) -> Option<OpCode> where T: VMFunc<T> + VMData<T, U> {
-        self.read_instruction(self.pc)
+    /// Returns the opcode for the current instruction.
+    pub fn get_opcode(self: &Self) -> Option<OpCode> where T: VMFunc<T> + VMData<T, U> {
+        self.read_opcode(self.pc)
     }
 
     /// Returns the current stack as a string.

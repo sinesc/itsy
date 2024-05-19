@@ -198,35 +198,35 @@ impl AsRef<str> for Ident {
 #[derive(Debug)]
 pub struct Path {
     pub position: Position,
-    pub name: Vec<Ident>,
+    pub segments: Vec<Ident>,
 }
 
 impl Path {
     /// Removes and returns the last path element.
     pub fn pop(self: &mut Self) -> Ident {
-        self.name.pop().unwrap()
+        self.segments.pop().unwrap()
     }
     /// Inserts a new path element at the beginning of the path.
     pub fn unshift(self: &mut Self, other: Ident) {
-        let old = replace(&mut self.name, Vec::new());
-        self.name.push(other);
-        self.name.extend(old.into_iter());
+        let old = replace(&mut self.segments, Vec::new());
+        self.segments.push(other);
+        self.segments.extend(old.into_iter());
     }
     /// Converts path to string, optionally skipping elements from start (negative skip) or end (positive) of path.
     pub fn to_string(self: &Self, skip: isize) -> String {
         if skip < 0 {
-            parts_to_path(&self.name[0..(self.name.len() as isize + skip) as usize])
+            parts_to_path(&self.segments[0..(self.segments.len() as isize + skip) as usize])
         } else if skip > 0 {
-            parts_to_path(&self.name[skip as usize..])
+            parts_to_path(&self.segments[skip as usize..])
         } else {
-            parts_to_path(&self.name)
+            parts_to_path(&self.segments)
         }
     }
 }
 
 impl Display for Path {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", parts_to_path(&self.name))
+        write!(f, "{}", parts_to_path(&self.segments))
     }
 }
 
@@ -247,7 +247,7 @@ pub enum Statement {
     Break(Break),
     Continue(Continue),
     Expression(Expression),
-    Module(Module),
+    Module(ModuleDecl),
     UseDecl(UseDecl),
     EnumDef(EnumDef),
 }
@@ -307,21 +307,21 @@ impl Debug for Statement {
 
 /// A module declaration, e.g. `mod mymodule;`.
 #[derive(Debug)]
-pub struct Module {
+pub struct ModuleDecl {
     pub position    : Position,
     pub ident       : Ident,
 }
 
-impl_positioned!(Module);
+impl_positioned!(ModuleDecl);
 
-impl Module {
+impl ModuleDecl {
     /// Returns the module name as a string
     pub fn name(self: &Self) -> &str {
         &self.ident.name
     }
 }
 
-impl Resolvable for Module {
+impl Resolvable for ModuleDecl {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
         Progress::new(1, 1)
     }
@@ -554,7 +554,7 @@ impl TypeName {
     }
     pub fn from_str(name: &str, position: Position) -> Self {
         TypeName {
-            path    : Path { name: vec! [ Ident { position: position, name: name.to_string() } ], position: position },
+            path    : Path { segments: vec! [ Ident { position: position, name: name.to_string() } ], position: position },
             type_id : None,
         }
     }
@@ -577,16 +577,16 @@ pub enum InlineType {
 impl Typeable for InlineType {
     fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
         match &self {
-            InlineType::ArrayDef(array) => array.type_id(bindings),
+            InlineType::ArrayDef(array_def) => array_def.type_id(bindings),
             InlineType::TypeName(type_name) => type_name.type_id(bindings),
-            InlineType::CallableDef(f) => f.type_id(bindings),
+            InlineType::CallableDef(callable_def) => callable_def.type_id(bindings),
         }
     }
     fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
         match self {
-            InlineType::ArrayDef(array) => array.set_type_id(bindings, type_id),
+            InlineType::ArrayDef(array_def) => array_def.set_type_id(bindings, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(bindings, type_id),
-            InlineType::CallableDef(f) => f.set_type_id(bindings, type_id),
+            InlineType::CallableDef(callable_def) => callable_def.set_type_id(bindings, type_id),
         }
     }
 }
@@ -594,9 +594,9 @@ impl Typeable for InlineType {
 impl Resolvable for InlineType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         match self {
+            Self::ArrayDef(array_def) => array_def.num_resolved(bindings),
             Self::TypeName(typename) => typename.num_resolved(bindings),
-            Self::ArrayDef(array) => array.num_resolved(bindings),
-            Self::CallableDef(f) => f.num_resolved(bindings),
+            Self::CallableDef(callable_def) => callable_def.num_resolved(bindings),
         }
     }
 }

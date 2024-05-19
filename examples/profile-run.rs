@@ -41,7 +41,7 @@ fn run(program: Program<MyAPI>, args: &[ String ]) {
     loop {
         // time single step
         let start_time = Instant::now();
-        let current_opcode = vm.get_instruction();
+        let current_opcode = vm.get_opcode();
         vm.step(&mut context).unwrap();
         let elapsed_time = Instant::now() - start_time;
         let stats = &mut opcode_stats[current_opcode.unwrap() as usize];
