@@ -69,6 +69,114 @@ pub(crate) trait Resolvable {
     }
 }
 
+
+pub(crate) enum ResolvableId {
+    TypeId(TypeId),
+    BindingId(BindingId),
+    ConstantId(ConstantId),
+    FunctionId(FunctionId),
+    Progress(Progress),
+}
+
+/// Resolvable AST structures.
+pub(crate) trait Resolvable2 {
+    /// Returns list of resolvable ids.
+    fn resolvable_ids(self: &Self) -> Vec<ResolvableId>;
+    /// Number of resolved and total items.
+    fn num_resolved2(self: &Self, container: &(impl BindingContainer+TypeContainer)) -> Progress {
+        Progress::zero() // FIXME implement
+    }
+    /// Whether the structure is fully resolved.
+    fn is_resolved2(self: &Self, container: &(impl BindingContainer+TypeContainer)) -> bool {
+        self.num_resolved2(container).done()
+    }
+    /// Error kind incase the item could not be resolved.
+    fn unresolved_error2(self: &Self) -> ResolveErrorKind {
+        ResolveErrorKind::CannotResolve("".to_string())
+    }
+}
+
+/// Implements the Display trait for given structure.
+/// Accepted syntax:
+///     impl_resolvable!(enum Statement|Expression|...)
+///     impl_resolvable!(always MyStruct)
+///     impl_resolvable!(MyStruct { field: Item|OptionalItem|OptionalTypeId... })
+macro_rules! impl_resolvable2 {
+    (@append $field:expr, Item) => {
+        $field.resolvable_ids()
+    };
+    (@append $field:expr, OptionalItem) => {
+        $field.as_ref().map_or(Vec::new(), |expr| expr.resolvable_ids())
+    };
+    (@append $field:expr, ItemList) => {
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvable_ids()); acc })
+    };
+    (@append $field:expr, ItemList1) => {
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.1.resolvable_ids()); acc })
+    };
+    (@append $field:expr, ItemMap) => {
+        $field.iter().map(|(_k, v)| v).fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvable_ids()); acc })
+    };
+    (@append $field:expr, OptionalTypeId) => {
+        if let Some(type_id) = $field {
+            vec![ ResolvableId::TypeId(type_id) ]
+        } else {
+            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+        }
+    };
+    (@append $field:expr, OptionalConstantId) => {
+        if let Some(constant_id) = $field {
+            vec![ ResolvableId::ConstantId(constant_id) ]
+        } else {
+            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+        }
+    };
+    (@append $field:expr, OptionalFunctionId) => {
+        if let Some(function_id) = $field {
+            vec![ ResolvableId::FunctionId(function_id) ]
+        } else {
+            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+        }
+    };
+    (@append $field:expr, BindingId) => {
+        vec![ ResolvableId::BindingId($field) ]
+    };
+    (@append $field:expr, BindingList) => {
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.push(ResolvableId::BindingId(*item)); acc })
+    };
+    (@append $field:expr, $unsupported:ident) => {
+        compile_error!(stringify!(Unsupported impl_resolvable type $unsupported))
+    };
+    // impl_resolvable!(enum Statement|Expression|...)
+    (enum $enum_type:ident ) => {
+        impl Resolvable2 for $enum_type {
+            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+                impl_matchall!(self, $enum_type, item, { item.resolvable_ids() })
+            }
+        }
+    };
+    // impl_resolvable!(always MyAST)
+    (always $ty:ident ) => {
+        impl Resolvable2 for $ty {
+            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+                vec![ ResolvableId::Progress(Progress::new(1, 1)) ]
+            }
+        }
+    };
+    // impl_resolvable!(MyStruct { field: Item|OptionalItem|OptionalTypeId... })
+    ($struct_name:ident { $( $field_name:ident : $field_ty:ident ),+ $( , )? } ) => {
+        impl Resolvable2 for $struct_name {
+            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+                let mut result = Vec::new();
+                $(
+                    result.append(&mut impl_resolvable2!(@append self.$field_name, $field_ty));
+                )+
+                return result;
+            }
+        }
+    };
+}
+
 /// A position in the source code.
 #[derive(Copy, Clone)]
 pub struct Position(pub(crate) usize);
@@ -142,6 +250,12 @@ macro_rules! impl_matchall {
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member, TypeName)
+    };
+    ($self:ident, InlineType, $val_name:ident, $code:tt) => {
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, CallableDef)
+    };
+    ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
+        compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
     };
 }
 
@@ -299,6 +413,8 @@ impl Resolvable for Statement {
     }
 }
 
+impl_resolvable2!(enum Statement);
+
 impl Debug for Statement {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         impl_matchall!(self, Statement, item, { write!(f, "{:#?}", item) })
@@ -327,6 +443,12 @@ impl Resolvable for ModuleDecl {
     }
 }
 
+impl Resolvable2 for ModuleDecl {
+    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+        vec!( ResolvableId::Progress(Progress::new(1, 1)) )
+    }
+}
+
 /// A use declaration, e.g. `use frontend::{ast::Use, parser::{parse, parse_module}};`.
 #[derive(Debug)]
 pub struct UseDecl {
@@ -339,6 +461,12 @@ impl_positioned!(UseDecl);
 impl Resolvable for UseDecl {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
         Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())
+    }
+}
+
+impl Resolvable2 for UseDecl {
+    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+        vec!(ResolvableId::Progress(Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())))
     }
 }
 
@@ -375,12 +503,30 @@ impl Resolvable for LetBinding {
     }
 }
 
+impl_resolvable2!(LetBinding {
+    expr: OptionalItem,
+    ty: OptionalItem,
+    binding_id: BindingId
+});
+
 #[derive(Debug)]
 pub struct FunctionShared {
     pub position: Position,
     pub sig     : Signature,
     pub block   : Option<Block>,
     pub scope_id: ScopeId,
+}
+
+impl_resolvable2!(FunctionShared {
+    sig: Item,
+    block: OptionalItem,
+});
+
+impl Resolvable for FunctionShared {
+    fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
+        self.sig.num_resolved(bindings)
+        + self.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved(bindings))
+    }
 }
 
 /// A closure, e.g. `|a: u8, b: String| -> u16 { ... }`.
@@ -401,12 +547,19 @@ impl Positioned for Closure {
 
 impl_typeable!(Closure);
 
+impl_resolvable2!(Closure {
+    shared: Item,
+    struct_type_id: OptionalTypeId,
+    type_id: OptionalTypeId,
+    function_id: OptionalFunctionId,
+    required_bindings: BindingList,
+});
+
 impl Resolvable for Closure {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
-        self.shared.sig.num_resolved(bindings)
-        + self.shared.block.as_ref().map_or(Progress::new(1, 1), |b| b.num_resolved(bindings))
+        self.shared.num_resolved(bindings)
         + self.function_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
-        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
+        + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1)) // todo: type_id may point at incomplete resolved type. really need to follow ids (everywhere)
     }
 }
 
@@ -450,10 +603,14 @@ impl Typeable for Function {
     }
 }
 
+impl_resolvable2!(Function {
+    shared: Item,
+    constant_id: OptionalConstantId,
+});
+
 impl Resolvable for Function {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
-        self.shared.sig.num_resolved(bindings)
-        + self.shared.block.as_ref().map_or(Progress::new(0, 0), |b| b.num_resolved(bindings))
+        self.shared.num_resolved(bindings)
         + self.constant_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
     fn unresolved_error(self: &Self) -> ResolveErrorKind {
@@ -479,6 +636,13 @@ impl Resolvable for CallableDef {
         + self.ret.as_ref().map_or(Progress::zero(), |ret| ret.num_resolved(bindings))
     }
 }
+
+impl_resolvable2!(CallableDef {
+    args: ItemList,
+    ret: OptionalItem,
+    type_id: OptionalTypeId,
+});
+
 
 /// The signatures of a function or closure.
 #[derive(Debug)]
@@ -510,6 +674,11 @@ impl Positioned for Signature {
     }
 }
 
+impl_resolvable2!(Signature {
+    args: ItemList,
+    ret: OptionalItem,
+});
+
 impl Resolvable for Signature {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.args.iter().fold(Progress::zero(), |acc, arg| acc + arg.num_resolved(bindings))
@@ -534,6 +703,10 @@ impl Display for TypeName {
         write!(f, "{}", self.path)
     }
 }
+
+impl_resolvable2!(TypeName {
+    type_id: OptionalTypeId,
+});
 
 impl Resolvable for TypeName {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
@@ -591,6 +764,8 @@ impl Typeable for InlineType {
     }
 }
 
+impl_resolvable2!(enum InlineType);
+
 impl Resolvable for InlineType {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         match self {
@@ -619,11 +794,35 @@ impl Resolvable for ArrayDef {
     }
 }
 
+impl_resolvable2!(ArrayDef {
+    element_type: Item,
+    type_id: OptionalTypeId,
+});
+
 /// The kind of a variant, either `Simple` (without associated data) or `Data`.
 #[derive(Debug)]
 pub enum VariantKind {
     Simple(Option<ConstantId>, Option<Literal>),
     Data(Option<ConstantId>, Vec<InlineType>),
+}
+
+impl Resolvable2 for VariantKind {
+    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+        match self {
+            VariantKind::Data(constant_id, fields) => {
+                let mut result = Vec::new();
+                result.append(&mut impl_resolvable2!(@append *constant_id, OptionalConstantId));
+                result.append(&mut impl_resolvable2!(@append fields, ItemList));
+                return result;
+            },
+            VariantKind::Simple(constant_id, literal) => {
+                let mut result = Vec::new();
+                result.append(&mut impl_resolvable2!(@append *constant_id, OptionalConstantId));
+                result.append(&mut impl_resolvable2!(@append literal, OptionalItem));
+                return result;
+            },
+        }
+    }
 }
 
 /// An enum variant definition, e.g. `MyVariant(u16, f32)` or `MySimpleVariant`.
@@ -635,6 +834,10 @@ pub struct VariantDef {
 }
 
 impl_positioned!(VariantDef);
+
+impl_resolvable2!(VariantDef {
+    kind: Item,
+});
 
 impl Resolvable for VariantDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -665,6 +868,11 @@ impl EnumDef {
     }
 }
 
+impl_resolvable2!(EnumDef {
+    variants: ItemList,
+    type_id: OptionalTypeId,
+});
+
 impl Resolvable for EnumDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.variants.iter().fold(Progress::zero(), |variant_acc, fields| variant_acc + fields.num_resolved(bindings))
@@ -688,6 +896,11 @@ pub struct StructDef {
 impl_positioned!(StructDef);
 impl_typeable!(StructDef);
 
+impl_resolvable2!(StructDef {
+    fields: ItemList1,
+    type_id: OptionalTypeId,
+});
+
 impl Resolvable for StructDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.fields.iter().fold(Progress::zero(), |acc, (_, field)| acc + field.num_resolved(bindings))
@@ -706,6 +919,12 @@ pub struct ImplBlock {
 }
 
 impl_positioned!(ImplBlock);
+
+impl_resolvable2!(ImplBlock {
+    functions: ItemList,
+    ty: Item,
+    trt: OptionalItem,
+});
 
 impl Resolvable for ImplBlock {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -728,6 +947,11 @@ pub struct TraitDef {
 
 impl_positioned!(TraitDef);
 impl_typeable!(TraitDef);
+
+impl_resolvable2!(TraitDef {
+    functions: ItemList,
+    type_id: OptionalTypeId,
+});
 
 impl Resolvable for TraitDef {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -757,6 +981,12 @@ impl ControlFlow for ForLoop {
         }
     }
 }
+
+impl_resolvable2!(ForLoop {
+    iter: Item,
+    expr: Item,
+    block: Item,
+});
 
 impl Resolvable for ForLoop {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -788,6 +1018,11 @@ impl ControlFlow for WhileLoop {
     }
 }
 
+impl_resolvable2!(WhileLoop {
+    expr: Item,
+    block: Item,
+});
+
 impl Resolvable for WhileLoop {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.expr.num_resolved(bindings)
@@ -804,6 +1039,10 @@ pub struct Return {
 
 impl_positioned!(Return);
 
+impl_resolvable2!(Return {
+    expr: Item,
+});
+
 impl Resolvable for Return {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.expr.num_resolved(bindings)
@@ -818,6 +1057,8 @@ pub struct Break {
 
 impl_positioned!(Break);
 
+impl_resolvable2!(always Break);
+
 impl Resolvable for Break {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
         Progress::new(1, 1)
@@ -831,6 +1072,8 @@ pub struct Continue {
 }
 
 impl_positioned!(Continue);
+
+impl_resolvable2!(always Continue);
 
 impl Resolvable for Continue {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
@@ -854,6 +1097,11 @@ pub struct MatchBlock {
 
 impl_positioned!(MatchBlock);
 impl_display!(MatchBlock, "match {} {{ ... }}", expr);
+
+impl_resolvable2!(MatchBlock {
+    expr: Item,
+    branches: ItemList1,
+});
 
 impl Resolvable for MatchBlock {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -883,6 +1131,12 @@ pub struct IfBlock {
 
 impl_positioned!(IfBlock);
 impl_display!(IfBlock, "if {} {{ ... }}", cond);
+
+impl_resolvable2!(IfBlock {
+    cond: Item,
+    if_block: Item,
+    else_block: OptionalItem,
+});
 
 impl Resolvable for IfBlock {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -955,8 +1209,12 @@ impl Block {
             scope_id,
         }
     }
-
 }
+
+impl_resolvable2!(Block {
+    statements: ItemList,
+    result: OptionalItem,
+});
 
 impl Resolvable for Block {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1062,6 +1320,8 @@ impl Resolvable for Expression {
     }
 }
 
+impl_resolvable2!(enum Expression);
+
 impl ControlFlow for Expression {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         match self {
@@ -1111,6 +1371,12 @@ impl Resolvable for Literal {
         + self.value.num_resolved(bindings)
     }
 }
+
+impl_resolvable2!(Literal {
+    value: Item,
+    type_name: OptionalItem,
+    type_id: OptionalTypeId,
+});
 
 impl Display for Literal {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1191,6 +1457,16 @@ impl Resolvable for LiteralValue {
     }
 }
 
+impl Resolvable2 for LiteralValue {
+    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+        match self {
+            Self::Array(array) => array.resolvable_ids(),
+            Self::Struct(struct_) => struct_.resolvable_ids(),
+            _ => vec![ ResolvableId::Progress(Progress::new(1, 1)) ],
+        }
+    }
+}
+
 impl Debug for LiteralValue {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1210,6 +1486,10 @@ pub struct ArrayLiteral {
     pub elements: Vec<Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
 
+impl_resolvable2!(ArrayLiteral {
+    elements: ItemList,
+});
+
 impl Resolvable for ArrayLiteral {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
         self.elements.iter().fold(Progress::zero(), |acc, element| acc + element.num_resolved(bindings))
@@ -1221,6 +1501,10 @@ impl Resolvable for ArrayLiteral {
 pub struct StructLiteral {
     pub fields: UnorderedMap<String, Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
+
+impl_resolvable2!(StructLiteral {
+    fields: ItemMap,
+});
 
 impl Resolvable for StructLiteral {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1247,6 +1531,10 @@ impl Typeable for Variable {
         bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
     }
 }
+
+impl_resolvable2!(Variable {
+    binding_id: BindingId,
+});
 
 impl Resolvable for Variable {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1281,6 +1569,10 @@ impl Typeable for Constant {
     }
 }
 
+impl_resolvable2!(Constant {
+    constant_id: OptionalConstantId,
+});
+
 impl Resolvable for Constant {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
         self.constant_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -1304,6 +1596,11 @@ impl_typeable!(Member);
 impl_positioned!(Member);
 impl_display!(Member, "{}", ident);
 
+impl_resolvable2!(Member {
+    type_id: OptionalTypeId,
+    constant_id: OptionalConstantId,
+});
+
 impl Resolvable for Member {
     fn num_resolved(self: &Self, _: &impl BindingContainer) -> Progress {
         self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
@@ -1324,6 +1621,10 @@ impl Display for ArgumentList {
         write!(f, "{}", self.args.iter().map(|e| format!("{}", e)).collect::<Vec<String>>().join(", "))
     }
 }
+
+impl_resolvable2!(ArgumentList {
+    args: ItemList,
+});
 
 impl Resolvable for ArgumentList {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1350,6 +1651,12 @@ pub struct Assignment {
 impl_typeable!(Assignment);
 impl_positioned!(Assignment);
 impl_display!(Assignment, "{} {} {}", left, op, right);
+
+impl_resolvable2!(Assignment {
+    left: Item,
+    right: Item,
+    type_id: OptionalTypeId,
+});
 
 impl Resolvable for Assignment {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1385,6 +1692,12 @@ impl Resolvable for Cast {
         + self.type_id.map_or(Progress::new(0, 1), |_| Progress::new(1, 1))
     }
 }
+
+impl_resolvable2!(Cast {
+    expr: Item,
+    ty: Item,
+    type_id: OptionalTypeId,
+});
 
 impl ControlFlow for Cast {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
@@ -1454,6 +1767,8 @@ impl Resolvable for BinaryOperand {
     }
 }
 
+impl_resolvable2!(enum BinaryOperand);
+
 impl ControlFlow for BinaryOperand {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         match self {
@@ -1477,6 +1792,12 @@ pub struct BinaryOp {
 impl_typeable!(BinaryOp);
 impl_positioned!(BinaryOp);
 impl_display!(BinaryOp, "{}{}{}", left, op, right);
+
+impl_resolvable2!(BinaryOp {
+    left: Item,
+    right: Item,
+    type_id: OptionalTypeId,
+});
 
 impl Resolvable for BinaryOp {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
@@ -1504,6 +1825,11 @@ pub struct UnaryOp {
 
 impl_typeable!(UnaryOp);
 impl_positioned!(UnaryOp);
+
+impl_resolvable2!(UnaryOp {
+    expr: Item,
+    type_id: OptionalTypeId,
+});
 
 impl Resolvable for UnaryOp {
     fn num_resolved(self: &Self, bindings: &(impl BindingContainer+TypeContainer)) -> Progress {
