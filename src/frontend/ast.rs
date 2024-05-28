@@ -57,7 +57,7 @@ macro_rules! impl_display {
     };
 }
 
-pub(crate) enum ResolvableId { // rename Resolvables
+pub(crate) enum Resolvables {
     TypeId(TypeId),
     BindingId(BindingId),
     ConstantId(ConstantId),
@@ -66,18 +66,18 @@ pub(crate) enum ResolvableId { // rename Resolvables
 }
 
 /// Resolvable AST structures.
-pub(crate) trait Resolvable: Display { // rename Resolvable
+pub(crate) trait Resolvable: Display {
     /// Returns list of resolvable ids.
-    fn resolvable_ids(self: &Self) -> Vec<ResolvableId>; // rename resolvables
+    fn resolvables(self: &Self) -> Vec<Resolvables>;
     /// Number of resolved and total items.
     fn num_resolved(self: &Self, container: &(impl BindingContainer+TypeContainer)) -> Progress {
-        let resolvables = self.resolvable_ids();
+        let resolvables = self.resolvables();
         let mut progress = Progress::zero();
         let mut seen = Set::new();
         for resolvable in resolvables {
             progress = progress + match resolvable {
-                ResolvableId::TypeId(type_id) => self.check_type_id(container, type_id, &mut seen),
-                ResolvableId::BindingId(binding_id) => {
+                Resolvables::TypeId(type_id) => self.check_type_id(container, type_id, &mut seen),
+                Resolvables::BindingId(binding_id) => {
                     let binding = container.binding_by_id(binding_id);
                     if let Some(type_id) = binding.type_id {
                         self.check_type_id(container, type_id, &mut seen)
@@ -85,9 +85,9 @@ pub(crate) trait Resolvable: Display { // rename Resolvable
                         Progress::new(0, 1)
                     }
                 },
-                ResolvableId::ConstantId(constant_id) => self.check_constant_id(container, constant_id, &mut seen),
-                ResolvableId::FunctionId(function_id) => self.check_function_id(container, function_id, &mut seen),
-                ResolvableId::Progress(progress) => progress,
+                Resolvables::ConstantId(constant_id) => self.check_constant_id(container, constant_id, &mut seen),
+                Resolvables::FunctionId(function_id) => self.check_function_id(container, function_id, &mut seen),
+                Resolvables::Progress(progress) => progress,
             };
         }
         progress
@@ -196,46 +196,46 @@ pub(crate) trait Resolvable: Display { // rename Resolvable
 ///     impl_resolvable!(MyStruct { field: Item|OptionalItem|TypeId... })
 macro_rules! impl_resolvable {
     (@append $field:expr, Item) => {
-        $field.resolvable_ids()
+        $field.resolvables()
     };
     (@append $field:expr, OptionalItem) => { // These are items that are not required, e.g. the InlineType in LetBindings is optional here: let x: u8 = 1u8;
-        $field.as_ref().map_or(Vec::new(), |expr| expr.resolvable_ids())
+        $field.as_ref().map_or(Vec::new(), |expr| expr.resolvables())
     };
     (@append $field:expr, ItemList) => {
-        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvable_ids()); acc })
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvables()); acc })
     };
     (@append $field:expr, ItemList1) => {
-        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.1.resolvable_ids()); acc })
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.append(&mut item.1.resolvables()); acc })
     };
     (@append $field:expr, ItemMap) => {
-        $field.iter().map(|(_k, v)| v).fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvable_ids()); acc })
+        $field.iter().map(|(_k, v)| v).fold(Vec::new(), |mut acc, item| { acc.append(&mut item.resolvables()); acc })
     };
     (@append $field:expr, TypeId) => { // TypeIds are wrapped in Option but they are not 'optional', they must be resolved eventually. So not naming this OptionalItem.
         if let Some(type_id) = $field {
-            vec![ ResolvableId::TypeId(type_id) ]
+            vec![ Resolvables::TypeId(type_id) ]
         } else {
-            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+            vec![ Resolvables::Progress(Progress::new(0, 1)) ]
         }
     };
     (@append $field:expr, ConstantId) => {
         if let Some(constant_id) = $field {
-            vec![ ResolvableId::ConstantId(constant_id) ]
+            vec![ Resolvables::ConstantId(constant_id) ]
         } else {
-            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+            vec![ Resolvables::Progress(Progress::new(0, 1)) ]
         }
     };
     (@append $field:expr, FunctionId) => {
         if let Some(function_id) = $field {
-            vec![ ResolvableId::FunctionId(function_id) ]
+            vec![ Resolvables::FunctionId(function_id) ]
         } else {
-            vec![ ResolvableId::Progress(Progress::new(0, 1)) ]
+            vec![ Resolvables::Progress(Progress::new(0, 1)) ]
         }
     };
     (@append $field:expr, BindingId) => {
-        vec![ ResolvableId::BindingId($field) ]
+        vec![ Resolvables::BindingId($field) ]
     };
     (@append $field:expr, BindingList) => {
-        $field.iter().fold(Vec::new(), |mut acc, item| { acc.push(ResolvableId::BindingId(*item)); acc })
+        $field.iter().fold(Vec::new(), |mut acc, item| { acc.push(Resolvables::BindingId(*item)); acc })
     };
     (@append $field:expr, $unsupported:ident) => {
         compile_error!(stringify!(Unsupported impl_resolvable type $unsupported))
@@ -243,23 +243,23 @@ macro_rules! impl_resolvable {
     // impl_resolvable!(enum Statement|Expression|...)
     (enum $enum_type:ident ) => {
         impl Resolvable for $enum_type {
-            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
-                impl_matchall!(self, $enum_type, item, { item.resolvable_ids() })
+            fn resolvables(self: &Self) -> Vec<Resolvables> {
+                impl_matchall!(self, $enum_type, item, { item.resolvables() })
             }
         }
     };
     // impl_resolvable!(always MyAST)
     (always $ty:ident ) => {
         impl Resolvable for $ty {
-            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
-                vec![ ResolvableId::Progress(Progress::new(1, 1)) ]
+            fn resolvables(self: &Self) -> Vec<Resolvables> {
+                vec![ Resolvables::Progress(Progress::new(1, 1)) ]
             }
         }
     };
     // impl_resolvable!(MyStruct { field: Item|OptionalItem|TypeId... })
     ($struct_name:ident { $( $field_name:ident : $field_ty:ident ),+ $( , )? } ) => {
         impl Resolvable for $struct_name {
-            fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+            fn resolvables(self: &Self) -> Vec<Resolvables> {
                 let mut result = Vec::new();
                 $(
                     result.append(&mut impl_resolvable!(@append self.$field_name, $field_ty));
@@ -542,8 +542,8 @@ impl_positioned!(UseDecl);
 impl_display!(UseDecl, "{:?}", mapping); // TODO: formatting
 
 impl Resolvable for UseDecl {
-    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
-        vec!(ResolvableId::Progress(Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())))
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        vec!(Resolvables::Progress(Progress::new(self.mapping.iter().map(|(_, (_, r))| *r as usize).sum(), self.mapping.len())))
     }
 }
 
@@ -837,7 +837,7 @@ pub enum VariantKind {
 }
 
 impl Resolvable for VariantKind {
-    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
         match self {
             VariantKind::Data(constant_id, fields) => {
                 let mut result = Vec::new();
@@ -1395,11 +1395,11 @@ impl LiteralValue {
 }
 
 impl Resolvable for LiteralValue {
-    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
         match self {
-            Self::Array(array) => array.resolvable_ids(),
-            Self::Struct(struct_) => struct_.resolvable_ids(),
-            _ => vec![ ResolvableId::Progress(Progress::new(1, 1)) ],
+            Self::Array(array) => array.resolvables(),
+            Self::Struct(struct_) => struct_.resolvables(),
+            _ => vec![ Resolvables::Progress(Progress::new(1, 1)) ],
         }
     }
 }
@@ -1532,7 +1532,7 @@ impl_positioned!(Member);
 impl_display!(Member, "{}", ident);
 
 impl Resolvable for Member {
-    fn resolvable_ids(self: &Self) -> Vec<ResolvableId> {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
         let mut result = Vec::new();
         if self.constant_id.is_some() {
             result.append(&mut impl_resolvable!(@append self.constant_id, ConstantId));
