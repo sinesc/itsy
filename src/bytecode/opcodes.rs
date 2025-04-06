@@ -310,7 +310,7 @@ impl_opcodes!{
         self.stack.push(a + b);
     }
 
-    /// Loads 2 values from the stack and pushes their product.
+    /// Loads 2 values from the stack and pushes their sum.
     fn <
         addvvs8<T: i8>(left: FrameAddress, right: FrameAddress) [ check ],
         addvvs16<T: i16>(left: FrameAddress, right: FrameAddress) [ check ],
@@ -330,7 +330,7 @@ impl_opcodes!{
         }
     }
 
-    /// Loads 2 values from the stack and pushes their product.
+    /// Loads 2 values from the stack and pushes their sum.
     fn <
         addvvf32<T: f32>(left: FrameAddress, right: FrameAddress),
         addvvf64<T: f64>(left: FrameAddress, right: FrameAddress)
