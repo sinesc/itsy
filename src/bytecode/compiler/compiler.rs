@@ -9,7 +9,7 @@ mod init_state;
 use crate::config::FrameAddress;
 use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
-use crate::shared::{BindingContainer, TypeContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
+use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::BuiltinType};
 use stack_frame::{StackFrame, StackFrames};
@@ -2053,9 +2053,9 @@ impl<T> Compiler<T> {
     }
 }
 
-/// Support TypeContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
+/// Support MetaContainer for Bindings so that methods that need to follow type_ids can be implemented once and be used in both
 /// the Resolver where types are scored in Scopes and the Compiler where types are a stored in a Vec.
-impl<T> TypeContainer for Compiler<T> {
+impl<T> MetaContainer for Compiler<T> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         self.resolved.ty(type_id)
     }
@@ -2065,10 +2065,6 @@ impl<T> TypeContainer for Compiler<T> {
     fn type_flat_name(self: &Self, _type_id: TypeId) -> Option<&String> {
         None // TODO
     }
-}
-
-/// A container holding binding id to Binding mappings
-impl<T> BindingContainer for Compiler<T> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         self.resolved.binding(binding_id)
     }

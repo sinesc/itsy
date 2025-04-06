@@ -3,25 +3,25 @@
 use crate::internals::resolved::{EnumVariant, ImplTrait};
 use crate::prelude::*;
 use crate::shared::meta::{Type, ConstantValue};
-use crate::shared::{impl_as_getter, BindingContainer, TypeContainer, {typed_ids::{BindingId, FunctionId, ScopeId, TypeId, ConstantId}, numeric::Numeric, Progress, parts_to_path}};
+use crate::shared::{impl_as_getter, MetaContainer, {typed_ids::{BindingId, FunctionId, ScopeId, TypeId, ConstantId}, numeric::Numeric, Progress, parts_to_path}};
 use crate::frontend::resolver::error::ResolveErrorKind;
 
 /// TypeId handling for typeable AST structures.
 pub(crate) trait Typeable {
     /// Returns the type_id.
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId>;
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId>;
     /// Returns a mutable reference to the type_id.
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId);
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId);
 }
 
 /// Implements the Typeable trait for given structure.
 macro_rules! impl_typeable {
     ($struct_name:ident) => {
         impl Typeable for $struct_name {
-            fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
+            fn type_id(self: &Self, _: &impl MetaContainer) -> Option<TypeId> {
                 self.type_id
             }
-            fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, type_id: TypeId) {
+            fn set_type_id(self: &mut Self, _bindings: &mut impl MetaContainer, type_id: TypeId) {
                 self.type_id = Some(type_id);
             }
         }
@@ -29,19 +29,19 @@ macro_rules! impl_typeable {
 }
 
 impl Typeable for TypeId {
-    fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, _: &impl MetaContainer) -> Option<TypeId> {
         Some(*self)
     }
-    fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, _type_id: TypeId) {
+    fn set_type_id(self: &mut Self, _bindings: &mut impl MetaContainer, _type_id: TypeId) {
         panic!("Cannot mutate TypeId through Typeable trait.")
     }
 }
 
 impl Typeable for Option<TypeId> {
-    fn type_id(self: &Self, _: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, _: &impl MetaContainer) -> Option<TypeId> {
         *self
     }
-    fn set_type_id(self: &mut Self, _bindings: &mut impl BindingContainer, _type_id: TypeId) {
+    fn set_type_id(self: &mut Self, _bindings: &mut impl MetaContainer, _type_id: TypeId) {
         panic!("Cannot mutate Option<TypeId> through Typeable trait.")
     }
 }
@@ -70,7 +70,7 @@ pub(crate) trait Resolvable: Display {
     /// Returns list of resolvable ids.
     fn resolvables(self: &Self) -> Vec<Resolvables>;
     /// Number of resolved and total items.
-    fn num_resolved(self: &Self, container: &(impl BindingContainer+TypeContainer)) -> Progress {
+    fn num_resolved(self: &Self, container: &impl MetaContainer) -> Progress {
         let resolvables = self.resolvables();
         let mut progress = Progress::zero();
         let mut seen = Set::new();
@@ -93,7 +93,7 @@ pub(crate) trait Resolvable: Display {
         progress
     }
     /// Whether the structure is fully resolved.
-    fn is_resolved(self: &Self, container: &(impl BindingContainer+TypeContainer)) -> bool {
+    fn is_resolved(self: &Self, container: &impl MetaContainer) -> bool {
         self.num_resolved(container).done()
     }
     /// Error kind incase the item could not be resolved.
@@ -101,7 +101,7 @@ pub(crate) trait Resolvable: Display {
         ResolveErrorKind::CannotResolve(format!("{}", self))
     }
     /// Recursively checks how much of a type is resolved.
-    fn check_type_id(self: &Self, container: &(impl BindingContainer+TypeContainer), type_id: TypeId, seen: &mut Set<TypeId>) -> Progress {
+    fn check_type_id(self: &Self, container: &impl MetaContainer, type_id: TypeId, seen: &mut Set<TypeId>) -> Progress {
         if seen.contains(&type_id) {
             Progress::new(0, 0)
         } else {
@@ -149,7 +149,7 @@ pub(crate) trait Resolvable: Display {
         }
     }
     /// Recursively checks how much of an enum variant is resolved.
-    fn check_enum_variant(self: &Self, container: &(impl BindingContainer+TypeContainer), variant: &EnumVariant, seen: &mut Set<TypeId>) -> Progress {
+    fn check_enum_variant(self: &Self, container: &impl MetaContainer, variant: &EnumVariant, seen: &mut Set<TypeId>) -> Progress {
         match variant {
             EnumVariant::Simple(_) => Progress::new(1, 1),
             EnumVariant::Data(opt_type_ids) => {
@@ -160,13 +160,13 @@ pub(crate) trait Resolvable: Display {
         }
     }
     /// Recursively checks how much of a trait implementation is resolved.
-    fn check_impl_trait(self: &Self, container: &(impl BindingContainer+TypeContainer), impl_type_id: TypeId, impl_trait: &ImplTrait, seen: &mut Set<TypeId>) -> Progress {
+    fn check_impl_trait(self: &Self, container: &impl MetaContainer, impl_type_id: TypeId, impl_trait: &ImplTrait, seen: &mut Set<TypeId>) -> Progress {
         self.check_type_id(container, impl_type_id, seen)
         + impl_trait.functions.iter().map(|(_, opt_const_id)| opt_const_id.map_or(Progress::new(0, 1), |const_id| self.check_constant_id(container, const_id, seen)))
             .fold(Progress::zero(), |acc, a| acc + a)
     }
     /// Recursively checks how much of a constant is resolved.
-    fn check_constant_id(self: &Self, container: &(impl BindingContainer+TypeContainer), constant_id: ConstantId, seen: &mut Set<TypeId>) -> Progress {
+    fn check_constant_id(self: &Self, container: &impl MetaContainer, constant_id: ConstantId, seen: &mut Set<TypeId>) -> Progress {
         let constant = container.constant_by_id(constant_id);
         if let Some(type_id) = constant.type_id {
             let mut progress = self.check_type_id(container, type_id, seen);
@@ -184,12 +184,12 @@ pub(crate) trait Resolvable: Display {
         }
     }
     /// Recursively checks how much of a function signature is resolved.
-    fn check_function_id(self: &Self, _container: &(impl BindingContainer+TypeContainer), _function_id: FunctionId, _seen: &mut Set<TypeId>) -> Progress {
+    fn check_function_id(self: &Self, _container: &impl MetaContainer, _function_id: FunctionId, _seen: &mut Set<TypeId>) -> Progress {
         Progress::new(1, 1) // FIXME, need to add function lookup to one of the containers
     }
 }
 
-/// Implements the Display trait for given structure.
+/// Implements the Resolvable trait for given structure.
 /// Accepted syntax:
 ///     impl_resolvable!(enum Statement|Expression|...)
 ///     impl_resolvable!(always MyStruct)
@@ -573,10 +573,10 @@ impl Display for LetBinding {
 }
 
 impl Typeable for LetBinding {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         bindings.binding_by_id(self.binding_id).type_id
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id);
     }
 }
@@ -654,13 +654,13 @@ impl Display for Function {
 }
 
 impl Typeable for Function {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id(constant_id).type_id,
             None => None,
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => { /* not resolved to constant yet */ },
@@ -712,16 +712,16 @@ impl_resolvable!(Signature {
 
 impl Signature {
     // FIXME use impl_resolved2 macro inner cases here
-    pub(crate) fn ret_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
+    pub(crate) fn ret_resolved(self: &Self, bindings: &impl MetaContainer) -> bool {
         self.ret.as_ref().map_or(true, |ret| ret.type_id(bindings).is_some())
     }
-    pub(crate) fn ret_type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    pub(crate) fn ret_type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         self.ret.as_ref().map_or(Some(TypeId::VOID), |ret| ret.type_id(bindings))
     }
-    pub(crate) fn args_resolved(self: &Self, bindings: &impl BindingContainer) -> bool {
+    pub(crate) fn args_resolved(self: &Self, bindings: &impl MetaContainer) -> bool {
         self.args.iter().all(|arg| arg.ty.as_ref().map_or(false, |type_name| type_name.type_id(bindings).is_some()))
     }
-    pub(crate) fn arg_type_ids(self: &Self, bindings: &impl BindingContainer) -> Vec<Option<TypeId>> {
+    pub(crate) fn arg_type_ids(self: &Self, bindings: &impl MetaContainer) -> Vec<Option<TypeId>> {
         self.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id(bindings))).collect()
     }
 }
@@ -795,14 +795,14 @@ impl Display for InlineType {
 }
 
 impl Typeable for InlineType {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         match &self {
             InlineType::ArrayDef(array_def) => array_def.type_id(bindings),
             InlineType::TypeName(type_name) => type_name.type_id(bindings),
             InlineType::CallableDef(callable_def) => callable_def.type_id(bindings),
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         match self {
             InlineType::ArrayDef(array_def) => array_def.set_type_id(bindings, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(bindings, type_id),
@@ -1091,10 +1091,10 @@ impl_resolvable!(MatchBlock {
 });
 
 impl Typeable for MatchBlock {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         self.branches.first().unwrap().1.type_id(bindings)
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         self.branches.first_mut().unwrap().1.set_type_id(bindings, type_id)
     }
 }
@@ -1138,10 +1138,10 @@ impl ControlFlow for IfBlock {
 }
 
 impl Typeable for IfBlock {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         if let Some(result) = &mut self.if_block.result {
             result.set_type_id(bindings, type_id)
         } else {
@@ -1188,10 +1188,10 @@ impl Block {
 }
 
 impl Typeable for Block {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         self.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         if let Some(result) = &mut self.result {
             result.set_type_id(bindings, type_id)
         } else {
@@ -1268,10 +1268,10 @@ impl Expression {
 }
 
 impl Typeable for Expression {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         impl_matchall!(self, Expression, item, { item.type_id(bindings) })
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         impl_matchall!(self, Expression, item, { item.set_type_id(bindings, type_id) })
     }
 }
@@ -1479,10 +1479,10 @@ impl_resolvable!(Variable {
 });
 
 impl Typeable for Variable {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         bindings.binding_by_id(self.binding_id).type_id
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
     }
 }
@@ -1503,13 +1503,13 @@ impl_resolvable!(Constant {
 });
 
 impl Typeable for Constant {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id(constant_id).type_id,
             None => None,
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         match self.constant_id {
             Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => { /* not resolved to constant yet */ },
@@ -1643,7 +1643,7 @@ impl_as_getter!(BinaryOperand {
 });
 
 impl Typeable for BinaryOperand {
-    fn type_id(self: &Self, bindings: &impl BindingContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
         match self {
             Self::Expression(v) => v.type_id(bindings),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
@@ -1651,7 +1651,7 @@ impl Typeable for BinaryOperand {
             Self::TypeName(v) => v.type_id(bindings),
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl BindingContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
         match self {
             Self::Expression(v) => v.set_type_id(bindings, type_id),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),

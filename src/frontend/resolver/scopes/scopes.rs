@@ -4,7 +4,7 @@ use crate::prelude::*;
 use crate::frontend::resolver::resolved::Resolved;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId, ConstantId};
 use crate::shared::meta::{Type, Function, FunctionKind, Binding, Callable, Constant, ConstantValue};
-use crate::shared::{BindingContainer, TypeContainer, Progress};
+use crate::shared::{MetaContainer, Progress};
 use repository::Repository;
 
 /// Flat lists of types and bindings and which scope they belong to.
@@ -262,7 +262,7 @@ impl Scopes {
     }
 }
 
-impl TypeContainer for Scopes {
+impl MetaContainer for Scopes {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         self.type_ref(type_id)
     }
@@ -272,9 +272,6 @@ impl TypeContainer for Scopes {
     fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String> {
         self.types.name_by_id(type_id)
     }
-}
-
-impl BindingContainer for Scopes {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         self.binding_ref(binding_id)
     }

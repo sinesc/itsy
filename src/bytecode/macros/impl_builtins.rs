@@ -170,7 +170,7 @@ macro_rules! impl_builtins {
             use super::{Builtin, BuiltinType};
             use crate::frontend::resolver::Resolver;
             use crate::bytecode::{compiler::Compiler, VMFunc};
-            use crate::shared::{meta::Type, typed_ids::TypeId, TypeContainer};
+            use crate::shared::{meta::Type, typed_ids::TypeId, MetaContainer};
             use crate::bytecode::macros::impl_builtins;
 
             $( // type

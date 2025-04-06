@@ -12,7 +12,7 @@ use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
-use crate::shared::{Progress, TypeContainer, BindingContainer, parts_to_path, path_to_parts};
+use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
 use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
@@ -1472,9 +1472,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 }
 
-/// Support TypeContainer for Scopes so that methods that need to follow type_ids can be implemented once and be used in both
+/// Support MetaContainer for Scopes so that methods that need to follow type_ids can be implemented once and be used in both
 /// the Resolver where types are stored in Scopes and the Compiler where types are a stored in a Vec.
-impl<'ctx> TypeContainer for Resolver<'ctx> {
+impl<'ctx> MetaContainer for Resolver<'ctx> {
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type {
         self.scopes.type_ref(type_id)
     }
@@ -1484,10 +1484,6 @@ impl<'ctx> TypeContainer for Resolver<'ctx> {
     fn type_flat_name(self: &Self, type_id: TypeId) -> Option<&String> {
         self.scopes.type_flat_name(type_id)
     }
-}
-
-/// A container holding binding id to Binding mappings
-impl<'ctx> BindingContainer for Resolver<'ctx> {
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding {
         self.scopes.binding_ref(binding_id)
     }

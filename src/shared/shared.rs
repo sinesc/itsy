@@ -8,8 +8,8 @@ pub mod error;
 use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId}, meta::{Type, Binding, Constant, Array, Callable}};
 use crate::prelude::*;
 
-/// A container holding type id to type mappings
-pub trait TypeContainer {
+/// A container holding AST metadata
+pub trait MetaContainer {
     /// Returns a reference to the type.
     fn type_by_id(self: &Self, type_id: TypeId) -> &Type;
     /// Returns a mutable reference to the type.
@@ -94,10 +94,6 @@ pub trait TypeContainer {
             }
         }
     }
-}
-
-/// A container holding binding id to Binding mappings
-pub trait BindingContainer {
     /// Returns a reference to the Binding.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
     /// Returns a mutable reference to the Binding.

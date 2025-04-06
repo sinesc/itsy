@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
-use crate::shared::{impl_as_getter, TypeContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
+use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
 
 /// Binding meta information.
@@ -119,7 +119,7 @@ pub struct Callable {
 
 impl Callable {
     /// Computes the total primitive size of the callable's parameters.
-    pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
+    pub fn arg_size(self: &Self, container: &dyn MetaContainer) -> FrameAddress {
         let mut arg_size = 0;
         for arg in &self.arg_type_ids {
             let arg_type_id = arg.expect("Function arg is not resolved");
@@ -128,7 +128,7 @@ impl Callable {
         arg_size
     }
     /// Returns the primitive size of the callable's return type.
-    pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
+    pub fn ret_size(self: &Self, container: &dyn MetaContainer) -> u8 {
         let ret_type_id = self.ret_type_id.expect("Function result is not resolved");
         container.type_by_id(ret_type_id).primitive_size()
     }
@@ -148,27 +148,27 @@ impl Function {
             _ => None,
         }
     }
-    pub fn is_resolved(self: &Self, container: &dyn TypeContainer) -> bool {
+    pub fn is_resolved(self: &Self, container: &dyn MetaContainer) -> bool {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         callable.ret_type_id.is_some() && self.kind.is_some() && callable.arg_type_ids.iter().all(|arg| arg.is_some())
     }
     /// Returns function argument type ids.
-    pub fn arg_type_ids<'a>(self: &Self, container: &'a dyn TypeContainer) -> &'a Vec<Option<TypeId>> {
+    pub fn arg_type_ids<'a>(self: &Self, container: &'a dyn MetaContainer) -> &'a Vec<Option<TypeId>> {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         &callable.arg_type_ids
     }
     /// Returns function return type ids.
-    pub fn ret_type_id<'a>(self: &Self, container: &'a dyn TypeContainer) -> Option<TypeId> {
+    pub fn ret_type_id<'a>(self: &Self, container: &'a dyn MetaContainer) -> Option<TypeId> {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         callable.ret_type_id
     }
     /// Computes the total primitive size of the function parameters.
-    pub fn arg_size(self: &Self, container: &dyn TypeContainer) -> FrameAddress {
+    pub fn arg_size(self: &Self, container: &dyn MetaContainer) -> FrameAddress {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         callable.arg_size(container)
     }
     /// Returns the primitive size of the function return type.
-    pub fn ret_size(self: &Self, container: &dyn TypeContainer) -> u8 {
+    pub fn ret_size(self: &Self, container: &dyn MetaContainer) -> u8 {
         let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
         callable.ret_size(container)
     }
