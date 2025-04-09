@@ -86,7 +86,7 @@ pub enum CoverageRangeType<'p> {
 }
 
 impl<'p> CoverageRangeType<'p> {
-    fn kind(self: &'p Self) -> &'p CoverageRangeKind {
+    fn kind(self: &'p Self) -> &'p CoverageRangeKind<'p> {
         match self {
             Self::Unsigned(coverage) => &coverage.kind,
             Self::Signed(coverage) => &coverage.kind,

@@ -22,7 +22,7 @@ impl ParsedModule {
         }
     }
     /// Returns an iterator over all submodules of the module.
-    pub fn modules<'a>(self: &'a Self) -> impl Iterator<Item=&ModuleDecl> {
+    pub fn modules(self: &Self) -> impl Iterator<Item=&ModuleDecl> {
         self.ast
             .iter()
             .filter_map(|s| match s {
@@ -31,7 +31,7 @@ impl ParsedModule {
             })
     }
     /// Returns an iterator over all use mappings in the module.
-    pub fn using<'a>(self: &'a Self) -> impl Iterator<Item=(&String, &String)> {
+    pub fn using(self: &Self) -> impl Iterator<Item=(&String, &String)> {
         self.ast
             .iter()
             .filter_map(|s| match s {
@@ -41,7 +41,7 @@ impl ParsedModule {
             .flatten()
     }
     /// Returns an iterator over all statements in the source.
-    pub fn statements<'a>(self: &'a Self) -> impl Iterator<Item=&Statement> {
+    pub fn statements(self: &Self) -> impl Iterator<Item=&Statement> {
         self.ast.iter()
     }
 }

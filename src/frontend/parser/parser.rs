@@ -61,7 +61,7 @@ where
 }
 
 /// Calls the given function with a mutable reference to parser flags, then runs the given parser. Restores previous parser flags afterwards.
-fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P) -> impl FnMut(Input<'a>) -> Output<'a, O> where P: FnMut(Input<'a>) -> Output<'a, O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
@@ -74,7 +74,7 @@ fn with_flags<'a, P: 'a, O: 'a>(s: &'a impl Fn(&mut ParserFlags), mut parser: P)
 }
 
 /// Pushes a new scope to the scope stack before running the given parser. Pops scope afterwards.
-fn with_scope<'a, P: 'a, O: 'a>(scope_type: ScopeKind, mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+fn with_scope<'a, P: 'a, O: 'a>(scope_type: ScopeKind, mut parser: P) -> impl FnMut(Input<'a>) -> Output<'a, O> where P: FnMut(Input<'a>) -> Output<'a, O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
@@ -90,7 +90,7 @@ fn with_scope<'a, P: 'a, O: 'a>(scope_type: ScopeKind, mut parser: P) -> impl Fn
 }
 
 /// Snapshots binding id state, restores it if the inner parser fails.
-fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<O> where P: FnMut(Input<'a>) -> Output<O> {
+fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<'a, O> where P: FnMut(Input<'a>) -> Output<'a, O> {
     move |input: Input<'_>| {
         use nom::Parser;
         let i = input.clone();
@@ -128,7 +128,7 @@ fn word(i: Input<'_>) -> Output<&str> {
 }
 
 /// Returns a parser that matches and returns the given string and consumes optional trailing whitespace.
-fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<'a, &'a str> {
     map(terminated(tag(p), space0), |s: Input<'_>| *s)
 }
 
@@ -145,7 +145,7 @@ fn ident(i: Input<'_>) -> Output<Ident> {
 }
 
 /// Returns a parser that matches the given alphanumeric keyword. Requires the entire next alphanumeric token to match.
-fn keyword<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<&str> {
+fn keyword<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<'a, &'a str> {
     verify(word, move |input: &str| w == input)
 }
 
