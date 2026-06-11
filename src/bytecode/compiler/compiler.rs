@@ -786,8 +786,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // create arguments in local environment
         self.init_state.push(BranchingKind::Single, BranchingScope::Function);
         let mut frame = StackFrame::new();
-        frame.ret_size = item.sig.ret.as_ref().map_or(0, |ret| self.ty(ret).primitive_size());
-        for arg in item.sig.args.iter() {
+        // use the resolved return type rather than the (possibly absent, for inferred closures) explicit annotation
+        frame.ret_size = self.function_by_id(function_id).ret_size(self);
+        for arg in item.sig.params.iter() {
             frame.insert(arg.binding_id, frame.arg_pos);
             self.init_state.declare(arg.binding_id);
             self.init_state.initialize(arg.binding_id);
@@ -1190,8 +1191,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if discriminant(&target.kind.ice()?) != discriminant(&other.kind.ice()?) {
             return Ok(false);
         }
-        let target_type = self.ty(&target.signature_type_id).as_callable().ice()?;
-        let other_type = self.ty(&other.signature_type_id).as_callable().ice()?;
+        let target_type = self.ty(&target.callable_type_id).as_callable().ice()?;
+        let other_type = self.ty(&other.callable_type_id).as_callable().ice()?;
         if target_type.ret_type_id != other_type.ret_type_id {
             return Ok(false);
         }
@@ -2076,5 +2077,11 @@ impl<T> MetaContainer for Compiler<T> {
     }
     fn constant_by_id_mut(self: &mut Self, _: ConstantId) -> &mut Constant {
         unreachable!("Compiler does not mutate constants.")
+    }
+    fn function_by_id(self: &Self, function_id: FunctionId) -> &Function {
+        self.resolved.function(function_id)
+    }
+    fn function_by_id_mut(self: &mut Self, _: FunctionId) -> &mut Function {
+        unreachable!("Compiler does not mutate functions.")
     }
 }

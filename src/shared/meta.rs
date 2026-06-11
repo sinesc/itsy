@@ -3,7 +3,7 @@ use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
 use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
 
-/// Binding meta information.
+/// Information about a binding in a resolved program.
 #[derive(Debug)]
 pub struct Binding {
     pub mutable: bool,
@@ -21,13 +21,14 @@ impl_as_getter!(ConstantValue {
 });
 
 
+/// Information about a constant in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Constant {
     pub value: ConstantValue,
     pub type_id: Option<TypeId>,
 }
 
-/// Single variant of an enum.
+/// Information about a single enum variant in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EnumVariant {
     Simple(Option<Numeric>),
@@ -138,7 +139,7 @@ impl Callable {
 #[derive(Clone, Debug)]
 pub struct Function {
     pub kind                : Option<FunctionKind>,
-    pub signature_type_id   : TypeId,
+    pub callable_type_id    : TypeId,
 }
 
 impl Function {
@@ -148,29 +149,28 @@ impl Function {
             _ => None,
         }
     }
+    fn callable<'a>(self: &Self, container: &'a dyn MetaContainer) -> &'a Callable {
+        container.type_by_id(self.callable_type_id).as_callable().unwrap()
+    }
     pub fn is_resolved(self: &Self, container: &dyn MetaContainer) -> bool {
-        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
+        let callable = self.callable(container);
         callable.ret_type_id.is_some() && self.kind.is_some() && callable.arg_type_ids.iter().all(|arg| arg.is_some())
     }
     /// Returns function argument type ids.
     pub fn arg_type_ids<'a>(self: &Self, container: &'a dyn MetaContainer) -> &'a Vec<Option<TypeId>> {
-        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        &callable.arg_type_ids
+        &self.callable(container).arg_type_ids
     }
     /// Returns function return type ids.
     pub fn ret_type_id<'a>(self: &Self, container: &'a dyn MetaContainer) -> Option<TypeId> {
-        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        callable.ret_type_id
+        self.callable(container).ret_type_id
     }
     /// Computes the total primitive size of the function parameters.
     pub fn arg_size(self: &Self, container: &dyn MetaContainer) -> FrameAddress {
-        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        callable.arg_size(container)
+        self.callable(container).arg_size(container)
     }
     /// Returns the primitive size of the function return type.
     pub fn ret_size(self: &Self, container: &dyn MetaContainer) -> u8 {
-        let callable = container.type_by_id(self.signature_type_id).as_callable().unwrap();
-        callable.ret_size(container)
+        self.callable(container).ret_size(container)
     }
 }
 

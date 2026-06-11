@@ -13,8 +13,8 @@ use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable};
-use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId};
+use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
+use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 
@@ -153,7 +153,8 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         }
 
         prev_resolved = now_resolved;
-        now_resolved = scopes.resolved() + program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved(&scopes));
+        now_resolved = program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved(&scopes));
+
 
         if !now_resolved.done() {
             if now_resolved == prev_resolved {
@@ -470,7 +471,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Resolves a struct definition.
+    /// Resolves a the definition of a callable type.
     fn resolve_callable_type(self: &mut Self, item: &mut ast::CallableDef) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
             return Ok(item.type_id);
@@ -488,12 +489,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(ret) = &mut item.ret {
             self.resolve_inline_type(ret)?;
         }
-        for field in &mut item.args {
+        for field in &mut item.params {
             self.resolve_inline_type(field)?;
         }
         // assemble type list first to avoid borrow issues
         let ret_type_id = item.ret.as_ref().map_or(Some(TypeId::VOID), |ret| ret.type_id(self));
-        let arg_type_ids: Vec<_> = item.args.iter()
+        let arg_type_ids: Vec<_> = item.params.iter()
             .map(|field| field.type_id(self))
             .collect();
         // assign type ids to definition
@@ -772,7 +773,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             return Ok(());
         }
         // resolve arguments
-        for arg in item.args.iter_mut() {
+        for arg in item.params.iter_mut() {
             self.resolve_let_binding(arg)?; // checks resolved_or_err
         }
         // resolve return type
@@ -782,8 +783,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved(item)
     }
 
-    /// Resolves a closure defintion. // TODO dedup with Function
-    fn resolve_closure(self: &mut Self, item: &mut ast::Closure, _expected_result: Option<TypeId>) -> ResolveResult {
+    /// Resolves a closure defintion.
+    fn resolve_closure(self: &mut Self, item: &mut ast::Closure, expected_result: Option<TypeId>) -> ResolveResult {
 
         let parent_scope_id = self.scope_id;
         self.scope_id = item.shared.scope_id;
@@ -799,41 +800,54 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
 
-        // resolve signature and expression using signature return type, if any
-        self.resolve_signature(&mut item.shared.sig)?;
-        self.resolve_block(item.shared.block.as_mut().ice()?, item.shared.sig.ret.as_ref().map(|r| r.type_id(self)).flatten())?;
-
-        // if the closure has an explicit return type // TODO: why set explicit type from non-explicit expression?
-        if let Some(ret) = &mut item.shared.sig.ret {
-            if item.shared.block.as_ref().ice()?.is_resolved(self) && !ret.is_resolved(self) {
-                ret.set_type_id(self, item.shared.block.as_ref().ice()?.type_id(self).ice()?);
+        // if an expected callable type is known (e.g. from a call argument or type annotation), use it to infer not yet resolved parameter types
+        let expected_callable = expected_result.and_then(|type_id| self.type_by_id(type_id).as_callable().cloned());
+        if let Some(expected_callable) = &expected_callable {
+            if expected_callable.arg_type_ids.len() == item.shared.sig.params.len() {
+                for index in 0..item.shared.sig.params.len() {
+                    if item.shared.sig.params[index].ty.is_none() && item.shared.sig.params[index].type_id(self).is_none() {
+                        if let Some(expected_arg_type_id) = expected_callable.arg_type_ids[index] {
+                            self.set_type_id(&mut item.shared.sig.params[index], expected_arg_type_id)?;
+                        }
+                    }
+                }
             }
         }
 
-        // if signature has a return type, use that, otherwise try to infer from expression
+        // resolve the signature (parameters and explicit return annotation, if any)
+        self.resolve_signature(&mut item.shared.sig)?;
+
+        // determine the return type: an explicit annotation or, lacking that, the type expected from context (call argument or annotation).
+        // when neither is available it is left unresolved here and inferred from the closure's (parser-synthesized) return statement in resolve_return.
         let ret_type_id = if let Some(ret) = &item.shared.sig.ret {
             ret.type_id(self)
-        } else if let Some(type_id) = item.shared.block.as_ref().ice()?.type_id(self) {
-            Some(type_id)
         } else {
-            None
+            expected_callable.as_ref().and_then(|c| c.ret_type_id)
         };
 
-        if item.function_id.is_none() && item.shared.sig.ret_resolved(self) && item.shared.sig.args_resolved(self) && ret_type_id.is_some() {
-            let arg_type_ids = item.shared.sig.arg_type_ids(self);
-            // insert function
-            let function_id = self.scopes.insert_closure(ret_type_id, arg_type_ids.clone());
+        // resolve the closure's body, providing the return type so it reaches the synthesized return statement
+        self.resolve_block(item.shared.block.as_mut().ice()?, ret_type_id)?;
+
+        // collect parameter types (inferred parameters resolve through their bindings)
+        let arg_type_ids: Vec<_> = item.shared.sig.params.iter().map(|field| field.type_id(self)).collect();
+
+        // insert the closure on first encounter, otherwise update its (possibly newly inferred) types
+        if let Some(function_id) = item.function_id {
+            self.scopes.update_closure(function_id, ret_type_id, arg_type_ids);
+        } else {
+            let function_id = self.scopes.insert_closure(ret_type_id, arg_type_ids);
             item.function_id = Some(function_id);
             self.scopes.scope_set_function_id(self.scope_id, function_id);
-            // insert function type
-            let closure_ty = Type::Callable(Callable { arg_type_ids, ret_type_id });
-            let closure_type_id = self.scopes.insert_anonymous_type(true, closure_ty);
-            item.type_id = Some(closure_type_id);
         }
 
         self.scope_id = parent_scope_id;
 
-        if self.stage.must_resolve() && (!item.shared.sig.args_resolved(self) || !item.shared.sig.ret_resolved(self)) {
+        // the closure's resolved types live in its function/callable rather than the (possibly inferred, unannotated) signature, so check those
+        let resolved = match item.function_id {
+            Some(function_id) => self.scopes.function_ref(function_id).is_resolved(self),
+            None => false,
+        };
+        if self.stage.must_resolve() && !resolved {
             Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("signature for '{}'", item.shared.sig.ident.name)), self.module_path))
         } else {
             Ok(())
@@ -847,14 +861,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.scope_id = item.shared.scope_id;
         self.resolve_signature(&mut item.shared.sig)?;
 
-        if item.constant_id.is_none() && item.shared.sig.ret_resolved(self) && item.shared.sig.args_resolved(self) {
-            let result_type_id = item.shared.sig.ret_type_id(self);
+        if item.constant_id.is_none() && item.shared.sig.ret_resolved(self, Some(TypeId::VOID)) && item.shared.sig.args_resolved(self) {
+            let result_type_id = item.shared.sig.ret_type_id(self, Some(TypeId::VOID));
             let arg_type_ids: Vec<_> = item.shared.sig.arg_type_ids(self);
             // function/method switch
             let (function_kind, qualified, alias) = if let Some(type_id) = struct_scope {
                 let type_name = self.type_flat_name(type_id).ice()?;
                 let path = self.make_path(&[ type_name, &item.shared.sig.ident.name ]);
-                if item.shared.sig.args.len() == 0 || item.shared.sig.args[0].ident.name != "self" { // FIXME ugh
+                if item.shared.sig.params.len() == 0 || item.shared.sig.params[0].ident.name != "self" { // FIXME ugh
                     let alias = self.make_path(&[ "Self", &item.shared.sig.ident.name ]);
                     (FunctionKind::Function, path, Some(alias))
                 } else {
@@ -891,10 +905,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
         let ret_type_id = if let Some(function_id) = function_id {
-            let ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
+            let declared_ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
             self.types_resolved(&mut item.expr, None)?;
-            self.resolve_expression(&mut item.expr, ret_type_id)?;
-            ret_type_id
+            self.resolve_expression(&mut item.expr, declared_ret_type_id)?;
+            // if the function's return type is already known (explicit, or previously inferred) verify the returned expression matches it,
+            // otherwise infer the function's return type from the returned expression (used to infer closure return types)
+            if let Some(expr_type_id) = item.expr.type_id(self) {
+                let callable_type_id = self.scopes.function_ref(function_id).callable_type_id;
+                let callable = self.scopes.type_mut(callable_type_id).as_callable_mut().ice_msg("Function type is not callable")?;
+                if let Some(callable_ret_type_id) = callable.ret_type_id {
+                    self.check_type_equals(item, expr_type_id, callable_ret_type_id)?;
+                    Some(callable_ret_type_id)
+                } else {
+                    callable.ret_type_id = Some(expr_type_id);
+                    Some(expr_type_id)
+                }
+            } else {
+                declared_ret_type_id
+            }
         } else {
             None
         };
@@ -1063,6 +1091,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a block.
     fn resolve_block(self: &mut Self, item: &mut ast::Block, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.scope_id;
+        //println!("{:?}", item);
         self.scope_id = item.scope_id;
         // resolve statments, result and returns
         for statement in item.statements.iter_mut() {
@@ -1180,7 +1209,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             let function = self.scopes.function_ref(function_id);
                             let member = item.right.as_member_mut().ice()?;
                             member.constant_id = Some(constant_id);
-                            self.set_type_id(member, function.signature_type_id)?;
+                            self.set_type_id(member, function.callable_type_id)?;
                         }
                     }
                     // check if a struct field or method is accessed
@@ -1252,6 +1281,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if let (Some(item_type_id), Some(expected_result)) = (item.type_id(self), expected_result) {
                         self.check_type_accepted_for(item, item_type_id, expected_result)?;
                     }
+                    // !TODO! try to fill in closure types here.
 
                     if func.arg_type_ids.len() != num_args {
                         let function_name = format!("{}", item.left.as_expression().ice()?);
@@ -1495,5 +1525,11 @@ impl<'ctx> MetaContainer for Resolver<'ctx> {
     }
     fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant {
         self.scopes.constant_mut(constant_id)
+    }
+    fn function_by_id(self: &Self, function_id: FunctionId) -> &Function {
+        self.scopes.function_by_id(function_id)
+    }
+    fn function_by_id_mut(self: &mut Self, function_id: FunctionId) -> &mut Function {
+        self.scopes.function_by_id_mut(function_id)
     }
 }

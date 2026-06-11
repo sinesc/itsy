@@ -238,7 +238,7 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
 
 /// Matches a callable type definition, e.g. `fn(u8) -> u16`.
 fn callable_def(i: Input<'_>) -> Output<CallableDef> {
-    fn type_list(i: Input<'_>) -> Output<Vec<InlineType>> {
+    fn parameter_list(i: Input<'_>) -> Output<Vec<InlineType>> {
         delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
     fn return_part(i: Input<'_>) -> Output<InlineType> {
@@ -246,12 +246,12 @@ fn callable_def(i: Input<'_>) -> Output<CallableDef> {
     }
     let position = i.position();
     map(
-        tuple((keyword("fn"), type_list, opt(return_part))),
+        tuple((keyword("fn"), parameter_list, opt(return_part))),
         move |sig| CallableDef {
             position,
-            args    : sig.1,
-            ret     : if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
-            type_id : None,
+            params: sig.1,
+            ret: if let Some(sig_ty) = sig.2 { Some(sig_ty) } else { None },
+            type_id: None,
         },
     )(i)
 }
@@ -424,19 +424,19 @@ fn function_return_part(i: Input<'_>) -> Output<InlineType> {
     preceded(punct("->"), inline_type)(i)
 }
 
-/// Matches the parameter list of a function definition, e.g. `param1: u8, param2: f64`.
-fn function_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
+/// Matches the parameter list of an anonymous function or closure definition (optionally specified types), e.g. `param1, param2: f64`.
+fn function_inferrable_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input<'_>) -> Output<LetBinding> {
         let position = i.position();
         map(
-            tuple((opt(keyword("mut")), var_decl, punct(":"), inline_type)),
+            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)))),
             move |tuple| LetBinding {
                 position    : position,
                 binding_id  : tuple.1.binding_id,
                 ident       : tuple.1.ident,
                 expr        : None,
                 mutable     : tuple.0.is_some(),
-                ty          : Some(tuple.3),
+                ty          : tuple.2,
             }
         )(i)
     }
@@ -463,15 +463,29 @@ fn function_transform_result(block: &mut Block, position: Position) {
 
 /// Matches a function implementation, e.g. `fn my_func(param: u64) -> f64 { ... }`.
 fn function(i: Input<'_>) -> Output<Function> {
+    fn parameter(i: Input<'_>) -> Output<LetBinding> {
+        let position = i.position();
+        map(
+            tuple((opt(keyword("mut")), var_decl, punct(":"), inline_type)),
+            move |tuple| LetBinding {
+                position    : position,
+                binding_id  : tuple.1.binding_id,
+                ident       : tuple.1.ident,
+                expr        : None,
+                mutable     : tuple.0.is_some(),
+                ty          : Some(tuple.3),
+            }
+        )(i)
+    }
     fn signature(i: Input<'_>) -> Output<Signature> {
         map(
             tuple((
                 terminated(opt(keyword("pub")), check_flags(keyword("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
-                terminated(ident, punct("(")), terminated(function_parameter_list, punct(")")), opt(function_return_part)
+                terminated(ident, punct("(")), terminated(separated_list0(punct(","), parameter), punct(")")), opt(function_return_part)
             )),
             |sig| Signature {
                 ident   : sig.1,
-                args    : sig.2,
+                params    : sig.2,
                 ret     : if let Some(sig_ty) = sig.3 { Some(sig_ty) } else { None },
                 vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
             },
@@ -508,11 +522,11 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
         map(
             preceded(
                 check_flags(keyword("fn"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(preceded(punct("("), function_parameter_list), preceded(punct(")"), opt(function_return_part)))
+                pair(preceded(punct("("), function_inferrable_parameter_list), preceded(punct(")"), opt(function_return_part)))
             ),
             move |sig| Signature {
                 ident   : Ident { name: format!("anonymous@{}", position), position },
-                args    : sig.0,
+                params    : sig.0,
                 ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
                 vis     : Visibility::Private,
             },
@@ -544,12 +558,12 @@ fn closure(i: Input<'_>) -> Output<Closure> {
         map(
             preceded(
                 check_flags(punct("|"), |s| if !s.in_function { Some(ParseErrorKind::IllegalClosure) } else { None }),
-                pair(terminated(function_parameter_list, punct("|")), opt(function_return_part))
+                pair(terminated(function_inferrable_parameter_list, punct("|")), opt(function_return_part))
             ),
             move |sig| {
                 Signature {
                     ident   : Ident { name: format!("closure[{}]", position), position },
-                    args    : sig.0,
+                    params    : sig.0,
                     ret     : if let Some(sig_ty) = sig.1 { Some(sig_ty) } else { None },
                     vis     : Visibility::Private,
                 }
@@ -570,19 +584,18 @@ fn closure(i: Input<'_>) -> Output<Closure> {
                 let scope_id = j.scope_id();
                 j.pop_scope(None);
                 Block {
-                    position    : expr.position(),
-                    statements  : Vec::new(),
-                    result      : Some(expr),
+                    position: expr.position(),
+                    statements: Vec::new(),
+                    result: Some(expr),
                     scope_id,
                 }
             };
             function_transform_result(&mut block, position);
             Closure {
-                shared          : FunctionShared { position, sig, block: Some(block), scope_id: j.scope_id() },
+                shared: FunctionShared { position, sig, block: Some(block), scope_id: j.scope_id() },
                 required_bindings,
-                function_id     : None,
-                type_id         : None,
-                struct_type_id  : None,
+                function_id: None,
+                struct_type_id: None,
             }
         }
     ))(i)

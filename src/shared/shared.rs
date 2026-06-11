@@ -5,7 +5,7 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId}, meta::{Type, Binding, Constant, Array, Callable}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, Callable, Function}};
 use crate::prelude::*;
 
 /// A container holding AST metadata
@@ -102,6 +102,10 @@ pub trait MetaContainer {
     fn constant_by_id(self: &Self, constant_id: ConstantId) -> &Constant;
     /// Returns a mutable reference to the Constant.
     fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant;
+    /// Returns a reference to the Function.
+    fn function_by_id(self: &Self, function_id: FunctionId) -> &Function;
+    /// Returns a mutable reference to the Function.
+    fn function_by_id_mut(self: &mut Self, function_id: FunctionId) -> &mut Function;
 }
 
 #[derive(Copy, Clone, PartialEq)]

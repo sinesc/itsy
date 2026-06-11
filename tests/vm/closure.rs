@@ -125,3 +125,167 @@ fn capture_ref() {
     ));
     assert_all(&result, &[ "c: 123".to_string() ]);
 }
+
+#[test]
+fn infer_return_from_body() {
+    // closure return type is inferred from the (parser-synthesized) return statement
+    let result = run(stringify!(
+        fn main() {
+            let f = |m: u8| 2 * m;
+            ret_u8(f(3));
+        }
+    ));
+    assert_all(&result, &[ 6u8 ]);
+}
+
+#[test]
+fn infer_param_from_body() {
+    // closure parameter type is inferred from how it is used in the body
+    let result = run(stringify!(
+        fn main() {
+            let f = |m| 2.0f32 * m;
+            ret_f32(f(3.0f32));
+        }
+    ));
+    assert_all(&result, &[ 6.0f32 ]);
+}
+
+#[test]
+fn infer_param_from_annotation() {
+    // closure parameter and return types are inferred from the let binding's callable type annotation
+    let result = run(stringify!(
+        fn main() {
+            let f: fn(f32) -> f32 = |m| 2.0f32 * m;
+            ret_f32(f(3.0f32));
+        }
+    ));
+    assert_all(&result, &[ 6.0f32 ]);
+}
+
+#[test]
+fn infer_param_from_call_argument() {
+    // closure parameter type is inferred from the callable type expected by the called function
+    let result = run(stringify!(
+        fn apply(op: fn(u32) -> u32, value: u32) -> u32 {
+            op(value)
+        }
+        fn main() {
+            ret_u32(apply(|x| x * 2, 5));
+        }
+    ));
+    assert_all(&result, &[ 10u32 ]);
+}
+
+#[test]
+#[should_panic(expected = "Resolver error: Cannot resolve")]
+fn infer_param_ambiguous() {
+    // a parameter that cannot be inferred from body or context must produce a hard error
+    run(stringify!(
+        fn main() {
+            let f = |x| x;
+            f(3);
+        }
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Resolver error")]
+fn infer_param_call_argument_mismatch() {
+    // an explicitly typed closure parameter that conflicts with the expected callable type must error
+    run(stringify!(
+        fn apply(op: fn(u32) -> u32, value: u32) -> u32 {
+            op(value)
+        }
+        fn main() {
+            ret_u32(apply(|x: i32| x * 2, 5));
+        }
+    ));
+}
+
+#[test]
+fn block_explicit_return() {
+    // closure with a block body and an explicit return statement, return type inferred from the returned expression
+    let result = run(stringify!(
+        fn main() {
+            let f = |x: u8| { return x * 2; };
+            ret_u8(f(3));
+        }
+    ));
+    assert_all(&result, &[ 6u8 ]);
+}
+
+#[test]
+fn block_explicit_return_annotated() {
+    // closure with a block body, explicit return statement and explicit return type annotation
+    let result = run(stringify!(
+        fn main() {
+            let f = |x: u8| -> u8 { return x * 2; };
+            ret_u8(f(3));
+        }
+    ));
+    assert_all(&result, &[ 6u8 ]);
+}
+
+#[test]
+fn block_multiple_statements_return() {
+    // closure with a multi-statement block body ending in a return statement
+    let result = run(stringify!(
+        fn main() {
+            let f = |x: u8| {
+                let y = x * 2;
+                return y + 1;
+            };
+            ret_u8(f(3));
+        }
+    ));
+    assert_all(&result, &[ 7u8 ]);
+}
+
+#[test]
+fn block_early_return() {
+    // closure with a block body containing an early return; both return statements share the inferred return type
+    let result = run(stringify!(
+        fn main() {
+            let f = |x: u8| {
+                if x > 5 {
+                    return 100;
+                }
+                return x;
+            };
+            ret_u8(f(9));
+            ret_u8(f(2));
+        }
+    ));
+    assert_all(&result, &[ 100u8, 2u8 ]);
+}
+
+#[test]
+fn block_return_infer_param_from_call_argument() {
+    // closure with a block body and return statement, parameter type inferred from the expected callable type
+    let result = run(stringify!(
+        fn apply(op: fn(u32) -> u32, value: u32) -> u32 {
+            op(value)
+        }
+        fn main() {
+            ret_u32(apply(|x| { return x * 2; }, 5));
+        }
+    ));
+    assert_all(&result, &[ 10u32 ]);
+}
+
+#[test]
+#[should_panic(expected = "Resolver error")]
+fn block_conflicting_returns() {
+    // a closure block whose return statements disagree on the return type must error
+    run(stringify!(
+        fn main() {
+            let f = |x: u8| {
+                if x > 5 {
+                    return 100;
+                }
+                return "no";
+            };
+            ret_u8(f(9));
+        }
+    ));
+}

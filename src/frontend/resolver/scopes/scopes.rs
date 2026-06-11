@@ -4,7 +4,7 @@ use crate::prelude::*;
 use crate::frontend::resolver::resolved::Resolved;
 use crate::shared::typed_ids::{TypeId, ScopeId, BindingId, FunctionId, ConstantId};
 use crate::shared::meta::{Type, Function, FunctionKind, Binding, Callable, Constant, ConstantValue};
-use crate::shared::{MetaContainer, Progress};
+use crate::shared::MetaContainer;
 use repository::Repository;
 
 /// Flat lists of types and bindings and which scope they belong to.
@@ -21,7 +21,7 @@ pub(crate) struct Scopes {
     bindings        : UnorderedMap<BindingId, Binding>,
     /// Function scopes (the function containing this scope), required to typecheck return statements
     scopefunction   : UnorderedMap<ScopeId, Option<FunctionId>>,
-    /// Maps ScopeId => Parent ScopeId (using vector as usize=>usize map)
+    /// Maps ScopeId => Parent ScopeId
     parent_map      : UnorderedMap<ScopeId, ScopeId>,
 }
 
@@ -52,25 +52,6 @@ impl Scopes {
             scopefunction   : UnorderedMap::new(),
             parent_map      : scope_parent_map, // set root-scope's parent to itself. used by parent_id() to detect that we hit the root
         }
-    }
-
-    /// Returns the number of resolved and total items in the Scopes.
-    // TODO: remove this and TypeContainer from Scopes, have ast trait Resolvable take a type container
-    pub fn resolved(self: &Self) -> Progress {
-        Progress::new(
-            // resolved counts
-            self.bindings.values().fold(0, |acc, b| acc + b.type_id.is_some() as usize)
-            + self.types.values().fold(0, |acc, t| acc + match t {
-                Type::Array(array) => if array.type_id.is_some() { 1 } else { 0 },
-                _ => 1,
-            })
-            + self.functions.iter().fold(0, |acc, f| acc + f.is_resolved(self) as usize),
-
-            // total counts
-            self.bindings.len()
-            + self.types.len()
-            + self.functions.len(),
-        )
     }
 
     /// Returns the parent scope id of the given scope id.
@@ -140,16 +121,30 @@ impl Scopes {
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
         let function_id = FunctionId::from(self.functions.len());
-        self.functions.push(Function { signature_type_id, kind });
+        self.functions.push(Function { callable_type_id: signature_type_id, kind });
         self.insert_constant(name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
-    /// Insert a closure into the given scope, returning a function id. Its types might not be resolved yet.
+    /// Insert a closure into the given scope, returning function and type id. Its types might not be resolved yet.
     pub fn insert_closure(self: &mut Self, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>) -> FunctionId {
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
         let function_id = FunctionId::from(self.functions.len());
-        self.functions.push(Function { signature_type_id, kind: Some(FunctionKind::Function) });
+        self.functions.push(Function { callable_type_id: signature_type_id, kind: Some(FunctionKind::Function) });
         function_id
+    }
+
+    /// Insert a closure into the given scope, returning function and type id. Its types might not be resolved yet.
+    pub fn update_closure(self: &mut Self, function_id: FunctionId, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>) {
+        let signature_type_id = self.function_by_id(function_id).callable_type_id;
+        let signature = self.type_mut(signature_type_id).as_callable_mut().expect("Implemented type expected to be a callable, got something else");
+        if result_type_id.is_some() && signature.ret_type_id.is_none() {
+            signature.ret_type_id = result_type_id;
+        }
+        for (index, &arg_type_id) in arg_type_ids.iter().enumerate() {
+            if arg_type_id.is_some() && signature.arg_type_ids[index].is_none() {
+                signature.arg_type_ids[index] = arg_type_id;
+            }
+        }
     }
 
     /* /// Looks up an existing constant_id for the given function_id.
@@ -186,6 +181,11 @@ impl Scopes {
     /// Returns a reference to the signature of the given function id.
     pub fn function_ref(self: &Self, function_id: FunctionId) -> &Function {
         &self.functions[function_id.into_usize()]
+    }
+
+    /// Returns a mutable reference to the signature of the given function id.
+    pub fn function_mut(self: &mut Self, function_id: FunctionId) -> &mut Function {
+        self.functions.get_mut(function_id.into_usize()).unwrap()
     }
 }
 
@@ -283,5 +283,11 @@ impl MetaContainer for Scopes {
     }
     fn constant_by_id_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant {
         self.constant_mut(constant_id)
+    }
+    fn function_by_id(self: &Self, function_id: FunctionId) -> &Function {
+        self.function_ref(function_id)
+    }
+    fn function_by_id_mut(self: &mut Self, function_id: FunctionId) -> &mut Function {
+        self.function_mut(function_id)
     }
 }

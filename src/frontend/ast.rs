@@ -2,16 +2,16 @@
 
 use crate::internals::resolved::{EnumVariant, ImplTrait};
 use crate::prelude::*;
-use crate::shared::meta::{Type, ConstantValue};
+use crate::shared::meta::{Type, ConstantValue, FunctionKind};
 use crate::shared::{impl_as_getter, MetaContainer, {typed_ids::{BindingId, FunctionId, ScopeId, TypeId, ConstantId}, numeric::Numeric, Progress, parts_to_path}};
 use crate::frontend::resolver::error::ResolveErrorKind;
 
 /// TypeId handling for typeable AST structures.
 pub(crate) trait Typeable {
     /// Returns the type_id.
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId>;
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId>;
     /// Returns a mutable reference to the type_id.
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId);
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId);
 }
 
 /// Implements the Typeable trait for given structure.
@@ -184,8 +184,17 @@ pub(crate) trait Resolvable: Display {
         }
     }
     /// Recursively checks how much of a function signature is resolved.
-    fn check_function_id(self: &Self, _container: &impl MetaContainer, _function_id: FunctionId, _seen: &mut Set<TypeId>) -> Progress {
-        Progress::new(1, 1) // FIXME, need to add function lookup to one of the containers
+    fn check_function_id(self: &Self, container: &impl MetaContainer, function_id: FunctionId, seen: &mut Set<TypeId>) -> Progress {
+        let function = container.function_by_id(function_id);
+        let progress = match function.kind {
+            None => Progress::new(0, 1),
+            Some(FunctionKind::Function) => Progress::zero(),
+            Some(FunctionKind::Method(type_id)) => self.check_type_id(container, type_id, seen),
+            Some(FunctionKind::Rust(_)) => Progress::new(1, 1),
+            Some(FunctionKind::Builtin(type_id, _)) => self.check_type_id(container, type_id, seen),
+            Some(FunctionKind::Variant(type_id, _)) => self.check_type_id(container, type_id, seen),
+        };
+        progress + self.check_type_id(container, function.callable_type_id, seen)
     }
 }
 
@@ -325,7 +334,7 @@ macro_rules! impl_positioned {
     };
 }
 
-/// Implements a match block with cases for all variants of Expression or Statement
+/// Implements a match block with cases for all variants of various AST enums.
 macro_rules! impl_matchall {
     (@match $self:ident, $enum_name:ident, $val_name:ident, $code:tt, [ $( $pattern:pat => $default:tt )? ] $(, $variant_name:ident)+) => {
         match $self {
@@ -471,11 +480,11 @@ impl Statement {
     /// Converts the statement into an expression or return None
     pub fn into_expression(self: Self) -> Option<Expression> {
         match self {
-            Statement::IfBlock(if_block)        => Some(Expression::IfBlock(Box::new(if_block))),
-            Statement::Block(block)             => Some(Expression::Block(Box::new(block))),
-            Statement::Expression(expression)   => Some(expression),
-            Statement::Return(ret)              => Some(ret.expr),
-            _                                   => None,
+            Statement::IfBlock(if_block) => Some(Expression::IfBlock(Box::new(if_block))),
+            Statement::Block(block) => Some(Expression::Block(Box::new(block))),
+            Statement::Expression(expression) => Some(expression),
+            Statement::Return(ret) => Some(ret.expr),
+            _ => None,
         }
     }
 }
@@ -483,13 +492,13 @@ impl Statement {
 impl ControlFlow for Statement {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         match self {
-            Statement::Return(_)    => Some(ControlFlowType::Return),
-            Statement::IfBlock(v)   => v.identify_control_flow(scan_blocks),
-            Statement::Block(v)     => v.identify_control_flow(scan_blocks),
-            Statement::ForLoop(v)     => v.identify_control_flow(scan_blocks),
-            Statement::WhileLoop(v)     => v.identify_control_flow(scan_blocks),
-            Statement::Expression(v)=> v.identify_control_flow(scan_blocks),
-            _                       => None,
+            Statement::Return(_) => Some(ControlFlowType::Return),
+            Statement::IfBlock(v) => v.identify_control_flow(scan_blocks),
+            Statement::Block(v) => v.identify_control_flow(scan_blocks),
+            Statement::ForLoop(v) => v.identify_control_flow(scan_blocks),
+            Statement::WhileLoop(v) => v.identify_control_flow(scan_blocks),
+            Statement::Expression(v) => v.identify_control_flow(scan_blocks),
+            _ => None,
         }
     }
 }
@@ -573,11 +582,54 @@ impl Display for LetBinding {
 }
 
 impl Typeable for LetBinding {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        bindings.binding_by_id(self.binding_id).type_id
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        container.binding_by_id(self.binding_id).type_id
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
-        bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id);
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        container.binding_by_id_mut(self.binding_id).type_id = Some(type_id);
+    }
+}
+
+/// The signatures of a function or closure.
+#[derive(Debug)]
+pub struct Signature {
+    pub ident   : Ident,
+    pub params  : Vec<LetBinding>,
+    pub ret     : Option<InlineType>,
+    pub vis     : Visibility,
+}
+
+impl_resolvable!(Signature {
+    params: ItemList,
+    ret: OptionalItem,
+});
+
+impl Signature {
+    pub(crate) fn ret_resolved(self: &Self, container: &impl MetaContainer, default: Option<TypeId>) -> bool {
+        self.ret_type_id(container, default).is_some()
+    }
+    pub(crate) fn ret_type_id(self: &Self, container: &impl MetaContainer, default: Option<TypeId>) -> Option<TypeId> {
+        self.ret.as_ref().map_or(default, |ret| ret.type_id(container))
+    }
+    pub(crate) fn args_resolved(self: &Self, container: &impl MetaContainer) -> bool {
+        // a parameter may be resolved via its explicit type annotation or, for inferred parameters, via its binding
+        self.params.iter().all(|arg| arg.type_id(container).is_some())
+    }
+    pub(crate) fn arg_type_ids(self: &Self, container: &impl MetaContainer) -> Vec<Option<TypeId>> {
+        // a parameter may be resolved via its explicit type annotation or, for inferred parameters, via its binding
+        self.params.iter().map(|arg| arg.type_id(container)).collect()
+    }
+}
+
+impl Display for Signature {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {{ {} }}", self.ident, self.params.iter().map(|b| format!("{}", b)).collect::<Vec<String>>().join(", "))
+    }
+}
+
+impl Positioned for Signature {
+    fn position(self: &Self) -> Position {
+        self.ident.position
     }
 }
 
@@ -601,20 +653,31 @@ impl_resolvable!(FunctionShared {
 #[derive(Debug)]
 pub struct Closure {
     pub shared              : FunctionShared,
-    pub struct_type_id      : Option<TypeId>,
-    pub type_id             : Option<TypeId>,
     pub function_id         : Option<FunctionId>,
+    pub struct_type_id      : Option<TypeId>,
     pub required_bindings   : Vec<BindingId>,
 }
 
-impl_typeable!(Closure);
 impl_resolvable!(Closure {
     shared: Item,
     struct_type_id: TypeId,
-    type_id: TypeId,
     function_id: FunctionId,
     required_bindings: BindingList,
 });
+
+
+impl Typeable for Closure {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        if let Some(function_id) = self.function_id {
+            Some(container.function_by_id(function_id).callable_type_id)
+        } else {
+            None
+        }
+    }
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        container.function_by_id_mut(self.function_id.unwrap()).callable_type_id = type_id;
+    }
+}
 
 impl Positioned for Closure {
     fn position(self: &Self) -> Position {
@@ -654,87 +717,17 @@ impl Display for Function {
 }
 
 impl Typeable for Function {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
         match self.constant_id {
-            Some(constant_id) => bindings.constant_by_id(constant_id).type_id,
+            Some(constant_id) => container.constant_by_id(constant_id).type_id,
             None => None,
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         match self.constant_id {
-            Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
+            Some(constant_id) => container.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => { /* not resolved to constant yet */ },
         }
-    }
-}
-
-
-/// The type signature of an anonymous function/closure.
-#[derive(Debug)]
-pub struct CallableDef {
-    pub position: Position,
-    pub args    : Vec<InlineType>,
-    pub ret     : Option<InlineType>,
-    pub type_id : Option<TypeId>,
-}
-
-impl_positioned!(CallableDef);
-impl_typeable!(CallableDef);
-impl_resolvable!(CallableDef {
-    args: ItemList,
-    ret: OptionalItem,
-    type_id: TypeId,
-});
-
-impl Display for CallableDef {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let args = self.args.iter().map(|b| format!("{}", b)).collect::<Vec<String>>().join(", ");
-        match &self.ret {
-            Some(ret) => write!(f, "fn({}) -> {}", args, ret),
-            None => write!(f, "fn({})", args),
-        }
-    }
-}
-
-/// The signatures of a function or closure.
-#[derive(Debug)]
-pub struct Signature {
-    pub ident   : Ident,
-    pub args    : Vec<LetBinding>, // TODO: should be params
-    pub ret     : Option<InlineType>,
-    pub vis     : Visibility,
-}
-
-impl_resolvable!(Signature {
-    args: ItemList,
-    ret: OptionalItem,
-});
-
-impl Signature {
-    // FIXME use impl_resolved2 macro inner cases here
-    pub(crate) fn ret_resolved(self: &Self, bindings: &impl MetaContainer) -> bool {
-        self.ret.as_ref().map_or(true, |ret| ret.type_id(bindings).is_some())
-    }
-    pub(crate) fn ret_type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        self.ret.as_ref().map_or(Some(TypeId::VOID), |ret| ret.type_id(bindings))
-    }
-    pub(crate) fn args_resolved(self: &Self, bindings: &impl MetaContainer) -> bool {
-        self.args.iter().all(|arg| arg.ty.as_ref().map_or(false, |type_name| type_name.type_id(bindings).is_some()))
-    }
-    pub(crate) fn arg_type_ids(self: &Self, bindings: &impl MetaContainer) -> Vec<Option<TypeId>> {
-        self.args.iter().map(|arg| arg.ty.as_ref().map_or(None, |type_name| type_name.type_id(bindings))).collect()
-    }
-}
-
-impl Display for Signature {
-    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {{ {} }}", self.ident, self.args.iter().map(|b| format!("{}", b)).collect::<Vec<String>>().join(", "))
-    }
-}
-
-impl Positioned for Signature {
-    fn position(self: &Self) -> Position {
-        self.ident.position
     }
 }
 
@@ -777,8 +770,11 @@ impl Positioned for TypeName {
 /// An inlineable type (e.g. `MyStruct` or `[ MyInt; 16 ]`).
 #[derive(Debug)]
 pub enum InlineType {
+    /// Regular type name
     TypeName(TypeName),
+    /// Array definition
     ArrayDef(Box<ArrayDef>),
+    /// Callable definition
     CallableDef(Box<CallableDef>),
 }
 
@@ -795,18 +791,18 @@ impl Display for InlineType {
 }
 
 impl Typeable for InlineType {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
         match &self {
-            InlineType::ArrayDef(array_def) => array_def.type_id(bindings),
-            InlineType::TypeName(type_name) => type_name.type_id(bindings),
-            InlineType::CallableDef(callable_def) => callable_def.type_id(bindings),
+            InlineType::ArrayDef(array_def) => array_def.type_id(container),
+            InlineType::TypeName(type_name) => type_name.type_id(container),
+            InlineType::CallableDef(callable_def) => callable_def.type_id(container),
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         match self {
-            InlineType::ArrayDef(array_def) => array_def.set_type_id(bindings, type_id),
-            InlineType::TypeName(type_name) => type_name.set_type_id(bindings, type_id),
-            InlineType::CallableDef(callable_def) => callable_def.set_type_id(bindings, type_id),
+            InlineType::ArrayDef(array_def) => array_def.set_type_id(container, type_id),
+            InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
+            InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
         }
     }
 }
@@ -904,6 +900,35 @@ impl EnumDef {
         self.variants.iter().all(|variant| match variant.kind { VariantKind::Simple(_, _) => true, _ => false })
     }
 }
+
+
+/// The type signature of an anonymous function/closure.
+#[derive(Debug)]
+pub struct CallableDef {
+    pub position: Position,
+    pub params  : Vec<InlineType>,
+    pub ret     : Option<InlineType>,
+    pub type_id : Option<TypeId>,
+}
+
+impl_positioned!(CallableDef);
+impl_typeable!(CallableDef);
+impl_resolvable!(CallableDef {
+    params: ItemList,
+    ret: OptionalItem,
+    type_id: TypeId,
+});
+
+impl Display for CallableDef {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let params = self.params.iter().map(|b| format!("{}", b)).collect::<Vec<String>>().join(", ");
+        match &self.ret {
+            Some(ret) => write!(f, "fn({}) -> {}", params, ret),
+            None => write!(f, "fn({})", params),
+        }
+    }
+}
+
 
 /// A struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
 #[derive(Debug)]
@@ -1091,11 +1116,11 @@ impl_resolvable!(MatchBlock {
 });
 
 impl Typeable for MatchBlock {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        self.branches.first().unwrap().1.type_id(bindings)
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        self.branches.first().unwrap().1.type_id(container)
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
-        self.branches.first_mut().unwrap().1.set_type_id(bindings, type_id)
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        self.branches.first_mut().unwrap().1.set_type_id(container, type_id)
     }
 }
 
@@ -1138,12 +1163,12 @@ impl ControlFlow for IfBlock {
 }
 
 impl Typeable for IfBlock {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(container))
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         if let Some(result) = &mut self.if_block.result {
-            result.set_type_id(bindings, type_id)
+            result.set_type_id(container, type_id)
         } else {
             panic!("Cannot set return type of if statement (not an expression).")
         }
@@ -1176,6 +1201,9 @@ impl Block {
             result = None; // result would have followed the dead code and also be dead
         }
         if statements.last().map_or(false, |s| s.is_expression()) {
+            if result.is_some() {
+                panic!("Result expression following block result."); // FIXME: need proper error handling for this (this means the next to last statement is actually a block expression and it is followed by another expression. there needs to be a semicolon after the block
+            }
             result = statements.pop().unwrap().into_expression();
         }
         Block {
@@ -1188,12 +1216,12 @@ impl Block {
 }
 
 impl Typeable for Block {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        self.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(bindings))
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        self.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(container))
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         if let Some(result) = &mut self.result {
-            result.set_type_id(bindings, type_id)
+            result.set_type_id(container, type_id)
         } else {
             panic!("Cannot to set return type of block statement (not an expression).")
         }
@@ -1268,11 +1296,11 @@ impl Expression {
 }
 
 impl Typeable for Expression {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        impl_matchall!(self, Expression, item, { item.type_id(bindings) })
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        impl_matchall!(self, Expression, item, { item.type_id(container) })
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
-        impl_matchall!(self, Expression, item, { item.set_type_id(bindings, type_id) })
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        impl_matchall!(self, Expression, item, { item.set_type_id(container, type_id) })
     }
 }
 
@@ -1479,11 +1507,11 @@ impl_resolvable!(Variable {
 });
 
 impl Typeable for Variable {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
-        bindings.binding_by_id(self.binding_id).type_id
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        container.binding_by_id(self.binding_id).type_id
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
-        bindings.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        container.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
     }
 }
 
@@ -1503,15 +1531,15 @@ impl_resolvable!(Constant {
 });
 
 impl Typeable for Constant {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
         match self.constant_id {
-            Some(constant_id) => bindings.constant_by_id(constant_id).type_id,
+            Some(constant_id) => container.constant_by_id(constant_id).type_id,
             None => None,
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         match self.constant_id {
-            Some(constant_id) => bindings.constant_by_id_mut(constant_id).type_id = Some(type_id),
+            Some(constant_id) => container.constant_by_id_mut(constant_id).type_id = Some(type_id),
             None => { /* not resolved to constant yet */ },
         }
     }
@@ -1643,20 +1671,20 @@ impl_as_getter!(BinaryOperand {
 });
 
 impl Typeable for BinaryOperand {
-    fn type_id(self: &Self, bindings: &impl MetaContainer) -> Option<TypeId> {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
         match self {
-            Self::Expression(v) => v.type_id(bindings),
+            Self::Expression(v) => v.type_id(container),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
-            Self::Member(v) => v.type_id(bindings),
-            Self::TypeName(v) => v.type_id(bindings),
+            Self::Member(v) => v.type_id(container),
+            Self::TypeName(v) => v.type_id(container),
         }
     }
-    fn set_type_id(self: &mut Self, bindings: &mut impl MetaContainer, type_id: TypeId) {
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         match self {
-            Self::Expression(v) => v.set_type_id(bindings, type_id),
+            Self::Expression(v) => v.set_type_id(container, type_id),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
-            Self::Member(v) => v.set_type_id(bindings, type_id),
-            Self::TypeName(v) => v.set_type_id(bindings, type_id),
+            Self::Member(v) => v.set_type_id(container, type_id),
+            Self::TypeName(v) => v.set_type_id(container, type_id),
         }
     }
 }
