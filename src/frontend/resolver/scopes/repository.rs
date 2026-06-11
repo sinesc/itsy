@@ -39,14 +39,14 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
     pub fn name_by_id(self: &Self, index: I) -> Option<&K> where I: PartialEq  {
         self.map.iter().find(|&item| *item.1 == index).map(|item| item.0)
     }
-    /// Returns an iterator over the items.
+    /* /// Returns an iterator over the items.
     pub fn values<'s>(self: &'s Self) -> impl Iterator<Item = &'s V> {
         self.data.iter().map(|item| item)
     }
     /// Returns the number of items in this Repository.
     pub fn len(self: &Self) -> usize  {
         self.data.len()
-    }
+    }*/
     /// Returns the id of the given value.
     pub fn id_by_value(self: &Self, value: &V) -> Option<I> where V: Eq {
         self.data.iter().enumerate().find_map(|item| if item.1 == value { Some(item.0.into()) } else { None })

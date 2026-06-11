@@ -22,7 +22,7 @@ impl<T> Writer<T> where T: VMFunc<T> {
             position: Cell::new(0),
         }
     }
-    pub(crate) fn program(self: &Self) -> RefMut<Program<T>> {
+    pub(crate) fn program(self: &Self) -> RefMut<'_, Program<T>> {
         self.program.borrow_mut()
     }
     /// Returns the current length of the program.

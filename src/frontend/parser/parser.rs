@@ -113,7 +113,7 @@ fn snap<'a, P: 'a, O: 'a>(mut parser: P) -> impl FnMut(Input<'a>) -> Output<'a, 
 }
 
 /// Matches and returns a legal alphanumeric word and consumes optional trailing whitespace.
-fn word(i: Input<'_>) -> Output<&str> {
+fn word(i: Input<'_>) -> Output<'_, &str> {
     map(
         // ([a-z_][a-z0-9_]*)
     terminated(
@@ -133,7 +133,7 @@ fn punct<'a>(p: &'static str) -> impl FnMut(Input<'a>) -> Output<'a, &'a str> {
 }
 
 /// Matches a valid identifier.
-fn ident(i: Input<'_>) -> Output<Ident> {
+fn ident(i: Input) -> Output<Ident> {
     let position = i.position();
     map(
         verify(word, |input: &str| !KEYWORDS.contains(&input)),
@@ -150,7 +150,7 @@ fn keyword<'a>(w: &'static str) -> impl FnMut(Input<'a>) -> Output<'a, &'a str> 
 }
 
 /// Matches a variable name and declares the variable in the current scope.
-fn var_decl(i: Input<'_>) -> Output<VarDecl> {
+fn var_decl(i: Input) -> Output<VarDecl> {
     let j = i.clone();
     map(
         ident,
@@ -169,13 +169,13 @@ fn var_decl(i: Input<'_>) -> Output<VarDecl> {
 }
 
 /// Matches a path.
-fn path(i: Input<'_>) -> Output<Path> {
+fn path(i: Input) -> Output<Path> {
     let position = i.position();
     map(separated_list1(punct("::"), ident), move |name| Path { position, segments: name })(i)
 }
 
 // Matches a module declaration, e.g. `mod mymodule;`.
-fn module_decl(i: Input<'_>) -> Output<ModuleDecl> {
+fn module_decl(i: Input) -> Output<ModuleDecl> {
     let position = i.position();
     map(
         preceded(
@@ -190,8 +190,8 @@ fn module_decl(i: Input<'_>) -> Output<ModuleDecl> {
 }
 
 /// Matches a use declaration, e.g. `use frontend::parse_module;`.
-fn use_decl(i: Input<'_>) -> Output<UseDecl> {
-    fn use_item(i: Input<'_>) -> Output<Vec<(String, (String, bool))>> {
+fn use_decl(i: Input) -> Output<UseDecl> {
+    fn use_item(i: Input) -> Output<Vec<(String, (String, bool))>> {
         alt((
             map(pair(path, delimited(pair(punct("::"), punct("{")), separated_list1(punct(","), use_item), punct("}") )), |(path, list)| {
                 let mut flattened = Vec::new();
@@ -228,7 +228,7 @@ fn use_decl(i: Input<'_>) -> Output<UseDecl> {
 }
 
 /// Matches an inlineable type, e.g. `MyStruct` or `[ MyInt; 16 ]`.
-fn inline_type(i: Input<'_>) -> Output<InlineType> {
+fn inline_type(i: Input) -> Output<InlineType> {
     alt((
         map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
@@ -237,11 +237,11 @@ fn inline_type(i: Input<'_>) -> Output<InlineType> {
 }
 
 /// Matches a callable type definition, e.g. `fn(u8) -> u16`.
-fn callable_def(i: Input<'_>) -> Output<CallableDef> {
-    fn parameter_list(i: Input<'_>) -> Output<Vec<InlineType>> {
+fn callable_def(i: Input) -> Output<CallableDef> {
+    fn parameter_list(i: Input) -> Output<Vec<InlineType>> {
         delimited(punct("("), separated_list0(punct(","), inline_type), punct(")"))(i)
     }
-    fn return_part(i: Input<'_>) -> Output<InlineType> {
+    fn return_part(i: Input) -> Output<InlineType> {
         preceded(punct("->"), inline_type)(i)
     }
     let position = i.position();
@@ -257,8 +257,8 @@ fn callable_def(i: Input<'_>) -> Output<CallableDef> {
 }
 
 /// Matches an enum type definition.
-fn enum_def(i: Input<'_>) -> Output<EnumDef> {
-    fn variant(i: Input<'_>) -> Output<VariantDef> {
+fn enum_def(i: Input) -> Output<EnumDef> {
+    fn variant(i: Input) -> Output<VariantDef> {
         let position = i.position();
         map(
             pair(
@@ -314,14 +314,14 @@ fn enum_def(i: Input<'_>) -> Output<EnumDef> {
 }
 
 /// Matches a struct type definition.
-fn struct_def(i: Input<'_>) -> Output<StructDef> {
-    fn field(i: Input<'_>) -> Output<(String, InlineType)> {
+fn struct_def(i: Input) -> Output<StructDef> {
+    fn field(i: Input) -> Output<(String, InlineType)> {
         map(
             tuple((word, punct(":"), inline_type)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
-    fn fields(i: Input<'_>) -> Output<Vec<(String, InlineType)>> {
+    fn fields(i: Input) -> Output<Vec<(String, InlineType)>> {
         map(
             separated_list1(punct(","), field),
             |list| {
@@ -346,7 +346,7 @@ fn struct_def(i: Input<'_>) -> Output<StructDef> {
 }
 
 /// Matches a trait definition.
-fn trait_def(i: Input<'_>) -> Output<TraitDef> {
+fn trait_def(i: Input) -> Output<TraitDef> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
@@ -366,7 +366,7 @@ fn trait_def(i: Input<'_>) -> Output<TraitDef> {
 }
 
 /// Matches an array type definition, e.g. `[ MyInt; 16 ]`
-fn array_def(i: Input<'_>) -> Output<ArrayDef> {
+fn array_def(i: Input) -> Output<ArrayDef> {
     let position = i.position();
     map(
         delimited(punct("["), inline_type, punct("]")),
@@ -379,7 +379,7 @@ fn array_def(i: Input<'_>) -> Output<ArrayDef> {
 }
 
 /// Matches an impl block, e.g. `impl MyStruct { ... }`
-fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
+fn impl_block(i: Input) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
@@ -398,7 +398,7 @@ fn impl_block(i: Input<'_>) -> Output<ImplBlock> {
 }
 
 /// Matches a trait impl block, e.g. `impl MyTrait for MyStruct { ... }`
-fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
+fn trait_impl_block(i: Input) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
@@ -420,13 +420,13 @@ fn trait_impl_block(i: Input<'_>) -> Output<ImplBlock> {
 }
 
 /// Matches the return type part of a function definition, e.g. `-> u8`.
-fn function_return_part(i: Input<'_>) -> Output<InlineType> {
+fn function_return_part(i: Input) -> Output<InlineType> {
     preceded(punct("->"), inline_type)(i)
 }
 
 /// Matches the parameter list of an anonymous function or closure definition (optionally specified types), e.g. `param1, param2: f64`.
-fn function_inferrable_parameter_list(i: Input<'_>) -> Output<Vec<LetBinding>> {
-    fn parameter(i: Input<'_>) -> Output<LetBinding> {
+fn function_inferrable_parameter_list(i: Input) -> Output<Vec<LetBinding>> {
+    fn parameter(i: Input) -> Output<LetBinding> {
         let position = i.position();
         map(
             tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)))),
@@ -462,8 +462,8 @@ fn function_transform_result(block: &mut Block, position: Position) {
 }
 
 /// Matches a function implementation, e.g. `fn my_func(param: u64) -> f64 { ... }`.
-fn function(i: Input<'_>) -> Output<Function> {
-    fn parameter(i: Input<'_>) -> Output<LetBinding> {
+fn function(i: Input) -> Output<Function> {
+    fn parameter(i: Input) -> Output<LetBinding> {
         let position = i.position();
         map(
             tuple((opt(keyword("mut")), var_decl, punct(":"), inline_type)),
@@ -477,7 +477,7 @@ fn function(i: Input<'_>) -> Output<Function> {
             }
         )(i)
     }
-    fn signature(i: Input<'_>) -> Output<Signature> {
+    fn signature(i: Input) -> Output<Signature> {
         map(
             tuple((
                 terminated(opt(keyword("pub")), check_flags(keyword("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
@@ -516,8 +516,8 @@ fn function(i: Input<'_>) -> Output<Function> {
 }
 
 /// Matches an anonymous function implementation, e.g. `fn(param: u64) -> f64 { ... }`.
-fn anonymous_function(i: Input<'_>) -> Output<Function> {
-    fn signature(i: Input<'_>) -> Output<Signature> {
+fn anonymous_function(i: Input) -> Output<Function> {
+    fn signature(i: Input) -> Output<Signature> {
         let position = i.position();
         map(
             preceded(
@@ -552,8 +552,8 @@ fn anonymous_function(i: Input<'_>) -> Output<Function> {
 }
 
 /// Matches a closure implementation, e.g. `|x: u8| -> u8 { x * 2 }`.
-fn closure(i: Input<'_>) -> Output<Closure> {
-    fn signature(i: Input<'_>) -> Output<Signature> {
+fn closure(i: Input) -> Output<Closure> {
+    fn signature(i: Input) -> Output<Signature> {
         let position = i.position();
         map(
             preceded(
@@ -602,7 +602,7 @@ fn closure(i: Input<'_>) -> Output<Closure> {
 }
 
 /// Matches a return statement.
-fn return_statement(i: Input<'_>) -> Output<Return> {
+fn return_statement(i: Input) -> Output<Return> {
     let position = i.position();
     map(
         preceded(
@@ -617,7 +617,7 @@ fn return_statement(i: Input<'_>) -> Output<Return> {
 }
 
 /// Matches a literal numeric value, e.g. `3.14f64`.
-fn numeric_literal(i: Input<'_>) -> Output<Literal> {
+fn numeric_literal(i: Input) -> Output<Literal> {
     /// Splits numerical value from its type suffix (if it has any)
     fn splits_numerical_suffix(n: &str) -> (&str, Option<&str>) {
         let tail = if n.len() > 3 {
@@ -667,7 +667,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
     }
 
     /// Matches string starting with a digit and optionally continuing with digits and underscores.
-    fn digits1(i: Input<'_>) -> Output<Input<'_>> {
+    fn digits1(i: Input) -> Output<Input> {
         recognize(pair(
             take_while1(|m| is_digit(m as u8) || m == '_'),
             take_while(|m| is_digit(m as u8) || m == '_')
@@ -726,7 +726,7 @@ fn numeric_literal(i: Input<'_>) -> Output<Literal> {
 }
 
 /// Matches a literal boolean value, e.g. `true`.
-fn bool_literal(i: Input<'_>) -> Output<Literal> {
+fn bool_literal(i: Input) -> Output<Literal> {
     let position = i.position();
     map(alt((keyword("true"), keyword("false"))), move |m| {
         Literal {
@@ -739,7 +739,7 @@ fn bool_literal(i: Input<'_>) -> Output<Literal> {
 }
 
 /// Matches a string. Since strings support variable interpolation they need to be represented as expressions.
-fn string_literal(i: Input<'_>) -> Output<Expression> {
+fn string_literal(i: Input) -> Output<Expression> {
 
     let position = i.position();
 
@@ -749,7 +749,7 @@ fn string_literal(i: Input<'_>) -> Output<Expression> {
         Interpolation(Expression),
     }
 
-    fn fragments(i: Input<'_>) -> Output<Vec<StringFragment<'_>>> {
+    fn fragments(i: Input) -> Output<Vec<StringFragment>> {
         // gather fragments into a vector
         fold_many0(
             alt((
@@ -831,7 +831,7 @@ fn string_literal(i: Input<'_>) -> Output<Expression> {
 
 /// Matches an array literal, e.g. `[ 1u8, 2, 3 ]`. Even though array literals may contain expressions, these are
 /// wrapped in a literal value, allowing us to return a Literal here.
-fn array_literal(i: Input<'_>) -> Output<Literal> {
+fn array_literal(i: Input) -> Output<Literal> {
     let position = i.position();
     map(
         tuple((punct("["), separated_list0(punct(","), expression), opt(punct(",")), punct("]"))),
@@ -847,14 +847,14 @@ fn array_literal(i: Input<'_>) -> Output<Literal> {
 }
 
 /// Matches a struct literal, e.g. `MyStruct { left: 123, right: 234 }`.
-fn struct_literal(i: Input<'_>) -> Output<Literal> {
-    fn field(i: Input<'_>) -> Output<(String, Expression)> {
+fn struct_literal(i: Input) -> Output<Literal> {
+    fn field(i: Input) -> Output<(String, Expression)> {
         map(
             tuple((word, punct(":"), expression)),
             |tuple| (tuple.0.to_string(), tuple.2)
         )(i)
     }
-    fn fields(i: Input<'_>) -> Output<UnorderedMap<String, Expression>> {
+    fn fields(i: Input) -> Output<UnorderedMap<String, Expression>> {
         map(
             separated_list1(punct(","), field),
             |list| {
@@ -877,7 +877,7 @@ fn struct_literal(i: Input<'_>) -> Output<Literal> {
 }
 
 /// Matches a literal, i.e. one of the above.
-fn literal(i: Input<'_>) -> Output<Expression> {
+fn literal(i: Input) -> Output<Expression> {
     alt((
         map(bool_literal, |l| Expression::Literal(l)),
         string_literal,
@@ -888,8 +888,8 @@ fn literal(i: Input<'_>) -> Output<Expression> {
 }
 
 /// Matches an expression, e.g. `3.0 * 4.0 * f64::PI`.
-fn expression(i: Input<'_>) -> Output<Expression> {
-    fn argument_list(i: Input<'_>) -> Output<ArgumentList> {
+fn expression(i: Input) -> Output<Expression> {
+    fn argument_list(i: Input) -> Output<ArgumentList> {
         let position = i.position();
         map(
             delimited(punct("("), separated_list0(punct(","), expression), punct(")")),
@@ -899,10 +899,10 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             }
         )(i)
     }
-    fn parens(i: Input<'_>) -> Output<Expression> {
+    fn parens(i: Input) -> Output<Expression> {
         delimited(punct("("), expression, punct(")"))(i)
     }
-    fn operand(i: Input<'_>) -> Output<Expression> {
+    fn operand(i: Input) -> Output<Expression> {
         let j = i.clone();
         alt((
             literal,
@@ -931,7 +931,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             map(closure, move |m| Expression::Closure(Box::new(m))),
         ))(i)
     }
-    fn prec7(i: Input<'_>) -> Output<Expression> {
+    fn prec7(i: Input) -> Output<Expression> {
         let init = operand(i.clone())?;
         let position = i.position();
         fold_many0_mut(
@@ -944,7 +944,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
         )(init.0)
     }
-    fn unary(i: Input<'_>) -> Output<Expression> {
+    fn unary(i: Input) -> Output<Expression> {
         let position = i.position();
         map(
             pair(
@@ -988,7 +988,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             }
         )(i)
     }
-    fn prec6(i: Input<'_>) -> Output<Expression> {
+    fn prec6(i: Input) -> Output<Expression> {
         let position = i.position();
         map(
             pair(
@@ -1009,7 +1009,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             }
         )(i)
     }
-    fn prec5(i: Input<'_>) -> Output<Expression> {
+    fn prec5(i: Input) -> Output<Expression> {
         let init = prec6(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1018,7 +1018,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec4(i: Input<'_>) -> Output<Expression> {
+    fn prec4(i: Input) -> Output<Expression> {
         let init = prec5(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1027,7 +1027,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec3(i: Input<'_>) -> Output<Expression> {
+    fn prec3(i: Input) -> Output<Expression> {
         let init = prec4(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1036,7 +1036,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec2(i: Input<'_>) -> Output<Expression> {
+    fn prec2(i: Input) -> Output<Expression> {
         let init = prec3(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1045,7 +1045,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec1(i: Input<'_>) -> Output<Expression> {
+    fn prec1(i: Input) -> Output<Expression> {
         let init = prec2(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1054,7 +1054,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec0(i: Input<'_>) -> Output<Expression> {
+    fn prec0(i: Input) -> Output<Expression> {
         let init = prec1(i)?;
         let position = init.0.position();
         fold_many0_mut(
@@ -1070,7 +1070,7 @@ fn expression(i: Input<'_>) -> Output<Expression> {
 }
 
 /// Matches a block scope expression.
-fn block(i: Input<'_>) -> Output<Block> {
+fn block(i: Input) -> Output<Block> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Block, map(
@@ -1087,8 +1087,8 @@ fn block(i: Input<'_>) -> Output<Block> {
 }
 
 /// Matches an if- and potentially else-block expression.
-fn if_block(i: Input<'_>) -> Output<IfBlock> {
-    fn else_block(i: Input<'_>) -> Output<Block> {
+fn if_block(i: Input) -> Output<IfBlock> {
+    fn else_block(i: Input) -> Output<Block> {
         let position = i.position();
         let j = i.clone();
         preceded(
@@ -1117,8 +1117,8 @@ fn if_block(i: Input<'_>) -> Output<IfBlock> {
 }
 
 /// Matches a match block expression.
-fn match_block(i: Input<'_>) -> Output<MatchBlock> {
-    /*fn variant_literal(i: Input<'_>) -> Output<Literal> {
+fn match_block(i: Input) -> Output<MatchBlock> {
+    /*fn variant_literal(i: Input) -> Output<Literal> {
         let position = i.position();
         map(
             tuple((ident, punct("::"), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
@@ -1133,14 +1133,14 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
             }
         )(i)
     }*/
-    fn match_pattern(i: Input<'_>) -> Output<Pattern> {
+    fn match_pattern(i: Input) -> Output<Pattern> {
         //let position = i.position();
         //alt((
             map(path, |v| Pattern::SimpleVariant(v))
         //))
         (i)
     }
-    fn match_case(i: Input<'_>) -> Output<Block> {
+    fn match_case(i: Input) -> Output<Block> {
         let position = i.position();
         let j = i.clone();
         alt((
@@ -1148,7 +1148,7 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
             map(expression, move |e| Block::new(position, j.scope_id(), Vec::new(), Some(e))),
         ))(i)
     }
-    fn match_list(i: Input<'_>) -> Output<Vec<(Pattern, Block)>> {
+    fn match_list(i: Input) -> Output<Vec<(Pattern, Block)>> {
         separated_list1(
             punct(","),
             pair(match_pattern, preceded(punct("=>"), match_case))
@@ -1171,8 +1171,8 @@ fn match_block(i: Input<'_>) -> Output<MatchBlock> {
 }
 
 /// Matches an assignment, e.g. `x = 3` or `mystruct.y = 4`.
-fn assignment(i: Input<'_>) -> Output<Assignment> {
-    fn assignable(i: Input<'_>) -> Output<Expression> {
+fn assignment(i: Input) -> Output<Assignment> {
+    fn assignable(i: Input) -> Output<Expression> {
         let var_position = i.position();
         let j = i.clone();
         let init = map(ident, |m| {
@@ -1220,7 +1220,7 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
             }
         )(init.0)
     }
-    fn assignment_operator(i: Input<'_>) -> Output<BinaryOperator> {
+    fn assignment_operator(i: Input) -> Output<BinaryOperator> {
         map(
             alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="))),
             |o| {
@@ -1245,7 +1245,7 @@ fn assignment(i: Input<'_>) -> Output<Assignment> {
 }
 
 /// Matches a let binding.
-fn let_binding(i: Input<'_>) -> Output<LetBinding> {
+fn let_binding(i: Input) -> Output<LetBinding> {
     let position = i.position();
     map(
         preceded(
@@ -1264,8 +1264,8 @@ fn let_binding(i: Input<'_>) -> Output<LetBinding> {
 }
 
 /// Matches a for loop statement.
-fn for_loop(i: Input<'_>) -> Output<ForLoop> {
-    fn loop_range(i: Input<'_>) -> Output<Expression> {
+fn for_loop(i: Input) -> Output<ForLoop> {
+    fn loop_range(i: Input) -> Output<Expression> {
         let position = i.position();
         map(
             tuple((expression, alt((punct("..="), punct(".."))), expression)),
@@ -1303,7 +1303,7 @@ fn for_loop(i: Input<'_>) -> Output<ForLoop> {
 }
 
 /// Matches a while loop statement.
-fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
+fn while_loop(i: Input) -> Output<WhileLoop> {
     let position = i.position();
     let j = i.clone();
     map(
@@ -1321,7 +1321,7 @@ fn while_loop(i: Input<'_>) -> Output<WhileLoop> {
 }
 
 /// Matches a break loop-control statement.
-fn break_statement(i: Input<'_>) -> Output<Break> {
+fn break_statement(i: Input) -> Output<Break> {
     let position = i.position();
     map(
         preceded(
@@ -1333,7 +1333,7 @@ fn break_statement(i: Input<'_>) -> Output<Break> {
 }
 
 /// Matches a continue loop-control statement.
-fn continue_statement(i: Input<'_>) -> Output<Continue> {
+fn continue_statement(i: Input) -> Output<Continue> {
     let position = i.position();
     map(
         preceded(
@@ -1345,7 +1345,7 @@ fn continue_statement(i: Input<'_>) -> Output<Continue> {
 }
 
 /// Matches a statement.
-fn statement(i: Input<'_>) -> Output<Statement> {
+fn statement(i: Input) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
         map(use_decl, |m| Statement::UseDecl(m)),
@@ -1368,7 +1368,7 @@ fn statement(i: Input<'_>) -> Output<Statement> {
 }
 
 /// Matches language items that are allowed in the root scope of a module.
-fn root_items(i: Input<'_>) -> Output<Statement> {
+fn root_items(i: Input) -> Output<Statement> {
     alt((
         map(use_decl, |m| Statement::UseDecl(m)),
         map(module_decl, |m| Statement::Module(m)),

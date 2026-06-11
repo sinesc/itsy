@@ -180,7 +180,7 @@ where
         self.ranges.push(CoverageRange { left: value, right: if value == self.right { None } else { Some(value + T::from(1)) }, kind });
     }
     /// Validates that the ranges cover the entire coverage.
-    pub fn validate(self: &Self) -> CoverageRangeType {
+    pub fn validate(self: &Self) -> CoverageRangeType<'_> {
         if self.ranges.len() == 0 {
             return CoverageRangeType::from(CoverageRange { left: self.left, right: None, kind: CoverageRangeKind::Gap });
         }
