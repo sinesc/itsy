@@ -871,7 +871,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     _ => Self::ice_at(item, "Unexpected boolean literal type")?,
                 };
             },
-            LiteralValue::String(ref string_literal) => {
+            LiteralValue::String(string_literal) => {
                 // store string on const pool and write instruction to load it from const pool directly onto th heap
                 // note: we get the offset from current const_len() and not the store_const() result as that points to
                 // the start of the string  while the we neeed to point at the meta data it writes before the string (the length)

@@ -422,7 +422,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves use declarations.
     fn resolve_use_decl(self: &mut Self, item: &mut ast::UseDecl) -> ResolveResult  {
         let mut unresolved = None;
-        for (name, (ref path, resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
+        for (name, &mut (ref path, ref mut resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
             if self.module_paths.contains(path) {
                 *resolved = true;
                 self.scopes.insert_alias(self.scope_id, path, name);
