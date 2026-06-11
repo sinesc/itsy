@@ -479,9 +479,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
 
         match constant.value {
             ConstantValue::Function(function_id) => {
-                let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                 // load function address
                 comment!(self, "\npush @{}", item.path);
+                // register call: may capture writer position for placeholder, must directly preceede write_immediate_sa
+                let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                 self.write_immediate_sa(function_addr)?;
                 // load constructor (none)
                 self.write_immediate_sa(0)?;
