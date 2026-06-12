@@ -14,7 +14,7 @@ Add the following to our `Cargo.toml` to make Itsy avaialble in your project.
 
 ```
 [dependencies]
-itsy = "0.4"
+itsy = "0.5"
 ```
 
 ## Integration
@@ -48,4 +48,5 @@ fn main() {
 ## Where to go from here
 
 **Crate reference:** [here](https://docs.rs/itsy/)\
+**Standard library/builtins reference** Linked on the index page of the crate documentation.
 **Language reference:** non-existent, some differences listed [here](doc/differences.md)
