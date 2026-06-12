@@ -3,3 +3,4 @@
 **/*.rs.bk
 logs/*
 /itsy/examples/devtest.itsy
+Cargo.lock
