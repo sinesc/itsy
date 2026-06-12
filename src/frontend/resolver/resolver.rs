@@ -1272,7 +1272,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // set return type from signature
                 if let Some(function_type_id) = call_func.type_id(self) {
 
-                    let func = self.type_by_id(function_type_id).as_callable().ice()?.clone(); //FIXME borrow
+                    // check type is actually callable
+                    let func = match self.type_by_id(function_type_id).as_callable() {
+                        Some(callable) => callable.clone(), //FIXME borrow
+                        None => {
+                            let type_name = self.type_name(function_type_id);
+                            return Err(ResolveError::new(item, ResolveErrorKind::NotCallable(type_name), self.module_path));
+                        }
+                    };
 
                     if let Some(ret_type_id) = func.ret_type_id {
                         self.set_type_id(item, ret_type_id)?;

@@ -289,3 +289,16 @@ fn block_conflicting_returns() {
         }
     ));
 }
+
+#[test]
+#[should_panic(expected = "Type i32 is not callable")]
+fn local_shadows_function_then_called() {
+    // a local binding shadowing a function and then being called must produce "not callable" error
+    run(stringify!(
+        fn foo() -> u32 { 5 }
+        fn main() {
+            let foo = 0;
+            foo();
+        }
+    ));
+}
