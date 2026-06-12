@@ -435,3 +435,24 @@ fn for_in_break_noref() {
     ));
     assert_all(&result, &[ "2 Test--3yz".to_string() ]);
 }
+
+#[test]
+fn return_if_expr_with_local() {
+    // if expression in tail position with local variable
+    let result = run(stringify!(
+        fn pick(c: bool) -> u8 {
+            if c {
+                let y = 7u8;
+                y + 1
+            } else {
+                let z = 3u8;
+                z
+            }
+        }
+        fn main() {
+            ret_u8(pick(true));
+            ret_u8(pick(false));
+        }
+    ));
+    assert_all(&result, &[ 8u8, 3u8 ]);
+}

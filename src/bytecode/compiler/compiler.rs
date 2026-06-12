@@ -1283,6 +1283,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             } else if let ast::Statement::Expression(expression) = statement {
                 self.create_stack_frame_exp(&expression, frame)?;
+            } else if let ast::Statement::Return(ret) = statement {
+                // any new bindings within a returned expression may need to be allocated
+                self.create_stack_frame_exp(&ret.expr, frame)?;
             }
         }
         if let Some(result) = &item.result {
