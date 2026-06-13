@@ -64,11 +64,11 @@ impl Resolved {
     }
     /// Returns an iterator over the type mapping returning only traits implementors.
     pub fn implementors(self: &Self) -> impl Iterator<Item=(TypeId, &Map<TypeId, ImplTrait>)> {
-        // TODO: currently only structs support traits. this will have to be extended to at least String and enums once those exist.
+        // TODO: extend to String once it can implement traits.
         self.type_map.iter()
             .enumerate()
-            .filter_map(|(type_id, ty)| ty.as_struct().map(|struct_| (TypeId::from(type_id), struct_)))
-            .filter_map(|i| if i.1.impl_traits.len() > 0 { Some((i.0, &i.1.impl_traits)) } else { None })
+            .filter_map(|(type_id, ty)| ty.impl_traits_map().map(|impl_traits| (TypeId::from(type_id), impl_traits)))
+            .filter(|i| i.1.len() > 0)
     }
     /// Returns an iterator over the binding mapping.
     pub fn bindings(self: &Self) -> impl Iterator<Item=(BindingId, &Binding)> {

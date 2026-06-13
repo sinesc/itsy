@@ -735,8 +735,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         return Err(ResolveError::new(function, ResolveErrorKind::NotATraitMethod(function_name.clone(), trait_name), self.module_path));
                     }
                     if let Some(constant_id) = function.constant_id {
-                        if let Some(struct_) = self.type_by_id_mut(type_id).as_struct_mut() {
-                            let impl_trait = struct_.impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
+                        if let Some(impl_traits) = self.type_by_id_mut(type_id).impl_traits_map_mut() {
+                            let impl_trait = impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
                             impl_trait.functions.insert(function_name.clone(), Some(constant_id));
                         }
                     }
@@ -1347,7 +1347,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
                 // if we expect the result to be of a particular type, set it now // TODO move above inference block, fix borrow issue
                 if let Some(expected_result) = expected_result {
-                    self.set_type_id(item, expected_result)?;
+                    // a concrete result passed where a trait is expected stays concrete (coerced to a
+                    // trait object at compile time); only its acceptance is verified, not its identity
+                    if self.type_by_id(expected_result).as_trait().is_some() {
+                        if let Some(item_type_id) = item.type_id(self) {
+                            self.check_type_accepted_for(item, item_type_id, expected_result)?;
+                        }
+                    } else {
+                        self.set_type_id(item, expected_result)?;
+                    }
                 }
             },
             Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {

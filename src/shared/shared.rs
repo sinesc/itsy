@@ -36,8 +36,8 @@ pub trait MetaContainer {
                             }
                         })
                 },
-                (Type::Struct(struct_), Type::Trait(_)) => {
-                    struct_.impl_traits.contains_key(&accepted_type_id)
+                (given, Type::Trait(_)) if given.impl_traits_map().is_some() => {
+                    given.impl_traits_map().unwrap().contains_key(&accepted_type_id)
                 },
                 _ => false,
             }

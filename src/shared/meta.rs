@@ -410,18 +410,28 @@ impl Type {
             _ => !self.is_primitive(),
         }
     }
-    /// Returns an iterator over the type_ids of traits implemented by this type, if any.
-    pub fn impl_trait_ids(self: &Self) -> Option<impl Iterator<Item=&TypeId>> {
+    /// Returns the trait implementation map for this type, if it can implement traits (structs and enums).
+    pub fn impl_traits_map(self: &Self) -> Option<&Map<TypeId, ImplTrait>> {
         match self {
-            Type::Struct(struct_) => Some(struct_.impl_traits.keys()),
+            Type::Struct(struct_) => Some(&struct_.impl_traits),
+            Type::Enum(enum_) => Some(&enum_.impl_traits),
             _ => None,
         }
     }
-    /// Returns an iterator over the traits implemented by this type, if any.
-    pub fn impl_traits(self: &Self) -> Option<impl Iterator<Item=(&TypeId, &ImplTrait)>> {
+    /// Returns the mutable trait implementation map for this type, if it can implement traits (structs and enums).
+    pub fn impl_traits_map_mut(self: &mut Self) -> Option<&mut Map<TypeId, ImplTrait>> {
         match self {
-            Type::Struct(struct_) => Some(struct_.impl_traits.iter()),
+            Type::Struct(struct_) => Some(&mut struct_.impl_traits),
+            Type::Enum(enum_) => Some(&mut enum_.impl_traits),
             _ => None,
         }
+    }
+    /// Returns an iterator over the type_ids of traits implemented by this type, if any.
+    pub fn impl_trait_ids(self: &Self) -> Option<impl Iterator<Item=&TypeId>> {
+        self.impl_traits_map().map(|impl_traits| impl_traits.keys())
+    }
+    /// Returns an iterator over the traits implemented by this type, if any.
+    pub fn impl_traits(self: &Self) -> Option<impl Iterator<Item=(&TypeId, &ImplTrait)>> {
+        self.impl_traits_map().map(|impl_traits| impl_traits.iter())
     }
 }
