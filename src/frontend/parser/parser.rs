@@ -667,9 +667,10 @@ fn numeric_literal(i: Input) -> Output<Literal> {
     }
 
     /// Matches string starting with a digit and optionally continuing with digits and underscores.
+    /// The first character must be an actual digit so identifiers starting with `_` aren't misparsed as numbers.
     fn digits1(i: Input) -> Output<Input> {
         recognize(pair(
-            take_while1(|m| is_digit(m as u8) || m == '_'),
+            take_while1(|m| is_digit(m as u8)),
             take_while(|m| is_digit(m as u8) || m == '_')
         ))(i)
     }
@@ -1313,6 +1314,30 @@ fn let_binding(i: Input) -> Output<LetBinding> {
     )(i)
 }
 
+/// Matches a destructuring let statement, e.g. `let Struct { a, b } = value;`.
+/// Plain `let x = ...` (a bare binding or wildcard) falls through to `let_binding`; refutable patterns
+/// (literals, enum variants) are accepted here but rejected later by the resolver with a clear error.
+fn let_pattern(i: Input) -> Output<LetPattern> {
+    let position = i.position();
+    map(
+        preceded(
+            check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
+            tuple((
+                verify(pattern, |p| !matches!(p, Pattern::Binding(_) | Pattern::Wildcard(_))),
+                opt(preceded(punct(":"), inline_type)),
+                preceded(punct("="), expression),
+                punct(";"),
+            ))
+        ),
+        move |m| LetPattern {
+            position    : position.clone(),
+            pattern     : m.0,
+            ty          : m.1,
+            expr        : m.2,
+        }
+    )(i)
+}
+
 /// Matches a for loop statement.
 fn for_loop(i: Input) -> Output<ForLoop> {
     fn loop_range(i: Input) -> Output<Expression> {
@@ -1399,6 +1424,7 @@ fn statement(i: Input) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
         map(use_decl, |m| Statement::UseDecl(m)),
+        map(snap(let_pattern), |m| Statement::LetPattern(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         map(for_loop, |m| Statement::ForLoop(m)),

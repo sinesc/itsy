@@ -320,6 +320,53 @@ fn match_struct_pattern_unknown_field_rejected() {
 }
 
 #[test]
+fn let_destructure_struct() {
+    // let destructuring: explicit binding, shorthand, wildcard, and nested struct across a heap boundary
+    let result = run(stringify!(
+        struct Inner { v: i32, s: String }
+        struct Outer { inner: Inner, tag: i32 }
+        fn main() {
+            let o = Outer { inner: Inner { v: 7, s: "deep" }, tag: 99 };
+            let Outer { inner: Inner { v, s: msg }, tag: _ } = o;
+            ret_i32(v);
+            ret_string(msg);
+            let Outer { inner, tag } = o; // shorthand
+            ret_i32(tag);
+            let Inner { v: vv, s: ss } = inner;
+            ret_i32(vv);
+            ret_string(ss);
+        }
+    ));
+    assert(&result[0], 7i32);
+    assert(&result[1], "deep".to_string());
+    assert(&result[2], 99i32);
+    assert(&result[3], 7i32);
+    assert(&result[4], "deep".to_string());
+}
+
+#[test]
+fn let_destructure_refutable_literal_rejected() {
+    let err = build_err(stringify!(
+        struct P { x: i32 }
+        fn main() {
+            let P { x: 1 } = P { x: 1 };
+        }
+    ));
+    assert!(err.contains("Refutable"), "unexpected error: {}", err);
+}
+
+#[test]
+fn let_destructure_refutable_enum_rejected() {
+    let err = build_err(stringify!(
+        enum E { A(i32), B }
+        fn main() {
+            let E::A(v) = E::A(1);
+        }
+    ));
+    assert!(err.contains("Refutable"), "unexpected error: {}", err);
+}
+
+#[test]
 fn struct_eq_nested() {
     // nested struct/array fields are compared recursively
     let result = run(stringify!(

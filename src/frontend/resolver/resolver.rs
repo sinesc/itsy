@@ -430,6 +430,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             ImplBlock(impl_block) => self.resolve_impl_block(impl_block),
             TraitDef(trait_def) => self.resolve_trait_type(trait_def),
             LetBinding(binding) => self.resolve_let_binding(binding),
+            LetPattern(let_pattern) => self.resolve_let_pattern(let_pattern),
             IfBlock(if_block) => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             ForLoop(for_loop) => self.resolve_for_loop(for_loop),
             WhileLoop(while_loop) => self.resolve_while_loop(while_loop),
@@ -1488,6 +1489,37 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         self.types_resolved(item, None)
+    }
+
+    /// Resolves a destructuring let binding, e.g. `let Struct { a, b } = value;`. The pattern must be irrefutable.
+    fn resolve_let_pattern(self: &mut Self, item: &mut ast::LetPattern) -> ResolveResult {
+        // refutability is structural (independent of type resolution), so reject refutable patterns up front
+        Self::check_pattern_irrefutable(&item.pattern).map_err(|kind| ResolveError::new(&item.pattern, kind, self.module_path))?;
+        // resolve the optional type annotation and apply it as a hint to the subject expression
+        let hint = match &mut item.ty {
+            Some(inline_type) => self.resolve_inline_type(inline_type)?,
+            None => None,
+        };
+        self.resolve_expression(&mut item.expr, hint)?;
+        let subject_type_id = item.expr.type_id(self);
+        self.resolve_pattern(&mut item.pattern, subject_type_id)?;
+        self.resolved(item)
+    }
+
+    /// Returns an error kind if the pattern is refutable and thus cannot be used in a let binding.
+    fn check_pattern_irrefutable(pattern: &ast::Pattern) -> Result<(), ResolveErrorKind> {
+        use ast::Pattern;
+        match pattern {
+            Pattern::Wildcard(_) | Pattern::Binding(_) => Ok(()),
+            Pattern::Struct(structure) => {
+                for (_, field) in &structure.fields {
+                    Self::check_pattern_irrefutable(field)?;
+                }
+                Ok(())
+            },
+            Pattern::Literal(_) => Err(ResolveErrorKind::InvalidOperation("Refutable literal pattern not allowed in let binding".to_string())),
+            Pattern::VariantTuple(_) | Pattern::Path(_) => Err(ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string())),
+        }
     }
 
     /// Resolves a unary operation.

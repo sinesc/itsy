@@ -348,7 +348,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, UseDecl, EnumDef)
+        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, UseDecl, EnumDef)
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member, TypeName)
@@ -449,6 +449,7 @@ impl Display for Path {
 /// An itsy statement.
 pub enum Statement {
     LetBinding(LetBinding),
+    LetPattern(LetPattern),
     Function(Function),
     StructDef(StructDef),
     ImplBlock(ImplBlock),
@@ -587,6 +588,27 @@ impl Typeable for LetBinding {
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         container.binding_by_id_mut(self.binding_id).type_id = Some(type_id);
+    }
+}
+
+/// A destructuring let binding, e.g. `let Struct { a, b } = value;`. The pattern must be irrefutable.
+#[derive(Debug)]
+pub struct LetPattern {
+    pub position    : Position,
+    pub pattern     : Pattern,
+    pub expr        : Expression,
+    pub ty          : Option<InlineType>,
+}
+
+impl_positioned!(LetPattern);
+impl_resolvable!(LetPattern {
+    expr: Item,
+    ty: OptionalItem,
+});
+
+impl Display for LetPattern {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "let {} = {}", self.pattern, self.expr)
     }
 }
 
@@ -1118,6 +1140,19 @@ impl Positioned for Pattern {
             Pattern::VariantTuple(variant) => variant.position,
             Pattern::Struct(structure) => structure.position,
             Pattern::Path(path) => path.position,
+        }
+    }
+}
+
+impl Display for Pattern {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Pattern::Wildcard(_) => write!(f, "_"),
+            Pattern::Binding(binding) => write!(f, "{}", binding),
+            Pattern::Literal(literal) => write!(f, "{}", literal),
+            Pattern::VariantTuple(variant) => write!(f, "{}({})", variant.path, variant.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ")),
+            Pattern::Struct(structure) => write!(f, "{} {{ {} }}", structure.path, structure.fields.iter().map(|(n, p)| format!("{}: {}", n, p)).collect::<Vec<_>>().join(", ")),
+            Pattern::Path(path) => write!(f, "{}", path),
         }
     }
 }

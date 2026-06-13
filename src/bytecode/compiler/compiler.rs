@@ -200,6 +200,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             S::LetBinding(binding) => self.compile_let_binding(binding),
+            S::LetPattern(let_pattern) => self.compile_let_pattern(let_pattern),
             S::IfBlock(if_block) => {
                 self.compile_if_block(if_block)?;
                 if let Some(result) = &if_block.if_block.result {
@@ -460,6 +461,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
             self.init_state.initialize(binding_id);
         }
+        Ok(())
+    }
+
+    /// Compiles a destructuring let binding, e.g. `let Struct { a, b } = value;`. Mirrors a single irrefutable
+    /// match arm: compile the subject, bind its fields, then release the subject. Bindings live in the current scope.
+    fn compile_let_pattern(self: &mut Self, item: &ast::LetPattern) -> CompileResult {
+        comment!(self, "{}", item);
+        let subject_type_id = item.expr.type_id(self).ice()?;
+        self.compile_expression(&item.expr)?;
+        self.compile_pattern_bind(subject_type_id, &[], &item.pattern)?;
+        self.write_discard(self.ty(&subject_type_id))?;
         Ok(())
     }
 
@@ -1495,6 +1507,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if let Some(expression) = &binding.expr {
                     self.create_stack_frame_exp(expression, frame)?;
                 }
+            } else if let ast::Statement::LetPattern(let_pattern) = statement {
+                self.create_stack_frame_pattern(&let_pattern.pattern, frame);
+                self.create_stack_frame_exp(&let_pattern.expr, frame)?;
             } else if let ast::Statement::ForLoop(for_loop) = statement {
                 frame.insert(for_loop.iter.binding_id, frame.var_pos);
                 frame.var_pos += self.ty(&for_loop.iter).primitive_size() as FrameAddress;
