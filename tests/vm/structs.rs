@@ -215,3 +215,33 @@ fn struct_self() {
     ));
     assert_all(&result, &[ 123i32, 37 ]);
 }
+#[test]
+fn struct_eq() {
+    // structs compare structurally, field by field
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 1, y: 2 };
+            ret_bool(p == Point { x: 1, y: 2 });
+            ret_bool(p == Point { x: 1, y: 9 });
+            ret_bool(p != Point { x: 9, y: 2 });
+        }
+    ));
+    assert_all(&result, &[ true, false, true ]);
+}
+
+#[test]
+fn struct_eq_nested() {
+    // nested struct/array fields are compared recursively
+    let result = run(stringify!(
+        struct Inner { values: [ i32 ] }
+        struct Outer { inner: Inner, tag: i32 }
+        fn main() {
+            let a = Outer { inner: Inner { values: [ 1, 2, 3 ] }, tag: 7 };
+            ret_bool(a == Outer { inner: Inner { values: [ 1, 2, 3 ] }, tag: 7 });
+            ret_bool(a == Outer { inner: Inner { values: [ 1, 2, 4 ] }, tag: 7 });
+            ret_bool(a == Outer { inner: Inner { values: [ 1, 2, 3 ] }, tag: 8 });
+        }
+    ));
+    assert_all(&result, &[ true, false, false ]);
+}

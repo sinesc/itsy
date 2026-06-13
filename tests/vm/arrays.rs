@@ -224,3 +224,44 @@ fn array_ref_elements() {
     ));
     assert_all(&result, &[ 6u8, 4, 1, 2, 3, 2 ]);
 }
+
+#[test]
+fn array_eq() {
+    // arrays compare structurally by length and element values
+    let result = run(stringify!(
+        fn main() {
+            let a = [ 1i32, 2, 3 ];
+            ret_bool(a == [ 1, 2, 3 ]);
+            ret_bool(a == [ 1, 2, 4 ]);
+            ret_bool(a == [ 1, 2 ]); // length mismatch
+            ret_bool(a != [ 1, 2, 4 ]);
+        }
+    ));
+    assert_all(&result, &[ true, false, false, true ]);
+}
+
+#[test]
+fn array_eq_infers_untyped_operand() {
+    // the untyped `[ ? ]` literal/binding must take its element type from the fully typed operand
+    let result = run(stringify!(
+        fn main() {
+            let typed = [ 1i32, 2, 3 ];
+            let untyped = [ 1, 2, 3 ];
+            ret_bool(typed == untyped);
+        }
+    ));
+    assert_all(&result, &[ true ]);
+}
+
+#[test]
+fn array_eq_nested() {
+    // nested arrays compare element-wise recursively
+    let result = run(stringify!(
+        fn main() {
+            let a = [ [ 1i32, 2 ], [ 3, 4 ] ];
+            ret_bool(a == [ [ 1, 2 ], [ 3, 4 ] ]);
+            ret_bool(a == [ [ 1, 2 ], [ 3, 5 ] ]);
+        }
+    ));
+    assert_all(&result, &[ true, false ]);
+}

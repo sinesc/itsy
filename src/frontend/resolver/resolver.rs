@@ -337,6 +337,29 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
+    /// Recursively unifies two structurally matching types by propagating resolved inner type-ids
+    /// onto their still-unresolved counterpart (in either direction). This lets a fully resolved
+    /// compound type help resolve a partially inferred one, e.g. comparing `[ i32 ]` with `[ ? ]`
+    /// fills in the latter's element type instead of failing the equality check.
+    fn unify_type_ids(self: &mut Self, first_type_id: TypeId, second_type_id: TypeId) -> ResolveResult {
+        if first_type_id == second_type_id {
+            return Ok(());
+        }
+        let inner = match (self.type_by_id(first_type_id).as_array(), self.type_by_id(second_type_id).as_array()) {
+            (Some(first), Some(second)) => Some((first.type_id, second.type_id)),
+            _ => None,
+        };
+        if let Some((first_inner, second_inner)) = inner {
+            match (first_inner, second_inner) {
+                (Some(first_inner), Some(second_inner)) => self.unify_type_ids(first_inner, second_inner)?,
+                (Some(first_inner), None) => self.type_by_id_mut(second_type_id).as_array_mut().ice()?.type_id = Some(first_inner),
+                (None, Some(second_inner)) => self.type_by_id_mut(first_type_id).as_array_mut().ice()?.type_id = Some(second_inner),
+                (None, None) => {},
+            }
+        }
+        Ok(())
+    }
+
     /*fn try_set_type_id(self: &mut Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
         if let Some(item_type_id) = item.type_id(self) {
             self.check_type_accepted_for(item, new_type_id, item_type_id)?;
@@ -939,6 +962,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item, expected_result)?;
                 }
             }
+        } else if let (Some(item_type_id), Some(expected_result)) = (item.type_id(self), expected_result) {
+            // the binding already carries a (possibly only partially inferred) type: complete its
+            // inner types from the expected type instead of failing the check in types_resolved
+            self.unify_type_ids(item_type_id, expected_result)?;
         }
         self.types_resolved(item, expected_result)
     }
@@ -1129,6 +1156,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
                 let right_type_id = item.right.type_id(self);
                 item.set_type_id(self, self.primitive_type_id(Type::bool)?);
+                // propagate inner types between operands so a partially inferred compound type
+                // (e.g. `[ ? ]`) is completed from the other side before the equality check below
+                if let (Some(left_type_id), Some(right_type_id)) = (left_type_id, right_type_id) {
+                    self.unify_type_ids(left_type_id, right_type_id)?;
+                }
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;

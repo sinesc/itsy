@@ -1884,7 +1884,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             select_primitive_size!(self, ty, ceq)
         } else if ty.is_string() {
             self.writer.string_ceq()
-        } else if ty.as_enum().is_some() {
+        } else if ty.as_enum().is_some() || ty.as_struct().is_some() || ty.as_array().is_some() {
             let constructor = self.constructor(ty)?;
             if constructor <= u16::MAX as StackAddress {
                 self.writer.heap_ceq_16(constructor as FrameAddress)
@@ -1902,7 +1902,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             select_primitive_size!(self, ty, cneq)
         } else if ty.is_string() {
             self.writer.string_cneq()
-        } else if ty.as_enum().is_some() {
+        } else if ty.as_enum().is_some() || ty.as_struct().is_some() || ty.as_array().is_some() {
             let constructor = self.constructor(ty)?;
             if constructor <= u16::MAX as StackAddress {
                 self.writer.heap_cneq_16(constructor as FrameAddress)
