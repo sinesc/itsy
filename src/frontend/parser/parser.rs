@@ -1116,30 +1116,56 @@ fn if_block(i: Input) -> Output<IfBlock> {
     )(i)
 }
 
-/// Matches a match block expression.
-fn match_block(i: Input) -> Output<MatchBlock> {
-    /*fn variant_literal(i: Input) -> Output<Literal> {
+/// Matches a deconstruction pattern, e.g. `_`, `123`, `name` or `Enum::Variant(123, inner)`.
+/// Bindings introduced by the pattern are declared in the current scope, so the caller is
+/// responsible for having pushed an appropriate scope (e.g. a match arm or let binding). This
+/// parser is recursive and reusable, so it can later back struct patterns and `let` destructuring.
+fn pattern(i: Input) -> Output<Pattern> {
+    /// `_` matches anything. Matched as a complete word so `_foo` still parses as a binding.
+    fn wildcard(i: Input) -> Output<Pattern> {
+        let position = i.position();
+        map(verify(word, |w: &str| w == "_"), move |_| Pattern::Wildcard(position))(i)
+    }
+    /// A literal value (numeric or bool) to match against.
+    fn literal_pattern(i: Input) -> Output<Pattern> {
+        alt((
+            map(bool_literal, |l| Pattern::Literal(l)),
+            map(numeric_literal, |l| Pattern::Literal(l)),
+        ))(i)
+    }
+    /// A data-carrying variant with parenthesized sub-patterns, e.g. `Enum::Variant(123, inner)`.
+    /// Wrapped in `snap` by the caller so bindings allocated by sub-patterns roll back on failure.
+    fn variant_tuple(i: Input) -> Output<Pattern> {
         let position = i.position();
         map(
-            tuple((ident, punct("::"), path)), // TODO: this ensures a path of at least two elements to avoid conflicts with idents but makes it impossible to `use num::Variant`. ideally the resolver would handle determining whether something is an variable or enum variant constructor
-            move |(ident, _, mut path)| {
-                path.unshift(ident); // prepend path with ident
-                Literal {
-                    position    : position,
-                    value       : LiteralValue::Variant(VariantLiteral { ident: path.pop(), path: path }),
-                    type_name   : None, //Some(TypeName::from_path(m)),
-                    type_id     : None,
-                }
-            }
+            pair(path, delimited(punct("("), separated_list0(punct(","), pattern), preceded(opt(punct(",")), punct(")")))),
+            move |(path, elements)| Pattern::VariantTuple(VariantTuplePattern { position, path, elements })
         )(i)
-    }*/
-    fn match_pattern(i: Input) -> Output<Pattern> {
-        //let position = i.position();
-        //alt((
-            map(path, |v| Pattern::SimpleVariant(v))
-        //))
-        (i)
     }
+    /// A path: multiple segments match a unit variant/constant, a single segment introduces a binding.
+    fn path_or_binding(i: Input) -> Output<Pattern> {
+        let position = i.position();
+        let j = i.clone();
+        map(path, move |mut p| {
+            if p.segments.len() > 1 {
+                Pattern::Path(p)
+            } else {
+                let ident = p.segments.pop().unwrap();
+                let binding_id = if j.flags().is_dead { BindingId::new(0) } else { j.add_binding(&ident.name) };
+                Pattern::Binding(BindingPattern { position, ident, binding_id })
+            }
+        })(i)
+    }
+    alt((
+        wildcard,
+        literal_pattern,
+        snap(variant_tuple),
+        path_or_binding,
+    ))(i)
+}
+
+/// Matches a match block expression.
+fn match_block(i: Input) -> Output<MatchBlock> {
     fn match_case(i: Input) -> Output<Block> {
         let position = i.position();
         let j = i.clone();
@@ -1151,7 +1177,8 @@ fn match_block(i: Input) -> Output<MatchBlock> {
     fn match_list(i: Input) -> Output<Vec<(Pattern, Block)>> {
         separated_list1(
             punct(","),
-            pair(match_pattern, preceded(punct("=>"), match_case))
+            // each arm gets its own scope so pattern bindings are visible in the arm body but don't leak between arms
+            with_scope(ScopeKind::Block, pair(pattern, preceded(punct("=>"), match_case)))
         )(i)
     }
     let position = i.position();

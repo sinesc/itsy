@@ -70,3 +70,39 @@ fn binary_as() {
             a as u8 + 1
         }\n").unwrap();
 }
+#[test]
+fn match_patterns() {
+    // exercises every pattern form: path (unit variant), variant-tuple with nested
+    // literal/binding/wildcard sub-patterns, and a top-level wildcard arm.
+    parse("
+        enum TestEnum {
+            SimpleA,
+            SimpleB,
+            Data(i32, String),
+        }
+        fn main() {
+            let e = TestEnum::SimpleA;
+            let _r = match e {
+                TestEnum::SimpleA => 1,
+                TestEnum::SimpleB => 2,
+                TestEnum::Data(123, val) => val,
+                TestEnum::Data(_, val) => val,
+                _ => \"x\",
+            };
+        }
+    ").unwrap();
+}
+
+#[test]
+fn match_pattern_binding_in_scope() {
+    // a binding introduced by a pattern must be visible in that arm's body
+    parse("
+        enum E { Data(i32) }
+        fn main() {
+            let _r = match E::Data(1) {
+                E::Data(inner) => inner + 1,
+                _ => 0,
+            };
+        }
+    ").unwrap();
+}

@@ -1092,11 +1092,52 @@ impl_resolvable!(always Continue);
 impl_display!(Continue, "continue");
 
 
-/// A deconstruction pattern.
+/// A deconstruction pattern, e.g. `_`, `123`, `name` or `Enum::Variant(123, inner)`.
 #[derive(Debug)]
 pub enum Pattern {
-    SimpleVariant(Path),
+    /// `_` — matches anything, binds nothing.
+    Wildcard(Position),
+    /// A single identifier introducing a new binding, e.g. `name`.
+    Binding(BindingPattern),
+    /// A literal value to match against, e.g. `123` or `true`.
+    Literal(Literal),
+    /// A data-carrying variant with sub-patterns, e.g. `Enum::Variant(123, inner)`.
+    VariantTuple(VariantTuplePattern),
+    /// A qualified path matching a unit variant or constant, e.g. `Enum::Variant`.
+    Path(Path),
 }
+
+impl Positioned for Pattern {
+    fn position(self: &Self) -> Position {
+        match self {
+            Pattern::Wildcard(position) => *position,
+            Pattern::Binding(binding) => binding.position,
+            Pattern::Literal(literal) => literal.position,
+            Pattern::VariantTuple(variant) => variant.position,
+            Pattern::Path(path) => path.position,
+        }
+    }
+}
+
+/// A binding introduced by a pattern, e.g. the `name` in `Enum::Variant(name)`.
+#[derive(Debug)]
+pub struct BindingPattern {
+    pub position    : Position,
+    pub ident       : Ident,
+    pub binding_id  : BindingId,
+}
+
+impl_positioned!(BindingPattern);
+
+/// A data-carrying variant pattern with sub-patterns, e.g. `Enum::Variant(123, inner)`.
+#[derive(Debug)]
+pub struct VariantTuplePattern {
+    pub position    : Position,
+    pub path        : Path,
+    pub elements    : Vec<Pattern>,
+}
+
+impl_positioned!(VariantTuplePattern);
 
 
 /// A match block, e.g. `match e { Enum::Variant => { ... } }`.
