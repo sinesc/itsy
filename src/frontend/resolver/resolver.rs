@@ -1060,11 +1060,74 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let parent_scope_id = self.scope_id;
         self.scope_id = item.scope_id;
         self.resolve_expression(&mut item.expr, None)?;
-        for (_, block) in &mut item.branches {
+        let subject_type_id = item.expr.type_id(self);
+        for (pattern, block) in &mut item.branches {
+            // resolve the pattern against the matched value's type before the body so pattern bindings are typed
+            self.resolve_pattern(pattern, subject_type_id)?;
             self.resolve_block(block, expected_result)?;
         }
         self.scope_id = parent_scope_id;
         self.resolved(item)
+    }
+
+    /// Resolves a match (or, later, let) pattern against the type of the value being matched, typing any
+    /// bindings the pattern introduces. `subject_type_id` is None until the matched value's type is known.
+    fn resolve_pattern(self: &mut Self, item: &mut ast::Pattern, subject_type_id: Option<TypeId>) -> ResolveResult {
+        use ast::Pattern;
+        match item {
+            Pattern::Wildcard(_) => {},
+            // a qualified path names a unit variant (or constant); nothing to bind, validity is checked below
+            Pattern::Path(path) => {
+                if let Some(subject_type_id) = subject_type_id {
+                    let variant_name = &path.segments.last().ice()?.name;
+                    if let Some(enum_) = self.type_by_id(subject_type_id).as_enum() {
+                        if enum_.variant_index(variant_name).is_none() {
+                            return Err(ResolveError::new(path, ResolveErrorKind::UndefinedMember(variant_name.clone()), self.module_path));
+                        }
+                    }
+                }
+            },
+            // a single identifier binds the entire matched value
+            Pattern::Binding(binding) => {
+                if let Some(subject_type_id) = subject_type_id {
+                    self.set_type_id(binding, subject_type_id)?;
+                }
+                if self.stage.must_resolve() && binding.type_id(self).is_none() {
+                    return Err(ResolveError::new(binding, ResolveErrorKind::CannotResolve(binding.ident.to_string()), self.module_path));
+                }
+            },
+            // a literal is matched by value
+            Pattern::Literal(literal) => {
+                self.resolve_literal(literal, subject_type_id)?;
+            },
+            // a data variant matches a variant tag and recurses into its fields
+            Pattern::VariantTuple(variant) => {
+                if let Some(subject_type_id) = subject_type_id {
+                    let variant_name = variant.path.segments.last().ice()?.name.clone();
+                    // pull the variant's field types out of the enum (cloned to release the immutable borrow before recursing)
+                    let field_type_ids = match self.type_by_id(subject_type_id).as_enum() {
+                        Some(enum_) => match enum_.variants.iter().find(|(name, _)| name == &variant_name) {
+                            Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
+                            Some((_, EnumVariant::Simple(_))) => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Enum variant '{}' carries no data", variant_name)), self.module_path)),
+                            None => return Err(ResolveError::new(variant, ResolveErrorKind::UndefinedMember(variant_name), self.module_path)),
+                        },
+                        None => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Cannot match variant pattern against non-enum type {}", self.type_name(subject_type_id))), self.module_path)),
+                    };
+                    if field_type_ids.len() != variant.elements.len() {
+                        return Err(ResolveError::new(variant, ResolveErrorKind::NumberOfArguments(variant.path.to_string(0), field_type_ids.len() as ItemIndex, variant.elements.len() as ItemIndex), self.module_path));
+                    }
+                    for (element, field_type_id) in variant.elements.iter_mut().zip(field_type_ids.into_iter()) {
+                        self.resolve_pattern(element, field_type_id)?;
+                    }
+                } else {
+                    // subject type unknown this pass; still recurse so nested patterns get a chance to make progress
+                    for element in variant.elements.iter_mut() {
+                        self.resolve_pattern(element, None)?;
+                    }
+                }
+            },
+        }
+        Ok(())
     }
 
     /// Resolves a for loop.

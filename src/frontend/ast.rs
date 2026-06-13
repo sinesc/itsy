@@ -1128,6 +1128,16 @@ pub struct BindingPattern {
 }
 
 impl_positioned!(BindingPattern);
+impl_display!(BindingPattern, "{}", ident);
+
+impl Typeable for BindingPattern {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        container.binding_by_id(self.binding_id).type_id
+    }
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        container.binding_by_id_mut(self.binding_id).type_id = Some(type_id)
+    }
+}
 
 /// A data-carrying variant pattern with sub-patterns, e.g. `Enum::Variant(123, inner)`.
 #[derive(Debug)]

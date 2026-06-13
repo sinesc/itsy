@@ -130,3 +130,48 @@ fn data_enum_nested_heap_payload_eq() {
     assert_all(&result, &[ true, false, true, false, false, true, false, false ]);
 }
 
+
+#[test]
+fn match_pattern_unknown_variant_rejected() {
+    // a pattern naming a variant the enum doesn't have must be a resolver error
+    let err = build_err(stringify!(
+        enum E { A, Data(i32) }
+        fn main() {
+            ret_i32(match E::A {
+                E::Nope => 1,
+                _ => 0,
+            });
+        }
+    ));
+    assert!(err.contains("Resolver error") && err.contains("Nope"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_pattern_wrong_arity_rejected() {
+    // a data-variant pattern with the wrong number of sub-patterns must be a resolver error
+    let err = build_err(stringify!(
+        enum E { A, Data(i32) }
+        fn main() {
+            ret_i32(match E::Data(1) {
+                E::Data(a, b) => a + b,
+                _ => 0,
+            });
+        }
+    ));
+    assert!(err.contains("Resolver error") && err.contains("E::Data"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_variant_pattern_on_non_enum_rejected() {
+    // a variant pattern used against a non-enum subject must be a resolver error
+    let err = build_err(stringify!(
+        enum E { Data(i32) }
+        fn main() {
+            ret_i32(match 5i32 {
+                E::Data(x) => x,
+                _ => 0,
+            });
+        }
+    ));
+    assert!(err.contains("Resolver error") && err.contains("non-enum"), "unexpected error: {}", err);
+}

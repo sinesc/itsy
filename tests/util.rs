@@ -113,6 +113,20 @@ pub fn run(code: &str) -> Context {
     context
 }
 
+/// Build a bit of itsy code that is expected to fail and return the formatted error message.
+#[allow(dead_code)]
+pub fn build_err(code: &str) -> String {
+    let input = if code.find("main()").is_some() {
+        format!("{} {}", TEST_PRELUDE, code)
+    } else {
+        format!("{} fn main() {{ {} }}", TEST_PRELUDE, code)
+    };
+    match build_str::<TestFns>(&input) {
+        Ok(_) => panic!("expected build to fail, but it succeeded"),
+        Err(err) => format!("{}", err),
+    }
+}
+
 #[allow(dead_code)]
 pub fn parse(src: &str) -> ParseResult<ParsedModule> {
     let mut linkstate = LinkState::new();
