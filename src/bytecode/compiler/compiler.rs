@@ -490,10 +490,26 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.writer.upload(size_of::<StackAddress>() * 2, 0);
             },
             ConstantValue::Discriminant(numeric) => {
-                let ty = self.ty(item);
-                let primitive_type_id = ty.as_enum().ice()?.primitive.ice()?.0;
-                let primitive_type = self.ty(&primitive_type_id);
-                self.write_immediate(primitive_type, numeric)?;
+                let type_id = item.type_id(self).ice()?;
+                let enumeration = self.ty(item).as_enum().ice()?;
+                match enumeration.primitive {
+                    // Primitive (C-like) enum: the value is the bare discriminant.
+                    Some((primitive_type_id, _)) => {
+                        let primitive_type = self.ty(&primitive_type_id);
+                        self.write_immediate(primitive_type, numeric)?;
+                    },
+                    // Reference-type enum (has data variants): a unit variant is a heap object
+                    // holding just the variant index, consistent with how data variants are built.
+                    None => {
+                        let variant_name = &item.path.segments.last().ice()?.name;
+                        let variant_index = enumeration.variant_index(variant_name).ice()?;
+                        let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
+                        let index_type = Type::unsigned(size_of::<VariantIndex>());
+                        comment!(self, "construct unit variant {}", item.path);
+                        self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
+                        self.writer.upload(index_type.primitive_size() as StackAddress, implementor_index);
+                    },
+                }
             },
         }
         Ok(())
@@ -1868,6 +1884,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             select_primitive_size!(self, ty, ceq)
         } else if ty.is_string() {
             self.writer.string_ceq()
+        } else if ty.as_enum().is_some() {
+            let constructor = self.constructor(ty)?;
+            if constructor <= u16::MAX as StackAddress {
+                self.writer.heap_ceq_16(constructor as FrameAddress)
+            } else {
+                self.writer.heap_ceq_sa(constructor)
+            }
         } else {
             Self::ice(&format!("ceq: Unsupported type {:?}", ty))?
         })
@@ -1879,6 +1902,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             select_primitive_size!(self, ty, cneq)
         } else if ty.is_string() {
             self.writer.string_cneq()
+        } else if ty.as_enum().is_some() {
+            let constructor = self.constructor(ty)?;
+            if constructor <= u16::MAX as StackAddress {
+                self.writer.heap_cneq_16(constructor as FrameAddress)
+            } else {
+                self.writer.heap_cneq_sa(constructor)
+            }
         } else {
             Self::ice(&format!("cneq: Unsupported type {:?}", ty))?
         })

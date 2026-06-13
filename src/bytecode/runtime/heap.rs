@@ -295,8 +295,16 @@ impl Heap {
         //un safe { std::str::from_utf8_unchecked(&slice) }
         std::str::from_utf8(slice).ok()
     }
+    /// Compares a run of raw bytes in one heap object with another. Used for primitive fields during deep equality.
+    pub fn compare_bytes(self: &Self, a: HeapRef, b: HeapRef, num_bytes: usize) -> bool {
+        let (a_index, a_offset) = a.into();
+        let (b_index, b_offset) = b.into();
+        let a_slice = &self.objects[a_index as usize].data[a_offset as usize..a_offset as usize + num_bytes];
+        let b_slice = &self.objects[b_index as usize].data[b_offset as usize..b_offset as usize + num_bytes];
+        a_slice == b_slice
+    }
     // Compares string of one heap object with another.
-    pub fn compare_string(self: &mut Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
+    pub fn compare_string(self: &Self, a: HeapRef, b: HeapRef, op: HeapCmp) -> bool {
         debug_assert_index!(self, a.index());
         debug_assert_index!(self, b.index());
         let slice_a = self.string(a);

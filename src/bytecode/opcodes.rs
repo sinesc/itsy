@@ -1272,6 +1272,36 @@ impl_opcodes!{
         self.heap.ref_item(b.index(), HeapRefOp::Free);
     }
 
+    /// Pops 2 heap references to reference-type values (e.g. enums), compares them for deep equality using the
+    /// given type constructor and pushes the result. Drops temporary references.
+    fn <
+        heap_ceq_16(constructor: u16 as StackAddress),
+        heap_ceq_sa(constructor: StackAddress),
+    >(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.compare_value(a, b, constructor);
+        self.stack.push(equals as Data8);
+        // deep free: the operands may contain nested heap references (e.g. string/array/enum fields)
+        self.refcount_value(a, constructor, HeapRefOp::Free);
+        self.refcount_value(b, constructor, HeapRefOp::Free);
+    }
+
+    /// Pops 2 heap references to reference-type values (e.g. enums), compares them for deep inequality using the
+    /// given type constructor and pushes the result. Drops temporary references.
+    fn <
+        heap_cneq_16(constructor: u16 as StackAddress),
+        heap_cneq_sa(constructor: StackAddress),
+    >(&mut self) {
+        let b: HeapRef = self.stack.pop();
+        let a: HeapRef = self.stack.pop();
+        let equals = self.compare_value(a, b, constructor);
+        self.stack.push((!equals) as Data8);
+        // deep free: the operands may contain nested heap references (e.g. string/array/enum fields)
+        self.refcount_value(a, constructor, HeapRefOp::Free);
+        self.refcount_value(b, constructor, HeapRefOp::Free);
+    }
+
     /// Pops 2 heap references to strings, compares the strings lexicographically and pushes the result. Drops temporary references.
     fn string_clt(&mut self) {
         let b: HeapRef = self.stack.pop();

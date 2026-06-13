@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
-use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp}, error::*}};
+use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
 
@@ -140,26 +140,36 @@ impl<T, U> VM<T, U> {
         arg
     }
 
-    /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
-    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, mut constructor_offset: StackAddress, op: HeapRefOp) {
+    /// Resolves a value's constructor offset, following the indirection used for trait implementors (offset 0,
+    /// looked up via the object's implementor index) and dynamic constructors (offset 1, stored at the end of the
+    /// object). Returns `None` if the object has no constructor, i.e. contains no nested heap references.
+    fn resolve_constructor_offset(self: &Self, item: HeapRef, mut constructor_offset: StackAddress) -> Option<StackAddress> {
         if constructor_offset == 0 {
             // trait implementor specific constructor
             let implementor_index = self.heap.item_implementor_index(item.index()) as usize;
             constructor_offset = self.stack.load((implementor_index * size_of::<StackAddress>()) as StackAddress);
         } else if constructor_offset == 1 {
             // dynamic constructor, index stored at the end of the heap-object
-            let item_index = item.index();
-            let data = &self.heap.item(item_index).data;
+            let data = &self.heap.item(item.index()).data;
             let pos = data.len() - size_of::<StackAddress>();
             constructor_offset = StackAddress::from_ne_bytes(data[pos..].try_into().unwrap());
             if constructor_offset == 0 {
-                self.heap.ref_item(item_index, op);
-                return;
+                return None;
             }
         }
-        let constructor = self.construct_read_op(&mut constructor_offset);
-        let epoch = self.heap.new_epoch();
-        self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op, epoch);
+        Some(constructor_offset)
+    }
+
+    /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
+    pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp) {
+        match self.resolve_constructor_offset(item, constructor_offset) {
+            None => self.heap.ref_item(item.index(), op),
+            Some(mut constructor_offset) => {
+                let constructor = self.construct_read_op(&mut constructor_offset);
+                let epoch = self.heap.new_epoch();
+                self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op, epoch);
+            }
+        }
     }
 
     /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
@@ -201,21 +211,7 @@ impl<T, U> VM<T, U> {
                 },
                 Constructor::Struct => {
                     let (_implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
-                    // handle fields // TODO dedup with enum code
-                    for _ in 0..num_fields {
-                        let field_constructor = self.construct_read_op(&mut field_offset);
-                        if field_constructor != Constructor::Primitive {
-                            let field: HeapRef = self.heap.read_seq(&mut item);
-                            let field_index = field.index();
-                            if epoch != self.heap.item_epoch(field_index) {
-                                self.refcount_recurse(field_constructor, field, &mut field_offset, op, epoch);
-                                // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
-                            }
-                        } else {
-                            let num_bytes = self.construct_read_index(&mut field_offset) as StackOffset;
-                            item.add_offset(num_bytes);
-                        }
-                    }
+                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op, epoch);
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::Enum => {
@@ -224,21 +220,7 @@ impl<T, U> VM<T, U> {
                     assert!(variant_index < num_variants, "Enum object specifies invalid enum variant");
                     // seek to variant offset, read it from constructor and seek to the offset
                     let (num_fields, mut field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
-                    // handle fields // TODO dedup with struct code
-                    for _ in 0..num_fields {
-                        let field_constructor = self.construct_read_op(&mut field_offset);
-                        if field_constructor != Constructor::Primitive {
-                            let field: HeapRef = self.heap.read_seq(&mut item);
-                            let field_index = field.index();
-                            if epoch != self.heap.item_epoch(field_index) {
-                                self.refcount_recurse(field_constructor, field, &mut field_offset, op, epoch);
-                                // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
-                            }
-                        } else {
-                            let num_bytes = self.construct_read_index(&mut field_offset) as StackOffset;
-                            item.add_offset(num_bytes);
-                        }
-                    }
+                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op, epoch);
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::String => {
@@ -253,6 +235,124 @@ impl<T, U> VM<T, U> {
             };
             *constructor_offset = parsed.next;
         }
+    }
+
+    /// Updates the refcounts for a sequence of struct fields or enum-variant fields described by the constructor at field_offset.
+    fn refcount_fields(self: &mut Self, num_fields: ItemIndex, field_offset: &mut StackAddress, item: &mut HeapRef, op: HeapRefOp, epoch: usize) {
+        for _ in 0..num_fields {
+            let field_constructor = self.construct_read_op(field_offset);
+            if field_constructor != Constructor::Primitive {
+                let field: HeapRef = self.heap.read_seq(item);
+                let field_index = field.index();
+                if epoch != self.heap.item_epoch(field_index) {
+                    self.refcount_recurse(field_constructor, field, field_offset, op, epoch);
+                    // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
+                }
+            } else {
+                let num_bytes = self.construct_read_index(field_offset) as StackOffset;
+                item.add_offset(num_bytes);
+            }
+        }
+    }
+
+    /// Compares the targets of two heap references of identical reference type for deep equality, guided by the
+    /// type's serialized constructor. Used to implement equality for non-primitive enums.
+    pub(crate) fn compare_value(self: &Self, a: HeapRef, b: HeapRef, constructor_offset: StackAddress) -> bool {
+        // both operands share the static type, so the constructor is resolved via a
+        match self.resolve_constructor_offset(a, constructor_offset) {
+            // no nested constructor: equal iff the same object is referenced
+            None => a.index() == b.index(),
+            Some(mut constructor_offset) => {
+                let constructor = self.construct_read_op(&mut constructor_offset);
+                self.compare_recurse(constructor, HeapRef::new(a.index(), 0), HeapRef::new(b.index(), 0), &mut constructor_offset)
+            }
+        }
+    }
+
+    /// Recursively compares two heap reference targets for equality, guided by the serialized type constructor.
+    fn compare_recurse(self: &Self, constructor: Constructor, mut a: HeapRef, mut b: HeapRef, constructor_offset: &mut StackAddress) -> bool {
+        let parsed = Constructor::parse_with(&self.stack, *constructor_offset, constructor);
+        *constructor_offset = parsed.offset;
+        let result = match constructor {
+            Constructor::Array => {
+                let element_constructor = self.construct_read_op(constructor_offset);
+                if element_constructor != Constructor::Primitive {
+                    let a_len = self.heap.item(a.index()).data.len();
+                    let b_len = self.heap.item(b.index()).data.len();
+                    if a_len != b_len {
+                        false
+                    } else {
+                        let original_constructor_offset = *constructor_offset;
+                        let num_elements = a_len / HeapRef::primitive_size() as usize;
+                        let mut equal = true;
+                        for _ in 0..num_elements {
+                            // reset offset each iteration to re-read the same element type, advancing once at the end
+                            *constructor_offset = original_constructor_offset;
+                            let a_element: HeapRef = self.heap.read_seq(&mut a);
+                            let b_element: HeapRef = self.heap.read_seq(&mut b);
+                            if !self.compare_recurse(element_constructor, a_element, b_element, constructor_offset) {
+                                equal = false;
+                                break;
+                            }
+                        }
+                        equal
+                    }
+                } else {
+                    // primitive elements: comparing the raw object data covers both length and contents
+                    self.construct_read_index(constructor_offset); // skip primitive num_bytes
+                    self.heap.item(a.index()).data == self.heap.item(b.index()).data
+                }
+            },
+            Constructor::Struct => {
+                let (_implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
+                self.compare_fields(num_fields, &mut field_offset, &mut a, &mut b)
+            },
+            Constructor::Enum => {
+                let a_variant: VariantIndex = self.heap.read_seq(&mut a);
+                let b_variant: VariantIndex = self.heap.read_seq(&mut b);
+                if a_variant != b_variant {
+                    false
+                } else {
+                    let (_implementor_index, _num_variants, variant_table_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
+                    let (num_fields, mut field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, a_variant);
+                    self.compare_fields(num_fields, &mut field_offset, &mut a, &mut b)
+                }
+            },
+            Constructor::String => {
+                self.heap.compare_string(a, b, HeapCmp::Eq)
+            },
+            Constructor::Closure => {
+                // closures are opaque: equal only if the same heap object is referenced
+                a.index() == b.index()
+            },
+            Constructor::Primitive => {
+                panic!("Unexpected primitive constructor.");
+            },
+        };
+        *constructor_offset = parsed.next;
+        result
+    }
+
+    /// Compares a sequence of struct fields or enum-variant fields, described by the constructor at field_offset.
+    fn compare_fields(self: &Self, num_fields: ItemIndex, field_offset: &mut StackAddress, a: &mut HeapRef, b: &mut HeapRef) -> bool {
+        for _ in 0..num_fields {
+            let field_constructor = self.construct_read_op(field_offset);
+            if field_constructor != Constructor::Primitive {
+                let a_field: HeapRef = self.heap.read_seq(a);
+                let b_field: HeapRef = self.heap.read_seq(b);
+                if !self.compare_recurse(field_constructor, a_field, b_field, field_offset) {
+                    return false;
+                }
+            } else {
+                let num_bytes = self.construct_read_index(field_offset) as StackOffset;
+                if !self.heap.compare_bytes(*a, *b, num_bytes as usize) {
+                    return false;
+                }
+                a.add_offset(num_bytes);
+                b.add_offset(num_bytes);
+            }
+        }
+        true
     }
 }
 
