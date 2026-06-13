@@ -175,3 +175,108 @@ fn match_variant_pattern_on_non_enum_rejected() {
     ));
     assert!(err.contains("Resolver error") && err.contains("non-enum"), "unexpected error: {}", err);
 }
+
+#[test]
+fn match_reference_enum() {
+    // unit and data variants, literal sub-pattern, field binding (incl. heap String extraction) and wildcard
+    let result = run(stringify!(
+        enum E { A, B, Data(i32, String) }
+        fn describe(e: E) -> String {
+            match e {
+                E::A => "a",
+                E::B => "b",
+                E::Data(123, val) => "special:" + val,
+                E::Data(_, val) => "data:" + val,
+            }
+        }
+        fn main() {
+            ret_string(describe(E::A));
+            ret_string(describe(E::B));
+            ret_string(describe(E::Data(123, "x")));
+            ret_string(describe(E::Data(7, "y")));
+        }
+    ));
+    assert_all(&result, &[
+        "a".to_string(), "b".to_string(), "special:x".to_string(), "data:y".to_string(),
+    ]);
+}
+
+#[test]
+fn match_nested_enum_pattern() {
+    // nested variant patterns: literal sub-pattern, binding extraction across a heap boundary, and a nested unit variant
+    let result = run(stringify!(
+        enum Inner { Simple, Data(i64) }
+        enum Outer { A, With(Inner) }
+        fn describe(o: Outer) -> String {
+            match o {
+                Outer::A => "a",
+                Outer::With(Inner::Data(3)) => "three",
+                Outer::With(Inner::Data(val)) => "data:" + val as String,
+                Outer::With(Inner::Simple) => "simple",
+            }
+        }
+        fn main() {
+            ret_string(describe(Outer::A));
+            ret_string(describe(Outer::With(Inner::Data(3))));
+            ret_string(describe(Outer::With(Inner::Data(42))));
+            ret_string(describe(Outer::With(Inner::Simple)));
+        }
+    ));
+    assert_all(&result, &[
+        "a".to_string(), "three".to_string(), "data:42".to_string(), "simple".to_string(),
+    ]);
+}
+
+#[test]
+fn match_primitive_enum() {
+    // C-like enum dispatched by discriminant value
+    let result = run(stringify!(
+        enum Dir { North = 1, East, South, West }
+        fn main() {
+            let d = Dir::South;
+            ret_i32(match d {
+                Dir::North => 1,
+                Dir::East => 2,
+                Dir::South => 3,
+                _ => 99,
+            });
+        }
+    ));
+    assert_all(&result, &[ 3i32 ]);
+}
+
+#[test]
+fn match_integer_literals() {
+    // matching a non-enum (integer) subject with literal patterns and a catch-all binding
+    let result = run(stringify!(
+        fn classify(n: i32) -> i32 {
+            match n {
+                0 => 100,
+                1 => 200,
+                other => other + 1,
+            }
+        }
+        fn main() {
+            ret_i32(classify(0));
+            ret_i32(classify(1));
+            ret_i32(classify(41));
+        }
+    ));
+    assert_all(&result, &[ 100i32, 200, 42 ]);
+}
+
+#[test]
+fn match_binds_whole_subject() {
+    // a bare-identifier pattern binds the entire (heap) subject, which is then reused (refcount must hold)
+    let result = run(stringify!(
+        enum E { A, B, Data(i32, String) }
+        fn main() {
+            let x = E::Data(1, "hi");
+            ret_bool(match x {
+                E::A => false,
+                bound => bound == E::Data(1, "hi"),
+            });
+        }
+    ));
+    assert_all(&result, &[ true ]);
+}

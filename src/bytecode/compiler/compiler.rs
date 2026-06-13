@@ -570,27 +570,184 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Write match arm block code.
-    fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, block: &ast::Block) -> CompileResult {
-        self.compile_block(block)?;
+    /// Computes the byte offset of a data-variant field within its heap object (past the leading variant index).
+    fn variant_field_offset(self: &Self, field_type_ids: &[Option<TypeId>], index: usize) -> CompileResult<StackAddress> {
+        let mut offset = size_of::<VariantIndex>() as StackAddress;
+        for field_type_id in &field_type_ids[..index] {
+            offset += self.ty(&field_type_id.ice()?).primitive_size() as StackAddress;
+        }
+        Ok(offset)
+    }
+
+    /// Returns the cloned field type-ids of the named data variant of the given enum type.
+    fn variant_data_fields(self: &Self, subject_type_id: TypeId, variant_name: &str) -> CompileResult<Vec<Option<TypeId>>> {
+        let enum_ = self.ty(&subject_type_id).as_enum().ice()?;
+        let variant = enum_.variants.iter().find(|(name, _)| name == variant_name).ice()?;
+        Ok(variant.1.as_data().ice()?.clone())
+    }
+
+    /// The type of the value a pattern matches against, given the access path to it. The empty path refers
+    /// to the match subject itself; otherwise the type of the last navigation step is the value's type.
+    fn pattern_value_type(self: &Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> TypeId {
+        access.last().map(|&(_, type_id)| type_id).unwrap_or(subject_type_id)
+    }
+
+    /// Emits code that pushes a borrowed copy of the value selected by `access` onto the stack, starting from
+    /// the match subject which is expected on top of the stack. Each step offsets into the current heap object
+    /// and fetches the field there, dereferencing across heap boundaries for nested (reference) values. No
+    /// refcounts are touched, so the result is a borrow the caller must consume (compare) or store (which incs).
+    fn emit_pattern_value_load(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> CompileResult {
+        self.write_clone(self.ty(&subject_type_id));
+        for &(offset, field_type_id) in access {
+            self.writer.offsetx_16(offset as FrameAddress);
+            self.write_heap_fetch(self.ty(&field_type_id))?;
+        }
+        Ok(())
+    }
+
+    /// Emits code that tests whether the value selected by `access` matches the variant named by `path`, without
+    /// consuming the subject. On mismatch a `j0` is emitted and collected in `fail_jumps`.
+    fn compile_variant_tag_test(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], path: &ast::Path, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
+        let value_type_id = self.pattern_value_type(subject_type_id, access);
+        let variant_name = &path.segments.last().ice()?.name;
+        // extract owned metadata so the enum borrow is released before emitting code
+        let enum_ = self.ty(&value_type_id).as_enum().ice()?;
+        let primitive_type_id = enum_.primitive.map(|(type_id, _)| type_id);
+        let variant_index = enum_.variant_index(variant_name);
+        let discriminant = enum_.variant_value(variant_name);
+        if let Some(primitive_type_id) = primitive_type_id {
+            // primitive (C-like) enum: the subject is the bare discriminant, compared as its underlying type.
+            // these carry no data, so they only ever appear at the top level (access is empty).
+            let discriminant = discriminant.ice()?;
+            self.write_clone(self.ty(&primitive_type_id));
+            self.write_immediate(self.ty(&primitive_type_id), discriminant)?;
+            self.write_ceq(self.ty(&primitive_type_id))?;
+        } else {
+            // reference enum: the variant index is the first field of the heap object
+            let variant_index = variant_index.ice()?;
+            let index_type = Type::unsigned(size_of::<VariantIndex>());
+            self.emit_pattern_value_load(subject_type_id, access)?;
+            self.write_heap_fetch(&index_type)?;
+            self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
+            self.write_ceq(&index_type)?;
+        }
+        fail_jumps.push(self.writer.j0(123));
+        Ok(())
+    }
+
+    /// Emits non-destructive tests for the given pattern against the value selected by `access` (the empty path
+    /// being the subject on top of the stack). Mismatch jumps are collected in `fail_jumps` for the caller to
+    /// point at the next arm. Recurses through nested variant/path sub-patterns, navigating across heap boundaries.
+    fn compile_pattern_test(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
+        match pattern {
+            // wildcard and binding patterns match unconditionally
+            ast::Pattern::Wildcard(_) | ast::Pattern::Binding(_) => {},
+            // a literal is matched by comparing the selected value against it
+            ast::Pattern::Literal(literal) => {
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.compile_literal(literal)?;
+                self.write_ceq(self.ty(&value_type_id))?;
+                fail_jumps.push(self.writer.j0(123));
+            },
+            // a unit variant is matched by its tag
+            ast::Pattern::Path(path) => {
+                self.compile_variant_tag_test(subject_type_id, access, path, fail_jumps)?;
+            },
+            // a data variant is matched by its tag and then field-wise against the sub-patterns
+            ast::Pattern::VariantTuple(variant) => {
+                self.compile_variant_tag_test(subject_type_id, access, &variant.path, fail_jumps)?;
+                let variant_name = variant.path.segments.last().ice()?.name.clone();
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                let field_type_ids = self.variant_data_fields(value_type_id, &variant_name)?;
+                for (index, element) in variant.elements.iter().enumerate() {
+                    let offset = self.variant_field_offset(&field_type_ids, index)?;
+                    let field_type_id = field_type_ids[index].ice()?;
+                    let mut element_access = access.to_vec();
+                    element_access.push((offset, field_type_id));
+                    self.compile_pattern_test(subject_type_id, &element_access, element, fail_jumps)?;
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Emits code that binds the pattern's variables, reading the selected values out of the subject (the empty
+    /// access path being the subject itself). Recurses through nested variant/path sub-patterns.
+    fn compile_pattern_bind(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern) -> CompileResult {
+        match pattern {
+            ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) => {},
+            // bind the selected value
+            ast::Pattern::Binding(binding) => {
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                self.init_state.declare(binding.binding_id);
+                let slot = self.locals.lookup(binding.binding_id);
+                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.write_store(self.ty(&value_type_id), slot, Some(binding.binding_id))?;
+                self.init_state.initialize(binding.binding_id);
+            },
+            // descend into each field sub-pattern, binding whatever variables it introduces
+            ast::Pattern::VariantTuple(variant) => {
+                let variant_name = variant.path.segments.last().ice()?.name.clone();
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                let field_type_ids = self.variant_data_fields(value_type_id, &variant_name)?;
+                for (index, element) in variant.elements.iter().enumerate() {
+                    let offset = self.variant_field_offset(&field_type_ids, index)?;
+                    let field_type_id = field_type_ids[index].ice()?;
+                    let mut element_access = access.to_vec();
+                    element_access.push((offset, field_type_id));
+                    self.compile_pattern_bind(subject_type_id, &element_access, element)?;
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Compiles a single match arm: tests the pattern, and on match binds its variables, releases the subject
+    /// and runs the body. Pattern bindings and body locals share the current branching scope.
+    fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, pattern: &ast::Pattern, block: &ast::Block) -> CompileResult {
+        // emit non-destructive match tests; failures jump to the next arm
+        let mut fail_jumps = Vec::new();
+        self.compile_pattern_test(subject_type_id, &[], pattern, &mut fail_jumps)?;
+        // matched: bind variables (still need the subject), then release the subject and run the body
+        self.compile_pattern_bind(subject_type_id, &[], pattern)?;
+        self.write_discard(self.ty(&subject_type_id))?; // balances the protective increment in compile_match_block
+        for statement in block.statements.iter() {
+            self.compile_statement(statement)?;
+        }
+        if let Some(result) = &block.result {
+            comment!(self, "match arm resulting");
+            self.compile_expression(result)?;
+            let result_type_id = result.type_id(self).ice()?;
+            self.write_cnt(self.ty(&result_type_id), true, HeapRefOp::Inc)?;
+            self.write_scope_destructor(BranchingScope::Block)?;
+            self.write_cnt(self.ty(&result_type_id), true, HeapRefOp::DecNoFree)?;
+        } else if block.control_flow() == None {
+            self.write_scope_destructor(BranchingScope::Block)?;
+        }
         if block.control_flow() != Some(ast::ControlFlowType::Return) {
             exit_jumps.push(self.writer.jmp(123));
+        }
+        // failed tests land here, at the next arm
+        let next_target = self.writer.position();
+        for fail_jump in fail_jumps {
+            self.writer.overwrite(fail_jump, |w| w.j0(next_target));
         }
         Ok(())
     }
 
     /// Split match block into recursive tree of A/B branches.
-    fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
+    fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
         if remaining_branches.len() == 1 {
             self.init_state.push(BranchingKind::Single, BranchingScope::Block); // patterns are required to be exhaustive
-            self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
+            self.compile_match_arm(exit_jumps, subject_type_id, &remaining_branches[0].0, &remaining_branches[0].1)?;
             self.init_state.pop();
         } else if remaining_branches.len() > 1 {
             self.init_state.push(BranchingKind::Double, BranchingScope::Block);
             self.init_state.set_path(BranchingPath::A);
-            self.compile_match_arm(exit_jumps, &remaining_branches[0].1)?;
+            self.compile_match_arm(exit_jumps, subject_type_id, &remaining_branches[0].0, &remaining_branches[0].1)?;
             self.init_state.set_path(BranchingPath::B);
-            self.compile_match_block_recursive(exit_jumps, &remaining_branches[1..])?;
+            self.compile_match_block_recursive(exit_jumps, subject_type_id, &remaining_branches[1..])?;
             self.init_state.pop();
         }
         Ok(())
@@ -599,9 +756,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a match block.
     fn compile_match_block(self: &mut Self, item: &ast::MatchBlock) -> CompileResult {
         comment!(self, "{}", item);
+        let subject_type_id = item.expr.type_id(self).ice()?;
         self.compile_expression(&item.expr)?;
+        // the subject stays on the stack across the arms; field reads during dispatch don't free it, and the
+        // matching arm discards it (write_discard's Free drops a temporary but leaves a borrowed value to its owner)
         let mut exit_jumps = Vec::new();
-        self.compile_match_block_recursive(&mut exit_jumps, &item.branches)?;
+        self.compile_match_block_recursive(&mut exit_jumps, subject_type_id, &item.branches)?;
         // fix branch jump outs
         let exit_target = self.writer.position();
         while let Some(exit_jump) = exit_jumps.pop() {
@@ -1252,9 +1412,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             }
             if binary_op.op == ast::BinaryOperator::Call {
                 for arg in &binary_op.right.as_argument_list().ice()?.args {
-                    if let ast::Expression::Block(block) = arg {
-                        self.create_stack_frame_block(block, frame)?;
-                    }
+                    self.create_stack_frame_exp(arg, frame)?;
                 }
             } else {
                 if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.right {
@@ -1270,8 +1428,32 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             if let Some(block) = &if_block.else_block {
                 self.create_stack_frame_block(block, frame)?;
             }
+        } else if let ast::Expression::MatchBlock(match_block) = expression {
+            self.create_stack_frame_exp(&match_block.expr, frame)?;
+            for (pattern, block) in &match_block.branches {
+                self.create_stack_frame_pattern(pattern, frame);
+                self.create_stack_frame_block(block, frame)?;
+            }
         }
         Ok(())
+    }
+
+    /// Allocates stack frame slots for the bindings introduced by a (possibly nested) match pattern.
+    fn create_stack_frame_pattern(self: &Self, pattern: &ast::Pattern, frame: &mut StackFrame) {
+        match pattern {
+            ast::Pattern::Binding(binding) => {
+                if let Some(type_id) = self.binding_by_id(binding.binding_id).type_id {
+                    frame.insert(binding.binding_id, frame.var_pos);
+                    frame.var_pos += self.ty(&type_id).primitive_size() as FrameAddress;
+                }
+            },
+            ast::Pattern::VariantTuple(variant) => {
+                for element in &variant.elements {
+                    self.create_stack_frame_pattern(element, frame);
+                }
+            },
+            _ => {},
+        }
     }
 
     /// Creates stack frame variables for blocks. // FIXME move this into AST
