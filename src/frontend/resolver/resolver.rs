@@ -1126,6 +1126,37 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             },
+            // a struct matches field-wise against the sub-patterns; all fields must be present
+            Pattern::Struct(structure) => {
+                if let Some(subject_type_id) = subject_type_id {
+                    // clone the struct metadata to release the immutable borrow before recursing
+                    let struct_ = match self.type_by_id(subject_type_id).as_struct() {
+                        Some(struct_) => struct_.clone(),
+                        None => return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Cannot match struct pattern against non-struct type {}", self.type_name(subject_type_id))), self.module_path)),
+                    };
+                    // reject unknown fields
+                    for (field_name, _) in structure.fields.iter() {
+                        if !struct_.has_field(&field_name.name) {
+                            return Err(ResolveError::new(structure, ResolveErrorKind::UndefinedMember(field_name.name.clone()), self.module_path));
+                        }
+                    }
+                    // require every struct field to be matched (no rest-syntax yet); this also rejects duplicates
+                    for (struct_field, _) in struct_.fields.iter() {
+                        if structure.fields.iter().filter(|(name, _)| &name.name == struct_field).count() != 1 {
+                            return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Struct pattern must match field '{}' exactly once", struct_field)), self.module_path));
+                        }
+                    }
+                    for (field_name, field_pattern) in structure.fields.iter_mut() {
+                        let field_type_id = struct_.type_id(&field_name.name);
+                        self.resolve_pattern(field_pattern, field_type_id)?;
+                    }
+                } else {
+                    // subject type unknown this pass; still recurse so nested patterns get a chance to make progress
+                    for (_, field_pattern) in structure.fields.iter_mut() {
+                        self.resolve_pattern(field_pattern, None)?;
+                    }
+                }
+            },
         }
         Ok(())
     }

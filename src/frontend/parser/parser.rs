@@ -1142,6 +1142,28 @@ fn pattern(i: Input) -> Output<Pattern> {
             move |(path, elements)| Pattern::VariantTuple(VariantTuplePattern { position, path, elements })
         )(i)
     }
+    /// A struct with brace-delimited field sub-patterns, e.g. `Struct { a: 123, b }`.
+    /// Wrapped in `snap` by the caller so bindings allocated by field sub-patterns roll back on failure.
+    fn struct_pattern(i: Input) -> Output<Pattern> {
+        let position = i.position();
+        /// A field: either `name: sub_pattern` or shorthand `name` (binds a variable named after the field).
+        fn field(i: Input) -> Output<(Ident, Pattern)> {
+            let position = i.position();
+            let j = i.clone();
+            alt((
+                map(tuple((ident, punct(":"), pattern)), |(name, _, pat)| (name, pat)),
+                map(ident, move |name| {
+                    let binding_id = if j.flags().is_dead { BindingId::new(0) } else { j.add_binding(&name.name) };
+                    let binding = Pattern::Binding(BindingPattern { position, ident: name.clone(), binding_id });
+                    (name, binding)
+                }),
+            ))(i)
+        }
+        map(
+            pair(path, delimited(punct("{"), separated_list1(punct(","), field), preceded(opt(punct(",")), punct("}")))),
+            move |(path, fields)| Pattern::Struct(StructPattern { position, path, fields })
+        )(i)
+    }
     /// A path: multiple segments match a unit variant/constant, a single segment introduces a binding.
     fn path_or_binding(i: Input) -> Output<Pattern> {
         let position = i.position();
@@ -1160,6 +1182,7 @@ fn pattern(i: Input) -> Output<Pattern> {
         wildcard,
         literal_pattern,
         snap(variant_tuple),
+        snap(struct_pattern),
         path_or_binding,
     ))(i)
 }

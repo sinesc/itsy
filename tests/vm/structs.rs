@@ -231,6 +231,95 @@ fn struct_eq() {
 }
 
 #[test]
+fn match_struct_pattern() {
+    // field literal test + binding extraction (incl. heap String), field shorthand, and field reordering
+    let result = run(stringify!(
+        struct Point { x: i32, label: String }
+        fn describe(p: Point) -> String {
+            match p {
+                Point { x: 0, label: l } => "origin:" + l,
+                Point { label: name, x: got } => "got:" + got as String + ":" + name,
+            }
+        }
+        fn shorthand(p: Point) -> String {
+            match p {
+                Point { x, label } => x as String + ":" + label,
+            }
+        }
+        fn main() {
+            ret_string(describe(Point { x: 0, label: "a" }));
+            ret_string(describe(Point { x: 7, label: "b" }));
+            ret_string(shorthand(Point { x: 5, label: "c" }));
+        }
+    ));
+    assert_all(&result, &[
+        "origin:a".to_string(), "got:7:b".to_string(), "5:c".to_string(),
+    ]);
+}
+
+#[test]
+fn match_struct_pattern_nested() {
+    // struct nested in struct and struct nested in enum, navigated across heap boundaries
+    let result = run(stringify!(
+        struct Inner { v: i32, s: String }
+        struct Outer { inner: Inner, tag: i32 }
+        enum E { Wrap(Inner) }
+        fn outer(o: Outer) -> String {
+            match o {
+                Outer { inner: Inner { v: 1, s: msg }, tag: t } => "one:" + msg + ":" + t as String,
+                Outer { inner: Inner { v, s }, tag } => v as String + ":" + s + ":" + tag as String,
+            }
+        }
+        fn wrapped(x: E) -> String {
+            match x {
+                E::Wrap(Inner { v: 9, s }) => "nine:" + s,
+                E::Wrap(Inner { v, s }) => v as String + ":" + s,
+            }
+        }
+        fn main() {
+            ret_string(outer(Outer { inner: Inner { v: 1, s: "hi" }, tag: 5 }));
+            ret_string(outer(Outer { inner: Inner { v: 2, s: "yo" }, tag: 6 }));
+            ret_string(wrapped(E::Wrap(Inner { v: 9, s: "deep" })));
+            ret_string(wrapped(E::Wrap(Inner { v: 3, s: "shallow" })));
+        }
+    ));
+    assert_all(&result, &[
+        "one:hi:5".to_string(), "2:yo:6".to_string(), "nine:deep".to_string(), "3:shallow".to_string(),
+    ]);
+}
+
+#[test]
+fn match_struct_pattern_missing_field_rejected() {
+    // every struct field must be matched (no rest-syntax)
+    let err = build_err(stringify!(
+        struct P { x: i32, y: i32 }
+        fn main() {
+            let p = P { x: 1, y: 2 };
+            match p {
+                P { x: 1 } => {},
+                _ => {},
+            }
+        }
+    ));
+    assert!(err.contains("field 'y'"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_struct_pattern_unknown_field_rejected() {
+    let err = build_err(stringify!(
+        struct P { x: i32, y: i32 }
+        fn main() {
+            let p = P { x: 1, y: 2 };
+            match p {
+                P { x: 1, y: 2, z: 3 } => {},
+                _ => {},
+            }
+        }
+    ));
+    assert!(err.contains("'z'"), "unexpected error: {}", err);
+}
+
+#[test]
 fn struct_eq_nested() {
     // nested struct/array fields are compared recursively
     let result = run(stringify!(

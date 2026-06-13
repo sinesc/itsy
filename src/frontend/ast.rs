@@ -1103,6 +1103,8 @@ pub enum Pattern {
     Literal(Literal),
     /// A data-carrying variant with sub-patterns, e.g. `Enum::Variant(123, inner)`.
     VariantTuple(VariantTuplePattern),
+    /// A struct with field sub-patterns, e.g. `Struct { a: 123, b }`.
+    Struct(StructPattern),
     /// A qualified path matching a unit variant or constant, e.g. `Enum::Variant`.
     Path(Path),
 }
@@ -1114,6 +1116,7 @@ impl Positioned for Pattern {
             Pattern::Binding(binding) => binding.position,
             Pattern::Literal(literal) => literal.position,
             Pattern::VariantTuple(variant) => variant.position,
+            Pattern::Struct(structure) => structure.position,
             Pattern::Path(path) => path.position,
         }
     }
@@ -1148,6 +1151,16 @@ pub struct VariantTuplePattern {
 }
 
 impl_positioned!(VariantTuplePattern);
+
+/// A struct pattern with field sub-patterns, e.g. `Struct { a: 123, b }`.
+#[derive(Debug)]
+pub struct StructPattern {
+    pub position    : Position,
+    pub path        : Path,
+    pub fields      : Vec<(Ident, Pattern)>,
+}
+
+impl_positioned!(StructPattern);
 
 
 /// A match block, e.g. `match e { Enum::Variant => { ... } }`.

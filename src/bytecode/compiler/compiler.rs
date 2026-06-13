@@ -668,6 +668,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.compile_pattern_test(subject_type_id, &element_access, element, fail_jumps)?;
                 }
             },
+            // a struct has no tag; it is matched field-wise against the sub-patterns
+            ast::Pattern::Struct(structure) => {
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
+                for (field_name, field_pattern) in structure.fields.iter() {
+                    let offset = self.compute_member_offset(&struct_, &field_name.name);
+                    let field_type_id = struct_.type_id(&field_name.name).ice()?;
+                    let mut element_access = access.to_vec();
+                    element_access.push((offset, field_type_id));
+                    self.compile_pattern_test(subject_type_id, &element_access, field_pattern, fail_jumps)?;
+                }
+            },
         }
         Ok(())
     }
@@ -697,6 +709,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
                     self.compile_pattern_bind(subject_type_id, &element_access, element)?;
+                }
+            },
+            // descend into each struct field sub-pattern, binding whatever variables it introduces
+            ast::Pattern::Struct(structure) => {
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
+                for (field_name, field_pattern) in structure.fields.iter() {
+                    let offset = self.compute_member_offset(&struct_, &field_name.name);
+                    let field_type_id = struct_.type_id(&field_name.name).ice()?;
+                    let mut element_access = access.to_vec();
+                    element_access.push((offset, field_type_id));
+                    self.compile_pattern_bind(subject_type_id, &element_access, field_pattern)?;
                 }
             },
         }
@@ -1450,6 +1474,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             ast::Pattern::VariantTuple(variant) => {
                 for element in &variant.elements {
                     self.create_stack_frame_pattern(element, frame);
+                }
+            },
+            ast::Pattern::Struct(structure) => {
+                for (_, field_pattern) in &structure.fields {
+                    self.create_stack_frame_pattern(field_pattern, frame);
                 }
             },
             _ => {},
