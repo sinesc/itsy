@@ -27,6 +27,8 @@ pub enum ResolveErrorKind {
     NotATraitMethod(String, String),
     /// A match block does not cover all possible values; the string is a witness pattern that is left uncovered.
     NonExhaustiveMatch(String),
+    /// An if-expression used as a value lacks an else branch; the string is the branch's result type.
+    MissingElseBranch(String),
     NotIterable(String),
     NotCallable(String),
     CannotResolve(String),
@@ -82,6 +84,7 @@ impl Display for ResolveError {
             ResolveErrorKind::InvalidVariantLiteral => write!(f, "Invalid enum variant literal"),
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
             ResolveErrorKind::NonExhaustiveMatch(witness) => write!(f, "Non-exhaustive match: pattern '{}' not covered", witness),
+            ResolveErrorKind::MissingElseBranch(t) => write!(f, "If-expression evaluating to type {t} requires an else branch"),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type {t} is not callable"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case

@@ -1066,8 +1066,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.check_type_accepted_for(item, else_type_id, if_type_id)?;
             }
         } else if let Some(if_type_id) = item.if_block.type_id(self) {
-            // if block with a non-void result but no else block
-            self.check_type_accepted_for(item, if_type_id, TypeId::VOID)?; // Todo: meh, using this to generate an error when we already know there is an error.
+            // an if without an else produces no value on the path where the condition is false, so it must be
+            // void. a non-void branch type means the if is being used as a value and needs an else to supply
+            // the missing case.
+            if if_type_id != TypeId::VOID {
+                let type_name = self.type_name(if_type_id);
+                return Err(ResolveError::new(item, ResolveErrorKind::MissingElseBranch(type_name), self.module_path));
+            }
         }
         self.scope_id = parent_scope_id;
         self.resolved(item)
