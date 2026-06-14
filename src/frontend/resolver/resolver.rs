@@ -506,7 +506,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_inline_type(self: &mut Self, item: &mut ast::InlineType) -> ResolveResult<Option<TypeId>> {
         use ast::InlineType::*;
         match item {
-            TypeName(type_name) => self.resolve_type_name(type_name, None), // todo: not sure about this one. inline-type is defining, so if it differs, the other side should be wrong
+            TypeName(type_name) => self.resolve_type_name(type_name, None),
             ArrayDef(array) => self.resolve_array_type(array),
             CallableDef(callable) => self.resolve_callable_type(callable),
         }

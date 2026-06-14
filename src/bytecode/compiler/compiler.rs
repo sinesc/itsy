@@ -1497,9 +1497,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Creates stack frame variables for blocks. // FIXME move this into AST
+    /// Creates stack frame variables for blocks.
     fn create_stack_frame_block(self: &Self, item: &ast::Block, frame: &mut StackFrame) -> CompileResult {
-        // todo: this is pretty bad. need to come up with better solution. trait on ast?
+        // todo: check if this would be more readable as a trait on AST?
         for statement in item.statements.iter() {
             if let ast::Statement::LetBinding(binding) = statement {
                 frame.insert(binding.binding_id, frame.var_pos);

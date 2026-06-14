@@ -153,7 +153,7 @@ pub fn path_to_parts<T: AsRef<str>>(path: T) -> Vec<String> {
 
 /// Joins parts of a path into a string.
 pub fn parts_to_path<T: AsRef<str>>(parts: &[T]) -> String {
-    let parts = parts.iter().map(|p| p.as_ref()).collect::<Vec<_>>(); // todo: lame to have to collect first
+    let parts = parts.iter().map(|p| p.as_ref()).collect::<Vec<_>>(); // todo: avoid collecting first
     parts.join("::")
 }
 

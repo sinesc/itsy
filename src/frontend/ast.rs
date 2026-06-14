@@ -709,7 +709,7 @@ impl Positioned for Closure {
 
 impl Display for Closure {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "|...|{:?}", self.shared.block) // todo: not super helpful
+        write!(f, "|...|{:?}", self.shared.block)
     }
 }
 

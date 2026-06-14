@@ -421,7 +421,7 @@ impl_builtins! {
                     vm.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
                     0
                 } else {
-                    // todo: split signed/unsigned, use div_euclid for unsigned (can't overflow)
+                    // todo: split signed/unsigned, use rem_euclid for unsigned (can't overflow)
                     let result = T::overflowing_rem_euclid(this, other);
                     if result.1 {
                         vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);

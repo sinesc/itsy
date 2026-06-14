@@ -28,7 +28,6 @@ pub(crate) struct Scopes {
 impl Into<Resolved> for Scopes {
     /// convert scopes into type vector
     fn into(mut self: Self) -> Resolved {
-        // todo refactor
         let mut binding_map = Vec::new();
         for i in 0..self.bindings.len() {
             binding_map.push(self.bindings.remove(&BindingId::new(i)).unwrap());
