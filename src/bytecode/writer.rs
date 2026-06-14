@@ -79,12 +79,20 @@ impl<T> Writer<T> where T: VMFunc<T> {
     pub fn const_len(self: &Self) -> StackAddress {
         self.program().consts.len() as StackAddress
     }
-    /// Reserves space for a data-block on the const pool and returns its base address.
+    /// Reserves space for a `StackAddress` array of `size` bytes on the const pool (filled in later
+    /// via `update_const`) and returns its base address. The space is reserved as individual
+    /// `StackAddress` slots tagged `Integer` so that `init_consts` performs the little-endian ->
+    /// native conversion the values written via `update_const` require.
     pub fn reserve_const_data(self: &Self, size: StackAddress) -> StackAddress {
+        let slot_size = size_of::<StackAddress>() as StackAddress;
+        debug_assert!(size % slot_size == 0, "reserved const data must be a multiple of StackAddress size");
         let position = self.program().consts.len() as StackAddress;
-        self.program().const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
-        let pool_size = self.program().consts.len();
-        self.program().consts.resize(pool_size + size as usize, 0);
+        let mut program = self.program();
+        for _ in 0..(size / slot_size) {
+            program.const_descriptors.push(ConstDescriptor { size: slot_size, endianness: ConstEndianness::Integer });
+        }
+        let pool_size = program.consts.len();
+        program.consts.resize(pool_size + size as usize, 0);
         position
     }
 }

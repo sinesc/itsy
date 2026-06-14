@@ -108,7 +108,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
 
     // reserve space for the trait vtable as well as an implementor-index => constructor mapping (required for trait object reference counting) in const pool
     let vtable_size = compiler.trait_function_indices.len() * compiler.trait_implementor_indices.len() * size_of::<StackAddress>();
-    compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress); // FIXME: this does not consider endianess
+    compiler.writer.reserve_const_data(compiler.trait_vtable_base + vtable_size as StackAddress);
 
     // serialize constructors onto const pool, ensure position 0 and 1 are not used
     if compiler.writer.const_len() < 2 {
