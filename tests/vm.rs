@@ -21,3 +21,6 @@ mod controlflow;
 mod enums;
 #[path="vm/closure.rs"]
 mod closure;
+#[cfg(feature="derive")]
+#[path="vm/api_types.rs"]
+mod api_types;

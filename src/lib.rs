@@ -18,8 +18,15 @@ mod bytecode;
 mod interface;
 mod prelude;
 mod config;
+mod marshal;
 
 pub use interface::*;
+
+/// Derives the marshalling glue required to use a struct as an Itsy API argument or return type.
+///
+/// See [itsy_api!] for how API functions are defined. Requires the `derive` feature.
+#[cfg(feature="derive")]
+pub use itsy_derive::VMValue;
 
 use config::*;
 mod config_derived {
@@ -46,7 +53,9 @@ use config_derived::*;
 ///
 /// `itsy_api!( [ <Visibility> ] <TypeName>, <ContextType>, { <Implementations> });`
 ///
-/// Currently supported parameter types are Rust primitives as well as String and &str.
+/// Out of the box supported parameter types are Rust primitives as well as String and &str.
+/// The itsy-derive crate provides `#[derive(VMValue)]` to enable use of custom structs and
+/// enums.
 ///
 /// # Examples
 ///
@@ -119,9 +128,10 @@ macro_rules! itsy_api {
         let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
         $vm.stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
     } };
-    (@handle_ret_value $vm:ident, $_:tt, $value:ident) => {
-        compile_error!("Unsupported return type");
-    };
+    (@handle_ret_value $vm:ident, $other:ident, $value:ident) => { {
+        let stack_value = <$other as $crate::internals::binary::VMValue>::to_stack($value, &mut $vm.heap);
+        $vm.stack.push(stack_value);
+    } };
     // VM: Pops an argument and converts some special cases.
     (@handle_param_value $vm:ident, u8) => { $vm.stack.pop() };
     (@handle_param_value $vm:ident, u16) => { $vm.stack.pop() };
@@ -136,22 +146,57 @@ macro_rules! itsy_api {
     (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param_value $vm:ident, String) => { $vm.stack.pop() };
     (@handle_param_value $vm:ident, str) => { $vm.stack.pop() };
-    (@handle_param_value $vm:ident, $_:tt) => { { compile_error!("Unsupported parameter type") } };
-    // VM: Translate parameter list pseudo-types to internally used types.
+    (@handle_param_value $vm:ident, $other:ident) => { $vm.stack.pop() };
+    // VM: Translate parameter list pseudo-types to internally used types. Primitives are loaded as
+    // themselves; strings and reference types (structs/enums) are loaded as a HeapRef.
+    (@handle_param_type u8) => { u8 };
+    (@handle_param_type u16) => { u16 };
+    (@handle_param_type u32) => { u32 };
+    (@handle_param_type u64) => { u64 };
+    (@handle_param_type i8) => { i8 };
+    (@handle_param_type i16) => { i16 };
+    (@handle_param_type i32) => { i32 };
+    (@handle_param_type i64) => { i64 };
+    (@handle_param_type f32) => { f32 };
+    (@handle_param_type f64) => { f64 };
+    (@handle_param_type bool) => { bool };
     (@handle_param_type String) => { $crate::internals::binary::heap::HeapRef };
     (@handle_param_type str) => { $crate::internals::binary::heap::HeapRef };
-    (@handle_param_type $other:ident) => { $other };
+    (@handle_param_type $other:ident) => { <$other as $crate::internals::binary::VMValue>::Stack };
     // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
+    (@handle_ref_param_value $vm:ident, u8, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, u16, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, u32, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, u64, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, i8, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, i16, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, i32, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, i64, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, f32, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, f64, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, bool, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap().to_string() };
     (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap() };
-    (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { <$other as $crate::internals::binary::VMValue>::from_stack(&$vm.heap, $arg_name) };
     // VM: Translate some pseudo-type names to concrete rust types.
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
     (@handle_ref_param_type $other:ident) => { $other };
-    // VM: Generate reference counting code for some pseudo type arguments.
+    // VM: Generate reference counting code for some pseudo type arguments. Primitives need no cleanup;
+    // strings free their temporary heap object; reference types recursively free theirs.
+    (@handle_ref_param_free $vm:ident, u8, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, u16, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, u32, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, u64, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, i8, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, i16, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, i32, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, i64, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, f32, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, f64, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, bool, $arg_name:ident) => { };
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { };
+    (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { <$other as $crate::internals::binary::VMValue>::free_stack(&mut $vm.heap, $arg_name) };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
         $(
@@ -209,6 +254,16 @@ macro_rules! itsy_api {
                     map.insert(concat!(stringify!($type_name), "::", stringify!($name)), ($type_name::$name.to_index(), stringify!($($ret_type)?), vec![ $(stringify!( $arg_type )),* ]));
                 )*
                 map
+            }
+            #[allow(unused_mut)]
+            #[cfg(feature="compiler")]
+            fn resolve_types() -> Vec<$crate::internals::binary::ApiTypeDef> {
+                let mut defs = Vec::new();
+                $(
+                    $( <$arg_type as $crate::internals::binary::VMType>::collect_type_defs(&mut defs); )*
+                    $( <$ret_type as $crate::internals::binary::VMType>::collect_type_defs(&mut defs); )?
+                )*
+                defs
             }
         }
 

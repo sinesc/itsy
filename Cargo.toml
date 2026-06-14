@@ -10,6 +10,9 @@ license = "MIT"
 readme = "README.md"
 keywords = [ "language", "scripting" ]
 
+[workspace]
+members = [ "itsy-derive" ]
+
 [profile.release]
 #strip = true
 #lto = true
@@ -23,10 +26,12 @@ debugging = [ ]
 symbols = [ ]
 comments = [ ]
 ice_panics = [ ]
+derive = [ "itsy-derive" ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }
 paste = "1.0"
+itsy-derive = { version = "0.5", path = "itsy-derive", optional = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 winapi-util = "0.1"

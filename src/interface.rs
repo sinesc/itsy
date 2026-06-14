@@ -53,6 +53,10 @@ pub mod internals {
         }
         pub use crate::bytecode::{VMFunc, VMData};
         pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
+        #[cfg(feature="compiler")]
+        pub use crate::marshal::{VMType, ApiTypeDef, ApiTypeKind};
+        #[cfg(feature="runtime")]
+        pub use crate::marshal::{VMValue, VMField, read_nested_ref, write_variant_tag, read_variant_tag, alloc_value, VARIANT_TAG_SIZE};
     }
     #[cfg(doc)]
     pub use crate::bytecode::builtins::documentation;

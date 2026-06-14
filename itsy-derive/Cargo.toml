@@ -1,0 +1,17 @@
+[package]
+name = "itsy-derive"
+version = "0.5.0"
+edition = "2024"
+authors = ["Dennis Möhlmann <dmo479@gmail.com>"]
+description = "Derive macro for the itsy crate. Generates Itsy API marshalling glue for structs and enums."
+documentation = "https://docs.rs/itsy/"
+repository = "https://github.com/sinesc/itsy.git"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+proc-macro2 = "1.0"

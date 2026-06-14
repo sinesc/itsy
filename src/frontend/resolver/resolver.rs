@@ -91,6 +91,71 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
+    // register struct/enum types used by the rust API into the root scope (two passes so that types
+    // can reference each other regardless of declaration order). Pass 1 inserts the named, empty types,
+    // pass 2 resolves their fields/variants against the now-known set of names.
+    use crate::marshal::ApiTypeKind;
+    let api_type_defs = T::resolve_types();
+    for def in &api_type_defs {
+        if scopes.type_id(ScopeId::ROOT, def.name).is_none() {
+            let placeholder = match &def.kind {
+                ApiTypeKind::Struct { .. } => Type::Struct(Struct { fields: Map::new(), impl_traits: Map::new() }),
+                ApiTypeKind::PrimitiveEnum { .. } | ApiTypeKind::DataEnum { .. } => Type::Enum(Enum { variants: Vec::new(), impl_traits: Map::new(), primitive: None }),
+            };
+            scopes.insert_type(Some(def.name), placeholder);
+        }
+    }
+    let api_discriminant_type_id = *primitives.get(&Type::i32).ice()?;
+    let api_discriminant_size = Type::i32.primitive_size();
+    for def in &api_type_defs {
+        let type_id = scopes.type_id(ScopeId::ROOT, def.name).ice_msg(&format!("Failed to register API type '{}'", def.name))?;
+        match &def.kind {
+            ApiTypeKind::Struct { fields } => {
+                let mut field_map = Map::new();
+                for (field_name, field_type_name) in fields {
+                    let field_type_id = scopes.type_id(ScopeId::ROOT, field_type_name)
+                        .ice_msg(&format!("Unknown type '{}' encountered in field '{}' of API type '{}'", field_type_name, field_name, def.name))?;
+                    field_map.insert(field_name.to_string(), Some(field_type_id));
+                }
+                *scopes.type_mut(type_id) = Type::Struct(Struct { fields: field_map, impl_traits: Map::new() });
+            },
+            ApiTypeKind::PrimitiveEnum { variants } => {
+                let mut enum_variants = Vec::new();
+                for (name, discriminant) in variants {
+                    let discriminant = Numeric::Signed(*discriminant);
+                    enum_variants.push((name.to_string(), EnumVariant::Simple(Some(discriminant))));
+                    // C-like enum variant: a constant holding the bare discriminant
+                    scopes.insert_constant(&format!("{}::{}", def.name, name), type_id, Some(type_id), ConstantValue::Discriminant(discriminant));
+                }
+                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: Some((api_discriminant_type_id, api_discriminant_size)) });
+            },
+            ApiTypeKind::DataEnum { variants } => {
+                let mut enum_variants = Vec::new();
+                for (index, (name, field_type_names)) in variants.iter().enumerate() {
+                    let path = format!("{}::{}", def.name, name);
+                    if field_type_names.is_empty() {
+                        // unit variant of a data enum: a constant; the discriminant is unused (the heap
+                        // tag is the variant index) but must be present for as_simple() lookups.
+                        let discriminant = Numeric::Signed(index as i64);
+                        enum_variants.push((name.to_string(), EnumVariant::Simple(Some(discriminant))));
+                        scopes.insert_constant(&path, type_id, Some(type_id), ConstantValue::Discriminant(discriminant));
+                    } else {
+                        let mut field_type_ids = Vec::new();
+                        for field_type_name in field_type_names {
+                            let field_type_id = scopes.type_id(ScopeId::ROOT, field_type_name)
+                                .ice_msg(&format!("Unknown type '{}' encountered in variant '{}' of API type '{}'", field_type_name, name, def.name))?;
+                            field_type_ids.push(Some(field_type_id));
+                        }
+                        // data variant: a constructor function tagged with its variant index
+                        scopes.insert_function(&path, Some(type_id), field_type_ids.clone(), Some(FunctionKind::Variant(type_id, index as VariantIndex)));
+                        enum_variants.push((name.to_string(), EnumVariant::Data(field_type_ids)));
+                    }
+                }
+                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: None });
+            },
+        }
+    }
+
     // insert rust functions into root scope
     for (name, (index, ret_type_name, arg_type_names)) in T::resolve_info().into_iter() {
         let ret_type = if ret_type_name == "" {

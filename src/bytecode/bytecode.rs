@@ -31,6 +31,11 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     #[cfg(feature="compiler")]
     fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
+    /// Returns the transitive set of struct/enum types used in the API's function signatures, so the
+    /// resolver can register them in the root scope.
+    #[doc(hidden)]
+    #[cfg(feature="compiler")]
+    fn resolve_types() -> Vec<crate::marshal::ApiTypeDef> { Vec::new() }
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.
