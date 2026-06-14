@@ -487,11 +487,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves types and bindings used in an expression.
     fn resolve_expression(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
         use ast::Expression::*;
-        match item { // todo: these all need to check expected_result since the caller might depend on an error result on type mismatch
+        match item {
             Literal(literal) => self.resolve_literal(literal, expected_result),
             Variable(variable) => self.resolve_variable(variable, expected_result),
             Constant(constant) => self.resolve_constant(constant, expected_result),
-            Assignment(assignment) => self.resolve_assignment(assignment),
+            Assignment(assignment) => self.resolve_assignment(assignment, expected_result),
             BinaryOp(binary_op) => self.resolve_binary_op(binary_op, expected_result),
             UnaryOp(unary_op) => self.resolve_unary_op(unary_op, expected_result),
             Block(block) => self.resolve_block(block, expected_result),
@@ -1259,13 +1259,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment) -> ResolveResult {
+    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment, expected_result: Option<TypeId>) -> ResolveResult {
         let right_type_id = item.right.type_id(self);
         self.resolve_expression(&mut item.left, right_type_id)?;
         let left_type_id = item.left.type_id(self);
         self.resolve_expression(&mut item.right, left_type_id)?;
+        // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
         item.type_id = Some(TypeId::VOID);
-        self.resolved(item)
+        self.types_resolved(item, expected_result)
     }
 
     /// Resolves a binary operation.
@@ -1489,7 +1490,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 return Self::ice("Unexpected operator in resolve_binary_op");
             },
         }
-        self.resolved(item)
+        // validate the produced type against what the caller expects. several branches above (comparisons,
+        // logical and/or, member access) produce a type independent of expected_result, so without this check
+        // a mismatch (e.g. `let x: i32 = a < b;`) would slip past the resolver and corrupt the VM stack.
+        self.types_resolved(item, expected_result)
     }
 
     /// Resolves a binding created by let, for or a signature.
@@ -1563,7 +1567,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     fn resolve_literal(self: &mut Self, item: &mut ast::Literal, expected_type: Option<TypeId>) -> ResolveResult {
         use self::ast::LiteralValue as LV;
 
-        if let LV::Bool(_) = item.value { // todo: all of these need to check expected type if any
+        if let LV::Bool(_) = item.value {
             if let Some(expected_type_id) = expected_type {
                 self.check_type_accepted_for(item, self.primitive_type_id(Type::bool)?, expected_type_id)?;
             }

@@ -329,3 +329,53 @@ fn optimized_compare() {
         (x+1) <= 2,
     ]);
 }
+#[test]
+fn comparison_result_type_mismatch_rejected() {
+    // a comparison produces bool regardless of the expected type; assigning it to a non-bool binding must be
+    // rejected by the resolver rather than slipping through and corrupting the VM stack at runtime
+    let err = build_err(stringify!(
+        fn main() {
+            let a = 1;
+            let b = 2;
+            let x: i32 = a < b;
+        }
+    ));
+    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+}
+
+#[test]
+fn logical_result_type_mismatch_rejected() {
+    let err = build_err(stringify!(
+        fn main() {
+            let a = true;
+            let b = false;
+            let x: i32 = a && b;
+        }
+    ));
+    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+}
+
+#[test]
+fn comparison_result_type_mismatch_in_block_rejected() {
+    // the block forwards the expected type to its result expression, so the comparison must still be checked
+    let err = build_err(stringify!(
+        fn main() {
+            let a = 1;
+            let b = 2;
+            let x: i32 = { a < b };
+        }
+    ));
+    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+}
+
+#[test]
+fn assignment_result_type_mismatch_rejected() {
+    // an assignment is a void expression; using its result where a value is expected must be rejected
+    let err = build_err(stringify!(
+        fn main() {
+            let mut a = 0;
+            let x: bool = a = 5;
+        }
+    ));
+    assert!(err.contains("void"), "unexpected error: {}", err);
+}
