@@ -456,3 +456,54 @@ fn return_if_expr_with_local() {
     ));
     assert_all(&result, &[ 8u8, 3u8 ]);
 }
+
+#[test]
+fn match_bool_non_exhaustive_rejected() {
+    // a bool match covering only one value (no catch-all) must report the missing value as a witness
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match true {
+                true => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("false"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_bool_exhaustive_ok() {
+    let result = run(stringify!(
+        let b = false;
+        ret_i32(match b {
+            true => 1,
+            false => 0,
+        });
+    ));
+    assert_all(&result, &[ 0i32 ]);
+}
+
+#[test]
+fn match_integer_requires_catchall() {
+    // integers have no finite signature, so a literal-only match is never exhaustive
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match 5i32 {
+                1 => 1,
+                5 => 5,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("_"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_integer_catchall_ok() {
+    let result = run(stringify!(
+        let x = 5i32;
+        ret_i32(match x {
+            1 => 1,
+            _ => 99,
+        });
+    ));
+    assert_all(&result, &[ 99i32 ]);
+}

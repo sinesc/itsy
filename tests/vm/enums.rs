@@ -177,6 +177,67 @@ fn match_variant_pattern_on_non_enum_rejected() {
 }
 
 #[test]
+fn match_non_exhaustive_missing_variant_rejected() {
+    // a match that omits a variant and has no catch-all must be a resolver error naming the uncovered variant
+    let err = build_err(stringify!(
+        enum E { A, B, C }
+        fn main() {
+            ret_i32(match E::A {
+                E::A => 0,
+                E::B => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Resolver error") && err.contains("Non-exhaustive") && err.contains("E::C"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_non_exhaustive_data_variant_rejected() {
+    // the witness for a missing data variant carries a wildcard sub-pattern
+    let err = build_err(stringify!(
+        enum E { A, Data(i32) }
+        fn main() {
+            ret_i32(match E::A {
+                E::A => 0,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("E::Data(_)"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_exhaustive_all_variants_ok() {
+    // covering every variant (without a catch-all) is exhaustive
+    let result = run(stringify!(
+        enum E { A, B, Data(i32) }
+        fn main() {
+            let e = E::Data(7);
+            ret_i32(match e {
+                E::A => 0,
+                E::B => 1,
+                E::Data(n) => n,
+            });
+        }
+    ));
+    assert_all(&result, &[ 7i32 ]);
+}
+
+#[test]
+fn match_non_exhaustive_nested_enum_rejected() {
+    // exhaustiveness recurses into a covered variant's data: the inner enum is not fully covered here
+    let err = build_err(stringify!(
+        enum Inner { X, Y }
+        enum Outer { Wrap(Inner) }
+        fn main() {
+            ret_i32(match Outer::Wrap(Inner::X) {
+                Outer::Wrap(Inner::X) => 0,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("Inner::Y"), "unexpected error: {}", err);
+}
+
+#[test]
 fn match_reference_enum() {
     // unit and data variants, literal sub-pattern, field binding (incl. heap String extraction) and wildcard
     let result = run(stringify!(

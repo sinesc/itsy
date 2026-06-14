@@ -25,6 +25,8 @@ pub enum ResolveErrorKind {
     /// Enum variant literal is not numeric. TODO: non-numeric currently intercepted by the parser. eventually consts should be allowed here which the parser wouldn't catch
     InvalidVariantLiteral,
     NotATraitMethod(String, String),
+    /// A match block does not cover all possible values; the string is a witness pattern that is left uncovered.
+    NonExhaustiveMatch(String),
     NotIterable(String),
     NotCallable(String),
     CannotResolve(String),
@@ -79,6 +81,7 @@ impl Display for ResolveError {
             ResolveErrorKind::InvalidVariantValue(numeric) => write!(f, "Invalid enum variant discriminant {numeric}. Discriminants must be integer types"),
             ResolveErrorKind::InvalidVariantLiteral => write!(f, "Invalid enum variant literal"),
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
+            ResolveErrorKind::NonExhaustiveMatch(witness) => write!(f, "Non-exhaustive match: pattern '{}' not covered", witness),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type {t} is not callable"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case

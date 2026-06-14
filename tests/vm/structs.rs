@@ -258,6 +258,41 @@ fn match_struct_pattern() {
 }
 
 #[test]
+fn match_struct_non_exhaustive_rejected() {
+    // a struct is a product type: leaving a field value uncovered (and no catch-all) is non-exhaustive
+    let err = build_err(stringify!(
+        struct Flags { a: bool }
+        fn main() {
+            ret_i32(match Flags { a: true } {
+                Flags { a: true } => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("Flags") && err.contains("false"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_struct_exhaustive_product_ok() {
+    // covering every combination of a struct's field values is exhaustive without a catch-all
+    let result = run(stringify!(
+        struct Flags { a: bool, b: bool }
+        fn classify(f: Flags) -> i32 {
+            match f {
+                Flags { a: true, b: true } => 3,
+                Flags { a: true, b: false } => 2,
+                Flags { a: false, b: true } => 1,
+                Flags { a: false, b: false } => 0,
+            }
+        }
+        fn main() {
+            ret_i32(classify(Flags { a: true, b: false }));
+            ret_i32(classify(Flags { a: false, b: true }));
+        }
+    ));
+    assert_all(&result, &[ 2i32, 1i32 ]);
+}
+
+#[test]
 fn match_struct_pattern_nested() {
     // struct nested in struct and struct nested in enum, navigated across heap boundaries
     let result = run(stringify!(

@@ -3,6 +3,7 @@
 #[path="scopes/scopes.rs"]
 mod scopes;
 mod stage;
+mod exhaustiveness;
 pub mod error;
 pub mod resolved;
 
@@ -415,6 +416,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             call_args.args.insert(0, arg);
         }
         Ok(())
+    }
+
+    /// Returns an error kind if the pattern is refutable and thus cannot be used in a let binding.
+    fn check_pattern_irrefutable(pattern: &ast::Pattern) -> Result<(), ResolveErrorKind> {
+        use ast::Pattern;
+        match pattern {
+            Pattern::Wildcard(_) | Pattern::Binding(_) => Ok(()),
+            Pattern::Struct(structure) => {
+                for (_, field) in &structure.fields {
+                    Self::check_pattern_irrefutable(field)?;
+                }
+                Ok(())
+            },
+            Pattern::Literal(_) => Err(ResolveErrorKind::InvalidOperation("Refutable literal pattern not allowed in let binding".to_string())),
+            Pattern::VariantTuple(_) | Pattern::Path(_) => Err(ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string())),
+        }
     }
 }
 
@@ -1068,6 +1085,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_block(block, expected_result)?;
         }
         self.scope_id = parent_scope_id;
+        // the match must cover every possible value of the subject (the compiler relies on this: a non-matching
+        // subject would fall through past the arms without being discarded). the check runs every pass but stays
+        // silent (Err) until all the types it needs are resolved, so it cannot report a false gap on an early pass.
+        if let Some(subject_type_id) = subject_type_id {
+            let matrix: Vec<Vec<Option<&ast::Pattern>>> = item.branches.iter().map(|(pattern, _)| vec![Some(pattern)]).collect();
+            if let Ok(Some(witness)) = exhaustiveness::witness(self, &[Some(subject_type_id)], &matrix) {
+                let witness = witness.into_iter().next().unwrap_or_else(|| "_".to_string());
+                return Err(ResolveError::new(item, ResolveErrorKind::NonExhaustiveMatch(witness), self.module_path));
+            }
+        }
         self.resolved(item)
     }
 
@@ -1504,22 +1531,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let subject_type_id = item.expr.type_id(self);
         self.resolve_pattern(&mut item.pattern, subject_type_id)?;
         self.resolved(item)
-    }
-
-    /// Returns an error kind if the pattern is refutable and thus cannot be used in a let binding.
-    fn check_pattern_irrefutable(pattern: &ast::Pattern) -> Result<(), ResolveErrorKind> {
-        use ast::Pattern;
-        match pattern {
-            Pattern::Wildcard(_) | Pattern::Binding(_) => Ok(()),
-            Pattern::Struct(structure) => {
-                for (_, field) in &structure.fields {
-                    Self::check_pattern_irrefutable(field)?;
-                }
-                Ok(())
-            },
-            Pattern::Literal(_) => Err(ResolveErrorKind::InvalidOperation("Refutable literal pattern not allowed in let binding".to_string())),
-            Pattern::VariantTuple(_) | Pattern::Path(_) => Err(ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string())),
-        }
     }
 
     /// Resolves a unary operation.
