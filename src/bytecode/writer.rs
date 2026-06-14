@@ -82,7 +82,7 @@ impl<T> Writer<T> where T: VMFunc<T> {
     /// Reserves space for a data-block on the const pool and returns its base address.
     pub fn reserve_const_data(self: &Self, size: StackAddress) -> StackAddress {
         let position = self.program().consts.len() as StackAddress;
-        self.program().const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        self.program().const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
         let pool_size = self.program().consts.len();
         self.program().consts.resize(pool_size + size as usize, 0);
         position
@@ -98,7 +98,7 @@ macro_rules! impl_store_const {
                 let position = self.program().consts.len() as StackAddress;
                 let size = size_of::<$type>() as StackAddress;
                 let mut program = self.program();
-                program.const_descriptors.push(ConstDescriptor { position, size, endianness: $endianess });
+                program.const_descriptors.push(ConstDescriptor { size, endianness: $endianess });
                 program.consts.extend_from_slice(&value.to_le_bytes());
                 position
             }
@@ -143,7 +143,7 @@ impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
         // string data
         let position = self.program().consts.len() as StackAddress;
         let mut program = self.program();
-        program.const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        program.const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
         program.consts.extend_from_slice(raw_bytes);
         position
     }
@@ -158,7 +158,7 @@ impl<P> StoreConst<Constructor> for Writer<P> where P: VMFunc<P> {
         let position = self.program().consts.len() as StackAddress;
         let size = size_of::<Constructor>() as StackAddress;
         let mut program = self.program();
-        program.const_descriptors.push(ConstDescriptor { position, size, endianness: ConstEndianness::None });
+        program.const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
         program.consts.push(value.to_u8());
         position
     }

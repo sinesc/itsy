@@ -108,8 +108,10 @@ impl<T, U> VM<T, U> {
     fn init_consts(consts: &Vec<u8>, const_descriptors: &Vec<ConstDescriptor>) -> Stack {
         use ConstEndianness as CE;
         let mut stack = Stack::new();
+        // descriptors describe consecutive blocks of the const pool, so the start of each block is
+        // the running sum of all preceding block sizes
+        let mut start = 0usize;
         for descriptor in const_descriptors {
-            let start = descriptor.position as usize;
             let end = start + descriptor.size as usize;
             match (descriptor.endianness, descriptor.size) {
                 (_, 1)              => stack.push(consts[start]),
@@ -121,6 +123,7 @@ impl<T, U> VM<T, U> {
                 (CE::None, _)       => stack.extend_from(&consts[start..end]),
                 _ => panic!("Unexpected ConstDescriptor {:?}.", &descriptor),
             }
+            start = end;
         }
         stack.begin();
         stack

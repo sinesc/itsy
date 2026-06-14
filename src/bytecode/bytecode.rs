@@ -168,33 +168,29 @@ impl ConstEndianness {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ConstDescriptor { // todo: order serially, remove position, reduce size to u8 (requires reserve_const_data removal)
-    pub(crate) position    : StackAddress,
+pub(crate) struct ConstDescriptor {
     pub(crate) size        : StackAddress,
     pub(crate) endianness  : ConstEndianness,
 }
 
 impl ConstDescriptor {
-    const SERIALIZED_SIZE: usize = 9;
+    // Descriptors describe consecutive blocks of the const pool in write order, so each block's
+    // position is the running sum of all preceding sizes and does not need to be stored.
+    const SERIALIZED_SIZE: usize = 5;
     fn to_bytes(self: &Self) -> [ u8; Self::SERIALIZED_SIZE ] {
         let mut result = [ 0u8; Self::SERIALIZED_SIZE ];
-        let position = (self.position as u32).to_le_bytes();
         let size = (self.size as u32).to_le_bytes();
         // whoa clunky, can't copy to specific position into an array?
-        let position_slice = &mut result[0..4];
-        position_slice.copy_from_slice(&position);
-        let size_slice = &mut result[4..8];
+        let size_slice = &mut result[0..4];
         size_slice.copy_from_slice(&size);
-        result[8] = self.endianness as u8;
+        result[4] = self.endianness as u8;
         result
     }
     fn from_bytes(mut descriptor: &[ u8 ]) -> Option<Self> {
         const U32: usize = size_of::<u32>();
-        let position = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
         let size = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
         let endianness = ConstEndianness::from_u8(read(&mut descriptor, 1)?[0])?;
         Some(Self {
-            position,
             size,
             endianness,
         })
