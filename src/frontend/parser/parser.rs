@@ -1161,26 +1161,34 @@ fn pattern(i: Input) -> Output<Pattern> {
             move |(path, elements)| Pattern::VariantTuple(VariantTuplePattern { position, path, elements })
         )(i)
     }
-    /// A struct with brace-delimited field sub-patterns, e.g. `Struct { a: 123, b }`.
+    /// A struct with brace-delimited field sub-patterns, e.g. `Struct { a: 123, b }`. A trailing `..` makes
+    /// the pattern ignore any unlisted fields (e.g. `Struct { a, .. }` or the field-less `Struct { .. }`).
     /// Wrapped in `snap` by the caller so bindings allocated by field sub-patterns roll back on failure.
     fn struct_pattern(i: Input) -> Output<Pattern> {
         let position = i.position();
-        /// A field: either `name: sub_pattern` or shorthand `name` (binds a variable named after the field).
-        fn field(i: Input) -> Output<(Ident, Pattern)> {
+        /// A struct pattern entry: either a `..` rest marker or a field (`name: sub_pattern`, or shorthand
+        /// `name` binding a variable named after the field).
+        enum Entry { Rest, Field(Ident, Pattern) }
+        fn entry(i: Input) -> Output<Entry> {
             let position = i.position();
             let j = i.clone();
             alt((
-                map(tuple((ident, punct(":"), pattern)), |(name, _, pat)| (name, pat)),
+                map(punct(".."), |_| Entry::Rest),
+                map(tuple((ident, punct(":"), pattern)), |(name, _, pat)| Entry::Field(name, pat)),
                 map(ident, move |name| {
                     let binding_id = if j.flags().is_dead { BindingId::new(0) } else { j.add_binding(&name.name) };
                     let binding = Pattern::Binding(BindingPattern { position, ident: name.clone(), binding_id });
-                    (name, binding)
+                    Entry::Field(name.clone(), binding)
                 }),
             ))(i)
         }
         map(
-            pair(path, delimited(punct("{"), separated_list1(punct(","), field), preceded(opt(punct(",")), punct("}")))),
-            move |(path, fields)| Pattern::Struct(StructPattern { position, path, fields })
+            pair(path, delimited(punct("{"), separated_list0(punct(","), entry), preceded(opt(punct(",")), punct("}")))),
+            move |(path, entries)| {
+                let rest = entries.iter().any(|e| matches!(e, Entry::Rest));
+                let fields = entries.into_iter().filter_map(|e| match e { Entry::Field(name, pat) => Some((name, pat)), Entry::Rest => None }).collect();
+                Pattern::Struct(StructPattern { position, path, fields, rest })
+            }
         )(i)
     }
     /// A path: multiple segments match a unit variant/constant, a single segment introduces a binding.

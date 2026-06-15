@@ -1157,7 +1157,11 @@ impl Display for Pattern {
             Pattern::Binding(binding) => write!(f, "{}", binding),
             Pattern::Literal(literal) => write!(f, "{}", literal),
             Pattern::VariantTuple(variant) => write!(f, "{}({})", variant.path, variant.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ")),
-            Pattern::Struct(structure) => write!(f, "{} {{ {} }}", structure.path, structure.fields.iter().map(|(n, p)| format!("{}: {}", n, p)).collect::<Vec<_>>().join(", ")),
+            Pattern::Struct(structure) => {
+                let mut entries = structure.fields.iter().map(|(n, p)| format!("{}: {}", n, p)).collect::<Vec<_>>();
+                if structure.rest { entries.push("..".to_string()); }
+                write!(f, "{} {{ {} }}", structure.path, entries.join(", "))
+            },
             Pattern::Path(path) => write!(f, "{}", path),
             Pattern::Range(range) => write!(f, "{}", range),
             Pattern::Or(or) => write!(f, "{}", or),
@@ -1195,12 +1199,14 @@ pub struct VariantTuplePattern {
 
 impl_positioned!(VariantTuplePattern);
 
-/// A struct pattern with field sub-patterns, e.g. `Struct { a: 123, b }`.
+/// A struct pattern with field sub-patterns, e.g. `Struct { a: 123, b }`. When `rest` is set, a trailing
+/// `..` was given and unlisted fields are ignored rather than required (e.g. `Struct { a, .. }`).
 #[derive(Debug)]
 pub struct StructPattern {
     pub position    : Position,
     pub path        : Path,
     pub fields      : Vec<(Ident, Pattern)>,
+    pub rest        : bool,
 }
 
 impl_positioned!(StructPattern);

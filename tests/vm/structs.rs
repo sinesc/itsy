@@ -325,7 +325,7 @@ fn match_struct_pattern_nested() {
 
 #[test]
 fn match_struct_pattern_missing_field_rejected() {
-    // every struct field must be matched (no rest-syntax)
+    // without a trailing `..`, every struct field must be matched
     let err = build_err(stringify!(
         struct P { x: i32, y: i32 }
         fn main() {
@@ -352,6 +352,69 @@ fn match_struct_pattern_unknown_field_rejected() {
         }
     ));
     assert!(err.contains("'z'"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_struct_pattern_rest() {
+    // a trailing `..` lets a struct pattern ignore unlisted fields, both in arms that bind a field and
+    // arms that match a literal; the field-less `P { .. }` form matches any value of the struct
+    let result = run(stringify!(
+        struct P { x: i32, y: i32, z: i32 }
+        fn main() {
+            let p = P { x: 2, y: 5, z: 9 };
+            ret_string(match p {
+                P { x: 3, .. } => "three",
+                P { x: 2, y, .. } => "two:{y}",
+                P { .. } => "any",
+            });
+        }
+    ));
+    assert(&result[0], "two:5".to_string());
+}
+
+#[test]
+fn let_destructure_struct_rest() {
+    // `..` in a let destructure ignores the remaining fields while still being irrefutable
+    let result = run(stringify!(
+        struct P { x: i32, y: i32, z: String }
+        fn main() {
+            let p = P { x: 1, y: 2, z: "hi" };
+            let P { x, .. } = p;
+            ret_i32(x);
+        }
+    ));
+    assert(&result[0], 1i32);
+}
+
+#[test]
+fn match_struct_pattern_rest_exhaustive() {
+    // `P { .. }` covers every value of the struct, so no wildcard arm is required
+    let result = run(stringify!(
+        struct P { x: i32, y: i32 }
+        fn main() {
+            let p = P { x: 1, y: 2 };
+            ret_i32(match p {
+                P { .. } => 42,
+            });
+        }
+    ));
+    assert(&result[0], 42i32);
+}
+
+#[test]
+fn match_struct_pattern_rest_duplicate_field_rejected() {
+    // `..` allows missing fields but a listed field still may not be repeated
+    let err = build_err(stringify!(
+        struct P { x: i32, y: i32 }
+        fn main() {
+            let p = P { x: 1, y: 2 };
+            match p {
+                P { x: 1, x: 2, .. } => {},
+                _ => {},
+            }
+        }
+    ));
+    assert!(err.contains("field 'x'"), "unexpected error: {}", err);
 }
 
 #[test]

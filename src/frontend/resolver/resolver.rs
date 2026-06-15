@@ -1308,9 +1308,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             return Err(ResolveError::new(structure, ResolveErrorKind::UndefinedMember(field_name.name.clone()), self.module_path));
                         }
                     }
-                    // require every struct field to be matched (no rest-syntax yet); this also rejects duplicates
+                    // each field may be matched at most once; without a trailing `..` every field is also
+                    // required, so a missing field (count 0) is an error unless rest-syntax was given
                     for (struct_field, _) in struct_.fields.iter() {
-                        if structure.fields.iter().filter(|(name, _)| &name.name == struct_field).count() != 1 {
+                        let count = structure.fields.iter().filter(|(name, _)| &name.name == struct_field).count();
+                        if count > 1 || (count == 0 && !structure.rest) {
                             return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Struct pattern must match field '{}' exactly once", struct_field)), self.module_path));
                         }
                     }
