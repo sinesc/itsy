@@ -48,6 +48,7 @@ impl ResolveError {
     pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
     }
+    #[cfg(not(feature="ice_panics"))]
     pub(crate) fn ice(message: String) -> ResolveError {
         Self { kind: ResolveErrorKind::Internal(message), position: Position(0), module_path: "".to_string() }
     }

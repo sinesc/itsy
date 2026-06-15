@@ -1,7 +1,8 @@
-//! Tests for passing `#[derive(VMValue)]` structs across the Itsy API boundary.
+//! Tests for passing `#[derive(VMValue)]` structs/enums and arrays (`Vec<T>`) across the Itsy API
+//! boundary.
 //!
 //! Each test builds and runs a small program against a custom API that constructs, consumes and
-//! round-trips structs. Results are pushed into the `Context` via `ret_*` helpers and asserted with
+//! round-trips these types. Results are pushed into the `Context` via `ret_*` helpers and asserted with
 //! `assert_all`. Because `VM::run` reports `HeapCorruption` when objects are leaked at termination,
 //! these tests also catch reference-counting mistakes (leaks and double-frees).
 
@@ -142,6 +143,45 @@ itsy_api! {
         fn wrap_point(&mut context, x: i32, y: i32) -> Wrap {
             Wrap::Pt(Point { x, y })
         }
+        // arrays of primitives
+        fn make_range(&mut context, n: u16) -> [ u16 ] {
+            (0..n).collect()
+        }
+        fn sum_u16(&mut context, values: [ u16 ]) -> i32 {
+            values.iter().map(|v| *v as i32).sum()
+        }
+        // arrays of strings
+        fn make_words(&mut context) -> [ String ] {
+            vec![String::from("a"), String::from("bb"), String::from("ccc")]
+        }
+        fn join(&mut context, parts: [ String ]) -> String {
+            parts.join("-")
+        }
+        // arrays of structs/enums
+        fn make_points(&mut context, n: i32) -> [ Point ] {
+            (0..n).map(|i| Point { x: i, y: i * 2 }).collect()
+        }
+        fn points_sum(&mut context, ps: [ Point ]) -> i32 {
+            ps.iter().map(|p| p.x + p.y).sum()
+        }
+        fn shapes_area(&mut context, ss: [ Shape ]) -> f64 {
+            ss.iter().map(|s| match s {
+                Shape::Circle(r) => 3.0 * r * r,
+                Shape::Rect(w, h) => w * h,
+                Shape::Named(_) => -1.0,
+                Shape::Empty => 0.0,
+            }).sum()
+        }
+        // nested arrays
+        fn make_grid(&mut context, rows: u16, cols: u16) -> [ [ u16 ] ] {
+            (0..rows).map(|_| (0..cols).collect()).collect()
+        }
+        fn grid_sum(&mut context, g: [ [ u16 ] ]) -> i32 {
+            g.iter().flatten().map(|v| *v as i32).sum()
+        }
+        fn flatten_words(&mut context, g: [ [ String ] ]) -> String {
+            g.into_iter().flatten().collect::<Vec<String>>().join(",")
+        }
         // assertion helpers
         fn ret_i32(&mut context, value: i32) {
             context.push(Box::new(value));
@@ -155,7 +195,7 @@ itsy_api! {
     }
 }
 
-const PRELUDE: &str = "use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, ret_i32, ret_f64, ret_string};";
+const PRELUDE: &str = "use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, make_range, sum_u16, make_words, join, make_points, points_sum, shapes_area, make_grid, grid_sum, flatten_words, ret_i32, ret_f64, ret_string};";
 
 fn run(code: &str) -> Context {
     let input = format!("{} fn main() {{ {} }}", PRELUDE, code);
@@ -308,4 +348,94 @@ fn struct_as_enum_payload() {
         ret_i32(wrap_sum(Wrap::None));
     ));
     assert_all(&result, &[13_i32, 5_i32, -1_i32]);
+}
+
+#[test]
+fn primitive_array_rust_to_script() {
+    // make_range returns [u16] to the script, which indexes and re-passes it
+    let result = run(stringify!(
+        let r = make_range(5);
+        ret_i32(r[0] as i32);
+        ret_i32(r[4] as i32);
+        ret_i32(sum_u16(r));
+    ));
+    assert_all(&result, &[0_i32, 4_i32, 10_i32]);
+}
+
+#[test]
+fn primitive_array_script_to_rust() {
+    let result = run(stringify!(
+        let a: [ u16 ] = [ 3, 4, 5 ];
+        ret_i32(sum_u16(a));
+    ));
+    assert_all(&result, &[12_i32]);
+}
+
+#[test]
+fn empty_primitive_array() {
+    let result = run(stringify!(
+        ret_i32(sum_u16(make_range(0)));
+        let a: [ u16 ] = [ ];
+        ret_i32(sum_u16(a));
+    ));
+    assert_all(&result, &[0_i32, 0_i32]);
+}
+
+#[test]
+fn string_array_roundtrip() {
+    let result = run(stringify!(
+        ret_string(join(make_words()));
+        let parts = [ "x", "y", "z" ];
+        ret_string(join(parts));
+    ));
+    assert_all(&result, &[String::from("a-bb-ccc"), String::from("x-y-z")]);
+}
+
+#[test]
+fn struct_array_roundtrip() {
+    let result = run(stringify!(
+        ret_i32(points_sum(make_points(3)));
+        let ps = [ Point { x: 1, y: 2 }, Point { x: 3, y: 4 } ];
+        ret_i32(points_sum(ps));
+    ));
+    // make_points(3): (0,0),(1,2),(2,4) -> 0+3+6 = 9; literal: 3 + 7 = 10
+    assert_all(&result, &[9_i32, 10_i32]);
+}
+
+#[test]
+fn enum_array_passed_to_rust() {
+    let result = run(stringify!(
+        let shapes = [ Shape::Circle(2.0), Shape::Rect(3.0, 4.0), Shape::Empty ];
+        ret_f64(shapes_area(shapes));
+    ));
+    assert_all(&result, &[24.0_f64]);
+}
+
+#[test]
+fn nested_primitive_array_rust_to_script() {
+    let result = run(stringify!(
+        let g = make_grid(2, 3);
+        ret_i32(g[0][2] as i32);
+        ret_i32(grid_sum(g));
+    ));
+    // 2 rows of [0,1,2]; element [0][2] = 2; sum = 2 * (0+1+2) = 6
+    assert_all(&result, &[2_i32, 6_i32]);
+}
+
+#[test]
+fn nested_primitive_array_script_to_rust() {
+    let result = run(stringify!(
+        let g: [ [ u16 ] ] = [ [ 1, 2 ], [ 3 ], [ ] ];
+        ret_i32(grid_sum(g));
+    ));
+    assert_all(&result, &[6_i32]);
+}
+
+#[test]
+fn nested_string_array_script_to_rust() {
+    let result = run(stringify!(
+        let g = [ [ "a", "b" ], [ "c" ] ];
+        ret_string(flatten_words(g));
+    ));
+    assert_all(&result, &[String::from("a,b,c")]);
 }

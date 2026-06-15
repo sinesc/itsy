@@ -30,7 +30,7 @@ pub trait VMFunc<T>: Debug {
     fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, &'static str, Vec<&'static str>)>;
+    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<crate::marshal::ApiType>, Vec<crate::marshal::ApiType>)>;
     /// Returns the transitive set of struct/enum types used in the API's function signatures, so the
     /// resolver can register them in the root scope.
     #[doc(hidden)]

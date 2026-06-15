@@ -56,7 +56,7 @@ pub(crate) struct Compiler<T> {
 ///
 /// // Define an API of Rust functions that are callable from the Itsy script.
 /// itsy_api!(MyAPI<()> {
-///     fn print(&mut context, value: &str) {
+///     fn print(&mut context, value: str) {
 ///         println!("print: {}", value);
 ///     }
 ///     // ... more functions ...

@@ -46,7 +46,7 @@ pub(crate) struct Resolver<'ctx> {
 ///
 /// // Define an API of Rust functions that are callable from the Itsy script.
 /// itsy_api!(MyAPI<()> {
-///     fn print(&mut context, value: &str) {
+///     fn print(&mut context, value: str) {
 ///         println!("print: {}", value);
 ///     }
 ///     // ... more functions ...
@@ -68,6 +68,25 @@ pub(crate) struct Resolver<'ctx> {
 /// ```
 ///
 /// The returned [ResolvedProgram] is now ready for compilation by [compile](crate::compiler::compile).
+///
+/// Recursively resolves an API [ApiType] descriptor to a [TypeId] in the root scope. Named types are
+/// looked up (with `str` normalized to `String`); arrays are created as anonymous `[ element ]` types,
+/// which the resolver matches structurally so they unify with array literals in scripts.
+fn resolve_api_type(scopes: &mut scopes::Scopes, api_type: &crate::marshal::ApiType, fn_name: &str, position: &str) -> ResolveResult<TypeId> {
+    use crate::marshal::ApiType;
+    match api_type {
+        ApiType::Name(type_name) => {
+            let type_name = if *type_name == "str" { "String" } else { *type_name };
+            scopes.type_id(ScopeId::ROOT, type_name)
+                .ice_msg(&format!("Unknown type '{}' encountered in rust fn '{}' {} position", type_name, fn_name, position))
+        },
+        ApiType::Array(element) => {
+            let element_type_id = resolve_api_type(scopes, element, fn_name, position)?;
+            Ok(scopes.insert_type(None, Type::Array(Array { type_id: Some(element_type_id) })))
+        },
+    }
+}
+
 #[allow(invalid_type_param_default)]
 pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveResult<ResolvedProgram<T>> where T: VMFunc<T> {
 
@@ -157,23 +176,14 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     }
 
     // insert rust functions into root scope
-    for (name, (index, ret_type_name, arg_type_names)) in T::resolve_info().into_iter() {
-        let ret_type = if ret_type_name == "" {
-            Some(*primitives.get(&Type::void).ice()?)
-        } else {
-            Some(scopes.type_id(ScopeId::ROOT, ret_type_name).ice_msg(&format!("Unknown type '{}' encountered in rust fn '{}' return position", ret_type_name, name))?)
+    for (name, (index, ret_type, arg_types)) in T::resolve_info().into_iter() {
+        let ret_type = match &ret_type {
+            None => Some(*primitives.get(&Type::void).ice()?),
+            Some(ret_type) => Some(resolve_api_type(&mut scopes, ret_type, name, "return")?),
         };
-        let arg_type_id: ResolveResult<Vec<_>> = arg_type_names
+        let arg_type_id: ResolveResult<Vec<_>> = arg_types
             .iter()
-            .map(|arg_type_name| {
-                let arg_type_name = if &arg_type_name[0..2] == "& " { &arg_type_name[2..] } else { &arg_type_name[..] };
-                let type_id = scopes.type_id(ScopeId::ROOT, if arg_type_name == "str" { "String" } else { arg_type_name });
-                if type_id.is_some() {
-                    Ok(type_id)
-                } else {
-                    Err(ResolveError::ice(format!("Unknown type '{}' encountered in rust fn '{}' argument position", arg_type_name, name)))
-                }
-            })
+            .map(|arg_type| Ok(Some(resolve_api_type(&mut scopes, arg_type, name, "argument")?)))
             .collect();
         scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }

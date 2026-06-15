@@ -7,11 +7,11 @@ struct BenchContext {
 
 itsy_api! {
     BenchAPI<BenchContext> {
-        fn print(&mut context, value: &str) {
+        fn print(&mut context, value: str) {
             print!("{}", value);
             io::stdout().flush().unwrap();
         }
-        fn println(&mut context, value: &str) {
+        fn println(&mut context, value: str) {
             println!("{}", value);
         }
         fn start_time(&mut context) {

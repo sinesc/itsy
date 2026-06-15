@@ -82,7 +82,7 @@ itsy_api! {
         fn ret_string(&mut context, value: String) {
             context.push(Box::new(value));
         }
-        fn ret_str(&mut context, value: &str) {
+        fn ret_str(&mut context, value: str) {
             context.push(Box::new(value.to_string()));
         }
     }

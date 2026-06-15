@@ -55,6 +55,18 @@ pub enum ApiTypeKind {
     },
 }
 
+/// Structural description of a type appearing in an API function's argument or return position. Unlike
+/// [ApiTypeDef] (which describes a named struct/enum to register), this describes how to *refer* to a
+/// type, supporting arrays (`[ T ]`) which are anonymous and resolved structurally by the resolver.
+#[cfg(feature = "compiler")]
+#[derive(Clone, Debug)]
+pub enum ApiType {
+    /// A named type, referenced by its Itsy name (a primitive, `String`, or a registered struct/enum).
+    Name(&'static str),
+    /// An array type with the given element type, corresponding to Itsy `[ element ]`.
+    Array(Box<ApiType>),
+}
+
 /// Provides the resolver with the Itsy type definition for a Rust type appearing in an API signature.
 ///
 /// Implemented (with the default no-op bodies) for primitives, `String` and `str`; derived for
@@ -128,6 +140,18 @@ impl_vmtype_builtin!(
     f32 => "f32", f64 => "f64", bool => "bool",
     String => "String", str => "str",
 );
+
+/// An array maps to an anonymous Itsy `[ element ]` type. It is never registered as a named type (the
+/// resolver creates it structurally from the [ApiType] descriptor), so `ITSY_NAME` is a placeholder and
+/// `itsy_type_def` yields nothing; `collect_type_defs` only forwards to the element type so that custom
+/// element types still get registered.
+#[cfg(feature = "compiler")]
+impl<T: VMType> VMType for Vec<T> {
+    const ITSY_NAME: &'static str = "[ ]";
+    fn collect_type_defs(out: &mut Vec<ApiTypeDef>) {
+        T::collect_type_defs(out);
+    }
+}
 
 // --- runtime-side built-in marshalling ---
 
@@ -224,5 +248,59 @@ impl VMField for String {
     fn free_field(heap: &mut Heap, base: HeapRef, offset: usize) {
         let item = read_heap_ref(heap, base, offset);
         heap.ref_item(item.index(), HeapRefOp::Free);
+    }
+}
+
+/// A `Vec<T>` marshals to an Itsy array `[ T ]`: a heap object whose data is the packed in-object
+/// representation of its elements (the same layout [VMField] uses for struct/enum fields). Element
+/// count is recovered from the object's byte length divided by the element's [VMField::HEAP_SIZE].
+/// Nesting works because `Vec<T>` is itself a [VMField] (a reference, like any other heap type).
+#[cfg(feature = "runtime")]
+impl<T: VMField> VMValue for Vec<T> {
+    type Stack = HeapRef;
+    fn from_stack(heap: &Heap, this: HeapRef) -> Self {
+        let count = heap.item(this.index()).data.len() / T::HEAP_SIZE;
+        let mut result = Vec::with_capacity(count);
+        let mut offset = 0usize;
+        for _ in 0..count {
+            result.push(T::read_field(heap, this, offset));
+            offset += T::HEAP_SIZE;
+        }
+        result
+    }
+    fn to_stack(self, heap: &mut Heap) -> HeapRef {
+        let mut buffer: Vec<u8> = Vec::new();
+        for element in self {
+            element.write_field(heap, &mut buffer);
+        }
+        alloc_value(heap, &buffer)
+    }
+    fn free_stack(heap: &mut Heap, this: HeapRef) {
+        if heap.item_refs(this.index()) == 0 {
+            let count = heap.item(this.index()).data.len() / T::HEAP_SIZE;
+            let mut offset = 0usize;
+            for _ in 0..count {
+                T::free_field(heap, this, offset);
+                offset += T::HEAP_SIZE;
+            }
+        }
+        heap.ref_item(this.index(), HeapRefOp::Free);
+    }
+}
+
+#[cfg(feature = "runtime")]
+impl<T: VMField> VMField for Vec<T> {
+    const HEAP_SIZE: usize = size_of::<HeapRef>();
+    fn read_field(heap: &Heap, base: HeapRef, offset: usize) -> Self {
+        let item = read_heap_ref(heap, base, offset);
+        <Self as VMValue>::from_stack(heap, item)
+    }
+    fn write_field(self, heap: &mut Heap, buf: &mut Vec<u8>) {
+        let item = <Self as VMValue>::to_stack(self, heap);
+        buf.extend_from_slice(&item.to_ne_bytes());
+    }
+    fn free_field(heap: &mut Heap, base: HeapRef, offset: usize) {
+        let item = read_heap_ref(heap, base, offset);
+        <Self as VMValue>::free_stack(heap, item);
     }
 }
