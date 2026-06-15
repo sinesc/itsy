@@ -710,6 +710,33 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.compile_pattern_test(subject_type_id, &element_access, field_pattern, fail_jumps)?;
                 }
             },
+            // an or-pattern matches if any alternative matches: test each in turn, short-circuiting to the
+            // body on the first success and only failing the arm if every alternative fails. Each alternative's
+            // test is stack-neutral, so converging branches all see the same (subject-only) stack.
+            ast::Pattern::Or(or) => {
+                let mut success_jumps = Vec::new();
+                let last = or.alternatives.len() - 1;
+                for (index, alternative) in or.alternatives.iter().enumerate() {
+                    if index == last {
+                        // final alternative: its failures are the or-pattern's failures (caller points them at the next arm)
+                        self.compile_pattern_test(subject_type_id, access, alternative, fail_jumps)?;
+                    } else {
+                        // earlier alternative: on success skip the rest, on failure fall through to the next alternative
+                        let mut alternative_fail = Vec::new();
+                        self.compile_pattern_test(subject_type_id, access, alternative, &mut alternative_fail)?;
+                        success_jumps.push(self.writer.jmp(123));
+                        let next_alternative = self.writer.position();
+                        for fail_jump in alternative_fail {
+                            self.writer.overwrite(fail_jump, |w| w.j0(next_alternative));
+                        }
+                    }
+                }
+                // every successful alternative lands here, ready for the caller to bind and run the body
+                let matched = self.writer.position();
+                for success_jump in success_jumps {
+                    self.writer.overwrite(success_jump, |w| w.jmp(matched));
+                }
+            },
         }
         Ok(())
     }
@@ -718,7 +745,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// access path being the subject itself). Recurses through nested variant/path sub-patterns.
     fn compile_pattern_bind(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern) -> CompileResult {
         match pattern {
-            ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) | ast::Pattern::Range(_) => {},
+            // or-patterns bind nothing (bindings inside them are rejected by the resolver)
+            ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) | ast::Pattern::Or(_) | ast::Pattern::Range(_) => {},
             // bind the selected value
             ast::Pattern::Binding(binding) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);

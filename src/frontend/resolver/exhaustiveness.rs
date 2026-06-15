@@ -33,6 +33,10 @@ pub(super) fn witness<'a>(meta: &impl MetaContainer, col_types: &[Option<TypeId>
         return Ok(if matrix.is_empty() { Some(Vec::new()) } else { None });
     };
     let head_type_id = head_type.ok_or(())?; // unresolved column type: cannot decide yet
+    // expand or-patterns at the head into independent rows so each alternative is considered on its own
+    // (e.g. `true | false` becomes two rows covering both bool constructors)
+    let matrix = expand_or_heads(matrix);
+    let matrix = matrix.as_slice();
     match type_ctors(meta, head_type_id) {
         // finite constructor set (bool, enum, struct): every constructor must be covered
         Some(ctors) => {
@@ -120,10 +124,35 @@ fn specialize_row<'a>(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCt
             }),
             _ => return None,
         },
+        // or-patterns at the head are flattened away by expand_or_heads before specialization is reached
+        Some(Pattern::Or(_)) => return None,
     };
     let mut specialized = sub;
     specialized.extend_from_slice(&row[1..]);
     Some(specialized)
+}
+
+/// Expands any or-pattern at the head (column 0) of a row into one row per alternative, recursing so that
+/// nested or-patterns are flattened too. Rows whose head is not an or-pattern are passed through unchanged.
+fn expand_or_heads<'a>(matrix: &[Vec<Option<&'a ast::Pattern>>]) -> Vec<Vec<Option<&'a ast::Pattern>>> {
+    let mut expanded = Vec::with_capacity(matrix.len());
+    for row in matrix {
+        expand_row_head(row, &mut expanded);
+    }
+    expanded
+}
+
+/// Appends `row` to `out`, first splitting a leading or-pattern into one row per alternative (recursively).
+fn expand_row_head<'a>(row: &[Option<&'a ast::Pattern>], out: &mut Vec<Vec<Option<&'a ast::Pattern>>>) {
+    if let Some(ast::Pattern::Or(or)) = row.first().copied().flatten() {
+        for alternative in &or.alternatives {
+            let mut alternative_row = row.to_vec();
+            alternative_row[0] = Some(alternative);
+            expand_row_head(&alternative_row, out);
+        }
+    } else {
+        out.push(row.to_vec());
+    }
 }
 
 /// Resolves the variant index named by a path's last segment against an enum type.

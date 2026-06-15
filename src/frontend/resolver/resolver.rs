@@ -538,6 +538,20 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Pattern::Literal(_) => Err(ResolveErrorKind::InvalidOperation("Refutable literal pattern not allowed in let binding".to_string())),
             Pattern::Range(_) => Err(ResolveErrorKind::InvalidOperation("Refutable range pattern not allowed in let binding".to_string())),
             Pattern::VariantTuple(_) | Pattern::Path(_) => Err(ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string())),
+            Pattern::Or(_) => Err(ResolveErrorKind::InvalidOperation("Refutable or-pattern not allowed in let binding".to_string())),
+        }
+    }
+
+    /// Returns whether the (possibly nested) pattern introduces any variable binding. Used to reject bindings
+    /// inside or-patterns, which would need consistent names/types across all alternatives (not yet supported).
+    fn pattern_introduces_binding(pattern: &ast::Pattern) -> bool {
+        use ast::Pattern;
+        match pattern {
+            Pattern::Binding(_) => true,
+            Pattern::Wildcard(_) | Pattern::Literal(_) | Pattern::Path(_) | Pattern::Range(_) => false,
+            Pattern::VariantTuple(variant) => variant.elements.iter().any(Self::pattern_introduces_binding),
+            Pattern::Struct(structure) => structure.fields.iter().any(|(_, field)| Self::pattern_introduces_binding(field)),
+            Pattern::Or(or) => or.alternatives.iter().any(Self::pattern_introduces_binding),
         }
     }
 }
@@ -1309,6 +1323,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     for (_, field_pattern) in structure.fields.iter_mut() {
                         self.resolve_pattern(field_pattern, None)?;
                     }
+                }
+            },
+            // an or-pattern matches if any alternative matches; each is resolved against the same subject type
+            Pattern::Or(or) => {
+                // bindings inside an or-pattern would need consistent names/types across all alternatives, which
+                // is not yet supported; reject them so a matched alternative never leaves a binding half-defined
+                for alternative in or.alternatives.iter() {
+                    if Self::pattern_introduces_binding(alternative) {
+                        return Err(ResolveError::new(alternative, ResolveErrorKind::InvalidOperation("Bindings are not allowed inside an or-pattern".to_string()), self.module_path));
+                    }
+                }
+                for alternative in or.alternatives.iter_mut() {
+                    self.resolve_pattern(alternative, subject_type_id)?;
                 }
             },
         }

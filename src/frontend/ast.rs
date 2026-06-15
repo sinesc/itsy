@@ -1131,6 +1131,8 @@ pub enum Pattern {
     Path(Path),
     /// An inclusive or exclusive numeric range, e.g. `1..5` or `1..=5`.
     Range(RangePattern),
+    /// A set of alternative patterns, any of which matches, e.g. `1 | 2 | 3`.
+    Or(OrPattern),
 }
 
 impl Positioned for Pattern {
@@ -1143,6 +1145,7 @@ impl Positioned for Pattern {
             Pattern::Struct(structure) => structure.position,
             Pattern::Path(path) => path.position,
             Pattern::Range(range) => range.position,
+            Pattern::Or(or) => or.position,
         }
     }
 }
@@ -1157,6 +1160,7 @@ impl Display for Pattern {
             Pattern::Struct(structure) => write!(f, "{} {{ {} }}", structure.path, structure.fields.iter().map(|(n, p)| format!("{}: {}", n, p)).collect::<Vec<_>>().join(", ")),
             Pattern::Path(path) => write!(f, "{}", path),
             Pattern::Range(range) => write!(f, "{}", range),
+            Pattern::Or(or) => write!(f, "{}", or),
         }
     }
 }
@@ -1215,6 +1219,22 @@ impl_positioned!(RangePattern);
 impl Display for RangePattern {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}..{}{}", self.lo, if self.inclusive { "=" } else { "" }, self.hi)
+    }
+}
+
+
+/// An or-pattern: a list of alternative patterns, any of which matches, e.g. `1 | 2 | 3`.
+#[derive(Debug)]
+pub struct OrPattern {
+    pub position        : Position,
+    pub alternatives    : Vec<Pattern>,
+}
+
+impl_positioned!(OrPattern);
+
+impl Display for OrPattern {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.alternatives.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(" | "))
     }
 }
 

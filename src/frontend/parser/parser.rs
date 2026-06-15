@@ -1197,14 +1197,30 @@ fn pattern(i: Input) -> Output<Pattern> {
             }
         })(i)
     }
-    alt((
-        wildcard,
-        range_pattern,
-        literal_pattern,
-        snap(variant_tuple),
-        snap(struct_pattern),
-        path_or_binding,
-    ))(i)
+    /// A single (non-or) pattern.
+    fn single_pattern(i: Input) -> Output<Pattern> {
+        alt((
+            wildcard,
+            range_pattern,
+            literal_pattern,
+            snap(variant_tuple),
+            snap(struct_pattern),
+            path_or_binding,
+        ))(i)
+    }
+    // a pattern is one or more `|`-separated alternatives (with an optional leading `|`); a single
+    // alternative collapses to the bare pattern, multiple become an or-pattern
+    let position = i.position();
+    map(
+        preceded(opt(punct("|")), separated_list1(punct("|"), single_pattern)),
+        move |mut alternatives| {
+            if alternatives.len() == 1 {
+                alternatives.pop().unwrap()
+            } else {
+                Pattern::Or(OrPattern { position, alternatives })
+            }
+        }
+    )(i)
 }
 
 /// Matches a match block expression.

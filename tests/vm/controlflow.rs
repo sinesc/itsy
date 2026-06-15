@@ -669,3 +669,128 @@ fn match_range_non_numeric_rejected() {
     ));
     assert!(err.contains("numeric"), "unexpected error: {}", err);
 }
+
+#[test]
+fn match_or_literals() {
+    let result = run(stringify!(
+        fn classify(n: i32) -> i32 {
+            match n {
+                1 | 2 | 3 => 10,
+                4 | 5 => 20,
+                _ => 0,
+            }
+        }
+        fn main() {
+            ret_i32(classify(1));
+            ret_i32(classify(3));
+            ret_i32(classify(4));
+            ret_i32(classify(5));
+            ret_i32(classify(6));
+        }
+    ));
+    assert_all(&result, &[ 10i32, 10, 20, 20, 0 ]);
+}
+
+#[test]
+fn match_or_bool_exhaustive() {
+    // `true | false` covers all bool values, so no catch-all is needed
+    let result = run(stringify!(
+        let b = true;
+        ret_i32(match b {
+            true | false => 7,
+        });
+    ));
+    assert_all(&result, &[ 7i32 ]);
+}
+
+#[test]
+fn match_or_enum_variants_exhaustive() {
+    // an or-pattern over enum variants plus the remaining variant covers the type without a catch-all
+    let result = run(stringify!(
+        enum E { A, B, C }
+        fn pick(e: E) -> i32 {
+            match e {
+                E::A | E::B => 1,
+                E::C => 2,
+            }
+        }
+        fn main() {
+            ret_i32(pick(E::A));
+            ret_i32(pick(E::B));
+            ret_i32(pick(E::C));
+        }
+    ));
+    assert_all(&result, &[ 1i32, 1, 2 ]);
+}
+
+#[test]
+fn match_or_enum_non_exhaustive_rejected() {
+    let err = build_err(stringify!(
+        enum E { A, B, C }
+        fn main() {
+            ret_i32(match E::A {
+                E::A | E::B => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("C"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_or_nested_in_variant() {
+    // an or-pattern nested inside a data-variant sub-pattern
+    let result = run(stringify!(
+        enum E { Num(i32), Other }
+        fn classify(e: E) -> i32 {
+            match e {
+                E::Num(1 | 2 | 3) => 1,
+                E::Num(_) => 2,
+                E::Other => 3,
+            }
+        }
+        fn main() {
+            ret_i32(classify(E::Num(2)));
+            ret_i32(classify(E::Num(9)));
+            ret_i32(classify(E::Other));
+        }
+    ));
+    assert_all(&result, &[ 1i32, 2, 3 ]);
+}
+
+#[test]
+fn match_or_leading_pipe() {
+    let result = run(stringify!(
+        let n = 2;
+        ret_i32(match n {
+            | 1 | 2 => 5,
+            _ => 0,
+        });
+    ));
+    assert_all(&result, &[ 5i32 ]);
+}
+
+#[test]
+fn match_or_int_requires_catchall() {
+    // integers are opaque, so an or of literals is not exhaustive on its own
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match 3i32 {
+                1 | 2 => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_or_binding_rejected() {
+    // a binding (here the catch-all identifier `other`) inside an or-pattern is not allowed in v1
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match 3i32 {
+                1 | other => 1,
+            });
+        }
+    ));
+    assert!(err.contains("Bindings are not allowed"), "unexpected error: {}", err);
+}
