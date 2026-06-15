@@ -278,6 +278,10 @@ macro_rules! itsy_api {
                 )*
                 map
             }
+            #[cfg(feature="compiler")]
+            fn api_name() -> &'static str {
+                stringify!($type_name)
+            }
             #[allow(unused_mut)]
             #[cfg(feature="compiler")]
             fn resolve_types() -> Vec<$crate::internals::binary::ApiTypeDef> {

@@ -195,7 +195,10 @@ itsy_api! {
     }
 }
 
-const PRELUDE: &str = "use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, make_range, sum_u16, make_words, join, make_points, points_sum, shapes_area, make_grid, grid_sum, flatten_words, ret_i32, ret_f64, ret_string};";
+const PRELUDE: &str = "
+    use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, make_range, sum_u16, make_words, join, make_points, points_sum, shapes_area, make_grid, grid_sum, flatten_words, ret_i32, ret_f64, ret_string};
+    use Api::{Point, Person, Line, Direction, Status, Shape, Tagged, Wrap};
+";
 
 fn run(code: &str) -> Context {
     let input = format!("{} fn main() {{ {} }}", PRELUDE, code);

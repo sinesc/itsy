@@ -15,8 +15,9 @@ use syn::{parse_macro_input, spanned::Spanned, Data, DataEnum, DataStruct, Deriv
 /// Derives the traits required to marshal a struct or enum across the Itsy API boundary.
 ///
 /// All field/variant-field types must consist of primitives, `String` or other `#[derive(VMValue)]`
-/// types. The Itsy type is registered under the struct/enum's Rust name; struct fields and enum
-/// variants keep their Rust names.
+/// types. The Itsy type is registered under the struct/enum's Rust name, namespaced under the API
+/// typename it is exposed through (e.g. `MyAPI::MyStruct`); struct fields and enum variants keep
+/// their Rust names.
 #[proc_macro_derive(VMValue, attributes(itsy))]
 pub fn derive_vmvalue(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);

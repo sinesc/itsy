@@ -31,6 +31,11 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     #[cfg(feature="compiler")]
     fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<crate::marshal::ApiType>, Vec<crate::marshal::ApiType>)>;
+    /// Returns the name given to the API in `itsy_api!`. API types are registered under this namespace
+    /// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced.
+    #[doc(hidden)]
+    #[cfg(feature="compiler")]
+    fn api_name() -> &'static str;
     /// Returns the transitive set of struct/enum types used in the API's function signatures, so the
     /// resolver can register them in the root scope.
     #[doc(hidden)]
