@@ -1143,6 +1143,15 @@ fn pattern(i: Input) -> Output<Pattern> {
             string_pattern,
         ))(i)
     }
+    /// An inclusive or exclusive numeric range, e.g. `1..5` or `1..=5`. Tried before `literal_pattern`
+    /// so a bare numeric followed by `..` is consumed as a range rather than a literal.
+    fn range_pattern(i: Input) -> Output<Pattern> {
+        let position = i.position();
+        map(
+            tuple((numeric_literal, alt((punct("..="), punct(".."))), numeric_literal)),
+            move |(lo, op, hi)| Pattern::Range(RangePattern { position, lo, hi, inclusive: op == "..=" })
+        )(i)
+    }
     /// A data-carrying variant with parenthesized sub-patterns, e.g. `Enum::Variant(123, inner)`.
     /// Wrapped in `snap` by the caller so bindings allocated by sub-patterns roll back on failure.
     fn variant_tuple(i: Input) -> Output<Pattern> {
@@ -1190,6 +1199,7 @@ fn pattern(i: Input) -> Output<Pattern> {
     }
     alt((
         wildcard,
+        range_pattern,
         literal_pattern,
         snap(variant_tuple),
         snap(struct_pattern),

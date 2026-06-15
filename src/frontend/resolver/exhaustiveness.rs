@@ -106,6 +106,9 @@ fn specialize_row<'a>(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCt
             MatchCtor::Variant(index) if path_variant(meta, type_id, path) == Some(*index) => Vec::new(),
             _ => return None,
         },
+        // ranges only apply to numeric (opaque) types, which have no finite ctors and so never reach
+        // specialize_row; treat as matching no constructor for completeness
+        Some(Pattern::Range(_)) => return None,
         Some(Pattern::VariantTuple(variant)) => match ctor {
             MatchCtor::Variant(index) if path_variant(meta, type_id, &variant.path) == Some(*index) => variant.elements.iter().map(Some).collect(),
             _ => return None,

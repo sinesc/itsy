@@ -1129,6 +1129,8 @@ pub enum Pattern {
     Struct(StructPattern),
     /// A qualified path matching a unit variant or constant, e.g. `Enum::Variant`.
     Path(Path),
+    /// An inclusive or exclusive numeric range, e.g. `1..5` or `1..=5`.
+    Range(RangePattern),
 }
 
 impl Positioned for Pattern {
@@ -1140,6 +1142,7 @@ impl Positioned for Pattern {
             Pattern::VariantTuple(variant) => variant.position,
             Pattern::Struct(structure) => structure.position,
             Pattern::Path(path) => path.position,
+            Pattern::Range(range) => range.position,
         }
     }
 }
@@ -1153,6 +1156,7 @@ impl Display for Pattern {
             Pattern::VariantTuple(variant) => write!(f, "{}({})", variant.path, variant.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ")),
             Pattern::Struct(structure) => write!(f, "{} {{ {} }}", structure.path, structure.fields.iter().map(|(n, p)| format!("{}: {}", n, p)).collect::<Vec<_>>().join(", ")),
             Pattern::Path(path) => write!(f, "{}", path),
+            Pattern::Range(range) => write!(f, "{}", range),
         }
     }
 }
@@ -1196,6 +1200,23 @@ pub struct StructPattern {
 }
 
 impl_positioned!(StructPattern);
+
+/// A numeric range pattern, e.g. `1..5` (exclusive) or `1..=5` (inclusive).
+#[derive(Debug)]
+pub struct RangePattern {
+    pub position    : Position,
+    pub lo          : Literal,
+    pub hi          : Literal,
+    pub inclusive   : bool,
+}
+
+impl_positioned!(RangePattern);
+
+impl Display for RangePattern {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}..{}{}", self.lo, if self.inclusive { "=" } else { "" }, self.hi)
+    }
+}
 
 
 /// A match block, e.g. `match e { Enum::Variant => { ... } }`.

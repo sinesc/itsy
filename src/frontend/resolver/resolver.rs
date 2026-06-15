@@ -536,6 +536,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 Ok(())
             },
             Pattern::Literal(_) => Err(ResolveErrorKind::InvalidOperation("Refutable literal pattern not allowed in let binding".to_string())),
+            Pattern::Range(_) => Err(ResolveErrorKind::InvalidOperation("Refutable range pattern not allowed in let binding".to_string())),
             Pattern::VariantTuple(_) | Pattern::Path(_) => Err(ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string())),
         }
     }
@@ -1242,6 +1243,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // a literal is matched by value
             Pattern::Literal(literal) => {
                 self.resolve_literal(literal, subject_type_id)?;
+            },
+            // a range is matched against its two numeric endpoints
+            Pattern::Range(range) => {
+                if let Some(subject_type_id) = subject_type_id {
+                    if !self.type_by_id(subject_type_id).is_numeric() {
+                        return Err(ResolveError::new(range, ResolveErrorKind::InvalidOperation(format!("Range pattern requires a numeric type, got {}", self.type_name(subject_type_id))), self.module_path));
+                    }
+                }
+                self.resolve_literal(&mut range.lo, subject_type_id)?;
+                self.resolve_literal(&mut range.hi, subject_type_id)?;
             },
             // a data variant matches a variant tag and recurses into its fields
             Pattern::VariantTuple(variant) => {

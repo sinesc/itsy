@@ -662,6 +662,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_ceq(self.ty(&value_type_id))?;
                 fail_jumps.push(self.writer.j0(123));
             },
+            // a range is matched by two bound comparisons against the selected value
+            ast::Pattern::Range(range) => {
+                let value_type_id = self.pattern_value_type(subject_type_id, access);
+                // lower bound: value >= lo
+                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.compile_literal(&range.lo)?;
+                self.write_cgte(self.ty(&value_type_id))?;
+                fail_jumps.push(self.writer.j0(123));
+                // upper bound: value <= hi (inclusive) or value < hi (exclusive)
+                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.compile_literal(&range.hi)?;
+                if range.inclusive {
+                    self.write_clte(self.ty(&value_type_id))?;
+                } else {
+                    self.write_clt(self.ty(&value_type_id))?;
+                }
+                fail_jumps.push(self.writer.j0(123));
+            },
             // a unit variant is matched by its tag
             ast::Pattern::Path(path) => {
                 self.compile_variant_tag_test(subject_type_id, access, path, fail_jumps)?;
@@ -700,7 +718,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// access path being the subject itself). Recurses through nested variant/path sub-patterns.
     fn compile_pattern_bind(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern) -> CompileResult {
         match pattern {
-            ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) => {},
+            ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) | ast::Pattern::Range(_) => {},
             // bind the selected value
             ast::Pattern::Binding(binding) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);

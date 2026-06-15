@@ -572,3 +572,100 @@ fn match_string_nested_in_variant() {
     ));
     assert_all(&result, &[ 1i32 ]);
 }
+
+#[test]
+fn match_range_inclusive() {
+    let result = run(stringify!(
+        fn classify(n: i32) -> i32 {
+            match n {
+                0..=9 => 1,
+                10..=99 => 2,
+                _ => 3,
+            }
+        }
+        fn main() {
+            ret_i32(classify(0));   // lower boundary
+            ret_i32(classify(9));   // upper boundary (inclusive)
+            ret_i32(classify(10));
+            ret_i32(classify(99));
+            ret_i32(classify(100)); // above
+            ret_i32(classify(-1));  // below
+        }
+    ));
+    assert_all(&result, &[ 1i32, 1, 2, 2, 3, 3 ]);
+}
+
+#[test]
+fn match_range_exclusive() {
+    let result = run(stringify!(
+        fn classify(n: i32) -> i32 {
+            match n {
+                0..10 => 1,
+                _ => 2,
+            }
+        }
+        fn main() {
+            ret_i32(classify(0));
+            ret_i32(classify(9));
+            ret_i32(classify(10)); // exclusive upper bound does not match
+        }
+    ));
+    assert_all(&result, &[ 1i32, 1, 2 ]);
+}
+
+#[test]
+fn match_range_float() {
+    let result = run(stringify!(
+        let x = 2.5f64;
+        ret_i32(match x {
+            0.0..=1.0 => 1,
+            1.0..=3.0 => 2,
+            _ => 3,
+        });
+    ));
+    assert_all(&result, &[ 2i32 ]);
+}
+
+#[test]
+fn match_range_nested_in_struct() {
+    // exercises range comparison against a numeric value reached through a heap boundary
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 5, y: 50 };
+            ret_i32(match p {
+                Point { x: 0..=9, y: 0..=9 } => 1,
+                Point { x: 0..=9, y: 10..=99 } => 2,
+                _ => 3,
+            });
+        }
+    ));
+    assert_all(&result, &[ 2i32 ]);
+}
+
+#[test]
+fn match_range_requires_catchall() {
+    // ranges cover an opaque numeric space, so a range-only match is never exhaustive
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match 5i32 {
+                0..=9 => 1,
+                10..=20 => 2,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_range_non_numeric_rejected() {
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match "hello" {
+                1..=5 => 1,
+                _ => 0,
+            });
+        }
+    ));
+    assert!(err.contains("numeric"), "unexpected error: {}", err);
+}
