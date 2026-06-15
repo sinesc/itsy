@@ -507,3 +507,68 @@ fn match_integer_catchall_ok() {
     ));
     assert_all(&result, &[ 99i32 ]);
 }
+
+#[test]
+fn match_string_literal_catchall_ok() {
+    // strings have no finite signature, so a literal-only string match needs a catch-all arm
+    let result = run(stringify!(
+        let s = "green";
+        ret_i32(match s {
+            "red" => 0,
+            "green" => 1,
+            "blue" => 2,
+            _ => 99,
+        });
+        // the subject survives the match and remains usable afterwards (refcount stayed balanced)
+        ret_str(s);
+    ));
+    assert(&result[0], 1i32);
+    assert(&result[1], "green".to_string());
+    assert!(result.len() == 2, "unexpected result length {}", result.len());
+}
+
+#[test]
+fn match_string_requires_catchall() {
+    let err = build_err(stringify!(
+        fn main() {
+            ret_i32(match "x" {
+                "x" => 1,
+                "y" => 2,
+            });
+        }
+    ));
+    assert!(err.contains("Non-exhaustive") && err.contains("_"), "unexpected error: {}", err);
+}
+
+#[test]
+fn match_string_interpolation_rejected() {
+    // an interpolated string is not a literal and must not be accepted as a pattern
+    let err = build_err(stringify!(
+        fn main() {
+            let n = 1;
+            ret_i32(match "x" {
+                "{n}" => 1,
+                _ => 0,
+            });
+        }
+    ));
+    assert!(err.len() > 0, "expected parse error for interpolated string pattern");
+}
+
+#[test]
+fn match_string_nested_in_variant() {
+    // exercises the nested-access path: a string sub-pattern inside a data variant, plus a binding arm
+    // that keeps the payload alive, validating refcounting across heap boundaries
+    let result = run(stringify!(
+        enum Msg { Text(String), Quit }
+        fn main() {
+            let m = Msg::Text("hello");
+            ret_i32(match m {
+                Msg::Text("hello") => 1,
+                Msg::Text(other) => 2,
+                Msg::Quit => 3,
+            });
+        }
+    ));
+    assert_all(&result, &[ 1i32 ]);
+}

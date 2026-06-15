@@ -6,7 +6,7 @@ pub mod types;
 
 use nom::character::{complete::{char, digit0, one_of}, is_alphabetic, is_alphanumeric, is_digit};
 use nom::bytes::complete::{take_while, take_while1, tag};
-use nom::combinator::{recognize, opt, all_consuming, map, not, verify};
+use nom::combinator::{recognize, opt, all_consuming, map, map_opt, not, verify};
 use nom::multi::{separated_list0, separated_list1, many0, fold_many0, fold_many1};
 use nom::branch::alt;
 use nom::sequence::{tuple, pair, delimited, preceded, terminated};
@@ -1127,11 +1127,20 @@ fn pattern(i: Input) -> Output<Pattern> {
         let position = i.position();
         map(verify(word, |w: &str| w == "_"), move |_| Pattern::Wildcard(position))(i)
     }
-    /// A literal value (numeric or bool) to match against.
+    /// A literal value (numeric, bool or string) to match against.
     fn literal_pattern(i: Input) -> Output<Pattern> {
+        // `string_literal` lowers an interpolated string to a concatenation expression; only a bare
+        // string literal is a valid pattern, so an interpolated string fails to parse here (and is rejected).
+        fn string_pattern(i: Input) -> Output<Pattern> {
+            map_opt(string_literal, |e| match e {
+                Expression::Literal(literal) if matches!(literal.value, LiteralValue::String(_)) => Some(Pattern::Literal(literal)),
+                _ => None,
+            })(i)
+        }
         alt((
             map(bool_literal, |l| Pattern::Literal(l)),
             map(numeric_literal, |l| Pattern::Literal(l)),
+            string_pattern,
         ))(i)
     }
     /// A data-carrying variant with parenthesized sub-patterns, e.g. `Enum::Variant(123, inner)`.
