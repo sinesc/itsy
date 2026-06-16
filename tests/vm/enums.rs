@@ -341,3 +341,13 @@ fn match_binds_whole_subject() {
     ));
     assert_all(&result, &[ true ]);
 }
+
+#[test]
+fn recursive_enum_rejected() {
+    // a data variant referencing the enum by value makes it infinitely sized; reject instead of overflowing
+    let err = build_err(stringify!(
+        enum E { Nil, Cons(E) }
+        fn main() {}
+    ));
+    assert!(err.contains("Recursive type 'E'"), "unexpected error: {}", err);
+}

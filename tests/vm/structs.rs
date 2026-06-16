@@ -479,3 +479,34 @@ fn struct_eq_nested() {
     ));
     assert_all(&result, &[ true, false, false ]);
 }
+
+#[test]
+fn recursive_struct_direct_rejected() {
+    // a struct containing itself by value has infinite size; reject instead of overflowing the compiler's stack
+    let err = build_err(stringify!(
+        struct Test { recurse: Test }
+        fn main() {}
+    ));
+    assert!(err.contains("Recursive type 'Test'"), "unexpected error: {}", err);
+}
+
+#[test]
+fn recursive_struct_via_array_rejected() {
+    // recursion through an array element is detected too
+    let err = build_err(stringify!(
+        struct Test { children: [ Test ] }
+        fn main() {}
+    ));
+    assert!(err.contains("Recursive type 'Test'"), "unexpected error: {}", err);
+}
+
+#[test]
+fn recursive_struct_mutual_rejected() {
+    // mutually recursive structs form a cycle and are rejected as well
+    let err = build_err(stringify!(
+        struct A { b: B }
+        struct B { a: A }
+        fn main() {}
+    ));
+    assert!(err.contains("Recursive type"), "unexpected error: {}", err);
+}

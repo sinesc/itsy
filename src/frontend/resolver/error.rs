@@ -31,6 +31,8 @@ pub enum ResolveErrorKind {
     MissingElseBranch(String),
     NotIterable(String),
     NotCallable(String),
+    /// A struct or enum contains itself by value (directly or transitively), which would result in an infinitely-sized type.
+    RecursiveType(String),
     CannotResolve(String),
     InvalidOperation(String),
     Internal(String),
@@ -88,6 +90,7 @@ impl Display for ResolveError {
             ResolveErrorKind::MissingElseBranch(t) => write!(f, "If-expression evaluating to type {t} requires an else branch"),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type {t} is not callable"),
+            ResolveErrorKind::RecursiveType(name) => write!(f, "Recursive type '{name}' has infinite size. Recursive types are not supported"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),

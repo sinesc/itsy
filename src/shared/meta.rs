@@ -410,6 +410,19 @@ impl Type {
             _ => !self.is_primitive(),
         }
     }
+    /// Returns a list of type ids contained within this type.
+    pub fn contained_type_ids(self: &Self) -> Vec<TypeId> {
+        match self {
+            Type::Struct(structure) => structure.fields.values().filter_map(|&f| f).collect(),
+            Type::Enum(enumeration) => enumeration.variants.iter()
+                .filter_map(|(_, variant)| variant.as_data())
+                .flatten()
+                .filter_map(|&f| f)
+                .collect(),
+            Type::Array(array) => array.type_id.into_iter().collect(),
+            _ => Vec::new(),
+        }
+    }
     /// Returns the trait implementation map for this type, if it can implement traits (structs and enums).
     pub fn impl_traits_map(self: &Self) -> Option<&Map<TypeId, ImplTrait>> {
         match self {

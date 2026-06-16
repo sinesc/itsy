@@ -262,7 +262,6 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         prev_resolved = now_resolved;
         now_resolved = program.modules().flat_map(|m| m.statements()).fold(Progress::zero(), |acc, statement| acc + statement.num_resolved(&scopes));
 
-
         if !now_resolved.done() {
             if now_resolved == prev_resolved {
                 if !stage.must_resolve() {
@@ -275,6 +274,23 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             }
         } else if now_resolved.done() {
             break;
+        }
+    }
+
+    // Reject recursive struct/enum types that would allow reference loops. Note: Currently these would
+    // also result in infinite sized type constructors.
+    for module in program.modules() {
+        for statement in module.statements() {
+            let (type_id, name) = match statement {
+                ast::Statement::StructDef(def) => (def.type_id, &def.ident.name),
+                ast::Statement::EnumDef(def) => (def.type_id, &def.ident.name),
+                _ => continue,
+            };
+            if let Some(type_id) = type_id {
+                if type_contains_self(&scopes, type_id) {
+                    return Err(ResolveError::new(statement, ResolveErrorKind::RecursiveType(name.clone()), &module.path));
+                }
+            }
         }
     }
 
@@ -294,6 +310,22 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         entry_fn        : entry_fn.usr(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()))?,
         resolved        : scopes.into(),
     })
+}
+
+/// Returns whether the type identified by `start` contains itself, directly or transitively.
+fn type_contains_self(scopes: &scopes::Scopes, start: TypeId) -> bool {
+    fn reaches(scopes: &scopes::Scopes, current: TypeId, start: TypeId, visited: &mut Set<TypeId>) -> bool {
+        for next in scopes.type_ref(current).contained_type_ids() {
+            if next == start {
+                return true;
+            }
+            if visited.insert(next) && reaches(scopes, next, start, visited) {
+                return true;
+            }
+        }
+        false
+    }
+    reaches(scopes, start, start, &mut Set::new())
 }
 
 /// Utility methods to update a typeslot with a resolved type and increase the resolution counter.
