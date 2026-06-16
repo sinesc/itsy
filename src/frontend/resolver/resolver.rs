@@ -556,6 +556,36 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
+    /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
+    /// element type from the value argument.
+    /// Note: method names/parameter index for inference are hardcoded in value_index match block and may need to be updated for new array builtins.
+    fn try_infer_array_element_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+        // identify `<array>.<method>` access whose array element type is still unresolved
+        let (array_type_id, value_index) = {
+            let binary_op = match call_exp.as_binary_op_mut() {
+                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
+                _ => return Ok(()),
+            };
+            // which (pre-transform, so the receiver is not yet prepended) argument carries the Element value
+            let value_index = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
+                Some("push") => 0,
+                Some("insert") => 1,
+                _ => return Ok(()),
+            };
+            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_array()) {
+                Some(Some(&Array { type_id: None })) => (binary_op.left.type_id(self).ice()?, value_index),
+                _ => return Ok(()),
+            }
+        };
+        if let Some(arg) = call_args.args.get_mut(value_index) {
+            self.resolve_expression(arg, None)?;
+            if let Some(element_type_id) = arg.type_id(self) {
+                self.type_by_id_mut(array_type_id).as_array_mut().ice()?.type_id = Some(element_type_id);
+            }
+        }
+        Ok(())
+    }
+
     /// Returns an error kind if the pattern is refutable and thus cannot be used in a let binding.
     fn check_pattern_irrefutable(pattern: &ast::Pattern) -> Result<(), ResolveErrorKind> {
         use ast::Pattern;
@@ -1609,6 +1639,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let call_func = item.left.as_expression_mut().ice()?;
                 self.resolve_expression(call_func, None)?;
                 let call_args = item.right.as_argument_list_mut().ice()?;
+                // an array builtin like `arr.push(x)` can't resolve while the array's element type is
+                // unknown, but for `push`/`insert` that type is exactly what the value argument supplies.
+                self.try_infer_array_element_from_args(call_func, call_args)?;
                 self.transform_constant_call(call_func, call_args)?;
                 let num_args = call_args.args.len();
                 // set return type from signature
