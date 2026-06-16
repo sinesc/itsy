@@ -1452,7 +1452,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         let target_type = self.ty(&target.callable_type_id).as_callable().ice()?;
         let other_type = self.ty(&other.callable_type_id).as_callable().ice()?;
-        if target_type.ret_type_id != other_type.ret_type_id {
+        if !self.type_accepted_for(other_type.ret_type_id.ice()?, target_type.ret_type_id.ice()?) {
             return Ok(false);
         }
         if target_type.arg_type_ids.len() != other_type.arg_type_ids.len() {

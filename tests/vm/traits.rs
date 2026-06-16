@@ -107,6 +107,45 @@ fn temporary_traitobject() {
 }
 
 #[test]
+fn trait_self_return() {
+    // a trait method returning Self, called on a concrete receiver, through a
+    // trait-typed receiver (dynamic dispatch), and from a provided method that
+    // itself returns Self
+    let result = run(stringify!(
+        trait Incrementable {
+            fn incremented(self: Self) -> Self;
+            fn twice(self: Self) -> Self {
+                self.incremented().incremented()
+            }
+            fn value(self: Self) -> u8;
+        }
+        struct Test {
+            val: u8,
+        }
+        impl Incrementable for Test {
+            fn incremented(self: Self) -> Self {
+                Test { val: self.val + 1 }
+            }
+            fn value(self: Self) -> u8 {
+                self.val
+            }
+        }
+        fn bump(x: Incrementable) -> u8 {
+            // Self return through a trait-typed (dynamically dispatched) receiver
+            x.incremented().value()
+        }
+        fn main() {
+            let base = Test { val: 3 };
+            ret_u8(base.incremented().value());            // 4 (concrete chain + field via method)
+            ret_u8(base.incremented().incremented().val);  // 5 (concrete Self return, direct field access)
+            ret_u8(base.twice().value());                  // 5 (provided method returning Self)
+            ret_u8(bump(base));                            // 4 (dynamic dispatch)
+        }
+    ));
+    assert_all(&result, &[ 4u8, 5, 5, 4 ]);
+}
+
+#[test]
 fn enum_trait_static_dispatch() {
     // a trait implemented on an enum, called directly on a concrete enum value
     let result = run(stringify!(
