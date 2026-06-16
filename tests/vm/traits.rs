@@ -146,6 +146,113 @@ fn trait_self_return() {
 }
 
 #[test]
+fn trait_self_composite_return() {
+    // a trait method returning a composite over Self ([ Self ]). The nested trait element is
+    // serialized as a virtual constructor and resolved per-element at runtime.
+    let result = run(stringify!(
+        trait Listable {
+            fn pair(self: Self) -> [ Self ];
+            fn value(self: Self) -> u8;
+        }
+        struct Test {
+            val: u8,
+        }
+        impl Listable for Test {
+            fn pair(self: Self) -> [ Self ] {
+                [ Test { val: self.val }, Test { val: self.val + 1 } ]
+            }
+            fn value(self: Self) -> u8 {
+                self.val
+            }
+        }
+        fn main() {
+            let base = Test { val: 3 };
+            let list = base.pair();
+            ret_u8(list[0].value()); // 3
+            ret_u8(list[1].value()); // 4
+        }
+    ));
+    assert_all(&result, &[ 3u8, 4 ]);
+}
+
+#[test]
+fn trait_object_nested_in_composites() {
+    // trait objects nested inside a struct field, inside an array, and inside an array-in-struct,
+    // including a heterogeneous array of implementors and dynamic dispatch through all of them.
+    // The `run` helper additionally asserts the heap fully drains, so refcounting through the
+    // virtual (trait-object) constructor markers is exercised here too.
+    let result = run(stringify!(
+        trait Animal {
+            fn speak(self: Self) -> String;
+        }
+        struct Dog { name: String }
+        struct Cat { lives: u8 }
+        impl Animal for Dog {
+            fn speak(self: Self) -> String { "woof " + self.name }
+        }
+        impl Animal for Cat {
+            fn speak(self: Self) -> String { "meow x" + self.lives as String }
+        }
+        struct Holder { a: Animal }
+        struct Zoo { animals: [ Animal ] }
+        fn main() {
+            // trait object as a struct field
+            let h = Holder { a: Dog { name: "Rex" } };
+            ret_string(h.a.speak());
+
+            // heterogeneous array of trait objects nested in a struct
+            let zoo = Zoo { animals: [ Dog { name: "A" }, Cat { lives: 9 } ] };
+            ret_string(zoo.animals[0].speak());
+            ret_string(zoo.animals[1].speak());
+
+            // bare heterogeneous trait-object array, grown via push
+            let mut zs: [ Animal ] = [ Dog { name: "B" } ];
+            zs.push(Cat { lives: 7 });
+            ret_string(zs[0].speak());
+            ret_string(zs[1].speak());
+        }
+    ));
+    assert_all(&result, &[
+        "woof Rex".to_string(),
+        "woof A".to_string(),
+        "meow x9".to_string(),
+        "woof B".to_string(),
+        "meow x7".to_string(),
+    ]);
+}
+
+#[test]
+fn trait_object_field_equality() {
+    // equality of structs containing a trait-object field exercises the virtual constructor in the
+    // comparison path: equal when concrete type and contents match, unequal on differing contents
+    // or differing concrete types.
+    let result = run(stringify!(
+        trait Animal {
+            fn speak(self: Self) -> String;
+        }
+        struct Dog { name: String }
+        struct Cat { name: String }
+        impl Animal for Dog {
+            fn speak(self: Self) -> String { "woof" }
+        }
+        impl Animal for Cat {
+            fn speak(self: Self) -> String { "meow" }
+        }
+        struct Holder { a: Animal }
+        fn main() {
+            let same_a = Holder { a: Dog { name: "Rex" } };
+            let same_b = Holder { a: Dog { name: "Rex" } };
+            let diff_content = Holder { a: Dog { name: "Fae" } };
+            let diff_type = Holder { a: Cat { name: "Rex" } };
+            ret_bool(same_a == same_b);      // true:  same type and contents
+            ret_bool(same_a == diff_content);// false: same type, different contents
+            ret_bool(same_a == diff_type);   // false: different concrete type
+        }
+    ));
+    assert_all(&result, &[ true, false, false ]);
+}
+
+#[test]
 fn enum_trait_static_dispatch() {
     // a trait implemented on an enum, called directly on a concrete enum value
     let result = run(stringify!(

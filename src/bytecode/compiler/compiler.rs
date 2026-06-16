@@ -1643,6 +1643,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::String);
             }
+            Type::Trait(_) => {
+                // A nested trait-object reference. Its concrete type (and thus constructor) is only
+                // known at runtime, so emit a virtual marker that the VM resolves via the referenced
+                // object's implementor index, mirroring the offset-0 indirection used for top-level
+                // trait objects.
+                *prev_primitive = None;
+                self.writer.store_const(Constructor::Virtual);
+            }
             Type::Enum(enumeration) => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Enum);

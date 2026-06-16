@@ -165,11 +165,17 @@ impl<T, U> VM<T, U> {
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp) {
+        let epoch = self.heap.new_epoch();
+        self.refcount_value_epoch(item, constructor_offset, op, epoch);
+    }
+
+    /// As [`refcount_value`], but reuses an existing refcounting epoch instead of starting a new one.
+    /// Used to descend into nested trait-object (virtual) references while traversing a containing value.
+    fn refcount_value_epoch(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp, epoch: usize) {
         match self.resolve_constructor_offset(item, constructor_offset) {
             None => self.heap.ref_item(item.index(), op),
             Some(mut constructor_offset) => {
                 let constructor = self.construct_read_op(&mut constructor_offset);
-                let epoch = self.heap.new_epoch();
                 self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op, epoch);
             }
         }
@@ -231,6 +237,12 @@ impl<T, U> VM<T, U> {
                 },
                 Constructor::Closure => {
                     self.heap.ref_item(item_index, op);
+                },
+                Constructor::Virtual => {
+                    // trait-object reference: resolve the concrete type's constructor via the object's
+                    // implementor index and descend into it. The recursive call performs the single
+                    // ref_item for this item; the virtual marker itself carries no inline layout.
+                    self.refcount_value_epoch(HeapRef::new(item_index, 0), 0, op, epoch);
                 },
                 Constructor::Primitive => {
                     panic!("Unexpected primitive constructor.");
@@ -327,6 +339,19 @@ impl<T, U> VM<T, U> {
             Constructor::Closure => {
                 // closures are opaque: equal only if the same heap object is referenced
                 a.index() == b.index()
+            },
+            Constructor::Virtual => {
+                // trait-object references: resolve each operand's concrete constructor via its implementor
+                // index. Differing concrete types are never equal; otherwise compare guided by that constructor.
+                match (self.resolve_constructor_offset(a, 0), self.resolve_constructor_offset(b, 0)) {
+                    (None, None) => a.index() == b.index(),
+                    (Some(a_offset), Some(b_offset)) if a_offset == b_offset => {
+                        let mut a_offset = a_offset;
+                        let constructor = self.construct_read_op(&mut a_offset);
+                        self.compare_recurse(constructor, HeapRef::new(a.index(), 0), HeapRef::new(b.index(), 0), &mut a_offset)
+                    },
+                    _ => false,
+                }
             },
             Constructor::Primitive => {
                 panic!("Unexpected primitive constructor.");

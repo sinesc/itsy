@@ -211,6 +211,7 @@ impl ConstDescriptor {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Constructor {
     Primitive   = 174,  // Primitive(num_bytes): copies primitive data
+    Virtual     = 175,  // Virtual: a nested trait-object reference whose concrete constructor is resolved at runtime via the referenced heap object's implementor index
     Array       = 176,  // Array(constructor_size, element constructor): copies an array, determining element count from prototype or heap object size
     Struct      = 177,  // Struct(constructor_size, implementor index, num_fields, field constructor, field constructor, ...): copies a struct
     String      = 178,  // String: copies a string
@@ -244,6 +245,7 @@ impl Constructor {
         //un safe { ::std::mem::transmute(raw) }
         match raw {
             x if x == Self::Primitive as u8 => Self::Primitive,
+            x if x == Self::Virtual as u8 => Self::Virtual,
             x if x == Self::Array as u8 => Self::Array,
             x if x == Self::Struct as u8 => Self::Struct,
             x if x == Self::String as u8 => Self::String,
@@ -274,8 +276,9 @@ impl Constructor {
                     next: offset + SIZE,
                 }
             },
-            Constructor::String | Constructor::Closure => {
-                // no additional data attached to string
+            Constructor::String | Constructor::Closure | Constructor::Virtual => {
+                // no additional data attached: a virtual constructor is resolved at runtime via the
+                // referenced object's implementor index, strings/closures carry no nested layout
                 ConstructorData {
                     op: constructor,
                     offset,
