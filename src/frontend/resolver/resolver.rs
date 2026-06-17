@@ -1059,12 +1059,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.types_resolved(&mut item.expr, None)?;
             self.resolve_expression(&mut item.expr, declared_ret_type_id)?;
             // if the function's return type is already known (explicit, or previously inferred) verify the returned expression matches it,
-            // otherwise infer the function's return type from the returned expression (used to infer closure return types)
+            // otherwise infer the function's return type from the returned expression (used to infer closure return types).
+            // acceptance (not strict equality) so a concrete implementor may be returned where a trait or trait bound
+            // is declared, mirroring argument passing and let bindings (the heap object already carries its implementor index).
             if let Some(expr_type_id) = item.expr.type_id(self) {
                 let callable_type_id = self.scopes.function_ref(function_id).callable_type_id;
                 let callable = self.scopes.type_mut(callable_type_id).as_callable_mut().ice_msg("Function type is not callable")?;
                 if let Some(callable_ret_type_id) = callable.ret_type_id {
-                    self.check_type_equals(item, expr_type_id, callable_ret_type_id)?;
+                    self.check_type_accepted_for(item, expr_type_id, callable_ret_type_id)?;
                     Some(callable_ret_type_id)
                 } else {
                     callable.ret_type_id = Some(expr_type_id);

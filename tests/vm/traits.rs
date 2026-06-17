@@ -475,3 +475,71 @@ fn multi_trait_bound_rejects_partial_implementor() {
         }
     ));
 }
+
+#[test]
+fn trait_return_concrete() {
+    // a function declaring a trait return type may return a concrete implementor; the returned value is
+    // usable as a trait object (the concrete heap object already carries its implementor index). Distinct
+    // implementors returned from separate functions confirm dynamic dispatch on the erased result.
+    let result = run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        struct Person { n: String }
+        struct Pet { species: String }
+        impl Named for Person {
+            fn name(self: Self) -> String { self.n }
+        }
+        impl Named for Pet {
+            fn name(self: Self) -> String { self.species }
+        }
+        fn make_person() -> Named {
+            Person { n: "Bob" }
+        }
+        fn make_pet() -> Named {
+            Pet { species: "cat" }
+        }
+        fn announce(who: Named) {
+            ret_string(who.name());
+        }
+        fn main() {
+            ret_string(make_person().name());
+            ret_string(make_pet().name());
+            // pass the erased trait object on to another trait-typed slot
+            announce(make_person());
+        }
+    ));
+    assert_all(&result, &[ "Bob".to_string(), "cat".to_string(), "Bob".to_string() ]);
+}
+
+#[test]
+fn multi_trait_bound_return_concrete() {
+    // a function declaring a multiple-trait bound return type may return a concrete implementor of all
+    // constituent traits, and methods from every trait remain callable on the result.
+    let result = run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        trait Aged {
+            fn age(self: Self) -> u8;
+        }
+        struct Person { n: String, a: u8 }
+        impl Named for Person {
+            fn name(self: Self) -> String { self.n }
+        }
+        impl Aged for Person {
+            fn age(self: Self) -> u8 { self.a }
+        }
+        fn make() -> Named + Aged {
+            Person { n: "Bob", a: 41 }
+        }
+        fn main() {
+            let who = make();
+            ret_string(who.name());
+            ret_u8(who.age());
+        }
+    ));
+    assert(&result[0], "Bob".to_string());
+    assert(&result[1], 41u8);
+    assert_eq!(result.len(), 2);
+}
