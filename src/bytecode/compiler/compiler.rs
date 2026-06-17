@@ -1968,10 +1968,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn write_store(self: &Self, ty: &Type, loc: FrameAddress, binding_id: Option<BindingId>) -> CompileResult<StackAddress> {
         Ok(if ty.is_ref() && binding_id.is_some() {
             let constructor = self.constructor(ty)?;
-            match self.init_state.initialized(binding_id.ice()?) {
+            let binding_id = binding_id.ice()?;
+            match self.init_state.initialized(binding_id) {
                 BranchingState::Initialized => self.writer.storex_replace(loc, constructor),
-                BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
                 BranchingState::MaybeInitialized => self.writer.storex_replace(loc, constructor), // used to be separate instruction, replace now handles both
+                // a binding declared outside a loop may already hold a value from a previous iteration, so it
+                // needs replace (decrement-old) semantics even though this single pass still sees it uninitialized
+                BranchingState::Uninitialized if self.init_state.assigned_across_loop_iteration(binding_id) => self.writer.storex_replace(loc, constructor),
+                BranchingState::Uninitialized => self.writer.storex_new(loc, constructor),
             }
         } else {
             select_primitive_size!(self, ty, store, loc)

@@ -133,6 +133,25 @@ fn for_in_array_string() {
 }
 
 #[test]
+fn for_in_array_assign_to_outer_var() {
+    // Regression: assigning the loop element to a variable declared outside the loop must release the
+    // previously held element each iteration. Previously every store used new (no decrement) semantics,
+    // leaking all but the last iterated heap element, which surfaced as a heap-corruption error on exit.
+    let result = run(stringify!(
+        struct S { a: u16 }
+        fn main() {
+            let data = [ S { a: 33 }, S { a: 44 }, S { a: 55 } ];
+            let x;
+            for i in data {
+                x = i;
+                ret_u16(x.a);
+            }
+        }
+    ));
+    assert_all(&result, &[ 33u16, 44, 55 ]);
+}
+
+#[test]
 fn for_in_inference() {
     let result = run(stringify!(
         let array = [ 1, 2, 3, 4 ];

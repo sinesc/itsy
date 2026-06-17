@@ -154,6 +154,29 @@ impl InitState {
         }
     }
 
+    /// Whether a store to this binding may overwrite a value left behind by a previous loop iteration.
+    ///
+    /// This is true when the binding is assigned within a loop but was declared outside of it: on the second
+    /// and later iterations the binding already holds a (reference-counted) value from the prior iteration, so
+    /// the store must use replace (decrement-old) semantics even though the single compilation pass sees the
+    /// binding as still uninitialized. Bindings declared inside the loop body are re-declared (and their slot
+    /// released by the block destructor) every iteration and must therefore keep new (no decrement) semantics.
+    pub fn assigned_across_loop_iteration(self: &Self, binding_id: BindingId) -> bool {
+        let mut in_loop = false;
+        for branching in self.branchings.iter().rev() {
+            if let Some(binding) = branching.bindings.get(&binding_id) {
+                if binding.declared {
+                    // reached the binding's declaration; it is across-iteration only if a loop boundary was crossed first
+                    return in_loop;
+                }
+            }
+            if branching.scope == BranchingScope::Loop {
+                in_loop = true;
+            }
+        }
+        in_loop
+    }
+
     /// Whether a binding is initialized in the current branching path at the current code position.
     pub fn initialized(self: &Self, binding_id: BindingId) -> BranchingState {
         for branching in self.branchings.iter().rev() {
