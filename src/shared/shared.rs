@@ -39,6 +39,17 @@ pub trait MetaContainer {
                 (given, Type::Trait(_)) if given.impl_traits_map().is_some() => {
                     given.impl_traits_map().unwrap().contains_key(&accepted_type_id)
                 },
+                // a multiple-trait bound is accepted for a single trait if the bound includes that trait
+                (Type::TraitBound(given_trait_ids), Type::Trait(_)) => {
+                    given_trait_ids.contains(&accepted_type_id)
+                },
+                // a type is accepted for a multiple-trait bound if it satisfies every constituent trait
+                (given, Type::TraitBound(accepted_trait_ids)) => {
+                    accepted_trait_ids.iter().all(|trait_id| match given {
+                        Type::TraitBound(given_trait_ids) => given_trait_ids.contains(trait_id),
+                        _ => given.impl_traits_map().map_or(false, |impl_traits| impl_traits.contains_key(trait_id)),
+                    })
+                },
                 _ => false,
             }
         }
@@ -89,6 +100,9 @@ pub trait MetaContainer {
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("fn({arg_type_names}) -> {result_type_name}")
+                }
+                Type::TraitBound(trait_ids) => {
+                    trait_ids.iter().map(|&type_id| self.type_name(type_id)).collect::<Vec<_>>().join(" + ")
                 }
                 _ => "?".to_string()
             }

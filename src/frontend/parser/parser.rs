@@ -227,10 +227,25 @@ fn use_decl(i: Input) -> Output<UseDecl> {
     )(i)
 }
 
-/// Matches an inlineable type, e.g. `MyStruct` or `[ MyInt; 16 ]`.
+/// Matches an inlineable type, e.g. `MyStruct`, `[ MyInt; 16 ]` or a multiple-trait bound `TraitA + TraitB`.
 fn inline_type(i: Input) -> Output<InlineType> {
+    // a single path is a regular type name, a `+`-separated list of paths is a multiple-trait bound.
+    // this is unambiguous since `as`-casts parse their target type via `path` directly (not inline_type)
+    // and every inline_type position terminates on a non-`+` token.
+    fn type_name_or_bound(i: Input) -> Output<InlineType> {
+        let position = i.position();
+        map(
+            pair(path, many0(preceded(punct("+"), path))),
+            move |(first, rest)| if rest.is_empty() {
+                InlineType::TypeName(TypeName::from_path(first))
+            } else {
+                let traits = std::iter::once(first).chain(rest.into_iter()).map(TypeName::from_path).collect();
+                InlineType::TraitBound(Box::new(TraitBound { position, traits, type_id: None }))
+            }
+        )(i)
+    }
     alt((
-        map(path, |t| InlineType::TypeName(TypeName::from_path(t))),
+        type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     ))(i)

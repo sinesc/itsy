@@ -198,6 +198,8 @@ pub enum Type {
     Enum(Enum),
     Struct(Struct),
     Trait(Trait),
+    /// A multiple-trait bound, e.g. `TraitA + TraitB`. Holds the constituent trait type-ids.
+    TraitBound(Vec<TypeId>),
     Callable(Callable),
 }
 
@@ -221,6 +223,7 @@ impl Debug for Type {
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
             Type::Trait(_) => write!(f, "<Trait>"),
+            Type::TraitBound(v) => write!(f, "<TraitBound {:?}>", v),
             Type::Callable(v) => write!(f,"{:?}", v),
         }
     }
@@ -246,6 +249,7 @@ impl Display for Type {
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
             Type::Trait(_) => write!(f, "trait"),
+            Type::TraitBound(_) => write!(f, "trait bound"),
             Type::Callable(_) => write!(f, "callable"),
         }
     }
@@ -277,6 +281,18 @@ impl_as_getter!(Type {
 });
 
 impl Type {
+    /// Returns the constituent trait type-ids if this type is a multiple-trait bound.
+    pub fn as_trait_bound(self: &Self) -> Option<&Vec<TypeId>> {
+        match self {
+            Type::TraitBound(trait_ids) => Some(trait_ids),
+            _ => None,
+        }
+    }
+    /// Whether the type is a trait object, i.e. a single trait or a multiple-trait bound.
+    /// Trait objects are dynamically dispatched and accept any concrete implementor.
+    pub const fn is_trait_object(self: &Self) -> bool {
+        matches!(self, Type::Trait(_) | Type::TraitBound(_))
+    }
     /// Size of the primitive type in bytes, otherwise size of the reference.
     pub const fn primitive_size(self: &Self) -> u8 {
         match self {
@@ -286,7 +302,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
@@ -335,7 +351,7 @@ impl Type {
     pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::Callable(_) => true,
+            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => true,
             _ => false,
         }
     }

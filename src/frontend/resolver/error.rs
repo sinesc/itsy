@@ -26,6 +26,10 @@ pub enum ResolveErrorKind {
     /// Enum variant literal is not numeric. TODO: non-numeric currently intercepted by the parser. eventually consts should be allowed here which the parser wouldn't catch
     InvalidVariantLiteral,
     NotATraitMethod(String, String),
+    /// A type used in a multiple-trait bound (`A + B`) is not a trait.
+    NotATrait(String),
+    /// A multiple-trait bound (`A + B`) lists the same trait more than once.
+    DuplicateTraitBound(String),
     /// A match block does not cover all possible values; the string is a witness pattern that is left uncovered.
     NonExhaustiveMatch(String),
     /// An if-expression used as a value lacks an else branch; the string is the branch's result type.
@@ -87,6 +91,8 @@ impl Display for ResolveError {
             ResolveErrorKind::InvalidVariantValue(numeric) => write!(f, "Invalid enum variant discriminant {numeric}. Discriminants must be integer types"),
             ResolveErrorKind::InvalidVariantLiteral => write!(f, "Invalid enum variant literal"),
             ResolveErrorKind::NotATraitMethod(m, t) => write!(f, "Method '{}' may not be implemented for trait '{}' because the trait does not define it", m, t),
+            ResolveErrorKind::NotATrait(t) => write!(f, "Type '{}' used in a trait bound is not a trait", t),
+            ResolveErrorKind::DuplicateTraitBound(t) => write!(f, "Trait '{}' appears more than once in a trait bound", t),
             ResolveErrorKind::NonExhaustiveMatch(witness) => write!(f, "Non-exhaustive match: pattern '{}' not covered", witness),
             ResolveErrorKind::MissingElseBranch(t) => write!(f, "If-expression evaluating to type {t} requires an else branch"),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type {t} is not iterable"),

@@ -324,3 +324,154 @@ fn enum_trait_dynamic_dispatch() {
         "a dog Fae".to_string(),
     ]);
 }
+
+#[test]
+fn multi_trait_bound_param() {
+    // a parameter bound by two traits accepts a concrete implementor and can call methods from both.
+    let result = run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        trait Aged {
+            fn age(self: Self) -> u8;
+            fn aged(self: Self) -> u8 { self.age() + 1 }
+        }
+        struct Person { n: String, a: u8 }
+        impl Named for Person {
+            fn name(self: Self) -> String { self.n }
+        }
+        impl Aged for Person {
+            fn age(self: Self) -> u8 { self.a }
+        }
+        fn describe(who: Named + Aged) {
+            ret_string(who.name());
+            ret_u8(who.age());
+            ret_u8(who.aged()); // provided default from the second trait
+        }
+        fn main() {
+            describe(Person { n: "Bob", a: 41 });
+        }
+    ));
+    assert(&result[0], "Bob".to_string());
+    assert(&result[1], 41u8);
+    assert(&result[2], 42u8);
+}
+
+#[test]
+fn multi_trait_bound_self_return_chaining() {
+    // a Self-returning method from one bound trait yields a value on which methods of the other
+    // bound trait remain callable (the receiver's full bound type is preserved across the call).
+    let result = run(stringify!(
+        trait Displayable {
+            fn show(self: Self) -> u8;
+        }
+        trait Incrementable {
+            fn incremented(self: Self) -> Self;
+        }
+        struct Test { val: u8 }
+        impl Displayable for Test {
+            fn show(self: Self) -> u8 { self.val }
+        }
+        impl Incrementable for Test {
+            fn incremented(self: Self) -> Self { Test { val: self.val + 1 } }
+        }
+        fn bump_and_show(val: Displayable + Incrementable) {
+            ret_u8(val.incremented().show());
+        }
+        fn main() {
+            bump_and_show(Test { val: 3 });
+        }
+    ));
+    assert_all(&result, &[ 4u8 ]);
+}
+
+#[test]
+fn multi_trait_bound_in_composites() {
+    // trait bounds are usable in array element types and struct fields, holding heterogeneous implementors.
+    let result = run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        trait Aged {
+            fn age(self: Self) -> u8;
+        }
+        struct Person { n: String, a: u8 }
+        struct Pet { species: String, years: u8 }
+        impl Named for Person {
+            fn name(self: Self) -> String { self.n }
+        }
+        impl Aged for Person {
+            fn age(self: Self) -> u8 { self.a }
+        }
+        impl Named for Pet {
+            fn name(self: Self) -> String { self.species }
+        }
+        impl Aged for Pet {
+            fn age(self: Self) -> u8 { self.years }
+        }
+        struct Holder { item: Named + Aged }
+        fn main() {
+            let everyone: [ Named + Aged ] = [ Person { n: "Bob", a: 41 }, Pet { species: "cat", years: 3 } ];
+            for e in everyone {
+                ret_string(e.name());
+                ret_u8(e.age());
+            }
+            let h = Holder { item: Pet { species: "dog", years: 7 } };
+            ret_string(h.item.name());
+            ret_u8(h.item.age());
+        }
+    ));
+    assert(&result[0], "Bob".to_string());
+    assert(&result[1], 41u8);
+    assert(&result[2], "cat".to_string());
+    assert(&result[3], 3u8);
+    assert(&result[4], "dog".to_string());
+    assert(&result[5], 7u8);
+    assert_eq!(result.len(), 6);
+}
+
+#[test]
+#[should_panic(expected = "Type 'Person' used in a trait bound is not a trait")]
+fn multi_trait_bound_rejects_non_trait() {
+    run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        struct Person { n: String }
+        fn describe(who: Named + Person) { }
+        fn main() { }
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Trait 'Named' appears more than once in a trait bound")]
+fn multi_trait_bound_rejects_duplicate() {
+    run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        fn describe(who: Named + Named) { }
+        fn main() { }
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Expected type Named + Aged, got Person")]
+fn multi_trait_bound_rejects_partial_implementor() {
+    run(stringify!(
+        trait Named {
+            fn name(self: Self) -> String;
+        }
+        trait Aged {
+            fn age(self: Self) -> u8;
+        }
+        struct Person { n: String }
+        impl Named for Person {
+            fn name(self: Self) -> String { self.n }
+        }
+        fn describe(who: Named + Aged) { }
+        fn main() {
+            describe(Person { n: "Bob" });
+        }
+    ));
+}

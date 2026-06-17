@@ -581,7 +581,44 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             TypeName(type_name) => self.resolve_type_name(type_name, None),
             ArrayDef(array) => self.resolve_array_type(array),
             CallableDef(callable) => self.resolve_callable_type(callable),
+            TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
         }
+    }
+
+    /// Resolves a multiple-trait bound (e.g. `TraitA + TraitB`) into a `Type::TraitBound`.
+    fn resolve_trait_bound(self: &mut Self, item: &mut ast::TraitBound) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        // resolve constituent trait names first
+        for trait_name in &mut item.traits {
+            self.resolve_type_name(trait_name, None)?;
+        }
+        // only build the bound once every constituent is resolved
+        let mut trait_ids = Vec::with_capacity(item.traits.len());
+        for trait_name in &item.traits {
+            match trait_name.type_id {
+                Some(type_id) => {
+                    // each member must be a trait
+                    if self.type_by_id(type_id).as_trait().is_none() {
+                        return Err(ResolveError::new(trait_name, ResolveErrorKind::NotATrait(trait_name.path.to_string(0)), self.module_path));
+                    }
+                    // members must be distinct
+                    if trait_ids.contains(&type_id) {
+                        return Err(ResolveError::new(trait_name, ResolveErrorKind::DuplicateTraitBound(trait_name.path.to_string(0)), self.module_path));
+                    }
+                    trait_ids.push(type_id);
+                },
+                None => return Ok(None), // not all constituents resolved yet, retry next pass
+            }
+        }
+        if item.type_id.is_none() {
+            // reuse an existing identical bound so distinct occurrences share a type id
+            let type_id = self.scopes.insert_anonymous_type(true, Type::TraitBound(trait_ids));
+            item.type_id = Some(type_id);
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
     }
 
     /// Resolves a the definition of a callable type.
@@ -1055,7 +1092,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // genuinely usage-typed binding like `let mut y;` keeps constraining numeric literals).
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
-                let ready = if self.type_by_id(expected_result).as_trait().is_some() {
+                let ready = if self.type_by_id(expected_result).is_trait_object() {
                     self.stage.infer_as_concrete()
                 } else {
                     self.stage.infer_from_usage()
@@ -1132,7 +1169,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // set expected type, if it isn't a trait or we're in final resolver stage
         if item.type_id(self).is_none() && item.constant_id.is_some() {
             if let Some(expected_result) = expected_result {
-                if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).as_trait().is_some() {
+                if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).is_trait_object() {
                     self.set_type_id(item, expected_result)?;
                 }
             }
@@ -1471,14 +1508,30 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let owning_type_id = item.left.type_id(self).ice()?;
                         let member_name = &item.right.as_member().ice()?.ident.name;
                         let left_ty = self.type_by_id(left_type_id);
-                        let constant_id = if left_ty.as_array().is_some() {
+                        let is_array = left_ty.as_array().is_some();
+                        let is_scalar = left_ty.is_float() || left_ty.is_integer() || left_ty.is_string();
+                        // constituent trait ids if the receiver is a multiple-trait bound (`A + B`)
+                        let trait_bound_ids = left_ty.as_trait_bound().cloned();
+                        let constant_id = if is_array {
                             // lookup array builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                                 .or(self.try_create_array_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)
-                        } else if left_ty.is_float() || left_ty.is_integer() || left_ty.is_string() {
+                        } else if is_scalar {
                             // lookup scalar builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                                 .or(self.try_create_scalar_builtin(member_name, owning_type_id)?)
+                        } else if let Some(trait_bound_ids) = trait_bound_ids {
+                            // trait bound receiver: search each constituent trait for the method (required or provided)
+                            let mut found = None;
+                            for trait_id in trait_bound_ids {
+                                let type_name = self.type_flat_name(trait_id).ice_msg("Unnamed trait")?.clone();
+                                let path = self.make_path(&[ &type_name, member_name ]);
+                                if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &path, trait_id) {
+                                    found = Some(constant_id);
+                                    break;
+                                }
+                            }
+                            found
                         } else {
                             // try method on type or trait default implementation
                             let type_name = self.type_flat_name(owning_type_id).ice_msg("Unnamed type")?;
@@ -1566,7 +1619,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         }
                     };
 
-                    if let Some(ret_type_id) = func.ret_type_id {
+                    // A trait method declared to return `Self` records its return type as the declaring
+                    // trait. When invoked on a trait-object receiver whose static type is broader (e.g. a
+                    // multiple-trait bound `A + B`), propagate the receiver's type to the result so methods
+                    // from the other constituent traits remain callable on the returned value.
+                    let ret_type_id = func.ret_type_id.map(|ret_type_id| {
+                        let receiver_type_id = item.left.as_expression()
+                            .and_then(|e| e.as_constant())
+                            .and_then(|c| c.constant_id)
+                            .and_then(|cid| self.scopes.constant_function_id(cid))
+                            .filter(|&fid| matches!(self.scopes.function_ref(fid).kind, Some(FunctionKind::Method(declaring_id)) if declaring_id == ret_type_id))
+                            .and(item.right.as_argument_list().and_then(|a| a.args.first()))
+                            .and_then(|receiver| receiver.type_id(self));
+                        match receiver_type_id {
+                            Some(receiver_type_id) if receiver_type_id != ret_type_id && self.type_accepted_for(receiver_type_id, ret_type_id) => receiver_type_id,
+                            _ => ret_type_id,
+                        }
+                    });
+                    if let Some(ret_type_id) = ret_type_id {
                         self.set_type_id(item, ret_type_id)?;
                     }
 
@@ -1602,7 +1672,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(expected_result) = expected_result {
                     // a concrete result passed where a trait is expected stays concrete (coerced to a
                     // trait object at compile time); only its acceptance is verified, not its identity
-                    if self.type_by_id(expected_result).as_trait().is_some() {
+                    if self.type_by_id(expected_result).is_trait_object() {
                         if let Some(item_type_id) = item.type_id(self) {
                             self.check_type_accepted_for(item, item_type_id, expected_result)?;
                         }

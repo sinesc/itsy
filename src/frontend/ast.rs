@@ -139,6 +139,11 @@ pub(crate) trait Resolvable: Display {
                         .map(|(_, opt_const_id)| opt_const_id.map_or(Progress::new(0, 1), |const_id| self.check_constant_id(container, const_id, seen)))
                         .fold(Progress::zero(), |acc, a| acc + a)
                 },
+                Type::TraitBound(trait_ids) => {
+                    trait_ids.iter()
+                        .map(|&trait_id| self.check_type_id(container, trait_id, seen))
+                        .fold(Progress::new(1, 1), |acc, a| acc + a)
+                },
                 Type::Callable(c) => {
                     c.ret_type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen))
                     + c.arg_type_ids.iter()
@@ -354,7 +359,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member, TypeName)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, CallableDef)
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, CallableDef, TraitBound)
     };
     ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
         compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
@@ -798,6 +803,8 @@ pub enum InlineType {
     ArrayDef(Box<ArrayDef>),
     /// Callable definition
     CallableDef(Box<CallableDef>),
+    /// Multiple trait bound, e.g. `TraitA + TraitB`
+    TraitBound(Box<TraitBound>),
 }
 
 impl_resolvable!(enum InlineType);
@@ -808,6 +815,7 @@ impl Display for InlineType {
             Self::TypeName(type_name) => write!(f, "{}", type_name),
             Self::ArrayDef(array_def) => write!(f, "{}", array_def),
             Self::CallableDef(callable_def) => write!(f, "{}", callable_def),
+            Self::TraitBound(trait_bound) => write!(f, "{}", trait_bound),
         }
     }
 }
@@ -818,6 +826,7 @@ impl Typeable for InlineType {
             InlineType::ArrayDef(array_def) => array_def.type_id(container),
             InlineType::TypeName(type_name) => type_name.type_id(container),
             InlineType::CallableDef(callable_def) => callable_def.type_id(container),
+            InlineType::TraitBound(trait_bound) => trait_bound.type_id(container),
         }
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
@@ -825,7 +834,30 @@ impl Typeable for InlineType {
             InlineType::ArrayDef(array_def) => array_def.set_type_id(container, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
             InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
+            InlineType::TraitBound(trait_bound) => trait_bound.set_type_id(container, type_id),
         }
+    }
+}
+
+
+/// A multiple-trait bound, e.g. `TraitA + TraitB`. Accepts any type implementing all listed traits.
+#[derive(Debug)]
+pub struct TraitBound {
+    pub position: Position,
+    pub traits  : Vec<TypeName>,
+    pub type_id : Option<TypeId>,
+}
+
+impl_positioned!(TraitBound);
+impl_typeable!(TraitBound);
+impl_resolvable!(TraitBound {
+    traits: ItemList,
+    type_id: TypeId,
+});
+
+impl Display for TraitBound {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.traits.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(" + "))
     }
 }
 

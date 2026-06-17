@@ -419,7 +419,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(item, function_kind)?;
-                if self.ty(&object_type_id).as_trait().is_some() {
+                if self.ty(&object_type_id).is_trait_object() {
                     // dynamic dispatch
                     let function_offset = self.vtable_function_offset(function_id)?;
                     let function_arg_size = self.resolved.function(function_id).arg_size(self);
@@ -1641,11 +1641,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::String);
             }
-            Type::Trait(_) => {
-                // A nested trait-object reference. Its concrete type (and thus constructor) is only
-                // known at runtime, so emit a virtual marker that the VM resolves via the referenced
-                // object's implementor index, mirroring the offset-0 indirection used for top-level
-                // trait objects.
+            Type::Trait(_) | Type::TraitBound(_) => {
+                // A nested trait-object reference (single trait or multiple-trait bound). Its concrete
+                // type (and thus constructor) is only known at runtime, so emit a virtual marker that the
+                // VM resolves via the referenced object's implementor index, mirroring the offset-0
+                // indirection used for top-level trait objects.
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Virtual);
             }
