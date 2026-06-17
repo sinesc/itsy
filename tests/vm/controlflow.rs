@@ -794,3 +794,20 @@ fn match_or_binding_rejected() {
     ));
     assert!(err.contains("Bindings are not allowed"), "unexpected error: {}", err);
 }
+
+#[test]
+fn assign_if_else_block_with_local() {
+    // regression: a let binding inside an if/else expression assigned to a variable
+    // must get a stack frame slot allocated (previously paniced with "Unknown local binding")
+    let result = run(stringify!(
+        let line = "";
+        line = if 1 > 2 {
+            let rando = "x";
+            rando
+        } else {
+            " "
+        };
+        ret_str(line);
+    ));
+    assert_all(&result, &[ " ".to_string() ]);
+}

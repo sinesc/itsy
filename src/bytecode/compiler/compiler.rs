@@ -1485,9 +1485,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame)?;
         } else if let ast::Expression::Assignment(assignment) = expression {
-            if let ast::Expression::Block(block) = &assignment.right {
-                self.create_stack_frame_block(block, frame)?;
-            }
+            self.create_stack_frame_exp(&assignment.right, frame)?;
         } else if let ast::Expression::BinaryOp(binary_op) = expression {
             if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.left {
                 self.create_stack_frame_block(block, frame)?;
