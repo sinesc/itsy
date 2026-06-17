@@ -4,6 +4,7 @@
 mod scopes;
 mod stage;
 mod exhaustiveness;
+mod apitype;
 pub mod error;
 pub mod resolved;
 
@@ -33,46 +34,6 @@ pub(crate) struct Resolver<'ctx> {
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
     module_path     : &'ctx str,
-}
-
-/// Recursively resolves an API [ApiType] descriptor to a [TypeId] in the root scope. Named types are
-/// looked up (with `str` normalized to `String` and API types qualified under the API namespace via
-/// `ns`); arrays are created as anonymous `[ element ]` types, which the resolver matches structurally
-/// so they unify with array literals in scripts.
-fn resolve_api_type(scopes: &mut scopes::Scopes, api_type: &crate::marshal::ApiType, ns: &ApiNamespace, fn_name: &str, position: &str) -> ResolveResult<TypeId> {
-    use crate::marshal::ApiType;
-    match api_type {
-        ApiType::Name(type_name) => {
-            let type_name = if *type_name == "str" { "String" } else { *type_name };
-            let type_name = ns.qualify(type_name);
-            scopes.type_id(ScopeId::ROOT, &type_name)
-                .ice_msg(&format!("Unknown type '{}' encountered in rust fn '{}' {} position", type_name, fn_name, position))
-        },
-        ApiType::Array(element) => {
-            let element_type_id = resolve_api_type(scopes, element, ns, fn_name, position)?;
-            Ok(scopes.insert_type(None, Type::Array(Array { type_id: Some(element_type_id) })))
-        },
-    }
-}
-
-/// Maps bare API type names (e.g. `MyStruct`) to their namespaced form under the API typename
-/// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced. Built-in type names
-/// (primitives, `String`) are not registered as API types and are left unqualified.
-struct ApiNamespace<'a> {
-    prefix: &'a str,
-    api_type_names: Set<&'a str>,
-}
-
-impl<'a> ApiNamespace<'a> {
-    /// Returns the namespaced name for an API type, or the name unchanged if it is not a registered
-    /// API type (i.e. a built-in such as a primitive or `String`).
-    fn qualify(self: &Self, name: &str) -> String {
-        if self.api_type_names.contains(name) {
-            format!("{}::{}", self.prefix, name)
-        } else {
-            name.to_string()
-        }
-    }
 }
 
 /// Resolves types within the given program AST structure.
@@ -131,89 +92,18 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
-    // register struct/enum types used by the rust API into the root scope (two passes so that types
-    // can reference each other regardless of declaration order). Pass 1 inserts the named, empty types,
-    // pass 2 resolves their fields/variants against the now-known set of names.
-    use crate::marshal::ApiTypeKind;
-    let api_type_defs = T::resolve_types();
-    // API types are namespaced under the API typename (e.g. `MyAPI::MyStruct`), mirroring how API
-    // functions are namespaced. References to them (fields, variant fields, arguments, returns) are
-    // qualified the same way; built-in names (primitives, `String`) are left as-is.
-    let ns = ApiNamespace {
-        prefix: T::api_name(),
-        api_type_names: api_type_defs.iter().map(|def| def.name).collect(),
-    };
-    for def in &api_type_defs {
-        let type_name = ns.qualify(def.name);
-        if scopes.type_id(ScopeId::ROOT, &type_name).is_none() {
-            let placeholder = match &def.kind {
-                ApiTypeKind::Struct { .. } => Type::Struct(Struct { fields: Map::new(), impl_traits: Map::new() }),
-                ApiTypeKind::PrimitiveEnum { .. } | ApiTypeKind::DataEnum { .. } => Type::Enum(Enum { variants: Vec::new(), impl_traits: Map::new(), primitive: None }),
-            };
-            scopes.insert_type(Some(&type_name), placeholder);
-        }
-    }
-    let api_discriminant_type_id = *primitives.get(&Type::i32).ice()?;
-    let api_discriminant_size = Type::i32.primitive_size();
-    for def in &api_type_defs {
-        let type_name = ns.qualify(def.name);
-        let type_id = scopes.type_id(ScopeId::ROOT, &type_name).ice_msg(&format!("Failed to register API type '{}'", type_name))?;
-        match &def.kind {
-            ApiTypeKind::Struct { fields } => {
-                let mut field_map = Map::new();
-                for (field_name, field_type_name) in fields {
-                    let field_type_id = scopes.type_id(ScopeId::ROOT, &ns.qualify(field_type_name))
-                        .ice_msg(&format!("Unknown type '{}' encountered in field '{}' of API type '{}'", field_type_name, field_name, def.name))?;
-                    field_map.insert(field_name.to_string(), Some(field_type_id));
-                }
-                *scopes.type_mut(type_id) = Type::Struct(Struct { fields: field_map, impl_traits: Map::new() });
-            },
-            ApiTypeKind::PrimitiveEnum { variants } => {
-                let mut enum_variants = Vec::new();
-                for (name, discriminant) in variants {
-                    let discriminant = Numeric::Signed(*discriminant);
-                    enum_variants.push((name.to_string(), EnumVariant::Simple(Some(discriminant))));
-                    // C-like enum variant: a constant holding the bare discriminant
-                    scopes.insert_constant(&format!("{}::{}", type_name, name), type_id, Some(type_id), ConstantValue::Discriminant(discriminant));
-                }
-                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: Some((api_discriminant_type_id, api_discriminant_size)) });
-            },
-            ApiTypeKind::DataEnum { variants } => {
-                let mut enum_variants = Vec::new();
-                for (index, (name, field_type_names)) in variants.iter().enumerate() {
-                    let path = format!("{}::{}", type_name, name);
-                    if field_type_names.is_empty() {
-                        // unit variant of a data enum: a constant; the discriminant is unused (the heap
-                        // tag is the variant index) but must be present for as_simple() lookups.
-                        let discriminant = Numeric::Signed(index as i64);
-                        enum_variants.push((name.to_string(), EnumVariant::Simple(Some(discriminant))));
-                        scopes.insert_constant(&path, type_id, Some(type_id), ConstantValue::Discriminant(discriminant));
-                    } else {
-                        let mut field_type_ids = Vec::new();
-                        for field_type_name in field_type_names {
-                            let field_type_id = scopes.type_id(ScopeId::ROOT, &ns.qualify(field_type_name))
-                                .ice_msg(&format!("Unknown type '{}' encountered in variant '{}' of API type '{}'", field_type_name, name, def.name))?;
-                            field_type_ids.push(Some(field_type_id));
-                        }
-                        // data variant: a constructor function tagged with its variant index
-                        scopes.insert_function(&path, Some(type_id), field_type_ids.clone(), Some(FunctionKind::Variant(type_id, index as VariantIndex)));
-                        enum_variants.push((name.to_string(), EnumVariant::Data(field_type_ids)));
-                    }
-                }
-                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: None });
-            },
-        }
-    }
+    // insert userdefined struct/enum types from derive-macro/itsy_api
+    let ns = apitype::insert_all::<T>(&mut scopes, &primitives)?;
 
     // insert rust functions into root scope
     for (name, (index, ret_type, arg_types)) in T::resolve_info().into_iter() {
         let ret_type = match &ret_type {
             None => Some(*primitives.get(&Type::void).ice()?),
-            Some(ret_type) => Some(resolve_api_type(&mut scopes, ret_type, &ns, name, "return")?),
+            Some(ret_type) => Some(apitype::resolve_type_id(&mut scopes, ret_type, &ns, name, "return")?),
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_types
             .iter()
-            .map(|arg_type| Ok(Some(resolve_api_type(&mut scopes, arg_type, &ns, name, "argument")?)))
+            .map(|arg_type| Ok(Some(apitype::resolve_type_id(&mut scopes, arg_type, &ns, name, "argument")?)))
             .collect();
         scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
