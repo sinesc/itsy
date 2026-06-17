@@ -1156,10 +1156,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves a variable name to a variable.
     fn resolve_variable(self: &mut Self, item: &mut ast::Variable, expected_result: Option<TypeId>) -> ResolveResult {
-        // set expected type, if it isn't a trait or we're in final resolver stage
+        // Adopt the type expected by a *use* of this variable only once the binding has had a chance to
+        // resolve from its own declaration. Pinning a still-unresolved binding to a usage-expected type
+        // during the early structural passes can poison it (e.g. an assignment target's element type
+        // leaking onto the assigned value), which masks the genuine type mismatch and surfaces a bogus
+        // error further downstream. So defer adoption to a later stage and let declaration-derived types
+        // win: traits until infer_as_concrete (a concrete implementor may still turn up), concrete types
+        // until infer_from_usage (one structural pass on, but still ahead of literal defaulting so a
+        // genuinely usage-typed binding like `let mut y;` keeps constraining numeric literals).
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
-                if self.stage.infer_as_concrete() || !self.type_by_id(expected_result).as_trait().is_some() {
+                let ready = if self.type_by_id(expected_result).as_trait().is_some() {
+                    self.stage.infer_as_concrete()
+                } else {
+                    self.stage.infer_from_usage()
+                };
+                if ready {
                     self.set_type_id(item, expected_result)?;
                 }
             }

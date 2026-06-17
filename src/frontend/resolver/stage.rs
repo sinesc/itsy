@@ -20,6 +20,13 @@ impl Stage {
     pub fn must_exist(self: &Self) -> bool {
         self.0 == 1
     }
+    /// First structural pass completed: a binding has now had a chance to resolve from its own
+    /// declaration, so it may be pinned to a (concrete) type expected by one of its uses. Kept before
+    /// `infer_literals` so a genuinely usage-typed binding (e.g. `let mut y;`) still constrains numeric
+    /// literals before they fall back to their default types.
+    pub fn infer_from_usage(self: &Self) -> bool {
+        self.0 >= 1
+    }
     /// Assume unresolved numeric literals to be their default types.
     pub fn infer_literals(self: &Self) -> bool {
         self.0 == 2
