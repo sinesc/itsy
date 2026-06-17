@@ -147,7 +147,7 @@ impl<T> StackRelativeOp<T> for Stack where Stack: StackOp<T> + StackOffsetOp { }
 #[allow(unused_macros)]
 macro_rules! impl_stack {
 
-    // push operationsoperations
+    // push operations
 
     (@push single, $type:tt, $stack: ident, $var:tt) => {
         let bytes = $var.to_ne_bytes();

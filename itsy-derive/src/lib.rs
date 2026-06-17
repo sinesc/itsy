@@ -56,7 +56,7 @@ fn impl_struct(ident: &Ident, data: &DataStruct) -> syn::Result<proc_macro2::Tok
     let compiler_impl = quote! {
         #[cfg(feature = "compiler")]
         const _: () = {
-            use ::itsy::internals::binary::{VMType, ApiTypeDef, ApiTypeKind};
+            use ::itsy::internals::marshal::{VMType, ApiTypeDef, ApiTypeKind};
             impl VMType for #ident {
                 const ITSY_NAME: &'static str = #name_str;
                 fn itsy_type_def() -> Option<ApiTypeDef> {
@@ -81,7 +81,7 @@ fn impl_struct(ident: &Ident, data: &DataStruct) -> syn::Result<proc_macro2::Tok
     let runtime_impl = quote! {
         #[cfg(feature = "runtime")]
         const _: () = {
-            use ::itsy::internals::binary::{VMValue, VMField, read_nested_ref, alloc_value};
+            use ::itsy::internals::marshal::{VMValue, VMField, read_nested_ref, alloc_value};
             use ::itsy::internals::binary::heap::{Heap, HeapRef, HeapRefOp};
 
             impl VMValue for #ident {
@@ -154,7 +154,7 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
     let compiler_impl = quote! {
         #[cfg(feature = "compiler")]
         const _: () = {
-            use ::itsy::internals::binary::{VMType, ApiTypeDef, ApiTypeKind};
+            use ::itsy::internals::marshal::{VMType, ApiTypeDef, ApiTypeKind};
             impl VMType for #ident {
                 const ITSY_NAME: &'static str = #name_str;
                 fn itsy_type_def() -> Option<ApiTypeDef> {
@@ -178,7 +178,7 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
     let runtime_impl = quote! {
         #[cfg(feature = "runtime")]
         const _: () = {
-            use ::itsy::internals::binary::{VMValue, VMField};
+            use ::itsy::internals::marshal::{VMValue, VMField};
             use ::itsy::internals::binary::heap::{Heap, HeapRef};
 
             impl VMValue for #ident {
@@ -277,7 +277,7 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
     let compiler_impl = quote! {
         #[cfg(feature = "compiler")]
         const _: () = {
-            use ::itsy::internals::binary::{VMType, ApiTypeDef, ApiTypeKind};
+            use ::itsy::internals::marshal::{VMType, ApiTypeDef, ApiTypeKind};
             impl VMType for #ident {
                 const ITSY_NAME: &'static str = #name_str;
                 fn itsy_type_def() -> Option<ApiTypeDef> {
@@ -302,7 +302,7 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
     let runtime_impl = quote! {
         #[cfg(feature = "runtime")]
         const _: () = {
-            use ::itsy::internals::binary::{VMValue, VMField, read_nested_ref, alloc_value, write_variant_tag, read_variant_tag, VARIANT_TAG_SIZE};
+            use ::itsy::internals::marshal::{VMValue, VMField, read_nested_ref, alloc_value, write_variant_tag, read_variant_tag, VARIANT_TAG_SIZE};
             use ::itsy::internals::binary::heap::{Heap, HeapRef, HeapRefOp};
 
             impl VMValue for #ident {

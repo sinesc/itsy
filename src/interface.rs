@@ -22,14 +22,21 @@ pub mod internals {
     pub mod resolved {
         //! Resolved program type information.
         pub use crate::shared::MetaContainer;
-        pub use crate::shared::meta::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind, Binding, EnumVariant};
+        pub use crate::shared::meta::{Type, Struct, Enum, Array, Trait, ImplTrait, Function, FunctionKind, Binding, EnumVariant, Constant, Callable};
         pub use crate::shared::numeric::Numeric;
         pub use crate::frontend::resolver::resolved::Resolved;
         pub mod ids {
             //! Typed ids used to refer to specific program elements.
-            pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId};
+            pub use crate::shared::typed_ids::{BindingId, FunctionId, TypeId, ScopeId, ConstantId};
             pub use crate::frontend::resolver::resolved::Resolved;
         }
+    }
+    pub mod marshal {
+        //! Support for custom types in Itsy API signatures.
+        #[cfg(feature="compiler")]
+        pub use crate::marshal::{VMType, ApiTypeDef, ApiTypeKind, ApiType};
+        #[cfg(feature="runtime")]
+        pub use crate::marshal::{VMValue, VMField, read_nested_ref, write_variant_tag, read_variant_tag, alloc_value, VARIANT_TAG_SIZE};
     }
     pub mod binary {
         //! Support for generating and executing compiled code.
@@ -52,11 +59,7 @@ pub mod internals {
             pub use crate::config_derived::*;
         }
         pub use crate::bytecode::{VMFunc, VMData};
-        pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
-        #[cfg(feature="compiler")]
-        pub use crate::marshal::{VMType, ApiTypeDef, ApiTypeKind, ApiType};
-        #[cfg(feature="runtime")]
-        pub use crate::marshal::{VMValue, VMField, read_nested_ref, write_variant_tag, read_variant_tag, alloc_value, VARIANT_TAG_SIZE};
+        pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin, builtins::BuiltinType};
     }
     #[cfg(doc)]
     pub use crate::bytecode::builtins::documentation;
