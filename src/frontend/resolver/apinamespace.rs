@@ -48,7 +48,7 @@ pub(super) fn resolve_type_id(scopes: &mut Scopes, api_type: &ApiType, ns: &ApiN
 }
 
 /// Insert userdefined struct/enum types from itsy_api! to global scope.
-pub(super) fn insert_all<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Type, TypeId>) -> ResolveResult<ApiNamespace> {
+pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Type, TypeId>) -> ResolveResult<ApiNamespace> {
 
     // get list of type defs provided by itsy_api! via VMFunc
     let api_type_defs = T::resolve_types();

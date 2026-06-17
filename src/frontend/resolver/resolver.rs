@@ -4,7 +4,7 @@
 mod scopes;
 mod stage;
 mod exhaustiveness;
-mod apitype;
+mod apinamespace;
 pub mod error;
 pub mod resolved;
 
@@ -93,17 +93,17 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
     // insert userdefined struct/enum types from derive-macro/itsy_api
-    let ns = apitype::insert_all::<T>(&mut scopes, &primitives)?;
+    let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
 
     // insert rust functions into root scope
     for (name, (index, ret_type, arg_types)) in T::resolve_info().into_iter() {
         let ret_type = match &ret_type {
             None => Some(*primitives.get(&Type::void).ice()?),
-            Some(ret_type) => Some(apitype::resolve_type_id(&mut scopes, ret_type, &ns, name, "return")?),
+            Some(ret_type) => Some(apinamespace::resolve_type_id(&mut scopes, ret_type, &ns, name, "return")?),
         };
         let arg_type_id: ResolveResult<Vec<_>> = arg_types
             .iter()
-            .map(|arg_type| Ok(Some(apitype::resolve_type_id(&mut scopes, arg_type, &ns, name, "argument")?)))
+            .map(|arg_type| Ok(Some(apinamespace::resolve_type_id(&mut scopes, arg_type, &ns, name, "argument")?)))
             .collect();
         scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
