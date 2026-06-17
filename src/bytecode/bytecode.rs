@@ -222,8 +222,6 @@ pub enum Constructor {
 /// Information about a serialized constructor
 #[cfg(feature="runtime")]
 pub struct ConstructorData {
-    /// Construction operation
-    pub op: Constructor,
     /// Offset to construction parameters (after size-info and operation)
     pub offset: StackAddress,
     /// Address of the next constructor
@@ -262,7 +260,6 @@ impl Constructor {
                 let constructor_size: ItemIndex = stack.load(offset);
                 offset += size_of_val(&constructor_size) as StackAddress;
                 ConstructorData {
-                    op: constructor,
                     offset,
                     next: offset + constructor_size as StackAddress,
                 }
@@ -271,7 +268,6 @@ impl Constructor {
                 // constructor size is size of one ItemIndex
                 const SIZE: StackAddress = size_of::<ItemIndex>() as StackAddress;
                 ConstructorData {
-                    op: constructor,
                     offset,
                     next: offset + SIZE,
                 }
@@ -280,7 +276,6 @@ impl Constructor {
                 // no additional data attached: a virtual constructor is resolved at runtime via the
                 // referenced object's implementor index, strings/closures carry no nested layout
                 ConstructorData {
-                    op: constructor,
                     offset,
                     next: offset,
                 }

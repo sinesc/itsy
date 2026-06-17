@@ -1,3 +1,8 @@
+// Convenience re-exports shared across the crate. Which symbols are actually used
+// depends on the enabled features (compiler/runtime), so unused imports are expected
+// in any single-feature build.
+#![allow(unused_imports)]
+
 pub use std::collections::BTreeMap as Map;
 pub use std::collections::BTreeSet as Set;
 pub use std::collections::HashMap as UnorderedMap;

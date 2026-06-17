@@ -59,7 +59,9 @@ pub mod internals {
             pub use crate::config_derived::*;
         }
         pub use crate::bytecode::{VMFunc, VMData};
-        pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin, builtins::BuiltinType};
+        pub use crate::bytecode::{opcodes::OpCode, builtins::Builtin};
+        #[cfg(feature="compiler")]
+        pub use crate::bytecode::builtins::BuiltinType;
     }
     #[cfg(doc)]
     pub use crate::bytecode::builtins::documentation;
