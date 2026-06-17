@@ -35,40 +35,6 @@ pub(crate) struct Resolver<'ctx> {
     module_path     : &'ctx str,
 }
 
-/// Resolves types within the given program AST structure.
-///
-/// # Examples
-///
-/// The following example parses a string into a module, constructs a program with it and resolves the program.
-/// If the program were to be compiled and run, execution would start at the "main" function.
-/// ```
-/// use itsy::{itsy_api, parser, resolver};
-///
-/// // Define an API of Rust functions that are callable from the Itsy script.
-/// itsy_api!(MyAPI<()> {
-///     fn print(&mut context, value: str) {
-///         println!("print: {}", value);
-///     }
-///     // ... more functions ...
-/// });
-///
-/// fn main() {
-///     let mut state = parser::LinkState::new();
-///     let module = parser::parse_module(&mut state, "
-///         // An Itsy program that calls the Rust 'print' function.
-///         fn main() {
-///             MyAPI::print(\"Hello from Itsy!\");
-///         }
-///     ", "").unwrap();
-///     let mut parsed = parser::ParsedProgram::new();
-///     parsed.add_module(module);
-///     parsed.set_link_state(state);
-///     let resolved = resolver::resolve::<MyAPI>(parsed, "main").unwrap();
-/// }
-/// ```
-///
-/// The returned [ResolvedProgram] is now ready for compilation by [compile](crate::compiler::compile).
-///
 /// Recursively resolves an API [ApiType] descriptor to a [TypeId] in the root scope. Named types are
 /// looked up (with `str` normalized to `String` and API types qualified under the API namespace via
 /// `ns`); arrays are created as anonymous `[ element ]` types, which the resolver matches structurally
@@ -109,6 +75,39 @@ impl<'a> ApiNamespace<'a> {
     }
 }
 
+/// Resolves types within the given program AST structure.
+///
+/// # Examples
+///
+/// The following example parses a string into a module, constructs a program with it and resolves the program.
+/// If the program were to be compiled and run, execution would start at the "main" function.
+/// ```
+/// use itsy::{itsy_api, parser, resolver};
+///
+/// // Define an API of Rust functions that are callable from the Itsy script.
+/// itsy_api!(MyAPI<()> {
+///     fn print(&mut context, value: str) {
+///         println!("print: {}", value);
+///     }
+///     // ... more functions ...
+/// });
+///
+/// fn main() {
+///     let mut state = parser::LinkState::new();
+///     let module = parser::parse_module(&mut state, "
+///         // An Itsy program that calls the Rust 'print' function.
+///         fn main() {
+///             MyAPI::print(\"Hello from Itsy!\");
+///         }
+///     ", "").unwrap();
+///     let mut parsed = parser::ParsedProgram::new();
+///     parsed.add_module(module);
+///     parsed.set_link_state(state);
+///     let resolved = resolver::resolve::<MyAPI>(parsed, "main").unwrap();
+/// }
+/// ```
+///
+/// The returned [ResolvedProgram] is now ready for compilation by [compile](crate::compiler::compile).
 #[allow(invalid_type_param_default)]
 pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveResult<ResolvedProgram<T>> where T: VMFunc<T> {
 
