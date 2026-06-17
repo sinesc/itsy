@@ -304,11 +304,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Returns Ok if given types are the same, otherwise a TypeMismatch error.
-    fn check_type_equals(self: &Self, item: &impl Positioned, first_type_id: TypeId, second_type_id: TypeId) -> ResolveResult  {
-        if !self.type_equals(first_type_id, second_type_id) {
-            let name_first = self.type_name(first_type_id);
-            let name_second = self.type_name(second_type_id);
-            let error_kind = ResolveErrorKind::TypeMismatch(name_first, name_second);
+    fn check_type_equals(self: &Self, item: &impl Positioned, given_type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
+        if !self.type_equals(given_type_id, expected_type_id) {
+            let name_got = self.type_name(given_type_id);
+            let name_expected = self.type_name(expected_type_id);
+            let error_kind = ResolveErrorKind::TypeMismatch(name_got, name_expected);
             Err(ResolveError::new(item, error_kind, self.module_path))
         } else {
             Ok(())
@@ -1373,10 +1373,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment, expected_result: Option<TypeId>) -> ResolveResult {
-        let right_type_id = item.right.type_id(self);
-        self.resolve_expression(&mut item.left, right_type_id)?;
+        // Resolve the assignment target first *without* imposing the value's type on it, then resolve the
+        // value against the target's type. This ordering means a genuine mismatch is reported as
+        // "expected <target>, got <value>"; resolving the target against the value's type instead (the
+        // reverse) would name the operands the wrong way round for an assignment.
+        self.resolve_expression(&mut item.left, None)?;
         let left_type_id = item.left.type_id(self);
         self.resolve_expression(&mut item.right, left_type_id)?;
+        let right_type_id = item.right.type_id(self);
+        // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
+        // untyped array's element type, or an uninitialized binding learned from what is assigned to it)
+        if left_type_id.is_none() {
+            self.resolve_expression(&mut item.left, right_type_id)?;
+        }
         // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
         item.type_id = Some(TypeId::VOID);
         self.types_resolved(item, expected_result)

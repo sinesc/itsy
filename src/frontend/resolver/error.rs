@@ -12,6 +12,7 @@ pub enum ResolveErrorKind {
     UndefinedFunction(String),
     UndefinedType(String),
     UndefinedItem(String),
+    /// Expected one type, got another. Expected type is second argument.
     TypeMismatch(String, String),
     InvalidCast(String, String),
     IncompatibleNumeric(String, Numeric),
