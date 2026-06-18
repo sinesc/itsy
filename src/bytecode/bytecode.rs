@@ -12,6 +12,7 @@ pub mod compiler;
 #[path="runtime/runtime.rs"]
 #[cfg(feature="runtime")]
 pub mod runtime;
+pub mod marshal;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
@@ -30,7 +31,7 @@ pub trait VMFunc<T>: Debug {
     fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<crate::marshal::ApiType>, Vec<crate::marshal::ApiType>)>;
+    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<crate::internals::marshal::ApiType>, Vec<crate::internals::marshal::ApiType>)>;
     /// Returns the name given to the API in `itsy_api!`. API types are registered under this namespace
     /// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced.
     #[doc(hidden)]
@@ -40,7 +41,7 @@ pub trait VMFunc<T>: Debug {
     /// resolver can register them in the root scope.
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_types() -> Vec<crate::marshal::ApiTypeDef> { Vec::new() }
+    fn resolve_types() -> Vec<crate::internals::marshal::ApiTypeDef> { Vec::new() }
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.

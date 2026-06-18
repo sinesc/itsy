@@ -34,9 +34,9 @@ pub mod internals {
     pub mod marshal {
         //! Support for custom types in Itsy API signatures.
         #[cfg(feature="compiler")]
-        pub use crate::marshal::{VMType, ApiTypeDef, ApiTypeKind, ApiType};
+        pub use crate::bytecode::marshal::{VMType, ApiTypeDef, ApiTypeKind, ApiType};
         #[cfg(feature="runtime")]
-        pub use crate::marshal::{VMValue, VMField, read_nested_ref, write_variant_tag, read_variant_tag, alloc_value, VARIANT_TAG_SIZE};
+        pub use crate::bytecode::marshal::{VMValue, VMField, read_nested_ref, write_variant_tag, read_variant_tag, alloc_value, VARIANT_TAG_SIZE};
     }
     pub mod binary {
         //! Support for generating and executing compiled code.

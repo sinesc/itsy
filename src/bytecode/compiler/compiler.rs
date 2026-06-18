@@ -3,7 +3,7 @@
 mod stack_frame;
 mod macros;
 pub mod error;
-mod util;
+mod placeholder;
 mod init_state;
 
 use crate::config::FrameAddress;
@@ -14,7 +14,7 @@ use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, 
 use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::BuiltinType};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
-use util::{LoopControlStack, LoopControl, Functions};
+use placeholder::{LoopControlStack, LoopControl, Functions};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 use macros::{comment, select_integer_type, select_numeric_type, select_numeric_cast_type, select_primitive_size};
 

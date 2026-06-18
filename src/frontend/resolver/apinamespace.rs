@@ -6,7 +6,7 @@ use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Type, FunctionKind, 
 use crate::shared::typed_ids::{ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::VMFunc;
-use crate::marshal::{ApiType, ApiTypeKind};
+use crate::bytecode::marshal::{ApiType, ApiTypeKind};
 
 /// Maps bare API type names (e.g. `MyStruct`) to their namespaced form under the API typename
 /// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced. Built-in type names

@@ -18,7 +18,6 @@ mod bytecode;
 mod interface;
 mod prelude;
 mod config;
-mod marshal;
 
 pub use interface::*;
 
