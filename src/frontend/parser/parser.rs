@@ -1555,7 +1555,7 @@ pub fn parse_module(link_state: &mut LinkState, src: &str, module_path: &str) ->
 /// fn main() {
 ///     let source_file = "itsy/rustdoc/parse.itsy";
 ///     let parsed = parser::parse(|module_path, state| {
-///         let filename = parser::module_filename(source_file, module_path, false);
+///         let filename = parser::module_filename(source_file, module_path, false)?;
 ///         let file = fs::read_to_string(filename)?;
 ///         parser::parse_module(state, &file, module_path)
 ///     }).unwrap();
@@ -1588,10 +1588,11 @@ fn parse_recurse(module_path: &str, state: &mut LinkState, program: &mut ParsedP
     Ok(())
 }
 
-/// Given the filename to an itsy program main module and an Itsy module path, returns the filename of the Itsy module.
-pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &str, subdirectory: bool) -> std::path::PathBuf {
+/// Given the filename to an itsy program main module and an Itsy module path, returns the filename of the Itsy module
+/// or an error if `main_file` is not a valid module filename.
+pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &str, subdirectory: bool) -> std::io::Result<std::path::PathBuf> {
     if module_path == "" {
-        main_file.into()
+        Ok(main_file.into())
     } else {
         let mut path: std::path::PathBuf = main_file.into();
         if path.pop() {
@@ -1601,10 +1602,10 @@ pub fn module_filename<P: Into<std::path::PathBuf>>(main_file: P, module_path: &
             if subdirectory {
                 path.push("mod");
             }
+            path.set_extension("itsy");
+            Ok(path)
         } else {
-            panic!("Invalid filename.");
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("Invalid main module filename '{}'", path.display())))
         }
-        path.set_extension("itsy");
-        path
     }
 }
