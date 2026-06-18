@@ -1043,11 +1043,56 @@ fn expression(i: Input) -> Output<Expression> {
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
     }
-    fn prec3(i: Input) -> Output<Expression> {
+    // bitwise or `|`. Lower precedence than `^`, higher than comparison.
+    // (Inserted between prec4 and prec3; named prec3a..prec3d to keep existing prec names stable for now.)
+    fn prec3a(i: Input) -> Output<Expression> {
+        let init = prec3b(i)?;
+        let position = init.0.position();
+        fold_many0_mut(
+            // guard against `||` (logical or) and `|=` (compound assign), which bind looser and are handled elsewhere
+            pair(map(terminated(punct("|"), not(one_of("|="))), |o| BinaryOperator::from_string(o)), prec3b),
+            init.1,
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+        )(init.0)
+    }
+    // bitwise xor `^`. Lower precedence than `&`, higher than `|`.
+    fn prec3b(i: Input) -> Output<Expression> {
+        let init = prec3c(i)?;
+        let position = init.0.position();
+        fold_many0_mut(
+            // guard against `^=` (compound assign)
+            pair(map(terminated(punct("^"), not(char('='))), |o| BinaryOperator::from_string(o)), prec3c),
+            init.1,
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+        )(init.0)
+    }
+    // bitwise and `&`. Lower precedence than shifts, higher than `^`.
+    fn prec3c(i: Input) -> Output<Expression> {
+        let init = prec3d(i)?;
+        let position = init.0.position();
+        fold_many0_mut(
+            // guard against `&&` (logical and) and `&=` (compound assign)
+            pair(map(terminated(punct("&"), not(one_of("&="))), |o| BinaryOperator::from_string(o)), prec3d),
+            init.1,
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+        )(init.0)
+    }
+    // shifts `<<` `>>`. Lower precedence than `+`/`-`, higher than `&`.
+    fn prec3d(i: Input) -> Output<Expression> {
         let init = prec4(i)?;
         let position = init.0.position();
         fold_many0_mut(
-            pair(map(alt((punct("<="), punct(">="), punct("<"), punct(">"))), |o| BinaryOperator::from_string(o)), prec4),
+            // guard against `<<=`/`>>=` (compound assigns)
+            pair(map(alt((terminated(punct("<<"), not(char('='))), terminated(punct(">>"), not(char('='))))), |o| BinaryOperator::from_string(o)), prec4),
+            init.1,
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+        )(init.0)
+    }
+    fn prec3(i: Input) -> Output<Expression> {
+        let init = prec3a(i)?;
+        let position = init.0.position();
+        fold_many0_mut(
+            pair(map(alt((punct("<="), punct(">="), punct("<"), punct(">"))), |o| BinaryOperator::from_string(o)), prec3a),
             init.1,
             |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
         )(init.0)
@@ -1331,7 +1376,8 @@ fn assignment(i: Input) -> Output<Assignment> {
     }
     fn assignment_operator(i: Input) -> Output<BinaryOperator> {
         map(
-            alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="))),
+            alt((punct("="), punct("+="), punct("-="), punct("*="), punct("/="), punct("%="),
+                punct("<<="), punct(">>="), punct("&="), punct("|="), punct("^="))),
             |o| {
                 BinaryOperator::from_string(o)
             }

@@ -1984,8 +1984,11 @@ impl Display for UnaryOperator {
 pub enum BinaryOperator {
     // arithmetic
     Add, Sub, Mul, Div, Rem,
+    // bitwise
+    BitAnd, BitOr, BitXor, Shl, Shr,
     // assigments
     Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
+    BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign,
     // comparison
     Less, Greater, LessOrEq, GreaterOrEq, Equal, NotEqual,
     // boolean
@@ -2012,6 +2015,18 @@ impl BinaryOperator {
             "&&" => BinaryOperator::And,
             "||" => BinaryOperator::Or,
 
+            "&" => BinaryOperator::BitAnd,
+            "|" => BinaryOperator::BitOr,
+            "^" => BinaryOperator::BitXor,
+            "<<" => BinaryOperator::Shl,
+            ">>" => BinaryOperator::Shr,
+
+            "&=" => BinaryOperator::BitAndAssign,
+            "|=" => BinaryOperator::BitOrAssign,
+            "^=" => BinaryOperator::BitXorAssign,
+            "<<=" => BinaryOperator::ShlAssign,
+            ">>=" => BinaryOperator::ShrAssign,
+
             "<" => BinaryOperator::Less,
             ">" => BinaryOperator::Greater,
             "<=" => BinaryOperator::LessOrEq,
@@ -2036,6 +2051,7 @@ impl BinaryOperator {
         use BinaryOperator as BO;
         match self {
             BO::Add | BO::Sub | BO::Mul | BO::Div | BO::Rem => true,
+            BO::BitAnd | BO::BitOr | BO::BitXor | BO::Shl | BO::Shr => true,
             BO::Less | BO::Greater | BO::LessOrEq | BO::GreaterOrEq | BO::Equal | BO::NotEqual => true,
             _ => false,
         }
@@ -2058,6 +2074,7 @@ impl BinaryOperator {
         use BinaryOperator as BO;
         match self {
             BO::AddAssign | BO::SubAssign | BO::MulAssign | BO::DivAssign | BO::RemAssign => true,
+            BO::BitAndAssign | BO::BitOrAssign | BO::BitXorAssign | BO::ShlAssign | BO::ShrAssign => true,
             _ => false,
         }
     }
@@ -2076,6 +2093,12 @@ impl Display for BinaryOperator {
             BinaryOperator::And             => " && ",
             BinaryOperator::Or              => " || ",
 
+            BinaryOperator::BitAnd          => " & ",
+            BinaryOperator::BitOr           => " | ",
+            BinaryOperator::BitXor          => " ^ ",
+            BinaryOperator::Shl             => " << ",
+            BinaryOperator::Shr             => " >> ",
+
             BinaryOperator::Less            => " < ",
             BinaryOperator::Greater         => " > ",
             BinaryOperator::LessOrEq        => " <= ",
@@ -2088,6 +2111,12 @@ impl Display for BinaryOperator {
             BinaryOperator::MulAssign       => " *= ",
             BinaryOperator::DivAssign       => " /= ",
             BinaryOperator::RemAssign       => " %= ",
+
+            BinaryOperator::BitAndAssign    => " &= ",
+            BinaryOperator::BitOrAssign     => " |= ",
+            BinaryOperator::BitXorAssign    => " ^= ",
+            BinaryOperator::ShlAssign       => " <<= ",
+            BinaryOperator::ShrAssign       => " >>= ",
 
             BinaryOperator::Range           => "..",
             BinaryOperator::RangeInclusive  => "..=",

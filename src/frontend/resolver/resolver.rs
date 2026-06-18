@@ -1412,18 +1412,35 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Resolves an assignment expression.
     fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment, expected_result: Option<TypeId>) -> ResolveResult {
+        use ast::BinaryOperator::*;
+        // shift-assigns take an independent integer shift amount on the right that must not be unified with
+        // the target type (mirrors the standalone `<<`/`>>` handling in resolve_binary_op)
+        let shift_assign = matches!(item.op, ShlAssign | ShrAssign);
         // Resolve the assignment target first *without* imposing the value's type on it, then resolve the
         // value against the target's type. This ordering means a genuine mismatch is reported as
         // "expected <target>, got <value>"; resolving the target against the value's type instead (the
         // reverse) would name the operands the wrong way round for an assignment.
         self.resolve_expression(&mut item.left, None)?;
         let left_type_id = item.left.type_id(self);
-        self.resolve_expression(&mut item.right, left_type_id)?;
+        self.resolve_expression(&mut item.right, if shift_assign { None } else { left_type_id })?;
         let right_type_id = item.right.type_id(self);
         // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
         // untyped array's element type, or an uninitialized binding learned from what is assigned to it)
-        if left_type_id.is_none() {
+        if left_type_id.is_none() && !shift_assign {
             self.resolve_expression(&mut item.left, right_type_id)?;
+        }
+        // bitwise/shift compound assigns require integer operands
+        if matches!(item.op, BitAndAssign | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign) {
+            if let Some(left_type_id) = item.left.type_id(self) {
+                if !self.type_by_id(left_type_id).is_integer() {
+                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", item.op)), self.module_path));
+                }
+            }
+            if let Some(right_type_id) = item.right.type_id(self) {
+                if !self.type_by_id(right_type_id).is_integer() {
+                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer right operand", item.op)), self.module_path));
+                }
+            }
         }
         // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
         item.type_id = Some(TypeId::VOID);
@@ -1465,6 +1482,46 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item, common_type_id)?;
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
+                }
+            },
+            BitAnd | BitOr | BitXor => {
+                // both operands share a single integer type, like arithmetic, but floats are rejected
+                self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
+                let left_type_id = item.left.type_id(self);
+                self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
+                let type_id = item.type_id(self);
+                let right_type_id = item.right.type_id(self);
+                if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
+                    self.set_type_id(item, common_type_id)?;
+                    self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
+                    self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
+                }
+                if let Some(common_type_id) = item.type_id(self) {
+                    if !self.type_by_id(common_type_id).is_integer() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", item.op)), self.module_path));
+                    }
+                }
+            },
+            Shl | Shr => {
+                // result type follows the left operand; the right operand (shift amount) is an
+                // independent integer type (cast to u32 at compile time), so it is not unified with the left
+                self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
+                let left_type_id = item.left.type_id(self);
+                let type_id = item.type_id(self);
+                if let Some(common_type_id) = type_id.or(left_type_id) {
+                    self.set_type_id(item, common_type_id)?;
+                    self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
+                }
+                self.resolve_expression(item.right.as_expression_mut().ice()?, None)?;
+                if let Some(left_type_id) = item.type_id(self) {
+                    if !self.type_by_id(left_type_id).is_integer() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer left operand", item.op)), self.module_path));
+                    }
+                }
+                if let Some(right_type_id) = item.right.type_id(self) {
+                    if !self.type_by_id(right_type_id).is_integer() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer shift amount", item.op)), self.module_path));
+                    }
                 }
             },
             Index | IndexWrite => {
@@ -1683,7 +1740,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             },
-            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign
+            | BitAndAssign | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign => {
                 return Self::ice("Unexpected operator in resolve_binary_op");
             },
         }
@@ -1745,10 +1803,21 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolve_expression(&mut item.expr, expected_type)?;
         match item.op {
             Not => {
-                if let Some(expected_type_id) = expected_type {
-                    self.check_type_accepted_for(item, self.primitive_type_id(Type::bool)?, expected_type_id)?;
+                // `!` is logical-not for bool and bitwise-not for integers; the result type matches the
+                // operand. Only commit once the operand type is known, otherwise a premature `bool` here
+                // would conflict with an integer operand inferred in a later pass.
+                match item.expr.type_id(self) {
+                    Some(operand_type_id) if self.type_by_id(operand_type_id).is_integer() => {
+                        self.set_type_id(item, operand_type_id)?;
+                    },
+                    Some(_) => {
+                        if let Some(expected_type_id) = expected_type {
+                            self.check_type_accepted_for(item, self.primitive_type_id(Type::bool)?, expected_type_id)?;
+                        }
+                        self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
+                    },
+                    None => {},
                 }
-                self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
             },
             Plus | Minus => {
                 if let Some(type_id) = item.expr.type_id(self) {

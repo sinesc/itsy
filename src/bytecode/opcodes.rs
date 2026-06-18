@@ -810,12 +810,117 @@ impl_opcodes!{
         self.stack.push(a % b);
     }
 
+    /// Pops 2 values from the stack and pushes their bitwise conjunction.
+    fn <
+        bitands8<T: i8>(),
+        bitands16<T: i16>(),
+        bitands32<T: i32>(),
+        bitands64<T: i64>(),
+        bitandu8<T: u8>(),
+        bitandu16<T: u16>(),
+        bitandu32<T: u32>(),
+        bitandu64<T: u64>(),
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push(a & b);
+    }
+
+    /// Pops 2 values from the stack and pushes their bitwise disjunction.
+    fn <
+        bitors8<T: i8>(),
+        bitors16<T: i16>(),
+        bitors32<T: i32>(),
+        bitors64<T: i64>(),
+        bitoru8<T: u8>(),
+        bitoru16<T: u16>(),
+        bitoru32<T: u32>(),
+        bitoru64<T: u64>(),
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push(a | b);
+    }
+
+    /// Pops 2 values from the stack and pushes their bitwise exclusive disjunction.
+    fn <
+        bitxors8<T: i8>(),
+        bitxors16<T: i16>(),
+        bitxors32<T: i32>(),
+        bitxors64<T: i64>(),
+        bitxoru8<T: u8>(),
+        bitxoru16<T: u16>(),
+        bitxoru32<T: u32>(),
+        bitxoru64<T: u64>(),
+    >(&mut self) {
+        let b: T = self.stack.pop();
+        let a: T = self.stack.pop();
+        self.stack.push(a ^ b);
+    }
+
+    /// Pops a value from the stack and pushes its bitwise negation.
+    fn <
+        bitnots8<T: i8>(),
+        bitnots16<T: i16>(),
+        bitnots32<T: i32>(),
+        bitnots64<T: i64>(),
+        bitnotu8<T: u8>(),
+        bitnotu16<T: u16>(),
+        bitnotu32<T: u32>(),
+        bitnotu64<T: u64>(),
+    >(&mut self) {
+        let a: T = self.stack.pop();
+        self.stack.push(!a);
+    }
+
+    /// Pops a u32 shift amount and a value from the stack and pushes the value shifted left.
+    /// Raises an integer overflow error if the shift amount is >= the value type's bit width.
+    fn <
+        shls8<T: i8>() [ check ],
+        shls16<T: i16>() [ check ],
+        shls32<T: i32>() [ check ],
+        shls64<T: i64>() [ check ],
+        shlu8<T: u8>() [ check ],
+        shlu16<T: u16>() [ check ],
+        shlu32<T: u32>() [ check ],
+        shlu64<T: u64>() [ check ],
+    >(&mut self) {
+        let b: u32 = self.stack.pop();
+        let a: T = self.stack.pop();
+        let result = T::overflowing_shl(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+
+    /// Pops a u32 shift amount and a value from the stack and pushes the value shifted right.
+    /// Raises an integer overflow error if the shift amount is >= the value type's bit width.
+    fn <
+        shrs8<T: i8>() [ check ],
+        shrs16<T: i16>() [ check ],
+        shrs32<T: i32>() [ check ],
+        shrs64<T: i64>() [ check ],
+        shru8<T: u8>() [ check ],
+        shru16<T: u16>() [ check ],
+        shru32<T: u32>() [ check ],
+        shru64<T: u64>() [ check ],
+    >(&mut self) {
+        let b: u32 = self.stack.pop();
+        let a: T = self.stack.pop();
+        let result = T::overflowing_shr(a, b);
+        self.stack.push(result.0);
+        if result.1 {
+            self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+        }
+    }
+/*
     /// Pops stack address sized value, shifts it by given number of bits and pushes it.
     fn shrsa(&mut self, num: u8) {
         let value: StackAddress = self.stack.pop();
         self.stack.push(value >> num);
     }
-
+*/
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn <
         ceq8<T: Data8>(),

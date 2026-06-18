@@ -322,6 +322,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     MulAssign => self.write_mul(ty)?,
                     DivAssign => self.write_div(ty)?,
                     RemAssign => self.write_rem(ty)?,
+                    BitAndAssign => self.write_bitand(ty)?,
+                    BitOrAssign => self.write_bitor(ty)?,
+                    BitXorAssign => self.write_bitxor(ty)?,
+                    ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
+                    ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
                     _ => Self::ice_at(item, "Invalid assignment operator while assigning to var")?,
                 };
                 self.write_store(self.ty(&item.left), loc, Some(binding_id))?; // stack --
@@ -353,6 +358,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     BO::MulAssign => self.write_mul(ty)?,
                     BO::DivAssign => self.write_div(ty)?,
                     BO::RemAssign => self.write_rem(ty)?,
+                    BO::BitAndAssign => self.write_bitand(ty)?,
+                    BO::BitOrAssign => self.write_bitor(ty)?,
+                    BO::BitXorAssign => self.write_bitxor(ty)?,
+                    BO::ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
+                    BO::ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
                     _ => Self::ice_at(item, "Invalid assignment operator while assigning to offset")?,
                 };
                 self.write_heap_put(ty, false)?; // stack -
@@ -1169,11 +1179,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     fn compile_unary_op(self: &mut Self, item: &ast::UnaryOp) -> CompileResult {
         use crate::frontend::ast::UnaryOperator as UO;
         match item.op {
-            // logical
+            // logical-not for bool, bitwise-not for integers
             UO::Not => {
                 self.compile_expression(&item.expr)?;
                 comment!(self, "{}", item);
-                self.writer.not();
+                let item_type = self.ty(&item.expr);
+                if item_type.is_integer() {
+                    self.write_bitnot(item_type)?;
+                } else {
+                    self.writer.not();
+                }
             }
             // arithmetic
             UO::Plus => { /* nothing to do */ }
@@ -1203,6 +1218,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             BO::Mul => self.write_mul(ty_result)?,
             BO::Div => self.write_div(ty_result)?,
             BO::Rem => self.write_rem(ty_result)?,
+            // bitwise
+            BO::BitAnd => self.write_bitand(ty_result)?,
+            BO::BitOr => self.write_bitor(ty_result)?,
+            BO::BitXor => self.write_bitxor(ty_result)?,
+            // shifts: the amount (right operand) is an independent integer normalized to u32
+            BO::Shl => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty_result)? },
+            BO::Shr => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty_result)? },
             // comparison
             BO::Greater     => self.write_cgt(ty_left)?,
             BO::GreaterOrEq => self.write_cgte(ty_left)?,
@@ -1376,7 +1398,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             // General operations
-            (Add | Sub | Mul | Div | Rem | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual, _) => {
+            (Add | Sub | Mul | Div | Rem | BitAnd | BitOr | BitXor | Shl | Shr
+                | Less | Greater | LessOrEq | GreaterOrEq | Equal | NotEqual, _) => {
                 self.compile_binary_op_simple(item)
             },
             (And | Or, _) => {
@@ -1391,7 +1414,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             (Call, _) => {
                 self.compile_binary_op_call(item)
             },
-            (Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | Range | RangeInclusive, _) => {
+            (Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign
+                | BitAndAssign | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign
+                | Range | RangeInclusive, _) => {
                 Self::ice_at(item, "Unexpected operator in compile_binary_op")
             },
         }
@@ -2145,6 +2170,44 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Write remainder instruction.
     fn write_rem(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         Ok(select_numeric_type!(self, ty, rem))
+    }
+
+    /// Write bitwise and instruction.
+    fn write_bitand(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, bitand))
+    }
+
+    /// Write bitwise or instruction.
+    fn write_bitor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, bitor))
+    }
+
+    /// Write bitwise xor instruction.
+    fn write_bitxor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, bitxor))
+    }
+
+    /// Write bitwise not instruction.
+    fn write_bitnot(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, bitnot))
+    }
+
+    /// Write left-shift instruction (selected by the type of the value being shifted).
+    fn write_shl(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, shl))
+    }
+
+    /// Write right-shift instruction (selected by the type of the value being shifted).
+    fn write_shr(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
+        Ok(select_integer_type!(self, ty, shr))
+    }
+
+    /// Casts a shift amount (already on the stack) to the u32 width expected by the shift opcodes.
+    fn write_shift_amount_cast(self: &Self, from: &Type) -> CompileResult {
+        if from != &Type::u32 {
+            self.write_cast(from, &Type::u32)?;
+        }
+        Ok(())
     }
 
     /// Write negation instruction.
