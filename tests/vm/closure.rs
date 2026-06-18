@@ -16,7 +16,7 @@ fn fnref_array_loop() {
 }
 
 #[test]
-#[should_panic(expected = "Resolver error: Expected type fn(u32) -> u32, got fn(i32) -> i32 in line 3, column 29.")]
+#[should_panic(expected = "Resolver error: Expected type `fn(u32) -> u32`, got `fn(i32) -> i32` in line 3, column 29.")]
 fn fnref_array_mismatch() {
     let result = run(stringify!(
         fn one(v: u32) -> u32 { v * 3 }
@@ -291,7 +291,7 @@ fn block_conflicting_returns() {
 }
 
 #[test]
-#[should_panic(expected = "Type i32 is not callable")]
+#[should_panic(expected = "Type `i32` is not callable")]
 fn local_shadows_function_then_called() {
     // a local binding shadowing a function and then being called must produce "not callable" error
     run(stringify!(

@@ -349,5 +349,5 @@ fn recursive_enum_rejected() {
         enum E { Nil, Cons(E) }
         fn main() {}
     ));
-    assert!(err.contains("Recursive type 'E'"), "unexpected error: {}", err);
+    assert!(err.contains("Recursive type `E`"), "unexpected error: {}", err);
 }

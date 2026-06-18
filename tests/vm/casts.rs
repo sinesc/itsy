@@ -378,7 +378,7 @@ fn to_string_missing_impl() {
             ret_string(p as String);
         }
     ));
-    assert!(err.contains("does not implement 'ToString'"), "unexpected error: {}", err);
+    assert!(err.contains("does not implement required trait `ToString`"), "unexpected error: {}", err);
 }
 
 // --- cast float to unsigned ---

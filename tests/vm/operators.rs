@@ -183,7 +183,7 @@ fn missing_impl() {
             ret_i64((a + b).v);
         }
     ));
-    assert!(err.contains("does not implement 'Add'"), "unexpected error: {}", err);
+    assert!(err.contains("does not implement required trait `Add`"), "unexpected error: {}", err);
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn missing_impl_compound() {
             ret_i64(a.v);
         }
     ));
-    assert!(err.contains("does not implement 'Add'"), "unexpected error: {}", err);
+    assert!(err.contains("does not implement required trait `Add`"), "unexpected error: {}", err);
 }
 
 #[test]

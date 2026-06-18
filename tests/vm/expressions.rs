@@ -340,7 +340,7 @@ fn comparison_result_type_mismatch_rejected() {
             let x: i32 = a < b;
         }
     ));
-    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+    assert!(err.contains("Expected type `i32`") && err.contains("bool"), "unexpected error: {}", err);
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn logical_result_type_mismatch_rejected() {
             let x: i32 = a && b;
         }
     ));
-    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+    assert!(err.contains("Expected type `i32`") && err.contains("bool"), "unexpected error: {}", err);
 }
 
 #[test]
@@ -365,7 +365,7 @@ fn comparison_result_type_mismatch_in_block_rejected() {
             let x: i32 = { a < b };
         }
     ));
-    assert!(err.contains("Expected type i32") && err.contains("bool"), "unexpected error: {}", err);
+    assert!(err.contains("Expected type `i32`") && err.contains("bool"), "unexpected error: {}", err);
 }
 
 #[test]

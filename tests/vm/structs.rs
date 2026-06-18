@@ -351,7 +351,7 @@ fn match_struct_pattern_unknown_field_rejected() {
             }
         }
     ));
-    assert!(err.contains("'z'"), "unexpected error: {}", err);
+    assert!(err.contains("`z`"), "unexpected error: {}", err);
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn recursive_struct_direct_rejected() {
         struct Test { recurse: Test }
         fn main() {}
     ));
-    assert!(err.contains("Recursive type 'Test'"), "unexpected error: {}", err);
+    assert!(err.contains("Recursive type `Test`"), "unexpected error: {}", err);
 }
 
 #[test]
@@ -497,7 +497,7 @@ fn recursive_struct_via_array_rejected() {
         struct Test { children: [ Test ] }
         fn main() {}
     ));
-    assert!(err.contains("Recursive type 'Test'"), "unexpected error: {}", err);
+    assert!(err.contains("Recursive type `Test`"), "unexpected error: {}", err);
 }
 
 #[test]

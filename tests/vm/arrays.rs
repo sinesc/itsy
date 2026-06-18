@@ -151,7 +151,7 @@ fn array_casting() {
 }
 
 #[test]
-#[should_panic(expected = "Resolver error: Expected type [ u8 ], got [ u16 ] in line 7, column 20.")]
+#[should_panic(expected = "Resolver error: Expected type `[ u8 ]`, got `[ u16 ]` in line 7, column 20.")]
 fn array_type_fail() {
     run("
         fn accept(x: [ u8 ]) {

@@ -43,10 +43,10 @@ impl CompileError {
 impl Display for CompileError {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method '{method}'"),
-            CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable '{variable}'"),
-            CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable '{variable}' might not be initialized"),
-            CompileErrorKind::Internal(msg) => write!(f, "Internal compiler error: {msg}"),
+            CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method `{method}`"),
+            CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable `{variable}`"),
+            CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable `{variable}` might not be initialized"),
+            CompileErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }
 }

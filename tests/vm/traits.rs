@@ -431,7 +431,7 @@ fn multi_trait_bound_in_composites() {
 }
 
 #[test]
-#[should_panic(expected = "Type 'Person' used in a trait bound is not a trait")]
+#[should_panic(expected = "Type `Person` used in a trait bound is not a trait")]
 fn multi_trait_bound_rejects_non_trait() {
     run(stringify!(
         trait Named {
@@ -444,7 +444,7 @@ fn multi_trait_bound_rejects_non_trait() {
 }
 
 #[test]
-#[should_panic(expected = "Trait 'Named' appears more than once in a trait bound")]
+#[should_panic(expected = "Trait `Named` appears more than once in a trait bound")]
 fn multi_trait_bound_rejects_duplicate() {
     run(stringify!(
         trait Named {
@@ -456,7 +456,7 @@ fn multi_trait_bound_rejects_duplicate() {
 }
 
 #[test]
-#[should_panic(expected = "Expected type Named + Aged, got Person")]
+#[should_panic(expected = "Expected type `Named + Aged`, got `Person`")]
 fn multi_trait_bound_rejects_partial_implementor() {
     run(stringify!(
         trait Named {
