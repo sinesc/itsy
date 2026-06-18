@@ -1777,24 +1777,54 @@ impl ControlFlow for ArgumentList {
 }
 
 
+/// How an arithmetic compound assignment (`+=`, `-=`, ...) is dispatched, determined during resolution.
+/// A compound assignment to a custom type is dispatched to an operator-trait method; `op_dispatch` being
+/// `None` marks an arithmetic compound assignment that is still awaiting classification (e.g. its target
+/// type or the target type's operator-trait impl has not resolved yet).
+#[derive(Debug)]
+pub enum CompoundDispatch {
+    /// A built-in numeric (or string `+=`) compound assignment, compiled with the arithmetic opcodes.
+    Builtin,
+    /// An operator-trait compound assignment on a custom target; the constant is the trait method to call.
+    Method(ConstantId),
+}
+
 /// A variable assignment within an expression, e.g. `x = 10`.
 #[derive(Debug)]
 pub struct Assignment {
-    pub position: Position,
-    pub op      : BinaryOperator,
-    pub left    : Expression,
-    pub right   : Expression,
-    pub type_id : Option<TypeId>,
+    pub position    : Position,
+    pub op          : BinaryOperator,
+    pub left        : Expression,
+    pub right       : Expression,
+    pub type_id     : Option<TypeId>,
+    /// For arithmetic compound assignment operators only: how the operator is dispatched. A compound
+    /// assignment to a variable of a custom type is lowered to `a = a OP b` and never reaches here; an
+    /// assignment to a custom-typed field/index target is instead dispatched in-place via a trait method
+    /// (single evaluation of the target). The node is not considered resolved until this is classified.
+    pub op_dispatch : Option<CompoundDispatch>,
 }
 
 impl_typeable!(Assignment);
 impl_positioned!(Assignment);
 impl_display!(Assignment, "{} {} {}", left, op, right);
-impl_resolvable!(Assignment {
-    left: Item,
-    right: Item,
-    type_id: TypeId,
-});
+
+impl Resolvable for Assignment {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        let mut result = self.left.resolvables();
+        result.append(&mut self.right.resolvables());
+        result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
+        // arithmetic compound assignment to a custom type is pending classification (built-in vs. an
+        // operator-trait method call); gate its resolution on that decision (see Assignment::op_dispatch)
+        if self.op.arithmetic_assign_base().is_some() {
+            match self.op_dispatch {
+                None => result.push(Resolvables::Progress(Progress::new(0, 1))),
+                Some(CompoundDispatch::Builtin) => result.push(Resolvables::Progress(Progress::new(1, 1))),
+                Some(CompoundDispatch::Method(constant_id)) => result.push(Resolvables::ConstantId(constant_id)),
+            }
+        }
+        result
+    }
+}
 
 impl ControlFlow for Assignment {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
@@ -1913,16 +1943,30 @@ pub struct BinaryOp {
     pub left        : BinaryOperand,
     pub right       : BinaryOperand,
     pub type_id     : Option<TypeId>,
+    /// For arithmetic operators only: whether the operator has been classified as a built-in numeric
+    /// operation. Arithmetic on a custom type is lowered to an operator-trait method call (e.g. `a + b`
+    /// to `a.add(b)`); until classified or lowered the node is not considered resolved, which lets a
+    /// forward-declared trait impl resolve and lets a genuinely missing impl reach the must_resolve stage.
+    pub op_resolved : bool,
 }
 
 impl_typeable!(BinaryOp);
 impl_positioned!(BinaryOp);
 impl_display!(BinaryOp, "{}{}{}", left, op, right);
-impl_resolvable!(BinaryOp {
-    left: Item,
-    right: Item,
-    type_id: TypeId,
-});
+
+impl Resolvable for BinaryOp {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        let mut result = self.left.resolvables();
+        result.append(&mut self.right.resolvables());
+        result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
+        // arithmetic operators on a custom type are pending lowering to an operator-trait method call;
+        // gate their resolution on that classification (see BinaryOp::op_resolved)
+        if matches!(self.op, BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Mul | BinaryOperator::Div | BinaryOperator::Rem) {
+            result.push(Resolvables::Progress(if self.op_resolved { Progress::new(1, 1) } else { Progress::new(0, 1) }));
+        }
+        result
+    }
+}
 
 impl ControlFlow for BinaryOp {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
@@ -1996,7 +2040,7 @@ impl Display for UnaryOperator {
 
 
 /// A binary operator used in binary expressions.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum BinaryOperator {
     // arithmetic
     Add, Sub, Mul, Div, Rem,
@@ -2092,6 +2136,19 @@ impl BinaryOperator {
             BO::AddAssign | BO::SubAssign | BO::MulAssign | BO::DivAssign | BO::RemAssign => true,
             BO::BitAndAssign | BO::BitOrAssign | BO::BitXorAssign | BO::ShlAssign | BO::ShrAssign => true,
             _ => false,
+        }
+    }
+    /// Returns the plain binary operator underlying an arithmetic compound assignment operator
+    /// (e.g. `+=` -> `+`), or `None` for other operators.
+    pub fn arithmetic_assign_base(self: &Self) -> Option<BinaryOperator> {
+        use BinaryOperator as BO;
+        match self {
+            BO::AddAssign => Some(BO::Add),
+            BO::SubAssign => Some(BO::Sub),
+            BO::MulAssign => Some(BO::Mul),
+            BO::DivAssign => Some(BO::Div),
+            BO::RemAssign => Some(BO::Rem),
+            _ => None,
         }
     }
 }

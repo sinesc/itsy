@@ -1,6 +1,8 @@
 mod util;
 #[path="vm/bitwise.rs"]
 mod bitwise;
+#[path="vm/operators.rs"]
+mod operators;
 #[path="vm/casts.rs"]
 mod casts;
 #[path="vm/expressions.rs"]

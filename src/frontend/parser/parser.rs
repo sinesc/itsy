@@ -789,6 +789,7 @@ fn string_literal(i: Input) -> Output<Expression> {
             left: BinaryOperand::Expression(left),
             right: BinaryOperand::Expression(right),
             type_id: None,
+            op_resolved: false,
         }));
 
         let lit = |string| Expression::Literal(Literal {
@@ -957,7 +958,7 @@ fn expression(i: Input) -> Output<Expression> {
                 map(snap(argument_list), |l| (BinaryOperator::Call, BinaryOperand::ArgumentList(l))),
             )),
             init.1,
-            move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
+            move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn unary(i: Input) -> Output<Expression> {
@@ -1031,7 +1032,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((punct("*"), punct("/"), punct("%"))), |o| BinaryOperator::from_string(o)), prec6),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn prec4(i: Input) -> Output<Expression> {
@@ -1040,7 +1041,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((punct("+"), punct("-"))), |o| BinaryOperator::from_string(o)), prec5),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     // bitwise or `|`. Lower precedence than `^`, higher than comparison.
@@ -1052,7 +1053,7 @@ fn expression(i: Input) -> Output<Expression> {
             // guard against `||` (logical or) and `|=` (compound assign), which bind looser and are handled elsewhere
             pair(map(terminated(punct("|"), not(one_of("|="))), |o| BinaryOperator::from_string(o)), prec3b),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     // bitwise xor `^`. Lower precedence than `&`, higher than `|`.
@@ -1063,7 +1064,7 @@ fn expression(i: Input) -> Output<Expression> {
             // guard against `^=` (compound assign)
             pair(map(terminated(punct("^"), not(char('='))), |o| BinaryOperator::from_string(o)), prec3c),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     // bitwise and `&`. Lower precedence than shifts, higher than `^`.
@@ -1074,7 +1075,7 @@ fn expression(i: Input) -> Output<Expression> {
             // guard against `&&` (logical and) and `&=` (compound assign)
             pair(map(terminated(punct("&"), not(one_of("&="))), |o| BinaryOperator::from_string(o)), prec3d),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     // shifts `<<` `>>`. Lower precedence than `+`/`-`, higher than `&`.
@@ -1085,7 +1086,7 @@ fn expression(i: Input) -> Output<Expression> {
             // guard against `<<=`/`>>=` (compound assigns)
             pair(map(alt((terminated(punct("<<"), not(char('='))), terminated(punct(">>"), not(char('='))))), |o| BinaryOperator::from_string(o)), prec4),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn prec3(i: Input) -> Output<Expression> {
@@ -1094,7 +1095,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((punct("<="), punct(">="), punct("<"), punct(">"))), |o| BinaryOperator::from_string(o)), prec3a),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn prec2(i: Input) -> Output<Expression> {
@@ -1103,7 +1104,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(alt((punct("!="), punct("=="))), |o| BinaryOperator::from_string(o)), prec3),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn prec1(i: Input) -> Output<Expression> {
@@ -1112,7 +1113,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(punct("&&"), |o| BinaryOperator::from_string(o)), prec2),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op: op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     fn prec0(i: Input) -> Output<Expression> {
@@ -1121,7 +1122,7 @@ fn expression(i: Input) -> Output<Expression> {
         fold_many0_mut(
             pair(map(punct("||"), |o| BinaryOperator::from_string(o)), prec1),
             init.1,
-            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None }))
+            |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position: position, op, left: BinaryOperand::Expression(acc), right: BinaryOperand::Expression(val), type_id: None, op_resolved: false }))
         )(init.0)
     }
     alt((
@@ -1370,7 +1371,7 @@ fn assignment(i: Input) -> Output<Assignment> {
                     }
                     _ => {}
                 }
-                Expression::BinaryOp(Box::new(BinaryOp { position: op_position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None }))
+                Expression::BinaryOp(Box::new(BinaryOp { position: op_position, op: op, left: BinaryOperand::Expression(acc), right: val, type_id: None, op_resolved: false }))
             }
         )(init.0)
     }
@@ -1389,11 +1390,12 @@ fn assignment(i: Input) -> Output<Assignment> {
         move |m| {
             // TODO: check that left is not a constant
             Assignment {
-                position: position,
-                op      : m.1,
-                left    : m.0,
-                right   : m.2,
-                type_id : None,
+                position    : position,
+                op          : m.1,
+                left        : m.0,
+                right       : m.2,
+                type_id     : None,
+                op_dispatch : None,
             }
         }
     )(i)
@@ -1453,7 +1455,8 @@ fn for_loop(i: Input) -> Output<ForLoop> {
                 op          : BinaryOperator::from_string(m.1),
                 left        : BinaryOperand::Expression(m.0),
                 right       : BinaryOperand::Expression(m.2),
-                type_id     : None
+                type_id     : None,
+                op_resolved : false,
             }))
         )(i)
     }

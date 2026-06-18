@@ -315,21 +315,33 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             _ => {
                 self.check_initialized(item.left.as_variable().ice()?)?;
                 self.write_load(self.ty(&item.left), loc)?; // stack: left
-                self.compile_expression(&item.right)?; // stack: left right
-                let ty = self.ty(&item.left);
-                match item.op { // stack: result
-                    AddAssign => self.write_add(ty)?,
-                    SubAssign => self.write_sub(ty)?,
-                    MulAssign => self.write_mul(ty)?,
-                    DivAssign => self.write_div(ty)?,
-                    RemAssign => self.write_rem(ty)?,
-                    BitAndAssign => self.write_bitand(ty)?,
-                    BitOrAssign => self.write_bitor(ty)?,
-                    BitXorAssign => self.write_bitxor(ty)?,
-                    ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
-                    ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
-                    _ => Self::ice_at(item, "Invalid assignment operator while assigning to var")?,
-                };
+                if let Some(ast::CompoundDispatch::Method(constant_id)) = &item.op_dispatch {
+                    // operator-trait dispatch on a custom target: the loaded value is `self` and the
+                    // right-hand side is `rhs`. Both are ref-counted up per the call convention (the callee
+                    // decrements them); the call replaces them with the result, which is then stored back
+                    // (write_store decrements the variable's previous value).
+                    let constant_id = *constant_id;
+                    self.write_cnt(self.ty(&item.left), true, HeapRefOp::Inc)?;   // stack: left(self)
+                    self.compile_expression(&item.right)?;                        // stack: self right
+                    self.write_cnt(self.ty(&item.right), true, HeapRefOp::Inc)?;  // stack: self rhs
+                    self.compile_method_dispatch(constant_id)?;                   // stack: result
+                } else {
+                    self.compile_expression(&item.right)?; // stack: left right
+                    let ty = self.ty(&item.left);
+                    match item.op { // stack: result
+                        AddAssign => self.write_add(ty)?,
+                        SubAssign => self.write_sub(ty)?,
+                        MulAssign => self.write_mul(ty)?,
+                        DivAssign => self.write_div(ty)?,
+                        RemAssign => self.write_rem(ty)?,
+                        BitAndAssign => self.write_bitand(ty)?,
+                        BitOrAssign => self.write_bitor(ty)?,
+                        BitXorAssign => self.write_bitxor(ty)?,
+                        ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
+                        ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
+                        _ => Self::ice_at(item, "Invalid assignment operator while assigning to var")?,
+                    };
+                }
                 self.write_store(self.ty(&item.left), loc, Some(binding_id))?; // stack --
             },
         };
@@ -351,25 +363,56 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.writer.clone(size_of::<HeapAddress>() as FrameAddress);// stack: &left &left
                 self.write_heap_fetch(self.ty(&item.left))?;// stack: &left left
-                self.compile_expression(&item.right)?;      // stack: &left left right
-                let ty = self.ty(&item.left);
-                match item.op {                                 // stack: &left result
-                    BO::AddAssign => self.write_add(ty)?,
-                    BO::SubAssign => self.write_sub(ty)?,
-                    BO::MulAssign => self.write_mul(ty)?,
-                    BO::DivAssign => self.write_div(ty)?,
-                    BO::RemAssign => self.write_rem(ty)?,
-                    BO::BitAndAssign => self.write_bitand(ty)?,
-                    BO::BitOrAssign => self.write_bitor(ty)?,
-                    BO::BitXorAssign => self.write_bitxor(ty)?,
-                    BO::ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
-                    BO::ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
-                    _ => Self::ice_at(item, "Invalid assignment operator while assigning to offset")?,
-                };
-                self.write_heap_put(ty, false)?; // stack -
+                if let Some(ast::CompoundDispatch::Method(constant_id)) = &item.op_dispatch {
+                    // operator-trait dispatch on a custom target, evaluated in place: the fetched target
+                    // value is `self` and the right-hand side is `rhs`. Both are ref-counted up per the call
+                    // convention (the callee decrements them); the call replaces them with the result.
+                    let constant_id = *constant_id;
+                    self.write_cnt(self.ty(&item.left), true, HeapRefOp::Inc)?;  // stack: &left left(self)
+                    self.compile_expression(&item.right)?;                       // stack: &left self right
+                    self.write_cnt(self.ty(&item.right), true, HeapRefOp::Inc)?; // stack: &left self rhs
+                    self.compile_method_dispatch(constant_id)?;                  // stack: &left result
+                } else {
+                    self.compile_expression(&item.right)?;      // stack: &left left right
+                    let ty = self.ty(&item.left);
+                    match item.op {                                 // stack: &left result
+                        BO::AddAssign => self.write_add(ty)?,
+                        BO::SubAssign => self.write_sub(ty)?,
+                        BO::MulAssign => self.write_mul(ty)?,
+                        BO::DivAssign => self.write_div(ty)?,
+                        BO::RemAssign => self.write_rem(ty)?,
+                        BO::BitAndAssign => self.write_bitand(ty)?,
+                        BO::BitOrAssign => self.write_bitor(ty)?,
+                        BO::BitXorAssign => self.write_bitxor(ty)?,
+                        BO::ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(ty)? },
+                        BO::ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(ty)? },
+                        _ => Self::ice_at(item, "Invalid assignment operator while assigning to offset")?,
+                    };
+                }
+                self.write_heap_put(self.ty(&item.left), false)?; // stack -
             },
         }
         Ok(())
+    }
+
+    /// Emits a call to the method identified by the given constant, with its arguments already on the stack
+    /// (ref-counted per the call convention). Used to dispatch in-place compound-assignment operator-trait
+    /// calls; mirrors the method-call dispatch in `compile_call_constant`.
+    fn compile_method_dispatch(self: &mut Self, constant_id: ConstantId) -> CompileResult {
+        let function_id = self.resolved.constant(constant_id).value.as_function_id().ice()?;
+        match self.resolved.function(function_id).kind.ice()? {
+            FunctionKind::Method(object_type_id) => {
+                if self.ty(&object_type_id).is_trait_object() {
+                    let function_offset = self.vtable_function_offset(function_id)?;
+                    let function_arg_size = self.resolved.function(function_id).arg_size(self);
+                    self.writer.call_virtual(function_offset, function_arg_size);
+                } else {
+                    self.write_call(function_id);
+                }
+                Ok(())
+            },
+            _ => Self::ice("Compound assignment dispatch target is not a method"),
+        }
     }
 
     /// Compiles function call arguments.

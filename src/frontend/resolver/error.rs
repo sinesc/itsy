@@ -44,7 +44,6 @@ pub enum ResolveErrorKind {
     CannotResolve(String),
     InvalidOperation(String),
     Internal(String),
-    Unsupported(String),
 }
 
 /// An error reported by the resolver (e.g. unknown/mismatching types).
@@ -81,7 +80,7 @@ impl Display for ResolveError {
         match &self.kind {
             ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {e}, got {g}"),
             ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {t1} to {t2}"),
-            ResolveErrorKind::MissingTraitImplementation(t, trt) => write!(f, "Cannot cast '{t}' to '{trt}' target: '{t}' does not implement '{trt}'"),
+            ResolveErrorKind::MissingTraitImplementation(t, trt) => write!(f, "'{t}' does not implement '{trt}'"),
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {n} for expected type {t}"),
             ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier '{v}'"),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{m}'"),
@@ -105,7 +104,6 @@ impl Display for ResolveError {
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve {b}"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {}", o),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {}", msg),
-            ResolveErrorKind::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
         }
     }
 }

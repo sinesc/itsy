@@ -48,6 +48,39 @@ struct IntrinsicCast {
     method          : &'static str,
 }
 
+/// Describes an intrinsic operator trait that backs an arithmetic operator for custom types. Each has a
+/// single required method `fn <method>(self: Self, rhs: Self) -> Self`. See the registration loop in
+/// [resolve], [Resolver::resolve_binary_op] and [Resolver::resolve_assignment].
+struct IntrinsicOpTrait {
+    /// The operator this trait backs, e.g. `Add` for `+`.
+    op          : ast::BinaryOperator,
+    /// Name of the trait scripts implement, e.g. `Add`.
+    trait_name  : &'static str,
+    /// The trait's single required method, e.g. `add`.
+    method      : &'static str,
+}
+
+/// The set of intrinsic operator traits known to the compiler. These let custom types implement the
+/// arithmetic operators; an operator applied to a non-numeric type is lowered to a call of the
+/// corresponding trait method (e.g. `a + b` to `a.add(b)`, `a += b` to `a = a.add(b)`).
+const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
+    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add" },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub" },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul" },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div" },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem" },
+];
+
+/// A resolved intrinsic operator: the trait that backs an operator and the trait method to dispatch to.
+/// Built from [IntrinsicOpTrait] once the trait has been registered.
+#[derive(Copy, Clone)]
+struct IntrinsicOp {
+    /// Type id of the registered trait (e.g. `Add`).
+    trait_type_id   : TypeId,
+    /// The trait's required method (e.g. `add`).
+    method          : &'static str,
+}
+
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
     stage           : stage::Stage,
@@ -61,6 +94,10 @@ pub(crate) struct Resolver<'ctx> {
     /// the `ToString` trait/`to_string`). A cast to such a target that is not a built-in primitive cast
     /// is lowered to a call of the trait method on the cast operand, provided the operand implements it.
     intrinsic_casts : &'ctx UnorderedMap<TypeId, IntrinsicCast>,
+    /// Maps an arithmetic operator to the intrinsic operator trait that backs it (e.g. `+` -> the `Add`
+    /// trait/`add`). An operator applied to a non-numeric type is lowered to a call of the trait method
+    /// on the operands, provided they implement it.
+    intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
@@ -145,6 +182,25 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method });
     }
 
+    // register intrinsic operator traits (e.g. `Add`). These are ordinary traits scripts implement via
+    // `impl Add for MyType { ... }`; an operator on a non-numeric type lowers to a call of the trait method
+    // (e.g. `a + b` to `a.add(b)`). Add a row to INTRINSIC_OP_TRAITS to back a further operator.
+    let mut intrinsic_ops = UnorderedMap::new();
+    for intrinsic in INTRINSIC_OP_TRAITS {
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+        // required method `fn <method>(self: Self, rhs: Self) -> Self`, registered exactly as the resolver
+        // would for a source-defined trait method so impl-matching and vtable construction pick it up.
+        let constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
+            Some(trait_type_id),
+            vec![ Some(trait_type_id), Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
+        intrinsic_trait_names.push(intrinsic.trait_name.to_string());
+        intrinsic_ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, method: intrinsic.method });
+    }
+
     // insert userdefined struct/enum types from derive-macro/itsy_api
     let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
 
@@ -191,6 +247,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             scopes          : &mut scopes,
             primitives      : &primitives,
             intrinsic_casts : &intrinsic_casts,
+            intrinsic_ops   : &intrinsic_ops,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -1481,6 +1538,30 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // reverse) would name the operands the wrong way round for an assignment.
         self.resolve_expression(&mut item.left, None)?;
         let left_type_id = item.left.type_id(self);
+        // classify arithmetic compound assignment once the target type is known. Numeric/string targets
+        // keep their built-in codegen; a custom target (variable, field or index) is dispatched in-place to
+        // the operator-trait method so the target is evaluated only once.
+        if let (Some(base_op), Some(left_type_id)) = (item.op.arithmetic_assign_base(), left_type_id) {
+            let left_type = self.type_by_id(left_type_id);
+            if left_type.is_numeric() || left_type.is_string() {
+                item.op_dispatch = Some(ast::CompoundDispatch::Builtin);
+            } else {
+                self.resolve_expression(&mut item.right, Some(left_type_id))?;
+                if let Some(right_type_id) = item.right.type_id(self) {
+                    self.check_type_accepted_for(item, right_type_id, left_type_id)?; // rhs must be Self
+                }
+                let intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
+                if let Some(constant_id) = self.intrinsic_op_method_constant(left_type_id, &intrinsic) {
+                    item.op_dispatch = Some(ast::CompoundDispatch::Method(constant_id));
+                } else if self.stage.must_resolve() {
+                    let type_name = self.type_name(left_type_id);
+                    let trait_name = self.type_name(intrinsic.trait_type_id);
+                    return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                }
+                item.type_id = Some(TypeId::VOID);
+                return self.types_resolved(item, expected_result);
+            }
+        }
         self.resolve_expression(&mut item.right, if shift_assign { None } else { left_type_id })?;
         let right_type_id = item.right.type_id(self);
         // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
@@ -1504,6 +1585,28 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
         item.type_id = Some(TypeId::VOID);
         self.types_resolved(item, expected_result)
+    }
+
+    /// Looks up the constant for an intrinsic operator trait's method on the given target type, used to
+    /// dispatch a compound assignment in-place. Concrete implementors resolve to their own impl method
+    /// (static dispatch); a trait-object target resolves to the trait's required method (virtual dispatch).
+    /// Returns `None` while the implementation is not yet known.
+    fn intrinsic_op_method_constant(self: &Self, type_id: TypeId, intrinsic: &IntrinsicOp) -> Option<ConstantId> {
+        if let Some(impl_traits) = self.type_by_id(type_id).impl_traits_map() {
+            if let Some(impl_trait) = impl_traits.get(&intrinsic.trait_type_id) {
+                if let Some(Some(constant_id)) = impl_trait.functions.get(intrinsic.method) {
+                    return Some(*constant_id);
+                }
+            }
+        }
+        if self.type_by_id(type_id).is_trait_object() {
+            if let Some(trt) = self.type_by_id(intrinsic.trait_type_id).as_trait() {
+                if let Some(Some(constant_id)) = trt.required.get(intrinsic.method) {
+                    return Some(*constant_id);
+                }
+            }
+        }
+        None
     }
 
     /// Resolves a type cast. Built-in primitive conversions are validated against the conversion matrix;
@@ -1570,6 +1673,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let cast = item.as_cast_mut().ice()?;
         let position = cast.position;
         let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
+        *item = Self::make_method_call(receiver, method, Vec::new(), position);
+        self.resolve_expression(item, expected_result)
+    }
+
+    /// Rewrites an arithmetic binary operation `a OP b` into a method call `a.<method>(b)` and resolves it.
+    /// Used to dispatch operators backed by an intrinsic operator trait (e.g. `Add`) through the regular
+    /// method-call machinery, reusing its static and dynamic dispatch.
+    fn lower_binary_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        match Self::make_method_call(receiver, method, vec![ rhs ], position) {
+            ast::Expression::BinaryOp(call) => *item = *call,
+            _ => return Self::ice("make_method_call did not produce a binary operation"),
+        }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Builds an unresolved method-call expression `receiver.method(args...)` for the resolver to lower
+    /// intrinsic-trait operations (casts, operators) onto the regular method-call machinery.
+    fn make_method_call(receiver: ast::Expression, method: &str, args: Vec<ast::Expression>, position: ast::Position) -> ast::Expression {
         let access = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
             position,
             op: ast::BinaryOperator::Access,
@@ -1581,15 +1711,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 constant_id: None,
             }),
             type_id: None,
+            op_resolved: false,
         }));
-        *item = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
             position,
             op: ast::BinaryOperator::Call,
             left: ast::BinaryOperand::Expression(access),
-            right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() }),
+            right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args }),
             type_id: None,
-        }));
-        self.resolve_expression(item, expected_result)
+            op_resolved: false,
+        }))
     }
 
     /// Resolves a binary operation.
@@ -1617,7 +1748,39 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
                 }
             },
-            Add | Sub | Mul | Div | Rem | Range | RangeInclusive => {
+            Add | Sub | Mul | Div | Rem => {
+                self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
+                let left_type_id = item.left.type_id(self);
+                self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
+                let type_id = item.type_id(self);
+                let right_type_id = item.right.type_id(self);
+                if let Some(common_type_id) = type_id.or(left_type_id).or(right_type_id) {
+                    self.set_type_id(item, common_type_id)?;
+                    self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
+                    self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
+                    let common_type = self.type_by_id(common_type_id);
+                    // built-in arithmetic applies to numeric types (all operators) and to `String` (the `+`
+                    // concatenation operator); any other type dispatches through an operator trait
+                    let is_builtin = common_type.is_numeric() || (item.op == Add && common_type.is_string());
+                    if is_builtin {
+                        item.op_resolved = true;
+                    } else {
+                        // operator overloading: an arithmetic operator on a custom type is lowered to a call
+                        // of the corresponding operator trait's method (e.g. `a + b` -> `a.add(b)`). The node
+                        // stays unresolved (op_resolved == false) until the operand is found to implement the
+                        // trait (then lowered) or resolution stalls (dedicated error).
+                        let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;
+                        if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
+                            return self.lower_binary_op_to_method(item, intrinsic.method, expected_result);
+                        } else if self.stage.must_resolve() {
+                            let type_name = self.type_name(common_type_id);
+                            let trait_name = self.type_name(intrinsic.trait_type_id);
+                            return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                        }
+                    }
+                }
+            },
+            Range | RangeInclusive => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
                 let left_type_id = item.left.type_id(self);
                 self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
