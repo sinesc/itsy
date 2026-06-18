@@ -798,12 +798,12 @@ fn string_literal(i: Input) -> Output<Expression> {
             type_id: None,
         });
 
-        let cast = |left| Expression::BinaryOp(Box::new(BinaryOp {
+        let cast = |left| Expression::Cast(Box::new(Cast {
             position,
-            op: BinaryOperator::Cast,
-            left: BinaryOperand::Expression(left),
-            right: BinaryOperand::TypeName(TypeName::from_str("String", position)),
+            expr: left,
+            ty: TypeName::from_str("String", position),
             type_id: None,
+            kind: None,
         }));
 
         let mut current_string = "".to_string();
@@ -1012,12 +1012,12 @@ fn expression(i: Input) -> Output<Expression> {
             ),
             move |(expr, path)| {
                 if let Some(path) = path {
-                    Expression::BinaryOp(Box::new(BinaryOp {
+                    Expression::Cast(Box::new(Cast {
                         position: position,
-                        op      : BinaryOperator::Cast,
-                        left    : BinaryOperand::Expression(expr),
-                        right   : BinaryOperand::TypeName(TypeName::from_path(path)),
+                        expr    : expr,
+                        ty      : TypeName::from_path(path),
                         type_id : None,
+                        kind    : None,
                     }))
                 } else {
                     expr

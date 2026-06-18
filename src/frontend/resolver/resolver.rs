@@ -21,6 +21,33 @@ use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 
 /// Temporary internal state during program type/binding resolution.
+/// Describes an intrinsic conversion trait that backs an `as` cast to a particular target type.
+/// See the registration loop in [resolve] and [Resolver::resolve_cast].
+struct IntrinsicCastTrait {
+    /// Name of the trait scripts implement, e.g. `ToString`.
+    trait_name  : &'static str,
+    /// The trait's single required method, e.g. `to_string`.
+    method      : &'static str,
+    /// The cast target type the trait converts to, e.g. `String`.
+    target      : Type,
+}
+
+/// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
+/// a cast (e.g. a future `Display` backing some target type).
+const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
+    IntrinsicCastTrait { trait_name: "ToString", method: "to_string", target: Type::String },
+];
+
+/// A resolved intrinsic cast: the trait that backs a cast to a particular target type and the trait
+/// method to dispatch to. Built from [IntrinsicCastTrait] once the trait has been registered.
+#[derive(Copy, Clone)]
+struct IntrinsicCast {
+    /// Type id of the registered trait (e.g. `ToString`).
+    trait_type_id   : TypeId,
+    /// The trait's required method (e.g. `to_string`).
+    method          : &'static str,
+}
+
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
     stage           : stage::Stage,
@@ -30,6 +57,10 @@ pub(crate) struct Resolver<'ctx> {
     scopes          : &'ctx mut scopes::Scopes,
     /// Primitive to type id mapping.
     primitives      : &'ctx UnorderedMap<&'ctx Type, TypeId>,
+    /// Maps a cast target type id to the intrinsic conversion trait that backs it (e.g. `String` ->
+    /// the `ToString` trait/`to_string`). A cast to such a target that is not a built-in primitive cast
+    /// is lowered to a call of the trait method on the cast operand, provided the operand implements it.
+    intrinsic_casts : &'ctx UnorderedMap<TypeId, IntrinsicCast>,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
@@ -92,6 +123,28 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
+    // register intrinsic conversion traits (e.g. `ToString`) and the cast targets they back. These are
+    // ordinary traits that scripts implement via `impl ToString for MyType { ... }`; a cast to the trait's
+    // target type (e.g. `myValue as String`) that isn't a built-in primitive cast lowers to a call of the
+    // trait's method (e.g. `myValue.to_string()`). Add a row here to make a future trait drive a cast.
+    let mut intrinsic_trait_names = Vec::new();
+    let mut intrinsic_casts = UnorderedMap::new();
+    for intrinsic in INTRINSIC_CAST_TRAITS {
+        let target_type_id = *primitives.get(&intrinsic.target).ice()?;
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+        // required method `fn <method>(self: Self) -> <target>`, registered exactly as the resolver would
+        // for a source-defined trait method so impl-matching and vtable construction pick it up.
+        let constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
+            Some(target_type_id),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
+        intrinsic_trait_names.push(intrinsic.trait_name.to_string());
+        intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method });
+    }
+
     // insert userdefined struct/enum types from derive-macro/itsy_api
     let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
 
@@ -117,6 +170,10 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
                 scopes.insert_alias(module.scope_id, &name, &(module_path.clone() + &name));
             }
         }
+        // make intrinsic traits (e.g. `ToString`) visible in every module, like the primitives above
+        for name in &intrinsic_trait_names {
+            scopes.insert_alias(module.scope_id, name, &(module_path.clone() + name));
+        }
     }
 
     // assemble set of module paths to check use declarations against
@@ -133,6 +190,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             scope_id        : ScopeId::ROOT,
             scopes          : &mut scopes,
             primitives      : &primitives,
+            intrinsic_casts : &intrinsic_casts,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -571,6 +629,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
             AnonymousFunction(anonymous_function) => self.resolve_function(anonymous_function, None),
             Closure(closure) => self.resolve_closure(closure, expected_result),
+            Cast(_) => self.resolve_cast(item, expected_result),
         }
     }
 
@@ -1447,6 +1506,92 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.types_resolved(item, expected_result)
     }
 
+    /// Resolves a type cast. Built-in primitive conversions are validated against the conversion matrix;
+    /// a cast to a type backed by an intrinsic conversion trait (e.g. `String` via `ToString`) that is not
+    /// a built-in cast is lowered to a call of the trait's method on the operand (e.g. `expr.to_string()`).
+    fn resolve_cast(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
+        let cast = item.as_cast_mut().ice()?;
+        self.resolve_type_name(&mut cast.ty, expected_result)?;
+        let cast = item.as_cast_mut().ice()?;
+        self.resolve_expression(&mut cast.expr, None)?;
+        let cast = item.as_cast_mut().ice()?;
+        let (from_type_id, to_type_id) = match (cast.expr.type_id(self), cast.ty.type_id(self)) {
+            (Some(from_type_id), Some(to_type_id)) => (from_type_id, to_type_id),
+            _ => return Ok(()), // can't decide until both operand and target are known
+        };
+        let cast = item.as_cast_mut().ice()?;
+        cast.set_type_id(self, to_type_id);
+        if from_type_id == to_type_id {
+            item.as_cast_mut().ice()?.kind = Some(ast::CastKind::Primitive);
+            return Ok(());
+        }
+        let from_type = self.type_by_id(from_type_id);
+        let to_type = self.type_by_id(to_type_id);
+        let is_builtin_cast =
+            (to_type.is_string() && from_type.is_numeric()) ||
+            (to_type.is_integer() && (from_type.is_numeric() || from_type.is_bool() || from_type.is_simple_enum())) ||
+            (to_type.is_float() && from_type.is_numeric()) ||
+            (to_type.is_bool() && from_type.is_integer());
+        if is_builtin_cast {
+            item.as_cast_mut().ice()?.kind = Some(ast::CastKind::Primitive);
+            return Ok(());
+        }
+        // not a built-in primitive cast: the target must be backed by an intrinsic conversion trait. The
+        // cast stays unclassified (kind == None, hence unresolved) until either the operand is found to
+        // implement the trait (lowered to a method call) or resolution stalls (dedicated error).
+        match self.intrinsic_casts.get(&to_type_id).copied() {
+            Some(intrinsic) => {
+                if self.type_accepted_for(from_type_id, intrinsic.trait_type_id) {
+                    // operand implements the backing trait: lower to a call of the trait method
+                    self.lower_cast_to_method(item, intrinsic.method, expected_result)
+                } else if self.stage.must_resolve() {
+                    // resolution has stalled: no impl block will make the trait appear, so the operand
+                    // genuinely does not implement it
+                    let from_name = self.type_name(from_type_id);
+                    let trait_name = self.type_name(intrinsic.trait_type_id);
+                    Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(from_name, trait_name), self.module_path))
+                } else {
+                    // an impl block may still resolve in a later pass; defer without classifying the cast
+                    Ok(())
+                }
+            },
+            None => {
+                let from_name = self.type_name(from_type_id);
+                let to_name = self.type_name(to_type_id);
+                Err(ResolveError::new(item, ResolveErrorKind::InvalidCast(from_name, to_name), self.module_path))
+            },
+        }
+    }
+
+    /// Rewrites a cast expression `expr as T` into a method call `expr.<method>()` and resolves it. Used to
+    /// dispatch casts backed by an intrinsic conversion trait (e.g. `ToString`) through the regular method
+    /// call machinery, which handles both static dispatch and dynamic dispatch on trait objects.
+    fn lower_cast_to_method(self: &mut Self, item: &mut ast::Expression, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let cast = item.as_cast_mut().ice()?;
+        let position = cast.position;
+        let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
+        let access = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Access,
+            left: ast::BinaryOperand::Expression(receiver),
+            right: ast::BinaryOperand::Member(ast::Member {
+                position,
+                ident: ast::Ident { position, name: method.to_string() },
+                type_id: None,
+                constant_id: None,
+            }),
+            type_id: None,
+        }));
+        *item = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Call,
+            left: ast::BinaryOperand::Expression(access),
+            right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() }),
+            type_id: None,
+        }));
+        self.resolve_expression(item, expected_result)
+    }
+
     /// Resolves a binary operation.
     fn resolve_binary_op(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
         use crate::frontend::ast::BinaryOperator::*;
@@ -1629,30 +1774,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                     if let Some(type_id) = item.right.type_id(self) {
                         self.set_type_id(item, type_id)?; // ignored if member is constant
-                    }
-                }
-            },
-            Cast => {
-                self.resolve_type_name(item.right.as_type_name_mut().ice()?, expected_result)?;
-                self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
-                if let Some(type_id) = item.right.type_id(self) {
-                    item.set_type_id(self, type_id);
-                }
-                if let (Some(from_type_id), Some(to_type_id)) = (item.left.type_id(self), item.right.type_id(self)) {
-                    if from_type_id != to_type_id {
-                        let from_type = self.type_by_id(from_type_id);
-                        let to_type = self.type_by_id(to_type_id);
-                        if
-                            (to_type.is_string() && !(from_type.is_numeric())) ||
-                            (to_type.is_integer() && !(from_type.is_numeric() || from_type.is_bool() || from_type.is_simple_enum())) ||
-                            (to_type.is_float() && !from_type.is_numeric()) ||
-                            (to_type.is_bool() && !from_type.is_integer()) ||
-                            !(to_type.is_string() || to_type.is_integer() || to_type.is_float() || to_type.is_bool())
-                        {
-                            let from_name = self.type_name(from_type_id);
-                            let to_name = self.type_name(to_type_id);
-                            return Err(ResolveError::new(item, ResolveErrorKind::InvalidCast(from_name, to_name), self.module_path));
-                        }
                     }
                 }
             },

@@ -268,6 +268,119 @@ fn cast_f32_i8() {
     assert_all(&result, &[ 3i8, -3, 127, 127, -128 ]);
 }
 
+// --- cast to String via the intrinsic ToString trait ---
+
+#[test]
+fn to_string_struct() {
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        impl ToString for Point {
+            fn to_string(self: Self) -> String {
+                "({self.x}, {self.y})"
+            }
+        }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_string(p as String);
+        }
+    ));
+    assert_all(&result, &[ "(3, 7)".to_string() ]);
+}
+
+#[test]
+fn to_string_enum() {
+    let result = run(stringify!(
+        enum Shape { Circle(i32), Square(i32) }
+        impl ToString for Shape {
+            fn to_string(self: Self) -> String {
+                if self == Shape::Circle(3) { "circle" } else { "square" }
+            }
+        }
+        fn main() {
+            ret_string(Shape::Circle(3) as String);
+            ret_string(Shape::Square(5) as String);
+        }
+    ));
+    assert_all(&result, &[ "circle".to_string(), "square".to_string() ]);
+}
+
+#[test]
+fn to_string_via_interpolation() {
+    // string interpolation lowers `{expr}` to `expr as String`, which routes custom types through ToString
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        impl ToString for Point {
+            fn to_string(self: Self) -> String {
+                "({self.x}, {self.y})"
+            }
+        }
+        fn main() {
+            let p = Point { x: 1, y: 2 };
+            ret_string("point: {p}!");
+        }
+    ));
+    assert_all(&result, &[ "point: (1, 2)!".to_string() ]);
+}
+
+#[test]
+fn to_string_dynamic_dispatch() {
+    // casting a trait-object-typed value to String dispatches through the vtable to the concrete impl
+    let result = run(stringify!(
+        struct Dog { name: String }
+        struct Cat { age: i32 }
+        impl ToString for Dog {
+            fn to_string(self: Self) -> String {
+                "dog {self.name}"
+            }
+        }
+        impl ToString for Cat {
+            fn to_string(self: Self) -> String {
+                "cat {self.age}"
+            }
+        }
+        fn stringify(thing: ToString) -> String {
+            thing as String
+        }
+        fn main() {
+            ret_string(stringify(Dog { name: "Rex" }));
+            ret_string(stringify(Cat { age: 3 }));
+        }
+    ));
+    assert_all(&result, &[ "dog Rex".to_string(), "cat 3".to_string() ]);
+}
+
+#[test]
+fn to_string_forward_impl() {
+    // the ToString impl is declared after the cast that uses it; resolution must not prematurely
+    // conclude the trait is unimplemented
+    let result = run(stringify!(
+        fn main() {
+            let p = Point { x: 4, y: 9 };
+            ret_string(p as String);
+        }
+        struct Point { x: i32, y: i32 }
+        impl ToString for Point {
+            fn to_string(self: Self) -> String {
+                "({self.x}, {self.y})"
+            }
+        }
+    ));
+    assert_all(&result, &[ "(4, 9)".to_string() ]);
+}
+
+#[test]
+fn to_string_missing_impl() {
+    // a type that does not implement ToString cannot be cast to String and yields a dedicated error
+    let err = build_err(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_string(p as String);
+        }
+    ));
+    assert!(err.contains("does not implement 'ToString'"), "unexpected error: {}", err);
+}
+
 // --- cast float to unsigned ---
 
 #[test]

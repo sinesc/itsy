@@ -15,6 +15,9 @@ pub enum ResolveErrorKind {
     /// Expected one type, got another. Expected type is second argument.
     TypeMismatch(String, String),
     InvalidCast(String, String),
+    /// A cast to a type backed by an intrinsic conversion trait (e.g. `String` via `ToString`) was attempted
+    /// on a type that does not implement that trait. Arguments are the source type and the trait name.
+    MissingTraitImplementation(String, String),
     IncompatibleNumeric(String, Numeric),
     NumberOfArguments(String, ItemIndex, ItemIndex),
     MutabilityEscalation,
@@ -78,6 +81,7 @@ impl Display for ResolveError {
         match &self.kind {
             ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type {e}, got {g}"),
             ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from {t1} to {t2}"),
+            ResolveErrorKind::MissingTraitImplementation(t, trt) => write!(f, "Cannot cast '{t}' to '{trt}' target: '{t}' does not implement '{trt}'"),
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric {n} for expected type {t}"),
             ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier '{v}'"),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member '{m}'"),

@@ -350,13 +350,13 @@ macro_rules! impl_matchall {
         }
     };
     ($self:ident, Expression, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction)
+        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction, Cast)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Break, Continue, Expression, Module, UseDecl, EnumDef)
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member, TypeName)
+        impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, CallableDef, TraitBound)
@@ -1435,6 +1435,7 @@ pub enum Expression {
     MatchBlock(Box<MatchBlock>),
     Closure(Box<Closure>),
     AnonymousFunction(Box<Function>),
+    Cast(Box<Cast>),
 }
 
 impl_resolvable!(enum Expression);
@@ -1444,6 +1445,7 @@ impl_as_getter!(Expression {
     pub as_constant: Constant -> &Constant,
     pub as_binary_op: BinaryOp -> &BinaryOp,
     pub as_binary_op_mut: BinaryOp -> mut BinaryOp,
+    pub as_cast_mut: Cast -> mut Cast,
 });
 
 impl Expression {
@@ -1490,6 +1492,7 @@ impl ControlFlow for Expression {
             Expression::UnaryOp(v)      => v.identify_control_flow(scan_blocks),
             Expression::Block(v)        => v.identify_control_flow(scan_blocks),
             Expression::IfBlock(v)      => v.identify_control_flow(scan_blocks),
+            Expression::Cast(v)         => v.identify_control_flow(scan_blocks),
             _                           => None,
         }
     }
@@ -1801,6 +1804,16 @@ impl ControlFlow for Assignment {
 }
 
 
+/// How a cast is dispatched, determined during resolution. Casts backed by an intrinsic conversion
+/// trait (e.g. `ToString`) are lowered to method calls and never survive as a `Cast`, so the only kind
+/// that reaches the compiler is `Primitive`; `kind` being `None` marks a cast that is still awaiting
+/// classification (e.g. a trait-backed cast whose operand's trait impl has not resolved yet).
+#[derive(Debug)]
+pub enum CastKind {
+    /// A built-in primitive conversion, compiled via the cast opcodes.
+    Primitive,
+}
+
 /// An explicit `as` type-cast.
 #[derive(Debug)]
 pub struct Cast {
@@ -1808,16 +1821,25 @@ pub struct Cast {
     pub expr        : Expression,
     pub ty          : TypeName,
     pub type_id     : Option<TypeId>,
+    pub kind        : Option<CastKind>,
 }
 
 impl_typeable!(Cast);
 impl_positioned!(Cast);
 impl_display!(Cast, "{} as {}", expr, ty);
-impl_resolvable!(Cast {
-    expr: Item,
-    ty: Item,
-    type_id: TypeId,
-});
+
+impl Resolvable for Cast {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        let mut result = self.expr.resolvables();
+        result.append(&mut self.ty.resolvables());
+        result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
+        // a cast is only fully resolved once it has been classified; this keeps a trait-backed cast
+        // whose operand type or trait impl is not yet known from being considered resolved (its target
+        // type alone may be filled in from context), so resolution proceeds to the must_resolve stage
+        result.push(Resolvables::Progress(self.kind.as_ref().map_or(Progress::new(0, 1), |_| Progress::new(1, 1))));
+        result
+    }
+}
 
 impl ControlFlow for Cast {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
@@ -1831,7 +1853,6 @@ pub enum BinaryOperand {
     Expression(Expression),
     ArgumentList(ArgumentList),
     Member(Member),
-    TypeName(TypeName),
 }
 
 impl_resolvable!(enum BinaryOperand);
@@ -1844,8 +1865,6 @@ impl_as_getter!(BinaryOperand {
     pub as_argument_list_mut: ArgumentList -> mut ArgumentList,
     pub as_member: Member -> &Member,
     pub as_member_mut: Member -> mut Member,
-    pub as_type_name: TypeName -> &TypeName,
-    pub as_type_name_mut: TypeName -> mut TypeName,
 });
 
 impl Typeable for BinaryOperand {
@@ -1854,7 +1873,6 @@ impl Typeable for BinaryOperand {
             Self::Expression(v) => v.type_id(container),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
             Self::Member(v) => v.type_id(container),
-            Self::TypeName(v) => v.type_id(container),
         }
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
@@ -1862,7 +1880,6 @@ impl Typeable for BinaryOperand {
             Self::Expression(v) => v.set_type_id(container, type_id),
             Self::ArgumentList(_) => panic!("ArgumentList is not typeable."),
             Self::Member(v) => v.set_type_id(container, type_id),
-            Self::TypeName(v) => v.set_type_id(container, type_id),
         }
     }
 }
@@ -1873,7 +1890,6 @@ impl Display for BinaryOperand {
             Self::Expression(v) => write!(f, "{v}"),
             Self::ArgumentList(v) => write!(f, "{v}"),
             Self::Member(v) => write!(f, "{v}"),
-            Self::TypeName(v) => write!(f, "{v}"),
         }
     }
 }
@@ -1998,7 +2014,7 @@ pub enum BinaryOperator {
     // data offsets
     Index, IndexWrite, Access, AccessWrite,
     // misc
-    Call, Cast,
+    Call,
 }
 
 impl BinaryOperator {
@@ -2126,7 +2142,6 @@ impl Display for BinaryOperator {
             BinaryOperator::IndexWrite      => "[] ",
 
             BinaryOperator::Call            => "(", // FIXME: add closing somewhere?
-            BinaryOperator::Cast            => " as ",
         })
     }
 }

@@ -278,6 +278,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             MatchBlock(match_block) => self.compile_match_block(match_block),
             AnonymousFunction(anonymous_function) => self.compile_anonymous_function(anonymous_function),
             Closure(closure) => self.compile_closure(closure),
+            Cast(cast) => self.compile_cast(cast),
         }
     }
 
@@ -1408,9 +1409,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             (Index | IndexWrite | Access | AccessWrite, _) => {
                 self.compile_binary_op_offseting(item)
             },
-            (Cast, _) => {
-                self.compile_binary_op_cast(item)
-            },
             (Call, _) => {
                 self.compile_binary_op_call(item)
             },
@@ -1422,12 +1420,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Compiles a variable binding and optional assignment.
-    fn compile_binary_op_cast(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
-        let expr = item.left.as_expression().ice()?;
-        self.compile_expression(expr)?;
-        let from = self.ty(expr);
-        let to = self.ty(item.right.as_type_name().ice()?);
+    /// Compiles a primitive type cast. Casts backed by an intrinsic conversion trait (e.g. `ToString`)
+    /// are lowered to method calls during resolution and never reach this point.
+    fn compile_cast(self: &mut Self, item: &ast::Cast) -> CompileResult {
+        self.compile_expression(&item.expr)?;
+        let from = self.ty(&item.expr);
+        let to = self.ty(&item.ty);
         self.write_cast(from, to)?;
         Ok(())
     }
