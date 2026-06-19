@@ -66,22 +66,6 @@ fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut St
 
 impl_builtins! {
 
-    [
-        /// Itsy builtin types.
-        ///
-        /// # Basic types
-        ///
-        /// Unsigned numbers: `u8`, `u16`, `u32`, `u64`.\
-        /// Signed numbers: `i8`, `i16`, `i32`, `i64`.\
-        /// Floating point numbers: [`f32`](crate::internals::documentation::Float), [`f64`](crate::internals::documentation::Float).\
-        /// Character strings: [`String`](crate::internals::documentation::String)
-        ///
-        /// # Compound types
-        ///
-        /// Arrays, variable-length lists of values of the same type: [`[ .. ]`](crate::internals::documentation::Array).\
-        /// Structs, fixed grouping of multiple types: `struct { .. }`.
-    ]
-
     /// Dynamically sized array type.
     ///
     /// Arrays store a variable amount of `Element`s of the same type. Arrays are a reference type,
@@ -1299,5 +1283,78 @@ impl_builtins! {
                 (char_code as char).to_string()
             }
         }
+    }
+}
+
+/// Documentation of the types available to Itsy code.
+///
+/// # Basic types
+///
+/// Unsigned numbers: `u8`, `u16`, `u32`, `u64`.\
+/// Signed numbers: `i8`, `i16`, `i32`, `i64`.\
+/// Floating point numbers: [`f32`](crate::internals::documentation::Float), [`f64`](crate::internals::documentation::Float).\
+/// Character strings: [`String`](crate::internals::documentation::String)
+///
+/// # Compound types
+///
+/// Arrays, variable-length lists of values of the same type: [`[ v, ... ]`](crate::internals::documentation::Array).\
+/// Maps, variable-length associations of keys to values: [`[ k => v, ... ]`](crate::internals::documentation::Map).\
+/// Structs, product of multiple types: `struct { field1: Type1, ... }`.\
+/// Enums, disjoint union (one of n variants, variants can carry data): `ennum { A, B(p1, p2, ...), ... }`.
+#[cfg(doc)]
+pub mod documentation {
+    #[doc(inline)]
+    pub use super::builtin_type_documentation::*;
+
+    // Placeholder types referenced by `Map`'s method signatures. Kept private (not rendered as
+    // standalone types) to mirror how the macro treats `Element`/`UnsignedSelf`.
+    struct Key { }
+    struct Value { }
+
+    /// Dynamically sized key/value map type.
+    ///
+    /// Maps associate `Key`s with `Value`s. Like arrays, maps are a reference type: binding a map
+    /// already bound to one variable to another makes both variables point at the same data.
+    /// Iteration (`for key in map`), indexing (`map[key]`) and the literal syntax (`[ key => value ]`)
+    /// are part of the language; the methods below are the named operations.
+    ///
+    /// # Examples
+    ///
+    /// ``` ignore
+    /// let ages = [ "Anna" => 30, "Bert" => 42 ];
+    /// ages.insert("Cleo", 19);
+    ///
+    /// for name in ages {
+    ///     print("{name} is {ages[name]}\n");
+    /// }
+    /// ```
+    pub struct Map { }
+
+    impl Map {
+        /// Inserts a key/value pair into the map, replacing and dropping any previous value stored
+        /// under an equal key.
+        pub fn insert(self: Self, key: Key, value: Value) { }
+
+        /// Returns the value stored under the given key.
+        ///
+        /// # Error
+        ///
+        /// Halts the VM if the key is not present in the map. The VM is resumable.
+        pub fn get(self: Self, key: Key) -> Value { }
+
+        /// Removes the entry stored under the given key, doing nothing if the key is absent.
+        pub fn remove(self: Self, key: Key) { }
+
+        /// Removes all entries from the map.
+        pub fn clear(self: Self) { }
+
+        /// Returns an array of the map's keys in insertion order.
+        pub fn keys(self: Self) -> Array { }
+
+        /// Returns an array of the map's values in insertion order.
+        pub fn values(self: Self) -> Array { }
+
+        /// Returns the number of entries in the map.
+        pub fn len(self: Self) -> u64 { }
     }
 }
