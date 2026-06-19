@@ -15,10 +15,10 @@ use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
-use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
+use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
-use crate::bytecode::{VMFunc, builtins::builtin_types};
+use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin}};
 
 /// Temporary internal state during program type/binding resolution.
 /// Describes an intrinsic conversion trait that backs an `as` cast to a particular target type.
@@ -362,6 +362,61 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    /// Try to create a concrete map builtin function signature for the given map type. Map methods are
+    /// dispatched via dedicated VM opcodes (see `map_*` in opcodes.rs), so unlike array/scalar builtins
+    /// these are registered as [`FunctionKind::MapBuiltin`] rather than going through the impl_builtins!
+    /// machinery. The receiver (the map itself) is prepended as the first argument, mirroring how the
+    /// array builtins encode `this`.
+    fn try_create_map_builtin(self: &mut Self, item: &ast::Expression, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
+
+        if let Some(constant_id) = self.scopes.constant_id(ScopeId::ROOT, name, type_id) {
+            return Ok(Some(constant_id));
+        }
+
+        let map_ty = self.type_by_id(type_id).as_map().ice()?;
+        let (key_type_id, value_type_id) = match (map_ty.key_type_id, map_ty.value_type_id) {
+            (Some(key_type_id), Some(value_type_id)) => (key_type_id, value_type_id),
+            // key/value types not resolved yet: can't build the signature until they are
+            _ => return if self.stage.must_resolve() {
+                Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("{}", &item)), self.module_path))
+            } else {
+                Ok(None)
+            },
+        };
+
+        // (builtin, return type, explicit argument types) — the receiver is prepended below
+        let spec: Option<(MapBuiltin, Option<TypeId>, Vec<TypeId>)> = match name {
+            "insert" => Some((MapBuiltin::Insert, None, vec![ key_type_id, value_type_id ])),
+            "get"    => Some((MapBuiltin::Get, Some(value_type_id), vec![ key_type_id ])),
+            "remove" => Some((MapBuiltin::Remove, None, vec![ key_type_id ])),
+            "clear"  => Some((MapBuiltin::Clear, None, vec![])),
+            "len"    => Some((MapBuiltin::Len, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?), vec![])),
+            "keys"   => {
+                let array_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: Some(key_type_id) }));
+                Some((MapBuiltin::Keys, Some(array_type_id), vec![]))
+            },
+            "values" => {
+                let array_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: Some(value_type_id) }));
+                Some((MapBuiltin::Values, Some(array_type_id), vec![]))
+            },
+            _ => None,
+        };
+
+        Ok(match spec {
+            None => None,
+            Some((map_builtin, ret_type_id, mut arg_type_ids)) => {
+                // prepend the receiver (the map itself), as the array builtins do for `this`
+                arg_type_ids.insert(0, type_id);
+                Some(self.scopes.insert_function(
+                    name,
+                    Some(ret_type_id.unwrap_or(TypeId::VOID)),
+                    arg_type_ids.into_iter().map(Some).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::MapBuiltin(type_id, map_builtin))
+                ))
+            },
+        })
+    }
+
     /// Create integer/float/string builtin function signature.
     fn try_create_scalar_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
 
@@ -590,6 +645,51 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
+    /// For a call like `map.insert(k, v)` (or `get`/`remove`) whose receiver map has a still-unknown key or
+    /// value type, infer those types from the relevant arguments (the map equivalent of
+    /// [`Self::try_create_array_builtin`]'s element inference). Required so methods can be called on an empty
+    /// map literal `[ => ]` whose types are not yet determined.
+    fn try_infer_map_types_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+        // identify `<map>.<method>` access and which (pre-transform, receiver not yet prepended) arguments
+        // carry the key and value
+        let (map_type_id, key_index, value_index) = {
+            let binary_op = match call_exp.as_binary_op_mut() {
+                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
+                _ => return Ok(()),
+            };
+            let (key_index, value_index) = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
+                Some("insert") => (Some(0), Some(1)),
+                Some("get") | Some("remove") => (Some(0), None),
+                _ => return Ok(()),
+            };
+            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_map()) {
+                Some(Some(_)) => (binary_op.left.type_id(self).ice()?, key_index, value_index),
+                _ => return Ok(()),
+            }
+        };
+        if let Some(key_index) = key_index {
+            if self.type_by_id(map_type_id).as_map().ice()?.key_type_id.is_none() {
+                if let Some(arg) = call_args.args.get_mut(key_index) {
+                    self.resolve_expression(arg, None)?;
+                    if let Some(key_type_id) = arg.type_id(self) {
+                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.key_type_id = Some(key_type_id);
+                    }
+                }
+            }
+        }
+        if let Some(value_index) = value_index {
+            if self.type_by_id(map_type_id).as_map().ice()?.value_type_id.is_none() {
+                if let Some(arg) = call_args.args.get_mut(value_index) {
+                    self.resolve_expression(arg, None)?;
+                    if let Some(value_type_id) = arg.type_id(self) {
+                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.value_type_id = Some(value_type_id);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns an error kind if the pattern is refutable and thus cannot be used in a let binding.
     fn check_pattern_irrefutable(pattern: &ast::Pattern) -> Result<(), ResolveErrorKind> {
         use ast::Pattern;
@@ -696,6 +796,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         match item {
             TypeName(type_name) => self.resolve_type_name(type_name, None),
             ArrayDef(array) => self.resolve_array_type(array),
+            MapDef(map) => self.resolve_map_type(map),
             CallableDef(callable) => self.resolve_callable_type(callable),
             TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
         }
@@ -795,6 +896,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let (None, inner_type_id @ Some(_)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
             let ty = Type::Array(Array {
                 type_id : inner_type_id,
+            });
+            let new_type_id = self.scopes.insert_type(None, ty);
+            item.type_id = Some(new_type_id);
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
+    }
+
+    /// Resolves a map definition.
+    fn resolve_map_type(self: &mut Self, item: &mut ast::MapDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        let key_type_id = self.resolve_inline_type(&mut item.key_type)?;
+        let value_type_id = self.resolve_inline_type(&mut item.value_type)?;
+        if let (None, Some(_), Some(_)) = (item.type_id, key_type_id, value_type_id) {
+            let ty = Type::Map(MapType {
+                key_type_id,
+                value_type_id,
             });
             let new_type_id = self.scopes.insert_type(None, ty);
             item.type_id = Some(new_type_id);
@@ -1477,8 +1597,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(&mut item.iter, type_id)?;
                 }
             },
-            Literal(_) | Constant(_) | Variable(_) | Block(_) | IfBlock(_) | MatchBlock(_)  => {
+            _ => {
+                // any array-typed expression is iterable. A map is lowered to iterating `map.keys()`: the
+                // loop walks a one-shot snapshot of the keys, which lets the body freely mutate the map
+                // (insert/remove) without disturbing the iteration.
                 self.resolve_expression(&mut item.expr, None)?;
+                if self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some()) {
+                    let position = item.expr.position();
+                    let map_expr = replace(&mut item.expr, ast::Expression::void(position));
+                    item.expr = Self::make_method_call(map_expr, "keys", Vec::new(), position);
+                    self.resolve_expression(&mut item.expr, None)?;
+                }
                 if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
                     // infer iter type from array element type
                     self.set_type_id(&mut item.iter, elements_type_id)?;
@@ -1492,7 +1621,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
                 }
             },
-            _ => return Err(ResolveError::new(&item.iter, ResolveErrorKind::InvalidOperation("Unsupported for in operand".to_string()), self.module_path)),
         };
         // handle block
         self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
@@ -1834,35 +1962,69 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             },
             Index | IndexWrite => {
                 self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
-                if let Some(left_type_id) = item.left.type_id(self) {
-                    if !self.type_by_id(left_type_id).as_array().is_some() {
-                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
-                    }
+                let left_type_id = item.left.type_id(self);
+                let is_map = left_type_id.map_or(false, |id| self.type_by_id(id).as_map().is_some());
+                let is_array = left_type_id.map_or(false, |id| self.type_by_id(id).as_array().is_some());
+                if left_type_id.is_some() && !is_array && !is_map {
+                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
                 }
-                self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
-                // left[right] : item
-                self.set_type_id(item.right.as_expression_mut().ice()?, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
-                // if we expect the result to be of a particular type, set it now
-                if let Some(expected_result) = expected_result {
-                    self.set_type_id(item, expected_result)?;
-                }
-                // if we know the result type, set the array element type to that
-                if let Some(result_type_id) = item.type_id(self) {
-                    if let Some(Type::Array(array)) = self.item_type(&item.left) {
-                        if let Some(array_type_id) = array.type_id {
-                            self.check_type_accepted_for(item, result_type_id, array_type_id)?;
-                        } else {
-                            // TODO: this is pretty ugly, referencing left type again. working around mutable borrow issues when directly borrowing mutably in above if let
-                            let ty = item.left.type_id(self).map(|type_id| self.type_by_id_mut(type_id));
-                            if let Some(Type::Array(array)) = ty {
-                                array.type_id = Some(result_type_id);
+                if is_map {
+                    // map index: the index operand is the key type, the result is the value type
+                    let key_type_id = if let Some(&Type::Map(MapType { key_type_id, .. })) = self.item_type(&item.left) { key_type_id } else { None };
+                    self.resolve_expression(item.right.as_expression_mut().ice()?, key_type_id)?;
+                    // infer the map key type from the index operand if still unknown
+                    if key_type_id.is_none() {
+                        if let (Some(index_type_id), Some(left_type_id)) = (item.right.type_id(self), item.left.type_id(self)) {
+                            if let Some(map_ty) = self.type_by_id_mut(left_type_id).as_map_mut() {
+                                map_ty.key_type_id = Some(index_type_id);
                             }
                         }
                     }
-                }
-                // if we know the array element type, set the result type to that
-                if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.item_type(&item.left) {
-                    self.set_type_id(item, element_type_id)?;
+                    // if we expect a particular result type, set it now
+                    if let Some(expected_result) = expected_result {
+                        self.set_type_id(item, expected_result)?;
+                    }
+                    // if we know the result type, propagate it to the map value type
+                    if let Some(result_type_id) = item.type_id(self) {
+                        let value_type_id = if let Some(&Type::Map(MapType { value_type_id, .. })) = self.item_type(&item.left) { value_type_id } else { None };
+                        if let Some(value_type_id) = value_type_id {
+                            self.check_type_accepted_for(item, result_type_id, value_type_id)?;
+                        } else if let Some(left_type_id) = item.left.type_id(self) {
+                            if let Some(map_ty) = self.type_by_id_mut(left_type_id).as_map_mut() {
+                                map_ty.value_type_id = Some(result_type_id);
+                            }
+                        }
+                    }
+                    // if we know the map value type, set the result type to that
+                    if let Some(&Type::Map(MapType { value_type_id: Some(value_type_id), .. })) = self.item_type(&item.left) {
+                        self.set_type_id(item, value_type_id)?;
+                    }
+                } else {
+                    self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;
+                    // left[right] : item
+                    self.set_type_id(item.right.as_expression_mut().ice()?, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
+                    // if we expect the result to be of a particular type, set it now
+                    if let Some(expected_result) = expected_result {
+                        self.set_type_id(item, expected_result)?;
+                    }
+                    // if we know the result type, set the array element type to that
+                    if let Some(result_type_id) = item.type_id(self) {
+                        if let Some(Type::Array(array)) = self.item_type(&item.left) {
+                            if let Some(array_type_id) = array.type_id {
+                                self.check_type_accepted_for(item, result_type_id, array_type_id)?;
+                            } else {
+                                // TODO: this is pretty ugly, referencing left type again. working around mutable borrow issues when directly borrowing mutably in above if let
+                                let ty = item.left.type_id(self).map(|type_id| self.type_by_id_mut(type_id));
+                                if let Some(Type::Array(array)) = ty {
+                                    array.type_id = Some(result_type_id);
+                                }
+                            }
+                        }
+                    }
+                    // if we know the array element type, set the result type to that
+                    if let Some(&Type::Array(Array { type_id: Some(element_type_id), .. })) = self.item_type(&item.left) {
+                        self.set_type_id(item, element_type_id)?;
+                    }
                 }
             },
             Access | AccessWrite => {
@@ -1876,6 +2038,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let member_name = &item.right.as_member().ice()?.ident.name;
                         let left_ty = self.type_by_id(left_type_id);
                         let is_array = left_ty.as_array().is_some();
+                        let is_map = left_ty.as_map().is_some();
                         let is_scalar = left_ty.is_float() || left_ty.is_integer() || left_ty.is_string();
                         // constituent trait ids if the receiver is a multiple-trait bound (`A + B`)
                         let trait_bound_ids = left_ty.as_trait_bound().cloned();
@@ -1883,6 +2046,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             // lookup array builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                                 .or(self.try_create_array_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)
+                        } else if is_map {
+                            // lookup map builtin or try to create it
+                            self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
+                                .or(self.try_create_map_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)
                         } else if is_scalar {
                             // lookup scalar builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
@@ -1930,6 +2097,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                                 // can't ice here since builtin resolve above might actually temporarily fail on arrays that don't have
                                 // their inner type resolved yet
                             },
+                            Type::Map(_) => {
+                                // as for arrays, builtin resolution above may temporarily fail while the
+                                // map's key/value types are not yet resolved
+                            },
                             x @ _ => {
                                 Self::ice(&format!("Member access on unsupported type {:?}", x))?;
                             },
@@ -1948,6 +2119,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // an array builtin like `arr.push(x)` can't resolve while the array's element type is
                 // unknown, but for `push`/`insert` that type is exactly what the value argument supplies.
                 self.try_infer_array_element_from_args(call_func, call_args)?;
+                self.try_infer_map_types_from_args(call_func, call_args)?;
                 self.transform_constant_call(call_func, call_args)?;
                 let num_args = call_args.args.len();
                 // set return type from signature
@@ -2129,6 +2301,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.set_type_id(item, self.primitive_type_id(Type::String)?)?;
         } else if let LV::Array(_) = item.value {
             self.resolve_array_literal(item, expected_type)?;
+        } else if let LV::Map(_) = item.value {
+            self.resolve_map_literal(item, expected_type)?;
         } else if let LV::Struct(_) = item.value {
             self.resolve_struct_literal(item)?;
         } else if let Some(type_name) = &mut item.type_name {
@@ -2238,6 +2412,80 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 self.check_type_accepted_for(item, current_element_type_id, elements_type_id)?;
             } else {
                 array_ty.type_id = Some(elements_type_id);
+            }
+        }
+
+        self.types_resolved(item, expected_type_id)
+    }
+
+    /// Resolves a map literal and creates the required map type.
+    fn resolve_map_literal(self: &mut Self, item: &mut ast::Literal, expected_type_id: Option<TypeId>) -> ResolveResult {
+
+        let mut key_type_id = None;
+        let mut value_type_id = None;
+
+        // apply expected type if known
+        if let Some(expected_type_id) = expected_type_id {
+            if self.type_by_id(expected_type_id).as_map().is_some() {
+                self.set_type_id(item, expected_type_id)?;
+            } else {
+                let expected_name = self.type_name(expected_type_id);
+                let received_name = if let Some(type_id) = item.type_id { self.type_name(type_id) } else { "?".to_string() };
+                return Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(received_name, expected_name), self.module_path));
+            }
+        }
+
+        // if we have a type for the map, pick up its known key/value types to apply to the entries
+        if let Some(&Type::Map(MapType { key_type_id: k, value_type_id: v })) = self.item_type(item) {
+            key_type_id = k;
+            value_type_id = v;
+        }
+
+        let type_id = item.type_id(self);
+        let map_literal = item.value.as_map_mut().ice_msg("Expected map type, got something else")?;
+
+        // try to infer key/value types from the entries
+        if key_type_id.is_none() || value_type_id.is_none() {
+            for (key, value) in &mut map_literal.entries {
+                self.resolve_expression(key, key_type_id)?;
+                self.resolve_expression(value, value_type_id)?;
+                if key_type_id.is_none() {
+                    key_type_id = key.type_id(self);
+                }
+                if value_type_id.is_none() {
+                    value_type_id = value.type_id(self);
+                }
+            }
+        }
+
+        // resolve entries against the (possibly newly) known key/value types to aid their inference
+        if key_type_id.is_some() || value_type_id.is_some() {
+            for (key, value) in &mut map_literal.entries {
+                self.resolve_expression(key, key_type_id)?;
+                self.resolve_expression(value, value_type_id)?;
+            }
+        }
+
+        // create the map type if we don't have one yet, otherwise propagate inferred key/value types
+        if type_id.is_none() {
+            let new_type_id = self.scopes.insert_type(None, Type::Map(MapType {
+                key_type_id,
+                value_type_id,
+            }));
+            item.set_type_id(self, new_type_id);
+        } else {
+            let map_type_id = item.type_id(self).ice()?;
+            if let Some(key_type_id) = key_type_id {
+                let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
+                if map_ty.key_type_id.is_none() {
+                    map_ty.key_type_id = Some(key_type_id);
+                }
+            }
+            if let Some(value_type_id) = value_type_id {
+                let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
+                if map_ty.value_type_id.is_none() {
+                    map_ty.value_type_id = Some(value_type_id);
+                }
             }
         }
 

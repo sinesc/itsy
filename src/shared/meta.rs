@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
 use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
-use crate::bytecode::builtins::BuiltinType;
+use crate::bytecode::builtins::{BuiltinType, MapBuiltin};
 
 /// Information about a binding in a resolved program.
 #[derive(Debug)]
@@ -90,6 +90,13 @@ impl Struct {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
     pub type_id: Option<TypeId>,
+}
+
+/// Information about a map (key -> value) in a resolved program.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MapType {
+    pub key_type_id: Option<TypeId>,
+    pub value_type_id: Option<TypeId>,
 }
 
 /// Information about a trait-implementation for a type.
@@ -181,6 +188,7 @@ pub enum FunctionKind {
     Method(TypeId),
     Rust(RustFnIndex),
     Builtin(TypeId, BuiltinType),
+    MapBuiltin(TypeId, MapBuiltin),
     Variant(TypeId, VariantIndex),
 }
 
@@ -195,6 +203,7 @@ pub enum Type {
     bool,
     String,
     Array(Array),
+    Map(MapType),
     Enum(Enum),
     Struct(Struct),
     Trait(Trait),
@@ -220,6 +229,7 @@ impl Debug for Type {
             Type::bool => write!(f, "bool"),
             Type::String => write!(f, "String"),
             Type::Array(v) => write!(f, "{:?}", v),
+            Type::Map(v) => write!(f, "{:?}", v),
             Type::Enum(v) => write!(f, "{:?}", v),
             Type::Struct(v) => write!(f, "{:?}", v),
             Type::Trait(_) => write!(f, "<Trait>"),
@@ -246,6 +256,7 @@ impl Display for Type {
             Type::bool => write!(f, "bool"),
             Type::String => write!(f, "String"),
             Type::Array(_) => write!(f, "[ _ ]"),
+            Type::Map(_) => write!(f, "[ _ => _ ]"),
             Type::Enum(_) => write!(f, "enum"),
             Type::Struct(_) => write!(f, "struct"),
             Type::Trait(_) => write!(f, "trait"),
@@ -266,6 +277,10 @@ impl_as_getter!(Type {
     pub as_array: Array -> &Array,
     /// Returns the type as a mutable array.
     pub as_array_mut: Array -> mut Array,
+    /// Returns the type as a map.
+    pub as_map: Map -> &MapType,
+    /// Returns the type as a mutable map.
+    pub as_map_mut: Map -> mut MapType,
     /// Returns the type as a struct.
     pub as_struct: Struct -> &Struct,
     /// Returns the type as a mutable struct.
@@ -302,7 +317,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Map(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
@@ -351,7 +366,7 @@ impl Type {
     pub const fn is_ref(self: &Self) -> bool {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
-            Type::String | Type::Array(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => true,
+            Type::String | Type::Array(_) | Type::Map(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => true,
             _ => false,
         }
     }
@@ -436,6 +451,7 @@ impl Type {
                 .filter_map(|&f| f)
                 .collect(),
             Type::Array(array) => array.type_id.into_iter().collect(),
+            Type::Map(map) => map.key_type_id.into_iter().chain(map.value_type_id.into_iter()).collect(),
             _ => Vec::new(),
         }
     }

@@ -247,6 +247,7 @@ fn inline_type(i: Input) -> Output<InlineType> {
     alt((
         type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
+        map(map_def, |m| InlineType::MapDef(Box::new(m))),
         map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     ))(i)
 }
@@ -388,6 +389,20 @@ fn array_def(i: Input) -> Output<ArrayDef> {
         move |ty| ArrayDef {
             position    : position,
             element_type: ty,
+            type_id     : None,
+        }
+    )(i)
+}
+
+/// Matches a map type definition, e.g. `[ KeyType => ValueType ]`
+fn map_def(i: Input) -> Output<MapDef> {
+    let position = i.position();
+    map(
+        tuple((punct("["), inline_type, punct("=>"), inline_type, punct("]"))),
+        move |m| MapDef {
+            position    : position,
+            key_type    : m.1,
+            value_type  : m.3,
             type_id     : None,
         }
     )(i)
@@ -863,6 +878,29 @@ fn array_literal(i: Input) -> Output<Literal> {
     )(i)
 }
 
+/// Matches a map literal, e.g. `[ "a" => 1, "b" => 2 ]`. The empty map is written `[ => ]` to
+/// disambiguate it from the empty array literal `[ ]`.
+fn map_literal(i: Input) -> Output<Literal> {
+    fn entry(i: Input) -> Output<(Expression, Expression)> {
+        map(tuple((expression, punct("=>"), expression)), |t| (t.0, t.2))(i)
+    }
+    let position = i.position();
+    map(
+        alt((
+            // empty map: `[ => ]`
+            map(tuple((punct("["), punct("=>"), punct("]"))), |_| Vec::new()),
+            // non-empty map: `[ k => v, ... ]`
+            map(tuple((punct("["), separated_list1(punct(","), entry), opt(punct(",")), punct("]"))), |m| m.1),
+        )),
+        move |entries| Literal {
+            position    : position,
+            value       : LiteralValue::Map(MapLiteral { entries }),
+            type_name   : None,
+            type_id     : None,
+        }
+    )(i)
+}
+
 /// Matches a struct literal, e.g. `MyStruct { left: 123, right: 234 }`.
 fn struct_literal(i: Input) -> Output<Literal> {
     fn field(i: Input) -> Output<(String, Expression)> {
@@ -898,6 +936,7 @@ fn literal(i: Input) -> Output<Expression> {
     alt((
         map(bool_literal, |l| Expression::Literal(l)),
         string_literal,
+        map(map_literal, |l| Expression::Literal(l)),
         map(array_literal, |l| Expression::Literal(l)),
         map(struct_literal, |l| Expression::Literal(l)),
         map(numeric_literal, |l| Expression::Literal(l)),

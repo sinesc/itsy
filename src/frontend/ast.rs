@@ -114,6 +114,9 @@ pub(crate) trait Resolvable: Display {
                 Type::bool |
                 Type::String => Progress::new(1, 1),
                 Type::Array(a) => a.type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen)),
+                Type::Map(m) =>
+                    m.key_type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen))
+                    + m.value_type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen)),
                 Type::Enum(e) => {
                     e.primitive.map_or(Progress::new(1, 1), |(type_id, _)| self.check_type_id(container, type_id, seen))
                     + e.variants.iter()
@@ -197,6 +200,7 @@ pub(crate) trait Resolvable: Display {
             Some(FunctionKind::Method(type_id)) => self.check_type_id(container, type_id, seen),
             Some(FunctionKind::Rust(_)) => Progress::new(1, 1),
             Some(FunctionKind::Builtin(type_id, _)) => self.check_type_id(container, type_id, seen),
+            Some(FunctionKind::MapBuiltin(type_id, _)) => self.check_type_id(container, type_id, seen),
             Some(FunctionKind::Variant(type_id, _)) => self.check_type_id(container, type_id, seen),
         };
         progress + self.check_type_id(container, function.callable_type_id, seen)
@@ -359,7 +363,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, CallableDef, TraitBound)
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, CallableDef, TraitBound)
     };
     ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
         compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
@@ -801,6 +805,8 @@ pub enum InlineType {
     TypeName(TypeName),
     /// Array definition
     ArrayDef(Box<ArrayDef>),
+    /// Map definition
+    MapDef(Box<MapDef>),
     /// Callable definition
     CallableDef(Box<CallableDef>),
     /// Multiple trait bound, e.g. `TraitA + TraitB`
@@ -814,6 +820,7 @@ impl Display for InlineType {
         match self {
             Self::TypeName(type_name) => write!(f, "{}", type_name),
             Self::ArrayDef(array_def) => write!(f, "{}", array_def),
+            Self::MapDef(map_def) => write!(f, "{}", map_def),
             Self::CallableDef(callable_def) => write!(f, "{}", callable_def),
             Self::TraitBound(trait_bound) => write!(f, "{}", trait_bound),
         }
@@ -824,6 +831,7 @@ impl Typeable for InlineType {
     fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
         match &self {
             InlineType::ArrayDef(array_def) => array_def.type_id(container),
+            InlineType::MapDef(map_def) => map_def.type_id(container),
             InlineType::TypeName(type_name) => type_name.type_id(container),
             InlineType::CallableDef(callable_def) => callable_def.type_id(container),
             InlineType::TraitBound(trait_bound) => trait_bound.type_id(container),
@@ -832,6 +840,7 @@ impl Typeable for InlineType {
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         match self {
             InlineType::ArrayDef(array_def) => array_def.set_type_id(container, type_id),
+            InlineType::MapDef(map_def) => map_def.set_type_id(container, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
             InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
             InlineType::TraitBound(trait_bound) => trait_bound.set_type_id(container, type_id),
@@ -875,6 +884,25 @@ impl_typeable!(ArrayDef);
 impl_display!(ArrayDef, "[ {} ]", element_type);
 impl_resolvable!(ArrayDef {
     element_type: Item,
+    type_id: TypeId,
+});
+
+
+/// A map type definition, e.g. `[ KeyType => ValueType ]`.
+#[derive(Debug)]
+pub struct MapDef {
+    pub position    : Position,
+    pub key_type    : InlineType,
+    pub value_type  : InlineType,
+    pub type_id     : Option<TypeId>,
+}
+
+impl_positioned!(MapDef);
+impl_typeable!(MapDef);
+impl_display!(MapDef, "[ {} => {} ]", key_type, value_type);
+impl_resolvable!(MapDef {
+    key_type: Item,
+    value_type: Item,
     type_id: TypeId,
 });
 
@@ -1542,6 +1570,7 @@ impl Display for Literal {
             LiteralValue::Numeric(v) => write!(f, "{}", v),
             LiteralValue::String(v) => write!(f, "{:?}", v),
             LiteralValue::Array(_) => write!(f, "[ ]"),
+            LiteralValue::Map(_) => write!(f, "[ => ]"),
             LiteralValue::Struct(_) => write!(f, "struct {}", &self.type_name.as_ref().unwrap().path),
         }
     }
@@ -1554,6 +1583,7 @@ pub enum LiteralValue {
     Numeric(Numeric),
     String(String),
     Array(ArrayLiteral),
+    Map(MapLiteral),
     Struct(StructLiteral),
 }
 
@@ -1561,6 +1591,9 @@ impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
         match self {
             LiteralValue::Array(v) => v.elements.iter().all(|e| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
+            LiteralValue::Map(v) => v.entries.iter().all(|(k, val)|
+                k.as_literal().map(|l| l.value.is_const()).unwrap_or(false)
+                && val.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
             LiteralValue::Struct(v) => v.fields.iter().all(|(_, e)| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
             _ => true,
         }
@@ -1595,6 +1628,18 @@ impl LiteralValue {
             _ => None,
         }
     }
+    pub fn as_map(self: &Self) -> Option<&MapLiteral> {
+        match self {
+            LiteralValue::Map(v) => Some(v),
+            _ => None,
+        }
+    }
+    pub fn as_map_mut(self: &mut Self) -> Option<&mut MapLiteral> {
+        match self {
+            LiteralValue::Map(v) => Some(v),
+            _ => None,
+        }
+    }
     pub fn as_struct_mut(self: &mut Self) -> Option<&mut StructLiteral> {
         match self {
             LiteralValue::Struct(v) => Some(v),
@@ -1607,6 +1652,7 @@ impl Resolvable for LiteralValue {
     fn resolvables(self: &Self) -> Vec<Resolvables> {
         match self {
             Self::Array(array) => array.resolvables(),
+            Self::Map(map) => map.resolvables(),
             Self::Struct(struct_) => struct_.resolvables(),
             _ => vec![ Resolvables::Progress(Progress::new(1, 1)) ],
         }
@@ -1621,6 +1667,7 @@ impl Display for LiteralValue {
             LiteralValue::Numeric(v) => write!(f, "{:?}", v),
             LiteralValue::String(v) => write!(f, "\"{:?}\"", v),
             LiteralValue::Array(v) => write!(f, "{})", v),
+            LiteralValue::Map(v) => write!(f, "{}", v),
             LiteralValue::Struct(v) => write!(f, "{:?}", v), // FIXME
         }
     }
@@ -1634,6 +1681,7 @@ impl Debug for LiteralValue {
             LiteralValue::Numeric(v) => write!(f, "{:?}", v),
             LiteralValue::String(v) => write!(f, "String({:?})", v),
             LiteralValue::Array(v) => write!(f, "Array({:#?})", v),
+            LiteralValue::Map(v) => write!(f, "Map({:#?})", v),
             LiteralValue::Struct(v) => write!(f, "Struct({:#?})", v),
         }
     }
@@ -1652,6 +1700,30 @@ impl_resolvable!(ArrayLiteral {
 impl Display for ArrayLiteral {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[ {} ]", self.elements.iter().map(|e| format!("{}", e)).collect::<Vec<String>>().join(", "))
+    }
+}
+
+
+/// An inline map literal, e.g. `[ "a" => 1, "b" => 2 ]`.
+#[derive(Debug)]
+pub struct MapLiteral {
+    pub entries: Vec<(Expression, Expression)>,
+}
+
+impl Resolvable for MapLiteral {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        let mut result = Vec::new();
+        for (key, value) in &self.entries {
+            result.append(&mut key.resolvables());
+            result.append(&mut value.resolvables());
+        }
+        result
+    }
+}
+
+impl Display for MapLiteral {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[ {} ]", self.entries.iter().map(|(k, v)| format!("{} => {}", k, v)).collect::<Vec<String>>().join(", "))
     }
 }
 

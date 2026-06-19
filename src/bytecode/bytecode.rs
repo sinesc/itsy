@@ -218,6 +218,7 @@ pub enum Constructor {
     String      = 178,  // String: copies a string
     Enum        = 179,  // Enum(constructor_size, implementor index, num_variants, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
     Closure     = 181,
+    Map         = 182,  // Map(constructor_size, key constructor, value constructor): copies a map. Keys and values are boxed, i.e. each stored inline as a HeapRef.
 }
 
 /// Information about a serialized constructor
@@ -250,13 +251,14 @@ impl Constructor {
             x if x == Self::String as u8 => Self::String,
             x if x == Self::Enum as u8 => Self::Enum,
             x if x == Self::Closure as u8 => Self::Closure,
+            x if x == Self::Map as u8 => Self::Map,
             index @ _ => panic!("Invalid constructor type {}.", index),
         }
     }
     // Parses serialized constructor parameters with given constructor op.
     pub fn parse_with(stack: &Stack, mut offset: StackAddress, constructor: Constructor) -> ConstructorData {
         match constructor {
-            Constructor::Array | Constructor::Struct | Constructor::Enum => {
+            Constructor::Array | Constructor::Struct | Constructor::Enum | Constructor::Map => {
                 // first value is the total constructor size
                 let constructor_size: ItemIndex = stack.load(offset);
                 offset += size_of_val(&constructor_size) as StackAddress;
@@ -314,6 +316,10 @@ impl HeapRef {
 
     /// Mask for extracting the offset of HeapRef.
     const OFFSET_MASK: HeapAddress = (1 << HEAP_OFFSET_BITS) - 1;
+
+    /// The largest index a HeapRef can represent. Usable as a sentinel since it can never be a valid
+    /// heap object index (it round-trips through `new`/`index`, unlike `StackAddress::MAX`).
+    pub const MAX_INDEX: StackAddress = (HeapRef::INDEX_MASK >> HEAP_OFFSET_BITS) as StackAddress;
 
     /// Creates a new HeapRef.
     pub fn new(index: StackAddress, offset: StackAddress) -> HeapRef {

@@ -5,7 +5,7 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, Callable, Function}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, MapType, Callable, Function}};
 use crate::prelude::*;
 
 /// A container holding AST metadata
@@ -24,6 +24,9 @@ pub trait MetaContainer {
             match (self.type_by_id(given_type_id), self.type_by_id(accepted_type_id)) {
                 (&Type::Array(Array { type_id: Some(given_type_id), .. }), &Type::Array(Array { type_id: Some(accepted_type_id), .. })) => {
                     self.type_accepted_for(given_type_id, accepted_type_id)
+                },
+                (&Type::Map(MapType { key_type_id: Some(given_key), value_type_id: Some(given_value) }), &Type::Map(MapType { key_type_id: Some(accepted_key), value_type_id: Some(accepted_value) })) => {
+                    self.type_accepted_for(given_key, accepted_key) && self.type_accepted_for(given_value, accepted_value)
                 },
                 (Type::Callable(Callable { arg_type_ids: given_arg_type_ids, ret_type_id: Some(given_ret_type_id) }), Type::Callable(Callable { arg_type_ids: accepted_arg_type_ids, ret_type_id: Some(accepted_ret_type_id) })) => {
                     self.type_accepted_for(*given_ret_type_id, *accepted_ret_type_id) &&
@@ -63,6 +66,9 @@ pub trait MetaContainer {
                 (&Type::Array(Array { type_id: Some(first_type_id), .. }), &Type::Array(Array { type_id: Some(second_type_id), .. })) => {
                     self.type_equals(first_type_id, second_type_id)
                 },
+                (&Type::Map(MapType { key_type_id: Some(first_key), value_type_id: Some(first_value) }), &Type::Map(MapType { key_type_id: Some(second_key), value_type_id: Some(second_value) })) => {
+                    self.type_equals(first_key, second_key) && self.type_equals(first_value, second_value)
+                },
                 (Type::Callable(Callable { arg_type_ids: given_arg_type_ids, ret_type_id: Some(given_ret_type_id) }), Type::Callable(Callable { arg_type_ids: accepted_arg_type_ids, ret_type_id: Some(accepted_ret_type_id) })) => {
                     self.type_equals(*given_ret_type_id, *accepted_ret_type_id) &&
                         given_arg_type_ids.len() == accepted_arg_type_ids.len() &&
@@ -91,6 +97,11 @@ pub trait MetaContainer {
                 }
                 Type::Array(Array { type_id: None }) => {
                     "[ ? ]".to_string()
+                }
+                &Type::Map(MapType { key_type_id, value_type_id }) => {
+                    let key = key_type_id.map_or("?".to_string(), |type_id| self.type_name(type_id));
+                    let value = value_type_id.map_or("?".to_string(), |type_id| self.type_name(type_id));
+                    format!("[ {} => {} ]", key, value)
                 }
                 Type::Callable(callable) => {
                     let result_type_name = if let Some(type_id) = callable.ret_type_id { self.type_name(type_id) } else { "?".to_string() };

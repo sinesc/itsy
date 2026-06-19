@@ -11,7 +11,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::BuiltinType};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use placeholder::{LoopControlStack, LoopControl, Functions};
@@ -354,6 +354,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "offset assignment");
         match item.op {
             BO::Assign => {
+                // map index-write `m[k] = v` has no fixed lvalue address; lower it to a map insert.
+                if let Some(bin) = item.left.as_binary_op() {
+                    if (bin.op == BO::Index || bin.op == BO::IndexWrite) && self.ty(&bin.left).as_map().is_some() {
+                        let constructor = self.constructor(self.ty(&bin.left))?;
+                        self.compile_expression(bin.left.as_expression().ice()?)?;  // stack: map
+                        self.compile_expression(bin.right.as_expression().ice()?)?; // stack: map key
+                        self.compile_expression(&item.right)?;                      // stack: map key value
+                        self.writer.map_insert(constructor);                        // stack: --
+                        return Ok(());
+                    }
+                }
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.compile_expression(&item.right)?;      // stack: &left right
                 let ty = self.ty(&item.left);
@@ -470,6 +481,22 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", constant.path);
                 self.write_builtin(self.ty(&type_id), builtin_type)?;
+            },
+            FunctionKind::MapBuiltin(type_id, map_builtin) => {
+                // receiver (the map) is arg[0], followed by the method's explicit args; the map opcodes
+                // consume them in that order. Each is dispatched to its dedicated opcode.
+                self.compile_call_args(item, function_kind)?;
+                comment!(self, "call {}()", constant.path);
+                let constructor = self.constructor(self.ty(&type_id))?;
+                match map_builtin {
+                    MapBuiltin::Insert => { self.writer.map_insert(constructor); },
+                    MapBuiltin::Get    => { self.writer.map_get(constructor); },
+                    MapBuiltin::Remove => { self.writer.map_remove(constructor); },
+                    MapBuiltin::Clear  => { self.writer.map_clear(constructor); },
+                    MapBuiltin::Keys   => { self.writer.map_keys(constructor); },
+                    MapBuiltin::Values => { self.writer.map_values(constructor); },
+                    MapBuiltin::Len    => { self.writer.map_len(constructor); },
+                };
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(item, function_kind)?;
@@ -1016,16 +1043,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
         let iter_type_id = item.iter.type_id(self).ice()?;
-        // handle ranges or arrays
-        let result = match &item.expr { // NOTE: these need to match Resolver::resolve_for_loop
+        // handle ranges or arrays. Maps were lowered to iterating `map.keys()` during resolution, so they
+        // reach here as an ordinary array-typed expression. (NOTE: must match Resolver::resolve_for_loop.)
+        let result = match &item.expr {
             BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
                 self.compile_for_loop_range(item, iter_local, iter_type_id)
             },
-            Literal(_) | Constant(_) | Variable(_) | Block(_) | IfBlock(_) | MatchBlock(_)  => {
-                self.compile_for_loop_array(item, iter_local, iter_type_id)
-            },
-            _ => Self::ice_at(item, "Invalid for loop expression"),
-
+            _ => self.compile_for_loop_array(item, iter_local, iter_type_id),
         };
         self.init_state.pop();
         result
@@ -1202,6 +1226,18 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let type_id = item.type_id(self).ice()?;
                 self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
+            LiteralValue::Map(map_literal) => {
+                // allocate an empty map, then populate it entry by entry. The map reference is duplicated
+                // before each insert (which consumes its copy) so the original remains as the result.
+                let constructor = self.constructor(self.ty(item))?;
+                self.writer.map_new();
+                for (key, value) in &map_literal.entries {
+                    self.writer.clone(size_of::<HeapAddress>() as FrameAddress); // stack: map map
+                    self.compile_expression(key)?;                              // stack: map map key
+                    self.compile_expression(value)?;                            // stack: map map key value
+                    self.writer.map_append(constructor);                        // stack: map
+                }
+            },
             LiteralValue::Struct(struct_literal) => {
                 // write instructions to construct the struct on the stack and once complete, upload it to the heap
                 let struct_def = ty.as_struct().ice_msg("Expected struct, got something else")?;
@@ -1315,6 +1351,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         let result_type = self.ty(item);
         let compare_type = self.ty(&item.left);
+        if compare_type.as_map().is_some() {
+            // stack: map-reference, key. Map index-write is handled in compile_assignment_to_offset and
+            // never reaches here, so only the read (Index) is expected.
+            let constructor = self.constructor(compare_type)?;
+            match item.op {
+                Index => { self.writer.map_get(constructor); },
+                _ => Self::ice_at(item, "unsupported map offset operation")?,
+            }
+            return Ok(());
+        }
         match item.op {
             Index => {
                 comment!(self, "[{}]", &item.right);
@@ -1699,6 +1745,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     Ok(0)
                 })?;
             }
+            Type::Map(map) => {
+                // keys and values are boxed (stored inline as HeapRefs), so the key/value constructors
+                // describe the target of those references: the boxed primitive object or the ref-type value.
+                *prev_primitive = None;
+                self.writer.store_const(Constructor::Map);
+                store_len(&mut || {
+                    self.store_constructor(map.key_type_id.ice_msg("Unresolved map key type")?, &mut None, &mut 0)?;
+                    self.store_constructor(map.value_type_id.ice_msg("Unresolved map value type")?, &mut None, &mut 0)
+                })?;
+                *prev_primitive = None;
+            }
             Type::Callable(_callable) => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Closure);
@@ -1715,7 +1772,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Virtual);
             }
-            Type::Enum(enumeration) => {
+            // simple (C-like) enums are stored inline as their discriminant; they are primitives and fall
+            // through to the primitive arm below. Only data-carrying enums need the Enum constructor.
+            Type::Enum(enumeration) if enumeration.primitive.is_none() => {
                 *prev_primitive = None;
                 self.writer.store_const(Constructor::Enum);
                 store_len(&mut || {

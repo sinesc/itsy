@@ -1,0 +1,555 @@
+use crate::util::*;
+
+#[test]
+fn map_literal_string_keys() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m["c"]);
+    ));
+    assert_all(&result, &[ 1u64, 2, 3 ]);
+}
+
+#[test]
+fn map_literal_duplicate_keys_last_wins() {
+    // duplicate keys in a literal resolve to the last value (matching Rust), with a single live entry
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "a" => 3u64 ];
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 3u64, 2, 2 ]);
+}
+
+#[test]
+fn map_literal_duplicate_string_values_last_wins() {
+    // exercises the replaced-value drop path for reference values during literal construction (no leak)
+    let result = run(stringify!(
+        let m = [ "k" => "first", "k" => "second" ];
+        ret_str(m["k"]);
+    ));
+    assert_all(&result, &[ "second".to_string() ]);
+}
+
+#[test]
+fn map_index_update_existing() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64 ];
+        m["a"] = 42u64;
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+    ));
+    assert_all(&result, &[ 42u64, 2 ]);
+}
+
+#[test]
+fn map_index_insert_new() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64 ];
+        m["b"] = 7u64;
+        m["c"] = 8u64;
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m["c"]);
+    ));
+    assert_all(&result, &[ 1u64, 7, 8 ]);
+}
+
+#[test]
+fn map_empty_then_insert() {
+    let result = run(stringify!(
+        let m = [ => ];
+        m["k"] = 5u64;
+        m["j"] = 6u64;
+        ret_u64(m["k"]);
+        ret_u64(m["j"]);
+    ));
+    assert_all(&result, &[ 5u64, 6 ]);
+}
+
+#[test]
+fn map_primitive_keys() {
+    let result = run(stringify!(
+        let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64 ];
+        ret_u64(m[1u64]);
+        ret_u64(m[2u64]);
+        ret_u64(m[3u64]);
+    ));
+    assert_all(&result, &[ 10u64, 20, 30 ]);
+}
+
+#[test]
+fn map_string_values() {
+    let result = run(stringify!(
+        let m = [ 1u64 => "one", 2u64 => "two" ];
+        ret_str(m[1u64]);
+        ret_str(m[2u64]);
+    ));
+    assert_all(&result, &[ "one".to_string(), "two".to_string() ]);
+}
+
+#[test]
+fn map_struct_keys() {
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let m = [ Point { x: 1, y: 2 } => 100u64, Point { x: 3, y: 4 } => 200u64 ];
+            ret_u64(m[Point { x: 1, y: 2 }]);
+            ret_u64(m[Point { x: 3, y: 4 }]);
+        }
+    ));
+    assert_all(&result, &[ 100u64, 200 ]);
+}
+
+#[test]
+fn map_struct_values() {
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let m = [ "origin" => Point { x: 0, y: 0 }, "unit" => Point { x: 1, y: 1 } ];
+            let o = m["origin"];
+            let u = m["unit"];
+            ret_i32(o.x);
+            ret_i32(o.y);
+            ret_i32(u.x);
+            ret_i32(u.y);
+        }
+    ));
+    assert_all(&result, &[ 0i32, 0, 1, 1 ]);
+}
+
+#[test]
+fn map_reassigned_value_releases_old() {
+    // exercises the replace path (old value dropped, new value retained) without leaking the heap
+    let result = run(stringify!(
+        let m = [ "a" => "first" ];
+        m["a"] = "second";
+        m["a"] = "third";
+        ret_str(m["a"]);
+    ));
+    assert_all(&result, &[ "third".to_string() ]);
+}
+
+#[test]
+#[should_panic]
+fn map_missing_key_traps() {
+    run(stringify!(
+        let m = [ "a" => 1u64 ];
+        ret_u64(m["missing"]);
+    ));
+}
+
+#[test]
+fn map_len() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        ret_u64(m.len());
+        let e = [ => ];
+        e["x"] = 1u64;
+        ret_u64(e.len());
+    ));
+    assert_all(&result, &[ 3u64, 1 ]);
+}
+
+#[test]
+fn map_method_insert_get() {
+    let result = run(stringify!(
+        let m = [ => ];
+        m.insert("a", 1u64);
+        m.insert("b", 2u64);
+        m.insert("a", 42u64); // update existing
+        ret_u64(m.get("a"));
+        ret_u64(m.get("b"));
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 42u64, 2, 2 ]);
+}
+
+#[test]
+fn map_remove() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        m.remove("b");
+        ret_u64(m.len());
+        ret_u64(m["a"]);
+        ret_u64(m["c"]);
+        m.remove("does-not-exist"); // no-op
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 2u64, 1, 3, 2 ]);
+}
+
+#[test]
+fn map_remove_then_reinsert() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64 ];
+        m.remove("a");
+        m["a"] = 7u64; // re-insert into a tombstoned slot
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 7u64, 2, 2 ]);
+}
+
+#[test]
+fn map_clear() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64 ];
+        m.clear();
+        ret_u64(m.len());
+        m["x"] = 9u64; // usable after clear
+        ret_u64(m.len());
+        ret_u64(m["x"]);
+    ));
+    assert_all(&result, &[ 0u64, 1, 9 ]);
+}
+
+#[test]
+fn map_clear_string_values_no_leak() {
+    // clearing must drop the boxed reference values without leaking the heap
+    let result = run(stringify!(
+        let m = [ "a" => "first", "b" => "second" ];
+        m.clear();
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn map_keys() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        let ks = m.keys();
+        for k in ks {
+            ret_str(k);
+        }
+    ));
+    assert_all(&result, &[ "a".to_string(), "b".to_string(), "c".to_string() ]);
+}
+
+#[test]
+fn map_values() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        let vs = m.values();
+        for v in vs {
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 1u64, 2, 3 ]);
+}
+
+#[test]
+fn map_keys_primitive() {
+    let result = run(stringify!(
+        let m = [ 10u64 => 1u64, 20u64 => 2u64 ];
+        let ks = m.keys();
+        for k in ks {
+            ret_u64(k);
+        }
+    ));
+    assert_all(&result, &[ 10u64, 20 ]);
+}
+
+#[test]
+fn map_values_string() {
+    let result = run(stringify!(
+        let m = [ 1u64 => "one", 2u64 => "two" ];
+        let vs = m.values();
+        for v in vs {
+            ret_str(v);
+        }
+    ));
+    assert_all(&result, &[ "one".to_string(), "two".to_string() ]);
+}
+
+#[test]
+fn for_in_map_string_keys() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        for k in m {
+            ret_str(k);
+        }
+    ));
+    assert_all(&result, &[ "a".to_string(), "b".to_string(), "c".to_string() ]);
+}
+
+#[test]
+fn for_in_map_primitive_keys() {
+    let result = run(stringify!(
+        let m = [ 10u64 => 100u64, 20u64 => 200u64, 30u64 => 300u64 ];
+        for k in m {
+            ret_u64(k);
+        }
+    ));
+    assert_all(&result, &[ 10u64, 20, 30 ]);
+}
+
+#[test]
+fn for_in_map_lookup_value() {
+    // iterate keys and look up the corresponding value through the map being iterated
+    let result = run(stringify!(
+        let m = [ 1u64 => 100u64, 2u64 => 200u64, 3u64 => 300u64 ];
+        for k in m {
+            ret_u64(m[k]);
+        }
+    ));
+    assert_all(&result, &[ 100u64, 200, 300 ]);
+}
+
+#[test]
+fn for_in_map_skips_removed() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        m.remove("b");
+        for k in m {
+            ret_str(k);
+        }
+    ));
+    assert_all(&result, &[ "a".to_string(), "c".to_string() ]);
+}
+
+#[test]
+fn for_in_map_empty() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64 ];
+        m.remove("a");
+        for k in m {
+            ret_str(k);
+        }
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn for_in_map_struct_keys() {
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let m = [ Point { x: 1, y: 2 } => 10u64, Point { x: 3, y: 4 } => 20u64 ];
+            // iterate struct keys, using each as a lookup key and reading its fields
+            for k in m {
+                ret_i32(k.x + k.y);
+            }
+        }
+    ));
+    assert_all(&result, &[ 3i32, 7 ]);
+}
+
+#[test]
+fn map_grows_many_primitive_keys() {
+    // insert well past the initial bucket count to force multiple table growths, then read all back
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..100u64 {
+            m[i] = i * 10u64;
+        }
+        ret_u64(m.len());
+        ret_u64(m[0u64]);
+        ret_u64(m[42u64]);
+        ret_u64(m[99u64]);
+    ));
+    assert_all(&result, &[ 100u64, 0, 420, 990 ]);
+}
+
+#[test]
+fn map_grows_string_keys() {
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..50u64 {
+            m["key{i}"] = i;
+        }
+        ret_u64(m.len());
+        ret_u64(m["key0"]);
+        ret_u64(m["key25"]);
+        ret_u64(m["key49"]);
+    ));
+    assert_all(&result, &[ 50u64, 0, 25, 49 ]);
+}
+
+#[test]
+fn map_insert_remove_churn() {
+    // repeatedly insert and remove to exercise tombstoning and bucket rebuilds
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..30u64 {
+            m[i] = i;
+        }
+        for i in 0u64..30u64 {
+            if i % 2u64 == 0u64 {
+                m.remove(i);
+            }
+        }
+        ret_u64(m.len());
+        ret_u64(m[1u64]);
+        ret_u64(m[29u64]);
+        // re-insert some removed keys
+        m[0u64] = 1000u64;
+        m[2u64] = 2000u64;
+        ret_u64(m.len());
+        ret_u64(m[0u64]);
+        ret_u64(m[2u64]);
+    ));
+    assert_all(&result, &[ 15u64, 1, 29, 17, 1000, 2000 ]);
+}
+
+#[test]
+fn map_compaction_after_many_removes() {
+    // removing most entries triggers entry-region compaction; remaining lookups and insertion-ordered
+    // iteration must stay correct after entries are renumbered
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..20u64 {
+            m[i] = i * 100u64;
+        }
+        for i in 0u64..15u64 {
+            m.remove(i);
+        }
+        ret_u64(m.len());
+        ret_u64(m[15u64]);
+        ret_u64(m[19u64]);
+        for k in m {
+            ret_u64(k);
+        }
+    ));
+    assert_all(&result, &[ 5u64, 1500, 1900, 15, 16, 17, 18, 19 ]);
+}
+
+#[test]
+fn map_compaction_string_keys_no_leak() {
+    // compaction moves boxed reference keys/values verbatim; ensure churn with reference keys stays
+    // correct and leak-free
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..20u64 {
+            m["k{i}"] = i;
+        }
+        for i in 0u64..15u64 {
+            m.remove("k{i}");
+        }
+        ret_u64(m.len());
+        ret_u64(m["k15"]);
+        ret_u64(m["k19"]);
+    ));
+    assert_all(&result, &[ 5u64, 15, 19 ]);
+}
+
+#[test]
+fn map_remove_all_then_reuse() {
+    // removing every entry compacts to empty (n_entries >= len*2 with len == 0); the map stays usable
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        m.remove("a");
+        m.remove("b");
+        m.remove("c");
+        ret_u64(m.len());
+        m["x"] = 9u64;
+        ret_u64(m["x"]);
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 0u64, 9, 1 ]);
+}
+
+#[test]
+fn map_grown_then_iterated() {
+    // after growth, insertion order is still preserved by iteration over the entries region
+    let result = run(stringify!(
+        let m = [ => ];
+        for i in 0u64..12u64 {
+            m[i] = i;
+        }
+        let mut sum = 0u64;
+        for k in m {
+            sum += k;
+        }
+        ret_u64(sum);
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 66u64, 12 ]);
+}
+
+#[test]
+fn map_enum_keys() {
+    let result = run(stringify!(
+        enum Color { Red, Green, Blue }
+        fn main() {
+            let m = [ Color::Red => 1u64, Color::Green => 2u64, Color::Blue => 3u64 ];
+            ret_u64(m[Color::Red]);
+            ret_u64(m[Color::Green]);
+            ret_u64(m[Color::Blue]);
+            m[Color::Green] = 20u64;
+            ret_u64(m[Color::Green]);
+            ret_u64(m.len());
+        }
+    ));
+    assert_all(&result, &[ 1u64, 2, 3, 20, 3 ]);
+}
+
+#[test]
+fn for_in_map_remove_during_iteration() {
+    // removing the current key during iteration is supported (the loop walks a key snapshot)
+    let result = run(stringify!(
+        let m = [ 1u64 => 1u64, 2u64 => 2u64, 3u64 => 3u64, 4u64 => 4u64 ];
+        for k in m {
+            if k % 2u64 == 0u64 {
+                m.remove(k);
+            }
+        }
+        ret_u64(m.len());
+        ret_u64(m[1u64]);
+        ret_u64(m[3u64]);
+    ));
+    assert_all(&result, &[ 2u64, 1, 3 ]);
+}
+
+#[test]
+fn for_in_map_remove_all_during_iteration_string_keys() {
+    // removing every (reference) key during iteration must stay leak-free: the snapshot keeps each key
+    // alive for the duration of its iteration even after it is dropped from the map
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        for k in m {
+            m.remove(k);
+        }
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn for_in_map_insert_during_iteration_is_snapshot() {
+    // inserting during iteration (which relocates the map's storage) is safe and does not extend the
+    // iteration: only the keys present at loop entry are visited
+    let result = run(stringify!(
+        let m = [ 1u64 => 10u64, 2u64 => 20u64 ];
+        let mut count = 0u64;
+        for k in m {
+            m[k + 100u64] = 0u64;
+            count += 1u64;
+        }
+        ret_u64(count);
+        ret_u64(m.len());
+    ));
+    assert_all(&result, &[ 2u64, 4 ]);
+}
+
+#[test]
+fn for_in_map_break_continue() {
+    let result = run(stringify!(
+        let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64, 4u64 => 40u64 ];
+        for k in m {
+            if k == 2u64 {
+                continue;
+            }
+            if k == 4u64 {
+                break;
+            }
+            ret_u64(k);
+        }
+    ));
+    assert_all(&result, &[ 1u64, 3 ]);
+}

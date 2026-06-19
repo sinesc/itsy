@@ -1578,6 +1578,52 @@ impl_opcodes!{
         self.stack.push(data);
     }
 
+    /// Allocate a new empty map and push a reference to it.
+    fn map_new(&mut self) {
+        let map = self.map_alloc();
+        self.stack.push(map);
+    }
+
+    /// Append an entry without reference-counting it (used to build map literals). Stack on entry (top first): value, key, map reference.
+    fn map_append(&mut self, constructor: StackAddress) {
+        self.op_map_append(constructor);
+    }
+
+    /// Insert or update an entry. Stack on entry (top first): boxed-or-raw value, key, map reference. `constructor` is the map's constructor.
+    fn map_insert(&mut self, constructor: StackAddress) {
+        self.op_map_insert(constructor);
+    }
+
+    /// Look up a key and push its value, trapping if absent. Stack on entry (top first): key, map reference.
+    fn map_get(&mut self, constructor: StackAddress) [ check ] {
+        self.op_map_get(constructor);
+    }
+
+    /// Push the number of live entries in the map. Stack on entry (top): map reference.
+    fn map_len(&mut self, constructor: StackAddress) {
+        self.op_map_len(constructor);
+    }
+
+    /// Remove an entry by key, doing nothing if absent. Stack on entry (top first): key, map reference.
+    fn map_remove(&mut self, constructor: StackAddress) {
+        self.op_map_remove(constructor);
+    }
+
+    /// Remove all entries from the map. Stack on entry (top): map reference.
+    fn map_clear(&mut self, constructor: StackAddress) {
+        self.op_map_clear(constructor);
+    }
+
+    /// Push a new array of the map's keys in insertion order. Stack on entry (top): map reference.
+    fn map_keys(&mut self, constructor: StackAddress) {
+        self.op_map_keys(constructor);
+    }
+
+    /// Push a new array of the map's values in insertion order. Stack on entry (top): map reference.
+    fn map_values(&mut self, constructor: StackAddress) {
+        self.op_map_values(constructor);
+    }
+
     /* /// Yield program execution.
     fn yld(&mut self) return {
         self.state = VMState::Yielded;

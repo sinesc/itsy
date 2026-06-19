@@ -9,6 +9,8 @@ mod casts;
 mod expressions;
 #[path="vm/arrays.rs"]
 mod arrays;
+#[path="vm/maps.rs"]
+mod maps;
 #[path="vm/structs.rs"]
 mod structs;
 #[path="vm/for_loop.rs"]
