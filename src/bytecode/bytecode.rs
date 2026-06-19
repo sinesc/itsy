@@ -258,7 +258,7 @@ impl Constructor {
     // Parses serialized constructor parameters with given constructor op.
     pub fn parse_with(stack: &Stack, mut offset: StackAddress, constructor: Constructor) -> ConstructorData {
         match constructor {
-            Constructor::Array | Constructor::Struct | Constructor::Enum | Constructor::Map => {
+            Self::Array | Self::Struct | Self::Enum | Self::Map => {
                 // first value is the total constructor size
                 let constructor_size: ItemIndex = stack.load(offset);
                 offset += size_of_val(&constructor_size) as StackAddress;
@@ -267,7 +267,7 @@ impl Constructor {
                     next: offset + constructor_size as StackAddress,
                 }
             },
-            Constructor::Primitive => {
+            Self::Primitive => {
                 // constructor size is size of one ItemIndex
                 const SIZE: StackAddress = size_of::<ItemIndex>() as StackAddress;
                 ConstructorData {
@@ -275,7 +275,7 @@ impl Constructor {
                     next: offset + SIZE,
                 }
             },
-            Constructor::String | Constructor::Closure | Constructor::Virtual => {
+            Self::String | Self::Closure | Self::Virtual => {
                 // no additional data attached: a virtual constructor is resolved at runtime via the
                 // referenced object's implementor index, strings/closures carry no nested layout
                 ConstructorData {
@@ -301,6 +301,47 @@ impl Constructor {
         // read and construct fields for the variant
         let num_fields = stack.load(offset);
         (num_fields, offset + size_of_val(&num_fields) as StackAddress)
+    }
+    /// Reads a constructor opcode from the stack at the given offset, advancing the offset past it.
+    pub fn read_op(stack: &Stack, offset: &mut StackAddress) -> Self {
+        let op = Self::from_u8(stack.load(*offset));
+        *offset += size_of_val(&op) as StackAddress;
+        op
+    }
+    /// Reads an ItemIndex-sized constructor argument from the stack, advancing the offset past it.
+    pub fn read_index(stack: &Stack, offset: &mut StackAddress) -> ItemIndex {
+        let arg: ItemIndex = stack.load(*offset);
+        *offset += size_of_val(&arg) as StackAddress;
+        arg
+    }
+    /// Given the offset of a serialized constructor, returns the offset immediately following it.
+    pub fn skip(stack: &Stack, mut offset: StackAddress) -> StackAddress {
+        let op = Self::from_u8(stack.load(offset));
+        offset += size_of_val(&op) as StackAddress;
+        Self::parse_with(stack, offset, op).next
+    }
+    /// Splits a map's constructor offset into its key and value sub-constructor offsets.
+    pub fn map_sub_constructors(stack: &Stack, mut offset: StackAddress) -> (StackAddress, StackAddress) {
+        let op = Self::from_u8(stack.load(offset));
+        debug_assert_eq!(op, Self::Map);
+        offset += size_of_val(&op) as StackAddress;
+        let parsed = Self::parse_with(stack, offset, op);
+        let key_ctor = parsed.offset;
+        let value_ctor = Self::skip(stack, key_ctor);
+        (key_ctor, value_ctor)
+    }
+    /// Returns whether the constructor at the given offset is a (boxed) primitive.
+    pub fn is_primitive(stack: &Stack, ctor_offset: StackAddress) -> bool {
+        let op = Self::from_u8(stack.load(ctor_offset));
+        op == Self::Primitive
+    }
+    /// Returns the byte size of a (boxed) primitive described by the constructor at the given offset.
+    pub fn primitive_size(stack: &Stack, mut ctor_offset: StackAddress) -> usize {
+        let op = Self::from_u8(stack.load(ctor_offset));
+        debug_assert_eq!(op, Self::Primitive);
+        ctor_offset += size_of_val(&op) as StackAddress;
+        let index: ItemIndex = stack.load(ctor_offset);
+        index as usize
     }
 }
 

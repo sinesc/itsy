@@ -3,4 +3,5 @@
 pub mod vm;
 pub mod stack;
 pub mod heap;
+pub mod map;
 pub mod error;
