@@ -1483,8 +1483,49 @@ fn let_pattern(i: Input) -> Output<LetPattern> {
     )(i)
 }
 
+/// Builds a variable-reference expression for an already-declared binding. Used by desugaring code
+/// that synthesizes references to bindings it created itself (the binding id is known, so no name
+/// lookup is required).
+fn var_expr(position: Position, name: &str, binding_id: BindingId) -> Expression {
+    Expression::Variable(Variable { position, ident: Ident { position, name: name.to_string() }, binding_id })
+}
+
+/// Builds a `receiver.method(args...)` call expression, matching the access+call node shape the
+/// expression parser produces. Used by desugaring code.
+fn method_call_expr(receiver: Expression, method: &str, args: Vec<Expression>, position: Position) -> Expression {
+    let access = Expression::BinaryOp(Box::new(BinaryOp {
+        position,
+        op          : BinaryOperator::Access,
+        left        : BinaryOperand::Expression(receiver),
+        right       : BinaryOperand::Member(Member { position, ident: Ident { position, name: method.to_string() }, type_id: None, constant_id: None }),
+        type_id     : None,
+        op_resolved : false,
+    }));
+    Expression::BinaryOp(Box::new(BinaryOp {
+        position,
+        op          : BinaryOperator::Call,
+        left        : BinaryOperand::Expression(access),
+        right       : BinaryOperand::ArgumentList(ArgumentList { position, args }),
+        type_id     : None,
+        op_resolved : false,
+    }))
+}
+
 /// Matches a for loop statement.
-fn for_loop(i: Input) -> Output<ForLoop> {
+///
+/// The single-binding form `for k in iterable { .. }` produces a plain `ForLoop`. The two-binding
+/// form `for k, v in map { .. }` (only valid for maps) is desugared here into a loop over the map's
+/// keys plus a value lookup, so the rest of the pipeline only ever sees single-binding loops:
+///
+/// ```text
+/// for k, v in <map> { <body> }
+/// // becomes
+/// { let $map = <map>; for k in $map { let v = $map.get(k); <body> } }
+/// ```
+///
+/// The map is bound to a hidden temporary so it is evaluated exactly once and both the key iteration
+/// (lowered to `$map.keys()` by the resolver) and the per-iteration value lookup share it.
+fn for_loop(i: Input) -> Output<Statement> {
     fn loop_range(i: Input) -> Output<Expression> {
         let position = i.position();
         map(
@@ -1499,26 +1540,62 @@ fn for_loop(i: Input) -> Output<ForLoop> {
             }))
         )(i)
     }
+    const MAP_TEMP: &str = "for$map"; // '$' can't occur in user identifiers, so this never collides
     let position = i.position();
-    let j = i.clone();
+    let nav = i.clone();
+    // Outer scope: hosts the wrapping block and the hidden map temporary in the two-binding case. In
+    // the single-binding case nothing is declared here, leaving the original behaviour unchanged.
     with_scope(ScopeKind::Block, map(
         preceded(
             check_flags(keyword("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            tuple((var_decl, keyword("in"), alt((loop_range, expression)), with_flags(&|flags| flags.in_loop = true, block)))
+            // Inner scope: the for loop's own scope, holding the key (and value) bindings.
+            with_scope(ScopeKind::Block, {
+                let nav = nav.clone();
+                map(
+                    tuple((
+                        var_decl,
+                        opt(preceded(punct(","), var_decl)),
+                        preceded(keyword("in"), alt((loop_range, expression))),
+                        with_flags(&|flags| flags.in_loop = true, block),
+                    )),
+                    move |(key, value, expr, block)| (key, value, expr, block, nav.scope_id())
+                )
+            })
         ),
-        move |m| ForLoop {
-            position: position,
-            iter: LetBinding {
-                position    : position,
-                binding_id  : m.0.binding_id,
-                ident       : m.0.ident,
-                mutable     : true,
-                expr        : None,
-                ty          : None,
-            },
-            expr: m.2,
-            block: m.3,
-            scope_id: j.scope_id(),
+        move |(key, value, expr, mut block, for_scope_id)| {
+            let iter = LetBinding {
+                position, binding_id: key.binding_id, ident: key.ident.clone(), mutable: true, expr: None, ty: None,
+            };
+            match value {
+                None => Statement::ForLoop(ForLoop { position, iter, expr, block, scope_id: for_scope_id, key_value: false }),
+                Some(value) => {
+                    // declare the hidden map temporary in the outer scope (popped from the inner scope already)
+                    let map_binding_id = if nav.flags().is_dead { BindingId::new(0) } else { nav.add_binding(MAP_TEMP) };
+                    let outer_scope_id = nav.scope_id();
+                    // let v = $map.get(k);
+                    let value_let = LetBinding {
+                        position, binding_id: value.binding_id, ident: value.ident, mutable: true, ty: None,
+                        expr: Some(method_call_expr(
+                            var_expr(position, MAP_TEMP, map_binding_id),
+                            "get",
+                            vec![ var_expr(position, &key.ident.name, key.binding_id) ],
+                            position,
+                        )),
+                    };
+                    block.statements.insert(0, Statement::LetBinding(value_let));
+                    // for k in $map { let v = ...; <body> }
+                    let for_loop = ForLoop {
+                        position, iter, block, scope_id: for_scope_id, key_value: true,
+                        expr: var_expr(position, MAP_TEMP, map_binding_id),
+                    };
+                    // { let $map = <map>; for k in $map { .. } }
+                    let map_let = LetBinding {
+                        position, binding_id: map_binding_id, ident: Ident { position, name: MAP_TEMP.to_string() },
+                        mutable: false, ty: None, expr: Some(expr),
+                    };
+                    Statement::Block(Block::new(position, outer_scope_id, vec![ Statement::LetBinding(map_let), Statement::ForLoop(for_loop) ], None))
+                },
+            }
         }
     ))(i)
 }
@@ -1573,7 +1650,7 @@ fn statement(i: Input) -> Output<Statement> {
         map(snap(let_pattern), |m| Statement::LetPattern(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
         map(if_block, |m| Statement::IfBlock(m)),
-        map(for_loop, |m| Statement::ForLoop(m)),
+        for_loop,
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
         map(break_statement, |m| Statement::Break(m)),

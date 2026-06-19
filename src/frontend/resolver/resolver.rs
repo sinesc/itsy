@@ -1602,11 +1602,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // loop walks a one-shot snapshot of the keys, which lets the body freely mutate the map
                 // (insert/remove) without disturbing the iteration.
                 self.resolve_expression(&mut item.expr, None)?;
-                if self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some()) {
+                let item_is_map = self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some());
+                // key/value iteration (`for key, value in ..`, lowered to this loop by the parser) is only
+                // valid over maps. Reject any other *resolved* iterable here so the error names the actual
+                // type, instead of letting the lowered value lookup fail with a reference to the internal
+                // temporary the desugaring introduced. Leave unresolved expressions for a later pass.
+                if item.key_value && !item_is_map {
+                    if let Some(type_id) = item.expr.type_id(self) {
+                        let type_name = self.type_name(type_id);
+                        return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotKeyValueIterable(type_name), self.module_path));
+                    }
+                }
+                if item_is_map {
                     let position = item.expr.position();
                     let map_expr = replace(&mut item.expr, ast::Expression::void(position));
                     item.expr = Self::make_method_call(map_expr, "keys", Vec::new(), position);
                     self.resolve_expression(&mut item.expr, None)?;
+                    // map confirmed and lowered to `.keys()` (now an array); clear the flag so the check
+                    // above doesn't misfire against that array on subsequent resolution passes.
+                    item.key_value = false;
                 }
                 if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
                     // infer iter type from array element type

@@ -301,6 +301,56 @@ fn for_in_map_lookup_value() {
 }
 
 #[test]
+fn for_in_map_key_value() {
+    // two-binding form binds both the key and the looked-up value
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        for k, v in m {
+            ret_str("{k}={v}");
+        }
+    ));
+    assert_all(&result, &[ "a=1".to_string(), "b=2".to_string(), "c=3".to_string() ]);
+}
+
+#[test]
+fn for_in_map_key_value_primitive() {
+    let result = run(stringify!(
+        let m = [ 10u64 => 100u64, 20u64 => 200u64 ];
+        for k, v in m {
+            ret_u64(k + v);
+        }
+    ));
+    assert_all(&result, &[ 110u64, 220 ]);
+}
+
+#[test]
+fn for_in_map_key_value_mutate_during_iteration() {
+    // iterating a key snapshot lets the body mutate the map without disturbing iteration; the value
+    // binding reflects the map state at the point of lookup
+    let result = run(stringify!(
+        let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64 ];
+        for k, v in m {
+            m.insert(k, v + 1u64);
+            ret_u64(m[k]);
+        }
+    ));
+    assert_all(&result, &[ 11u64, 21, 31 ]);
+}
+
+#[test]
+fn for_in_map_key_value_rejects_array() {
+    // the two-binding form is only valid over maps; iterating an array must name the offending type
+    // rather than leaking the desugaring's internal temporary
+    let err = build_err(stringify!(
+        let a = [ 1, 2, 3 ];
+        for k, v in a {
+            ret_i32(k + v);
+        }
+    ));
+    assert!(err.contains("key/value iteration") && !err.contains("for$map"), "unexpected error: {}", err);
+}
+
+#[test]
 fn for_in_map_skips_removed() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];

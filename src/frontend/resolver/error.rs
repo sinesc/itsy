@@ -38,6 +38,8 @@ pub enum ResolveErrorKind {
     /// An if-expression used as a value lacks an else branch; the string is the branch's result type.
     MissingElseBranch(String),
     NotIterable(String),
+    /// A `for key, value in ..` loop iterates something other than a map; the string is the iterated type.
+    NotKeyValueIterable(String),
     NotCallable(String),
     /// A struct or enum contains itself by value (directly or transitively), which would result in an infinitely-sized type.
     RecursiveType(String),
@@ -99,6 +101,7 @@ impl Display for ResolveError {
             ResolveErrorKind::NonExhaustiveMatch(witness) => write!(f, "Non-exhaustive match: pattern `{witness}` not covered"),
             ResolveErrorKind::MissingElseBranch(t) => write!(f, "If-expression evaluating to type `{t}` requires an else branch"),
             ResolveErrorKind::NotIterable(t) => write!(f, "Type `{t}` is not iterable"),
+            ResolveErrorKind::NotKeyValueIterable(t) => write!(f, "Type `{t}` is not a map; key/value iteration (`for key, value in ..`) requires a map"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type `{t}` is not callable"),
             ResolveErrorKind::RecursiveType(name) => write!(f, "Recursive type `{name}` has infinite size. Recursive types are not supported"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve `{b}`"), // fallback case

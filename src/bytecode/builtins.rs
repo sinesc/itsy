@@ -1315,8 +1315,11 @@ pub mod documentation {
     ///
     /// Maps associate `Key`s with `Value`s. Like arrays, maps are a reference type: binding a map
     /// already bound to one variable to another makes both variables point at the same data.
-    /// Iteration (`for key in map`), indexing (`map[key]`) and the literal syntax (`[ key => value ]`)
-    /// are part of the language; the methods below are the named operations.
+    /// Iteration (`for key in map` or `for key, value in map`), indexing (`map[key]`) and the literal
+    /// syntax (`[ key => value ]`) are part of the language; the methods below are the named operations.
+    ///
+    /// Iteration walks a snapshot of the map's keys taken in insertion order, so the body is free to
+    /// insert into or remove from the map without disturbing the iteration.
     ///
     /// # Examples
     ///
@@ -1324,8 +1327,8 @@ pub mod documentation {
     /// let ages = [ "Anna" => 30, "Bert" => 42 ];
     /// ages.insert("Cleo", 19);
     ///
-    /// for name in ages {
-    ///     print("{name} is {ages[name]}\n");
+    /// for name, age in ages {
+    ///     print("{name} is {age}\n");
     /// }
     /// ```
     pub struct Map { }

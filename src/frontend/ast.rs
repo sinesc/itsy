@@ -1090,6 +1090,9 @@ pub struct ForLoop {
     pub expr    : Expression,
     pub block   : Block,
     pub scope_id: ScopeId,
+    /// Set for the loop synthesized from the two-binding `for key, value in map` form. The iterated
+    /// expression must resolve to a map; the resolver uses this to reject non-maps with a clear error.
+    pub key_value: bool,
 }
 
 impl_positioned!(ForLoop);
