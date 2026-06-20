@@ -1497,6 +1497,7 @@ impl_as_getter!(Expression {
     pub as_literal: Literal -> &Literal,
     pub as_variable: Variable -> &Variable,
     pub as_constant: Constant -> &Constant,
+    pub as_constant_mut: Constant -> mut Constant,
     pub as_binary_op: BinaryOp -> &BinaryOp,
     pub as_binary_op_mut: BinaryOp -> mut BinaryOp,
     pub as_cast_mut: Cast -> mut Cast,

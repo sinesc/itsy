@@ -81,6 +81,19 @@ struct IntrinsicOp {
     method          : &'static str,
 }
 
+/// Bookkeeping for a synthesized `Result<T>` data enum, keyed by its (deduplicated) enum type id. Lets
+/// the resolver recognize a type as a `Result` and bind `Ok`/`Err` calls to its variant constructors.
+#[derive(Copy, Clone)]
+struct ResultTypeInfo {
+    /// Success type `T` (the `Ok` payload). Read by the `?` operator.
+    #[allow(dead_code)]
+    ok_type_id      : TypeId,
+    /// Constructor for the `Ok(T)` variant (`FunctionKind::Variant`, index 0).
+    ok_constructor  : ConstantId,
+    /// Constructor for the `Err(Error)` variant (`FunctionKind::Variant`, index 1).
+    err_constructor : ConstantId,
+}
+
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
     stage           : stage::Stage,
@@ -100,6 +113,9 @@ pub(crate) struct Resolver<'ctx> {
     intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
     /// Type id of the built-in `Error` trait. Fixed `Err` payload type of every synthesized `Result<T>`.
     error_trait_type_id: TypeId,
+    /// Registry of synthesized `Result<T>` enums (keyed by enum type id), persistent across resolution
+    /// passes so `Ok`/`Err` calls can be recognized and bound to the right variant constructors.
+    result_types    : &'ctx mut UnorderedMap<TypeId, ResultTypeInfo>,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
@@ -216,6 +232,10 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     scopes.type_mut(error_trait_type_id).as_trait_mut().ice()?.required.insert("description".to_string(), Some(error_description_id));
     intrinsic_trait_names.push("Error".to_string());
 
+    // registry of synthesized `Result<T>` enums, populated on demand as `Result<T>` annotations and
+    // `Ok`/`Err` constructors are resolved. Persistent across passes (the Resolver is rebuilt each pass).
+    let mut result_types = UnorderedMap::new();
+
     // insert userdefined struct/enum types from derive-macro/itsy_api
     let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
 
@@ -264,6 +284,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             intrinsic_casts : &intrinsic_casts,
             intrinsic_ops   : &intrinsic_ops,
             error_trait_type_id,
+            result_types    : &mut result_types,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -937,7 +958,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Returns the type id of the `Result<T>` data enum for the given success type, synthesizing it on
     /// first use. `Result<T>` is represented as an anonymous data enum with variants `Ok(T)` and
-    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id.
+    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id. On first
+    /// synthesis the two variant constructors are created and recorded in `result_types`.
     fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
         let error_trait_type_id = self.error_trait_type_id;
         let variants = vec![
@@ -946,7 +968,60 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         ];
         // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
         let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
-        self.scopes.insert_anonymous_type(true, ty)
+        let result_type_id = self.scopes.insert_anonymous_type(true, ty);
+        if !self.result_types.contains_key(&result_type_id) {
+            // names embed the enum type id to stay unique across distinct `Result<T>`; they are never
+            // looked up by name (callers bind to the constructor's constant id directly).
+            let raw = result_type_id.into_usize();
+            let ok_constructor = self.scopes.insert_function(
+                &format!("Result#{raw}::Ok"), Some(result_type_id), vec![ Some(ok_type_id) ],
+                Some(FunctionKind::Variant(result_type_id, 0)),
+            );
+            let err_constructor = self.scopes.insert_function(
+                &format!("Result#{raw}::Err"), Some(result_type_id), vec![ Some(error_trait_type_id) ],
+                Some(FunctionKind::Variant(result_type_id, 1)),
+            );
+            self.result_types.insert(result_type_id, ResultTypeInfo { ok_type_id, ok_constructor, err_constructor });
+        }
+        result_type_id
+    }
+
+    /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant
+    /// constructor so the generic call resolution below handles argument checking and the result type.
+    /// `T` comes from the expected result type when available, otherwise (for `Ok`) is inferred from the
+    /// argument. `Err` without an expected `Result` type cannot infer `T` and is left unbound (reported as
+    /// an undefined identifier in the final stage).
+    fn try_bind_result_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
+        let variant = match item.left.as_expression().and_then(|e| e.as_constant()) {
+            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 => match c.path.segments[0].name.as_str() {
+                "Ok" => 0 as VariantIndex,
+                "Err" => 1 as VariantIndex,
+                _ => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+        // an expected result type pins T directly; this is the common case (`return Ok(x)`, match arms, ...)
+        let expected_result_type = expected_result.filter(|t| self.result_types.contains_key(t));
+        let result_type_id = match (variant, expected_result_type) {
+            (_, Some(result_type_id)) => Some(result_type_id),
+            // Ok(x): infer T from the argument's type
+            (0, None) => {
+                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
+                    self.resolve_expression(arg, None)?;
+                    arg.type_id(self).map(|ok_type_id| self.synthesize_result_type(ok_type_id))
+                } else {
+                    None
+                }
+            },
+            // Err(e): cannot determine T from the error alone; wait for / require context
+            (_, None) => None,
+        };
+        if let Some(result_type_id) = result_type_id {
+            let info = *self.result_types.get(&result_type_id).ice()?;
+            let constructor = if variant == 0 { info.ok_constructor } else { info.err_constructor };
+            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(constructor);
+        }
+        Ok(())
     }
 
     /// Resolves a map definition.
@@ -2171,6 +2246,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             },
             Call => {
+                // bind a bare `Ok`/`Err` callee to its `Result<T>` variant constructor before generic
+                // resolution (which then handles argument checking and the result type like any other call)
+                self.try_bind_result_constructor(item, expected_result)?;
                 // resolve function
                 let call_func = item.left.as_expression_mut().ice()?;
                 self.resolve_expression(call_func, None)?;
