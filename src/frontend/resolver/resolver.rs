@@ -1020,6 +1020,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let info = *self.result_types.get(&result_type_id).ice()?;
             let constructor = if variant == 0 { info.ok_constructor } else { info.err_constructor };
             item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(constructor);
+        } else if self.stage.must_resolve() {
+            // the constructor could not be bound to any `Result<T>`: there is no result type to infer from
+            // (e.g. `?` or a bare `Err`/`Ok` in a function that does not return `Result`). Report this
+            // directly instead of letting the unbound `Ok`/`Err` surface as a misleading "undefined identifier".
+            let from_try = item.right.as_argument_list().and_then(|a| a.args.first())
+                .and_then(|arg| arg.as_variable())
+                .map_or(false, |var| var.ident.name == "try$err" || var.ident.name == "try$ok");
+            let expected = expected_result.map(|type_id| self.type_name(type_id));
+            return Err(ResolveError::new(item, ResolveErrorKind::ResultOutsideResultContext(from_try, expected), self.module_path));
         }
         Ok(())
     }
@@ -1412,7 +1421,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
         let ret_type_id = if let Some(function_id) = function_id {
             let declared_ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
-            self.types_resolved(&mut item.expr, None)?;
+            // resolve before the unresolved-check below, so a returned expression that fails to resolve
+            // gets its own dedicated diagnostic (e.g. `Ok`/`Err`/`?` outside a `Result` function) rather
+            // than the generic "cannot resolve" fallback. The trailing `types_resolved` still enforces it.
             self.resolve_expression(&mut item.expr, declared_ret_type_id)?;
             // if the function's return type is already known (explicit, or previously inferred) verify the returned expression matches it,
             // otherwise infer the function's return type from the returned expression (used to infer closure return types).
@@ -1520,8 +1531,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             }
-            if item.constant_id.is_none() && self.stage.must_exist() {
-                return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string(0)), self.module_path));
+            if item.constant_id.is_none() {
+                // `Ok`/`Err` are bound to a `Result<T>` variant constructor by try_bind_result_constructor
+                // once a `Result` context is known, which can be as late as literal/type inference. Defer
+                // their existence check to must_resolve so a valid `Ok`/`Err` isn't prematurely rejected;
+                // genuine misuse (e.g. `?` in a non-`Result` function) gets a dedicated diagnostic there.
+                let is_result_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Ok" | "Err");
+                let must_report = if is_result_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
+                if must_report {
+                    return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string(0)), self.module_path));
+                }
             }
         }
         // set expected type, if it isn't a trait or we're in final resolver stage

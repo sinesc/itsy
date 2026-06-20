@@ -193,7 +193,24 @@ fn try_operator_in_non_result_function_rejected() {
             ret_i32(bad());
         }
     ));
-    assert!(err.len() > 0);
+    // the diagnostic must point at the `?`/Result misuse, not surface as a generic "cannot resolve" or
+    // "undefined identifier `Err`" from the desugared `return Err(..)`.
+    assert!(err.contains("`?` operator"), "unexpected error: {}", err);
+    assert!(err.contains("Result"), "unexpected error: {}", err);
+}
+
+#[test]
+fn result_constructor_outside_result_context_rejected() {
+    // a bare `Ok`/`Err` in a function that does not return `Result` cannot infer its type; the error must
+    // explain the `Result` requirement rather than report `Err` as an undefined identifier.
+    let err = build_err(stringify!(
+        fn bad() -> i32 { Err(1) }
+        fn main() {
+            ret_i32(bad());
+        }
+    ));
+    assert!(err.contains("`Ok`/`Err`"), "unexpected error: {}", err);
+    assert!(!err.contains("Undefined identifier"), "unexpected error: {}", err);
 }
 
 #[test]

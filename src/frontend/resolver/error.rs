@@ -18,6 +18,10 @@ pub enum ResolveErrorKind {
     /// A cast to a type backed by an intrinsic conversion trait (e.g. `String` via `ToString`) was attempted
     /// on a type that does not implement that trait. Arguments are the source type and the trait name.
     MissingTraitImplementation(String, String),
+    /// A `Result` constructor (`Ok`/`Err`) or the `?` operator was used outside a `Result` context, so its
+    /// type could not be determined. First field: whether the construct was a desugared `?`. Second field:
+    /// the type the surrounding context expects instead (if known).
+    ResultOutsideResultContext(bool, Option<String>),
     IncompatibleNumeric(String, Numeric),
     NumberOfArguments(String, ItemIndex, ItemIndex),
     MutabilityEscalation,
@@ -83,6 +87,17 @@ impl Display for ResolveError {
             ResolveErrorKind::TypeMismatch(g, e) => write!(f, "Expected type `{e}`, got `{g}`"),
             ResolveErrorKind::InvalidCast(t1, t2) => write!(f, "Invalid cast from `{t1}` to `{t2}`"),
             ResolveErrorKind::MissingTraitImplementation(ty, trt) => write!(f, "`{ty}` does not implement required trait `{trt}`"),
+            ResolveErrorKind::ResultOutsideResultContext(from_try, expected) => {
+                let context = match expected {
+                    Some(ty) => format!(", but the enclosing function returns `{ty}`"),
+                    None => String::new(),
+                };
+                if *from_try {
+                    write!(f, "the `?` operator can only be used in a function that returns `Result<T>`{context}")
+                } else {
+                    write!(f, "`Ok`/`Err` can only be used where a `Result<T>` value is expected{context}")
+                }
+            },
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric `{n}` for expected type `{t}`"),
             ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier `{v}`"),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member `{m}`"),
