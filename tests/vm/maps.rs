@@ -168,6 +168,31 @@ fn map_method_insert_get() {
 }
 
 #[test]
+fn map_contains_key() {
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64 ];
+        ret_bool(m.contains_key("a"));
+        ret_bool(m.contains_key("b"));
+        ret_bool(m.contains_key("c"));
+        m.remove("a");
+        ret_bool(m.contains_key("a"));
+        m.insert("c", 3u64);
+        ret_bool(m.contains_key("c"));
+    ));
+    assert_all(&result, &[ true, true, false, false, true ]);
+}
+
+#[test]
+fn map_contains_key_primitive() {
+    let result = run(stringify!(
+        let m = [ 1u64 => "a", 2u64 => "b" ];
+        ret_bool(m.contains_key(1u64));
+        ret_bool(m.contains_key(3u64));
+    ));
+    assert_all(&result, &[ true, false ]);
+}
+
+#[test]
 fn map_remove() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];

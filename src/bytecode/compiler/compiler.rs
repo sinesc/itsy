@@ -491,6 +491,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 match map_builtin {
                     MapBuiltin::Insert => { self.writer.map_insert(constructor); },
                     MapBuiltin::Get    => { self.writer.map_get(constructor); },
+                    MapBuiltin::ContainsKey => { self.writer.map_contains_key(constructor); },
                     MapBuiltin::Remove => { self.writer.map_remove(constructor); },
                     MapBuiltin::Clear  => { self.writer.map_clear(constructor); },
                     MapBuiltin::Keys   => { self.writer.map_keys(constructor); },

@@ -388,6 +388,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let spec: Option<(MapBuiltin, Option<TypeId>, Vec<TypeId>)> = match name {
             "insert" => Some((MapBuiltin::Insert, None, vec![ key_type_id, value_type_id ])),
             "get"    => Some((MapBuiltin::Get, Some(value_type_id), vec![ key_type_id ])),
+            "contains_key" => Some((MapBuiltin::ContainsKey, Some(self.primitive_type_id(Type::bool)?), vec![ key_type_id ])),
             "remove" => Some((MapBuiltin::Remove, None, vec![ key_type_id ])),
             "clear"  => Some((MapBuiltin::Clear, None, vec![])),
             "len"    => Some((MapBuiltin::Len, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?), vec![])),

@@ -20,6 +20,7 @@ use std::str::Chars;
 pub enum MapBuiltin {
     Insert,
     Get,
+    ContainsKey,
     Remove,
     Clear,
     Keys,
@@ -1344,6 +1345,9 @@ pub mod documentation {
         ///
         /// Halts the VM if the key is not present in the map. The VM is resumable.
         pub fn get(self: Self, key: Key) -> Value { }
+
+        /// Returns `true` if the map contains a value for the given key.
+        pub fn contains_key(self: Self, key: Key) -> bool { }
 
         /// Removes the entry stored under the given key, doing nothing if the key is absent.
         pub fn remove(self: Self, key: Key) { }

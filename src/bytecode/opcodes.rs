@@ -1636,6 +1636,17 @@ impl_opcodes!{
         }
     }
 
+    /// Look up a key and push whether it is present. Stack on entry (top first): key, map reference.
+    fn map_contains_key(&mut self, constructor: StackAddress) {
+        let (key_ctor, _value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let key = self.map_box_pop(key_ctor);
+        let map: HeapRef = self.stack.pop();
+        let found = self.map_find(map.index(), key, key_ctor).is_some();
+        self.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+        self.stack.push(found as Data8);
+        self.refcount_value(map, constructor, HeapRefOp::Free);
+    }
+
     /// Push the number of live entries in the map. Stack on entry (top): map reference.
     fn map_len(&mut self, constructor: StackAddress) {
         let map: HeapRef = self.stack.pop();
