@@ -1287,7 +1287,7 @@ impl_builtins! {
     }
 }
 
-/// Documentation of the types available to Itsy code.
+/// Itsy language reference
 ///
 /// # Basic types
 ///
@@ -1305,8 +1305,8 @@ impl_builtins! {
 ///
 /// # Traits
 ///
-/// [Intrinsic traits](crate::internals::documentation::traits) are recognized by the
-/// compiler and back language operators or casts (e.g. `Add` backs `+`, `ToString` backs `as String`).
+/// [Intrinsic traits](crate::internals::documentation::traits) are recognized by the compiler. Implementing one for
+/// a custom type makes the language functionality it backs work on that type (e.g. `Add` backs `+`, `ToString` backs `as String`).
 #[cfg(doc)]
 pub mod documentation {
     #[doc(inline)]
@@ -1370,22 +1370,51 @@ pub mod documentation {
         pub fn len(self: Self) -> u64 { }
     }
 
+    /// Success-or-error type, written `Result<T>`.
+    ///
+    /// A `Result<T>` is either `Ok(value)` carrying a success value of type `T`, or `Err(error)`
+    /// carrying any value implementing the [`Error`](self::traits::Error) trait. Unlike Rust's
+    /// `Result<T, E>` the error type is not a parameter: every error is an `Error`, which is what lets
+    /// errors of different concrete types flow through one `Result<T>`.
+    ///
+    /// Inspect a result by matching it; both variants are part of the language:
+    ///
+    /// ``` ignore
+    /// match parse(text) {
+    ///     Ok(value) => print("got {value}"),
+    ///     Err(e) => print("failed: {e.description()}"),
+    /// }
+    /// ```
+    ///
+    /// # The `?` operator
+    ///
+    /// Postfix `?` on a `Result<T>` evaluates to the contained `T` when the result is `Ok`, and
+    /// otherwise returns the `Err` from the enclosing function unchanged. It may only be used inside a
+    /// function that itself returns a `Result`. This makes chaining fallible calls concise:
+    ///
+    /// ``` ignore
+    /// fn total(a: String, b: String) -> Result<i32> {
+    ///     let x = parse(a)?;   // returns early if parse fails
+    ///     let y = parse(b)?;
+    ///     Ok(x + y)
+    /// }
+    /// ```
+    pub struct Result { }
+
     /// Intrinsic traits recognized by the compiler.
     ///
     /// Unlike user-defined traits, these are known to the compiler: implementing one for a custom type
-    /// makes the language operator or cast it backs work on that type. They are implemented exactly like
+    /// makes the language functionality it backs work on that type. They are implemented exactly like
     /// any other trait (`impl Add for MyType { ... }`) and are in scope in every module without a `use`.
     ///
-    /// Each required method takes `self` by value (as `self: Self`) and, for the operator traits,
-    /// a single right-hand-side operand of the same type, returning a value of the same type. The
-    /// operator traits only apply to custom types; the built-in types use the native logic.
+    /// Intrinsic traits only apply to custom types; built-in types always use compiler native logic.
     pub mod traits {
 
         /// Converts a value to a [`String`](crate::internals::documentation::String).
         ///
-        /// Backs the `as String` cast for custom types, and by extension `{...}` string interpolation
-        /// (which lowers to `as String`). Implement it to make `value as String` and `"{value}"` work
-        /// for your type.
+        /// Backs the `as String` cast for custom types, and by extension string interpolation
+        /// (which lowers to `as String`). Implementing it makes `value as String` and `"{value}"` work
+        /// for the given type.
         ///
         /// # Examples
         ///
@@ -1406,7 +1435,7 @@ pub mod documentation {
             fn to_string(self: Self) -> String;
         }
 
-        /// Overloads the `+` and `+=` operators. `a + b` lowers to `a.add(b)`; `a += b` to `a = a.add(b)`.
+        /// Overloads the `+` and `+=` operators.
         ///
         /// # Examples
         ///
@@ -1425,28 +1454,58 @@ pub mod documentation {
             fn add(self: Self, rhs: Self) -> Self;
         }
 
-        /// Overloads the `-` and `-=` operators. `a - b` lowers to `a.sub(b)`; `a -= b` to `a = a.sub(b)`.
+        /// Overloads the `-` and `-=` operators.
         pub trait Sub {
             /// Returns the result of `self - rhs`.
             fn sub(self: Self, rhs: Self) -> Self;
         }
 
-        /// Overloads the `*` and `*=` operators. `a * b` lowers to `a.mul(b)`; `a *= b` to `a = a.mul(b)`.
+        /// Overloads the `*` and `*=` operators.
         pub trait Mul {
             /// Returns the result of `self * rhs`.
             fn mul(self: Self, rhs: Self) -> Self;
         }
 
-        /// Overloads the `/` and `/=` operators. `a / b` lowers to `a.div(b)`; `a /= b` to `a = a.div(b)`.
+        /// Overloads the `/` and `/=` operators.
         pub trait Div {
             /// Returns the result of `self / rhs`.
             fn div(self: Self, rhs: Self) -> Self;
         }
 
-        /// Overloads the `%` and `%=` operators. `a % b` lowers to `a.rem(b)`; `a %= b` to `a = a.rem(b)`.
+        /// Overloads the `%` and `%=` operators.
         pub trait Rem {
             /// Returns the result of `self % rhs`.
             fn rem(self: Self, rhs: Self) -> Self;
+        }
+
+        /// The error type of [`Result`](crate::internals::documentation::Result).
+        ///
+        /// `Error` is the fixed error side of every `Result<T>`. Any type implementing `Error` is accepted
+        /// as the `Err` payload of a `Result`, which is what lets the [`?`](crate::internals::documentation::Result) operator
+        /// propagate errors of different concrete types through a single `Result<T>` without conversion.
+        ///
+        /// # Examples
+        ///
+        /// ``` ignore
+        /// struct NotFound { key: String }
+        /// impl Error for NotFound {
+        ///     fn description(self: Self) -> String {
+        ///         "not found: {self.key}"
+        ///     }
+        /// }
+        ///
+        /// fn lookup(key: String) -> Result<i32> {
+        ///     Err(NotFound { key: key })
+        /// }
+        ///
+        /// fn use_it() -> Result<i32> {
+        ///     let value = lookup("answer")?;  // returns early with the NotFound error
+        ///     Ok(value + 1)
+        /// }
+        /// ```
+        pub trait Error {
+            /// Returns a human-readable description of the error.
+            fn description(self: Self) -> String;
         }
     }
 }

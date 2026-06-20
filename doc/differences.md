@@ -99,3 +99,47 @@ fn main() {
     Add { to: 3 }.print(3);             // performs 3 + 3 -> 6
 }
 ```
+
+## Error handling
+
+Itsy has `Result<T>` and the `?` operator. `Result<T>` is not a generic but rather a built-in datastructure (like arrays or maps)
+with a syntax chosen to resemble Rust's generic `Result<T, E>`. It can hold either one success value of type `T` or an error value
+implementing the built-in `Error`-trait.
+This replaces Rust's `Result<T, E>` and its `From`-based error conversion because every error is already an `Error`, `?` propagates
+errors of different concrete types through a single `Result<T>` without conversion.
+
+```rust
+struct NotFound {
+    key: String,
+}
+
+// any type implementing the built-in `Error` trait can be used as a `Result`'s error
+impl Error for NotFound {
+    fn description(self: Self) -> String {
+        "not found: {self.key}"
+    }
+}
+
+fn lookup(key: String) -> Result<i32> {
+    if key == "answer" {
+        Ok(42)
+    } else {
+        Err(NotFound { key: key })
+    }
+}
+
+fn answer_plus_one() -> Result<i32> {
+    let value = lookup("answer")?;  // `?` unwraps Ok, or returns the Err from this function
+    Ok(value + 1)
+}
+
+fn main() {
+    match answer_plus_one() {
+        Ok(value) => print("{value}\n"),               // -> 43
+        Err(e) => print("error: {e.description()}\n"),
+    }
+}
+```
+
+`Ok(x)` and `Err(e)` construct the variants, and a `Result` is inspected by matching it. `?` may only be
+used inside a function that itself returns a `Result`.
