@@ -195,3 +195,18 @@ fn try_operator_in_non_result_function_rejected() {
     ));
     assert!(err.len() > 0);
 }
+
+#[test]
+fn result_renders_legibly_in_diagnostics() {
+    // a forgotten `?` leaves a `Result<T>` where `T` was expected; the diagnostic must name the type
+    // legibly as `Result<i32>` rather than the anonymous-enum fallback `?`, so the mistake is obvious.
+    let err = build_err(stringify!(
+        fn ok() -> Result<i32> { Ok(1) }
+        fn double(x: i32) -> i32 { x * 2 }
+        fn main() {
+            let v = ok();
+            ret_i32(double(v));
+        }
+    ));
+    assert!(err.contains("Result<i32>"), "unexpected error: {}", err);
+}

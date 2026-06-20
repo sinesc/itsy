@@ -5,7 +5,7 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, MapType, Callable, Function}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, MapType, Callable, Function, Enum, EnumVariant}};
 use crate::prelude::*;
 
 /// A container holding AST metadata
@@ -84,11 +84,31 @@ pub trait MetaContainer {
             }
         }
     }
+    /// If the given type is a compiler-synthesized `Result<T>` data enum, returns the success type `T`.
+    /// `Result<T>` is an anonymous `Ok(T)`/`Err(Error)` enum (see `synthesize_result_type`), so it has no
+    /// flat name; this structural check lets `type_name` render it legibly in diagnostics.
+    fn result_ok_type_id(self: &Self, type_id: TypeId) -> Option<TypeId> {
+        if let Type::Enum(Enum { primitive: None, variants, .. }) = self.type_by_id(type_id) {
+            if let [(ok_name, EnumVariant::Data(ok_fields)), (err_name, EnumVariant::Data(err_fields))] = &variants[..] {
+                if ok_name == "Ok" && err_name == "Err" && ok_fields.len() == 1 && err_fields.len() == 1 {
+                    if let Some(err_type_id) = err_fields[0] {
+                        // the Err payload is fixed to the built-in `Error` trait
+                        if matches!(self.type_by_id(err_type_id), Type::Trait(_)) && self.type_flat_name(err_type_id).map_or(false, |n| n == "Error") {
+                            return ok_fields[0];
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
     // Returns recursively resolved type name.
     fn type_name(self: &Self, type_id: TypeId) -> String {
         let ty = self.type_by_id(type_id);
         if let Some(type_name) = self.type_flat_name(type_id) {
             type_name.to_string()
+        } else if let Some(ok_type_id) = self.result_ok_type_id(type_id) {
+            format!("Result<{}>", self.type_name(ok_type_id))
         } else {
             match ty {
                 Type::void => "void".to_string(), // void is explicitly not a named type so we have to manually give it a name here
