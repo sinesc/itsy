@@ -1302,6 +1302,11 @@ impl_builtins! {
 /// Maps, variable-length associations of keys to values: [`[ k => v, ... ]`](crate::internals::documentation::Map).\
 /// Structs, product of multiple types: `struct { field1: Type1, ... }`.\
 /// Enums, disjoint union (one of n variants, variants can carry data): `ennum { A, B(p1, p2, ...), ... }`.
+///
+/// # Traits
+///
+/// [Intrinsic traits](crate::internals::documentation::traits) are recognized by the
+/// compiler and back language operators or casts (e.g. `Add` backs `+`, `ToString` backs `as String`).
 #[cfg(doc)]
 pub mod documentation {
     #[doc(inline)]
@@ -1363,5 +1368,85 @@ pub mod documentation {
 
         /// Returns the number of entries in the map.
         pub fn len(self: Self) -> u64 { }
+    }
+
+    /// Intrinsic traits recognized by the compiler.
+    ///
+    /// Unlike user-defined traits, these are known to the compiler: implementing one for a custom type
+    /// makes the language operator or cast it backs work on that type. They are implemented exactly like
+    /// any other trait (`impl Add for MyType { ... }`) and are in scope in every module without a `use`.
+    ///
+    /// Each required method takes `self` by value (as `self: Self`) and, for the operator traits,
+    /// a single right-hand-side operand of the same type, returning a value of the same type. The
+    /// operator traits only apply to custom types; the built-in types use the native logic.
+    pub mod traits {
+
+        /// Converts a value to a [`String`](crate::internals::documentation::String).
+        ///
+        /// Backs the `as String` cast for custom types, and by extension `{...}` string interpolation
+        /// (which lowers to `as String`). Implement it to make `value as String` and `"{value}"` work
+        /// for your type.
+        ///
+        /// # Examples
+        ///
+        /// ``` ignore
+        /// struct Point { x: i32, y: i32 }
+        /// impl ToString for Point {
+        ///     fn to_string(self: Self) -> String {
+        ///         "({self.x}, {self.y})"
+        ///     }
+        /// }
+        ///
+        /// let p = Point { x: 3, y: 7 };
+        /// print(p as String);   // (3, 7)
+        /// print("point: {p}");  // point: (3, 7)
+        /// ```
+        pub trait ToString {
+            /// Returns the string representation of `self`.
+            fn to_string(self: Self) -> String;
+        }
+
+        /// Overloads the `+` and `+=` operators. `a + b` lowers to `a.add(b)`; `a += b` to `a = a.add(b)`.
+        ///
+        /// # Examples
+        ///
+        /// ``` ignore
+        /// struct V { x: i64, y: i64 }
+        /// impl Add for V {
+        ///     fn add(self: Self, rhs: Self) -> Self {
+        ///         V { x: self.x + rhs.x, y: self.y + rhs.y }
+        ///     }
+        /// }
+        ///
+        /// let c = V { x: 1, y: 2 } + V { x: 3, y: 4 };  // V { x: 4, y: 6 }
+        /// ```
+        pub trait Add {
+            /// Returns the result of `self + rhs`.
+            fn add(self: Self, rhs: Self) -> Self;
+        }
+
+        /// Overloads the `-` and `-=` operators. `a - b` lowers to `a.sub(b)`; `a -= b` to `a = a.sub(b)`.
+        pub trait Sub {
+            /// Returns the result of `self - rhs`.
+            fn sub(self: Self, rhs: Self) -> Self;
+        }
+
+        /// Overloads the `*` and `*=` operators. `a * b` lowers to `a.mul(b)`; `a *= b` to `a = a.mul(b)`.
+        pub trait Mul {
+            /// Returns the result of `self * rhs`.
+            fn mul(self: Self, rhs: Self) -> Self;
+        }
+
+        /// Overloads the `/` and `/=` operators. `a / b` lowers to `a.div(b)`; `a /= b` to `a = a.div(b)`.
+        pub trait Div {
+            /// Returns the result of `self / rhs`.
+            fn div(self: Self, rhs: Self) -> Self;
+        }
+
+        /// Overloads the `%` and `%=` operators. `a % b` lowers to `a.rem(b)`; `a %= b` to `a = a.rem(b)`.
+        pub trait Rem {
+            /// Returns the result of `self % rhs`.
+            fn rem(self: Self, rhs: Self) -> Self;
+        }
     }
 }
