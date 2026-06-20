@@ -214,6 +214,26 @@ fn result_constructor_outside_result_context_rejected() {
 }
 
 #[test]
+fn undefined_method_on_trait_receiver_rejected() {
+    // calling a non-existent method on a trait receiver (here the `Err` payload, typed as the built-in
+    // `Error` trait) must report a missing-method error rather than ICE-ing on an unhandled receiver type.
+    // the message names the receiver type, not a guessed trait, since a receiver may satisfy several.
+    let err = build_err(stringify!(
+        fn result_test() -> Result<i32> { Ok(1) }
+        fn main() {
+            let result = match (result_test()) {
+                Ok(s) => s as String,
+                Err(e) => e.description_typo(),
+            };
+            ret_string(result);
+        }
+    ));
+    assert!(err.contains("No method `description_typo`"), "unexpected error: {}", err);
+    assert!(err.contains("Error"), "unexpected error: {}", err);
+    assert!(!err.contains("Internal error"), "unexpected error: {}", err);
+}
+
+#[test]
 fn result_renders_legibly_in_diagnostics() {
     // a forgotten `?` leaves a `Result<T>` where `T` was expected; the diagnostic must name the type
     // legibly as `Result<i32>` rather than the anonymous-enum fallback `?`, so the mistake is obvious.

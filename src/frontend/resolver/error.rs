@@ -9,6 +9,11 @@ use crate::shared::numeric::Numeric;
 pub enum ResolveErrorKind {
     UndefinedIdentifier(String),
     UndefinedMember(String),
+    /// A method (or builtin) was accessed on a receiver that does not provide it. First field is the
+    /// member name, second is the receiver type name. Used for non-struct receivers (traits, trait bounds,
+    /// enums, scalars), whose missing methods cannot be pinned to a single owning trait/impl, so the
+    /// message names the receiver type rather than guessing a trait.
+    UndefinedMethod(String, String),
     UndefinedFunction(String),
     UndefinedType(String),
     UndefinedItem(String),
@@ -101,6 +106,7 @@ impl Display for ResolveError {
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric `{n}` for expected type `{t}`"),
             ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier `{v}`"),
             ResolveErrorKind::UndefinedMember(m) => write!(f, "Undefined struct member `{m}`"),
+            ResolveErrorKind::UndefinedMethod(m, t) => write!(f, "No method `{m}` found for type `{t}`"),
             ResolveErrorKind::NumberOfArguments(func, e, g) => write!(f, "Invalid number of arguments. Function `{func}` expects `{e}` argument, got `{g}`"),
             ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
             ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),

@@ -2254,8 +2254,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                                 // as for arrays, builtin resolution above may temporarily fail while the
                                 // map's key/value types are not yet resolved
                             },
-                            x @ _ => {
-                                Self::ice(&format!("Member access on unsupported type {:?}", x))?;
+                            // any other receiver (trait, trait bound, enum, scalar): the method/builtin lookup
+                            // above failed, so the member does not exist. report it rather than ICE-ing. we name
+                            // the receiver type, not a trait, because a receiver may satisfy several traits and we
+                            // cannot know which the user intended.
+                            _ => {
+                                let member = item.right.as_member().ice_msg("Member access using a non-member")?;
+                                let member_name = member.ident.name.clone();
+                                let type_name = self.type_name(left_type_id);
+                                return Err(ResolveError::new(member, ResolveErrorKind::UndefinedMethod(member_name, type_name), self.module_path));
                             },
                         }
                     }
