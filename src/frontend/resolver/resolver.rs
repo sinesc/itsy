@@ -98,6 +98,8 @@ pub(crate) struct Resolver<'ctx> {
     /// trait/`add`). An operator applied to a non-numeric type is lowered to a call of the trait method
     /// on the operands, provided they implement it.
     intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// Type id of the built-in `Error` trait. Fixed `Err` payload type of every synthesized `Result<T>`.
+    error_trait_type_id: TypeId,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
@@ -201,6 +203,19 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         intrinsic_ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, method: intrinsic.method });
     }
 
+    // register the built-in `Error` trait so scripts can `impl Error for MyType { ... }`. Required method:
+    // `fn description(self: Self) -> String`, registered exactly as a source-defined trait method would be.
+    let string_type_id = *primitives.get(&Type::String).ice()?;
+    let error_trait_type_id = scopes.insert_type(Some("Error"), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+    let error_description_id = scopes.insert_function(
+        "Error::description",
+        Some(string_type_id),
+        vec![ Some(error_trait_type_id) ],
+        Some(FunctionKind::Method(error_trait_type_id)),
+    );
+    scopes.type_mut(error_trait_type_id).as_trait_mut().ice()?.required.insert("description".to_string(), Some(error_description_id));
+    intrinsic_trait_names.push("Error".to_string());
+
     // insert userdefined struct/enum types from derive-macro/itsy_api
     let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
 
@@ -248,6 +263,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             primitives      : &primitives,
             intrinsic_casts : &intrinsic_casts,
             intrinsic_ops   : &intrinsic_ops,
+            error_trait_type_id,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -798,6 +814,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             TypeName(type_name) => self.resolve_type_name(type_name, None),
             ArrayDef(array) => self.resolve_array_type(array),
             MapDef(map) => self.resolve_map_type(map),
+            ResultDef(result) => self.resolve_result_type(result),
             CallableDef(callable) => self.resolve_callable_type(callable),
             TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
         }
@@ -903,6 +920,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.types_resolved(item, None)?;
         Ok(item.type_id)
+    }
+
+    /// Resolves a result definition `Result<T>` into its synthesized two-variant data enum
+    /// `Ok(T)` / `Err(Error)`.
+    fn resolve_result_type(self: &mut Self, item: &mut ast::ResultDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        if let (None, Some(ok_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.ok_type)?) {
+            item.type_id = Some(self.synthesize_result_type(ok_type_id));
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
+    }
+
+    /// Returns the type id of the `Result<T>` data enum for the given success type, synthesizing it on
+    /// first use. `Result<T>` is represented as an anonymous data enum with variants `Ok(T)` and
+    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id.
+    fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
+        let error_trait_type_id = self.error_trait_type_id;
+        let variants = vec![
+            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ])),
+            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ])),
+        ];
+        // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
+        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
+        self.scopes.insert_anonymous_type(true, ty)
     }
 
     /// Resolves a map definition.

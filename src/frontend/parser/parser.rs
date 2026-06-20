@@ -245,11 +245,28 @@ fn inline_type(i: Input) -> Output<InlineType> {
         )(i)
     }
     alt((
+        // `result_def` must precede `type_name_or_bound`, otherwise `Result` is consumed as a plain
+        // type name and the `<T>` argument is left dangling.
+        map(result_def, |r| InlineType::ResultDef(Box::new(r))),
         type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(map_def, |m| InlineType::MapDef(Box::new(m))),
         map(array_def, |a| InlineType::ArrayDef(Box::new(a))),
     ))(i)
+}
+
+/// Matches a result type definition, e.g. `Result<OkType>`. The error side is implicit (the built-in
+/// `Error` trait), so only the success type is written.
+fn result_def(i: Input) -> Output<ResultDef> {
+    let position = i.position();
+    map(
+        delimited(pair(keyword("Result"), punct("<")), inline_type, punct(">")),
+        move |ok| ResultDef {
+            position,
+            ok_type: ok,
+            type_id: None,
+        }
+    )(i)
 }
 
 /// Matches a callable type definition, e.g. `fn(u8) -> u16`.

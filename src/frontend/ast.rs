@@ -363,7 +363,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, CallableDef, TraitBound)
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, ResultDef, CallableDef, TraitBound)
     };
     ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
         compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
@@ -807,6 +807,8 @@ pub enum InlineType {
     ArrayDef(Box<ArrayDef>),
     /// Map definition
     MapDef(Box<MapDef>),
+    /// Result definition, e.g. `Result<T>`
+    ResultDef(Box<ResultDef>),
     /// Callable definition
     CallableDef(Box<CallableDef>),
     /// Multiple trait bound, e.g. `TraitA + TraitB`
@@ -821,6 +823,7 @@ impl Display for InlineType {
             Self::TypeName(type_name) => write!(f, "{}", type_name),
             Self::ArrayDef(array_def) => write!(f, "{}", array_def),
             Self::MapDef(map_def) => write!(f, "{}", map_def),
+            Self::ResultDef(result_def) => write!(f, "{}", result_def),
             Self::CallableDef(callable_def) => write!(f, "{}", callable_def),
             Self::TraitBound(trait_bound) => write!(f, "{}", trait_bound),
         }
@@ -832,6 +835,7 @@ impl Typeable for InlineType {
         match &self {
             InlineType::ArrayDef(array_def) => array_def.type_id(container),
             InlineType::MapDef(map_def) => map_def.type_id(container),
+            InlineType::ResultDef(result_def) => result_def.type_id(container),
             InlineType::TypeName(type_name) => type_name.type_id(container),
             InlineType::CallableDef(callable_def) => callable_def.type_id(container),
             InlineType::TraitBound(trait_bound) => trait_bound.type_id(container),
@@ -841,6 +845,7 @@ impl Typeable for InlineType {
         match self {
             InlineType::ArrayDef(array_def) => array_def.set_type_id(container, type_id),
             InlineType::MapDef(map_def) => map_def.set_type_id(container, type_id),
+            InlineType::ResultDef(result_def) => result_def.set_type_id(container, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
             InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
             InlineType::TraitBound(trait_bound) => trait_bound.set_type_id(container, type_id),
@@ -903,6 +908,24 @@ impl_display!(MapDef, "[ {} => {} ]", key_type, value_type);
 impl_resolvable!(MapDef {
     key_type: Item,
     value_type: Item,
+    type_id: TypeId,
+});
+
+
+/// A result type definition, e.g. `Result<OkType>`. The error side is always the built-in `Error`
+/// trait, so only the success type is written.
+#[derive(Debug)]
+pub struct ResultDef {
+    pub position    : Position,
+    pub ok_type     : InlineType,
+    pub type_id     : Option<TypeId>,
+}
+
+impl_positioned!(ResultDef);
+impl_typeable!(ResultDef);
+impl_display!(ResultDef, "Result<{}>", ok_type);
+impl_resolvable!(ResultDef {
+    ok_type: Item,
     type_id: TypeId,
 });
 

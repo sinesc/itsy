@@ -106,3 +106,14 @@ fn match_pattern_binding_in_scope() {
         }
     ").unwrap();
 }
+
+#[test]
+fn result_type_in_signature() {
+    // `Result<T>` parses in type position (return type and parameter), including a nested generic-ish
+    // success type, without colliding with the `<`/`>` comparison operators.
+    parse("
+        fn a() -> Result<i32> { }
+        fn b(r: Result<String>) { }
+        fn c() -> Result<[ u8 ]> { }
+    ").unwrap();
+}

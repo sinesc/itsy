@@ -25,6 +25,8 @@ mod traits;
 mod controlflow;
 #[path="vm/enums.rs"]
 mod enums;
+#[path="vm/result.rs"]
+mod result;
 #[path="vm/closure.rs"]
 mod closure;
 #[cfg(feature="derive")]
