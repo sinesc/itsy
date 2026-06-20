@@ -117,3 +117,81 @@ fn result_let_binding_and_branch() {
     ));
     assert_all(&result, &[ 10i32, -100 ]);
 }
+
+#[test]
+fn try_operator_ok_passthrough() {
+    // `?` on an Ok result yields the contained value and execution continues normally.
+    let result = run(stringify!(
+        fn half(n: i32) -> Result<i32> {
+            Ok(n / 2)
+        }
+        fn compute() -> Result<i32> {
+            let a = half(20)?;
+            let b = half(10)?;
+            Ok(a + b)
+        }
+        fn main() {
+            let r = match compute() {
+                Ok(v) => v,
+                Err(_) => 0 - 1,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all(&result, &[ 15i32 ]);
+}
+
+#[test]
+fn try_operator_err_propagates() {
+    // `?` on an Err result returns early from the enclosing function, propagating the error (as the
+    // built-in Error trait) without any conversion. The later `?` and the `Ok` tail never run.
+    let result = run(stringify!(
+        struct DivByZero {
+            marker: u8,
+        }
+        impl Error for DivByZero {
+            fn description(self: Self) -> String { "division by zero" }
+        }
+        fn checked_div(a: i32, b: i32) -> Result<i32> {
+            if b == 0 {
+                Err(DivByZero { marker: 0 })
+            } else {
+                Ok(a / b)
+            }
+        }
+        fn compute(a: i32, b: i32) -> Result<i32> {
+            let q = checked_div(a, b)?;
+            Ok(q + 1)
+        }
+        fn report(r: Result<i32>) {
+            let s = match r {
+                Ok(v) => "ok {v}",
+                Err(e) => e.description(),
+            };
+            ret_string(s);
+        }
+        fn main() {
+            report(compute(10, 2));
+            report(compute(10, 0));
+        }
+    ));
+    assert(&result[0], "ok 6".to_string());
+    assert(&result[1], "division by zero".to_string());
+}
+
+#[test]
+fn try_operator_in_non_result_function_rejected() {
+    // `?` desugars to `return Err(..)`, which can only construct the error in a function that itself
+    // returns a `Result`; using it elsewhere must fail to build rather than miscompile.
+    let err = build_err(stringify!(
+        fn ok() -> Result<i32> { Ok(1) }
+        fn bad() -> i32 {
+            let x = ok()?;
+            x
+        }
+        fn main() {
+            ret_i32(bad());
+        }
+    ));
+    assert!(err.len() > 0);
+}

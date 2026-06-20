@@ -1007,7 +1007,7 @@ fn expression(i: Input) -> Output<Expression> {
     fn prec7(i: Input) -> Output<Expression> {
         let init = operand(i.clone())?;
         let position = i.position();
-        fold_many0_mut(
+        let (mut rest, mut acc) = fold_many0_mut(
             alt((
                 map(delimited(punct("["), expression, punct("]")), |e| (BinaryOperator::Index, BinaryOperand::Expression(e))),
                 map(preceded(punct("."), ident), |i| (BinaryOperator::Access, BinaryOperand::Member(Member { position: position, ident: i, type_id: None, constant_id: None }))),
@@ -1015,7 +1015,13 @@ fn expression(i: Input) -> Output<Expression> {
             )),
             init.1,
             move |acc, (op, val)| Expression::BinaryOp(Box::new(BinaryOp { position, op, left: BinaryOperand::Expression(acc), right: val, type_id: None, op_resolved: false }))
-        )(init.0)
+        )(init.0)?;
+        // postfix `?` (tightest precedence, like `.`/call): desugar each occurrence into an Err-propagating match
+        while let Ok((next, _)) = punct("?")(rest.clone()) {
+            acc = build_try_desugar(position, &rest, acc);
+            rest = next;
+        }
+        Ok((rest, acc))
     }
     fn unary(i: Input) -> Output<Expression> {
         let position = i.position();
@@ -1525,6 +1531,59 @@ fn method_call_expr(receiver: Expression, method: &str, args: Vec<Expression>, p
         right       : BinaryOperand::ArgumentList(ArgumentList { position, args }),
         type_id     : None,
         op_resolved : false,
+    }))
+}
+
+/// Desugars the postfix `?` operator on `inner` (a `Result<T>`) into
+/// `match inner { Ok(tmp) => tmp, Err(tmp) => return Err(tmp) }`
+fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Expression {
+    /// Builds a `name(args...)` call to a single-segment path constant.
+    fn path_call_expr(position: Position, name: &str, args: Vec<Expression>) -> Expression {
+        let callee = Expression::Constant(Constant {
+            position,
+            path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ] },
+            constant_id: None,
+        });
+        Expression::BinaryOp(Box::new(BinaryOp {
+            position,
+            op          : BinaryOperator::Call,
+            left        : BinaryOperand::Expression(callee),
+            right       : BinaryOperand::ArgumentList(ArgumentList { position, args }),
+            type_id     : None,
+            op_resolved : false,
+        }))
+    }
+    const TRY_OK: &str = "try$ok";
+    const TRY_ERR: &str = "try$err";
+    let scope_id = input.scope_id();
+    let is_dead = input.flags().is_dead;
+    let bind = |name: &str| if is_dead { BindingId::new(0) } else { input.add_binding(name) };
+    let ok_binding = bind(TRY_OK);
+    let err_binding = bind(TRY_ERR);
+    let variant_pattern = |name: &str, bind_name: &str, binding_id| Pattern::VariantTuple(VariantTuplePattern {
+        position,
+        path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ] },
+        elements: vec![ Pattern::Binding(BindingPattern { position, ident: Ident { position, name: bind_name.to_string() }, binding_id }) ],
+    });
+    // Ok(try$ok) => try$ok
+    let ok_branch = (
+        variant_pattern("Ok", TRY_OK, ok_binding),
+        Block::new(position, scope_id, Vec::new(), Some(var_expr(position, TRY_OK, ok_binding))),
+    );
+    // Err(try$err) => return Err(try$err)
+    let err_return = Statement::Return(Return {
+        position,
+        expr: path_call_expr(position, "Err", vec![ var_expr(position, TRY_ERR, err_binding) ]),
+    });
+    let err_branch = (
+        variant_pattern("Err", TRY_ERR, err_binding),
+        Block::new(position, scope_id, vec![ err_return ], None),
+    );
+    Expression::MatchBlock(Box::new(MatchBlock {
+        position,
+        expr: inner,
+        branches: vec![ ok_branch, err_branch ],
+        scope_id,
     }))
 }
 

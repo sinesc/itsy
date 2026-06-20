@@ -117,3 +117,16 @@ fn result_type_in_signature() {
         fn c() -> Result<[ u8 ]> { }
     ").unwrap();
 }
+
+#[test]
+fn try_operator_postfix() {
+    // postfix `?` parses on calls, including chained occurrences
+    parse("
+        fn a() -> Result<i32> { Ok(1) }
+        fn b() -> Result<i32> {
+            let x = a()?;
+            let y = a()? + a()?;
+            Ok(x + y)
+        }
+    ").unwrap();
+}
