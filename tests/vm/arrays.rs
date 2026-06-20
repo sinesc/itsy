@@ -265,3 +265,121 @@ fn array_eq_nested() {
     ));
     assert_all(&result, &[ true, false ]);
 }
+
+#[test]
+fn for_in_array_values() {
+    // the single-binding form iterates values
+    let result = run(stringify!(
+        let a = [ 10u64, 20u64, 30u64 ];
+        for v in a {
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 10u64, 20, 30 ]);
+}
+
+#[test]
+fn for_in_array_index_value() {
+    // two-binding form binds the index and the value
+    let result = run(stringify!(
+        let a = [ 10u64, 20u64, 30u64 ];
+        for k, v in a {
+            ret_u64(k as u64);
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 0u64, 10, 1, 20, 2, 30 ]);
+}
+
+#[test]
+fn for_in_array_index_only() {
+    // `index, _` iterates indices alone
+    let result = run(stringify!(
+        let a = [ 10u64, 20u64, 30u64 ];
+        for k, _ in a {
+            ret_u64(k as u64);
+        }
+    ));
+    assert_all(&result, &[ 0u64, 1, 2 ]);
+}
+
+#[test]
+fn for_in_array_ignore_index() {
+    // `_, value` iterates values, ignoring indices
+    let result = run(stringify!(
+        let a = [ 10u64, 20u64, 30u64 ];
+        for _, v in a {
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 10u64, 20, 30 ]);
+}
+
+#[test]
+fn for_in_array_index_value_reference_elements() {
+    // value lookup for reference-typed elements goes through array indexing; exercises its refcounting
+    let result = run(stringify!(
+        let a = [ "a", "b", "c" ];
+        for k, v in a {
+            ret_str("{k as u64}:{v}");
+        }
+    ));
+    assert_all(&result, &[ "0:a".to_string(), "1:b".to_string(), "2:c".to_string() ]);
+}
+
+#[test]
+fn for_in_array_index_value_empty() {
+    let result = run(stringify!(
+        let a: [ u64 ] = [ ];
+        for k, v in a {
+            ret_u64(v);
+        }
+        ret_u64(99u64);
+    ));
+    assert_all(&result, &[ 99u64 ]);
+}
+
+#[test]
+fn for_in_array_index_value_snapshot_len() {
+    // the upper bound `arr.len()` is evaluated once at loop entry, so growing the array during iteration
+    // does not extend the loop; indexing the (reallocated) array each iteration stays correct
+    let result = run(stringify!(
+        let a = [ 1u64, 2u64, 3u64 ];
+        let mut count = 0u64;
+        for k, v in a {
+            a.push(v + 100u64);
+            count += 1u64;
+        }
+        ret_u64(count);
+        ret_u64(a.len() as u64);
+    ));
+    assert_all(&result, &[ 3u64, 6 ]);
+}
+
+#[test]
+fn for_in_array_break_continue() {
+    let result = run(stringify!(
+        let a = [ 10u64, 20u64, 30u64, 40u64 ];
+        for k, v in a {
+            if k == 1u64 {
+                continue;
+            }
+            if k == 3u64 {
+                break;
+            }
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 10u64, 30 ]);
+}
+
+#[test]
+fn for_in_index_rejects_non_collection() {
+    // key/index iteration requires a map or array; a non-collection must name itself in the error
+    let err = build_err(stringify!(
+        for k, _ in 5 {
+            ret_i32(k);
+        }
+    ));
+    assert!(err.contains("key/index iteration") && !err.contains("for$iter"), "unexpected error: {}", err);
+}

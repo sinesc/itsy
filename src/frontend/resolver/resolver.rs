@@ -1737,41 +1737,61 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             },
             _ => {
-                // any array-typed expression is iterable. A map is lowered to iterating `map.keys()`: the
-                // loop walks a one-shot snapshot of the keys, which lets the body freely mutate the map
-                // (insert/remove) without disturbing the iteration.
+                // any array-typed expression is iterable. Collections iterated by key/index are lowered to a
+                // one-shot snapshot so the body can freely mutate them without disturbing the iteration: a
+                // map's keys/values to `map.keys()`/`map.values()`, an array's indices to a counting range
+                // `0 .. array.len()`.
                 self.resolve_expression(&mut item.expr, None)?;
                 let item_is_map = self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some());
-                // key/value iteration (`for key, value in ..`, lowered to this loop by the parser) is only
-                // valid over maps. Reject any other *resolved* iterable here so the error names the actual
-                // type, instead of letting the lowered value lookup fail with a reference to the internal
-                // temporary the desugaring introduced. Leave unresolved expressions for a later pass.
-                if item.key_value && !item_is_map {
-                    if let Some(type_id) = item.expr.type_id(self) {
-                        let type_name = self.type_name(type_id);
-                        return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotKeyValueIterable(type_name), self.module_path));
-                    }
-                }
-                if item_is_map {
+                let item_is_array = self.item_type(&item.expr).map_or(false, |ty| ty.as_array().is_some());
+                if item.iterate == ast::ForIterate::Keys && item_is_array {
+                    // index iteration over an array `arr`: lower to `for k in 0 .. arr.len()`. On the next
+                    // pass `item.expr` is a range and routes to the range arm above; any `arr[k]` value
+                    // lookup (from the `for k, v` desugaring) indexes the shared temporary directly.
                     let position = item.expr.position();
-                    let map_expr = replace(&mut item.expr, ast::Expression::void(position));
-                    item.expr = Self::make_method_call(map_expr, "keys", Vec::new(), position);
-                    self.resolve_expression(&mut item.expr, None)?;
-                    // map confirmed and lowered to `.keys()` (now an array); clear the flag so the check
-                    // above doesn't misfire against that array on subsequent resolution passes.
-                    item.key_value = false;
-                }
-                if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
-                    // infer iter type from array element type
-                    self.set_type_id(&mut item.iter, elements_type_id)?;
-                } else if let (Some(iter_type_id), Some(array_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
-                    // infer array element type from iter
-                    if let Some(array) = self.type_by_id_mut(array_type_id).as_array_mut() {
-                        array.type_id = Some(iter_type_id);
+                    let array_expr = replace(&mut item.expr, ast::Expression::void(position));
+                    let len_call = Self::make_method_call(array_expr, "len", Vec::new(), position);
+                    item.expr = Self::make_range(position, len_call);
+                    // expr is now a range, walked by value like any other range; tidy the mode accordingly.
+                    item.iterate = ast::ForIterate::Values;
+                    let type_id = item.iter.type_id(self);
+                    self.resolve_expression(&mut item.expr, type_id)?;
+                    if let Some(type_id) = item.expr.type_id(self) {
+                        self.set_type_id(&mut item.iter, type_id)?;
                     }
-                } else if self.item_type(&item.expr).map_or(false, |expr| expr.as_array().is_none()) {
-                    let type_name = self.type_name(item.expr.type_id(self).ice()?);
-                    return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
+                } else {
+                    // key/index iteration over a non-map, non-array is rejected. Reject any *resolved* such
+                    // type here so the error names it, instead of letting the lowered value lookup fail with a
+                    // reference to the internal temporary the desugaring introduced. Leave unresolved
+                    // expressions for a later pass.
+                    if item.iterate == ast::ForIterate::Keys && !item_is_map {
+                        if let Some(type_id) = item.expr.type_id(self) {
+                            let type_name = self.type_name(type_id);
+                            return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotKeyValueIterable(type_name), self.module_path));
+                        }
+                    }
+                    if item_is_map {
+                        let position = item.expr.position();
+                        let method = if item.iterate == ast::ForIterate::Keys { "keys" } else { "values" };
+                        let map_expr = replace(&mut item.expr, ast::Expression::void(position));
+                        item.expr = Self::make_method_call(map_expr, method, Vec::new(), position);
+                        self.resolve_expression(&mut item.expr, None)?;
+                        // map confirmed and lowered to a `.keys()`/`.values()` array; switch to plain by-value
+                        // iteration so the rejection above doesn't misfire against that array on later passes.
+                        item.iterate = ast::ForIterate::Values;
+                    }
+                    if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
+                        // infer iter type from array element type
+                        self.set_type_id(&mut item.iter, elements_type_id)?;
+                    } else if let (Some(iter_type_id), Some(array_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
+                        // infer array element type from iter
+                        if let Some(array) = self.type_by_id_mut(array_type_id).as_array_mut() {
+                            array.type_id = Some(iter_type_id);
+                        }
+                    } else if self.item_type(&item.expr).map_or(false, |expr| expr.as_array().is_none()) {
+                        let type_name = self.type_name(item.expr.type_id(self).ice()?);
+                        return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
+                    }
                 }
             },
         };
@@ -1999,6 +2019,25 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             op: ast::BinaryOperator::Call,
             left: ast::BinaryOperand::Expression(access),
             right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args }),
+            type_id: None,
+            op_resolved: false,
+        }))
+    }
+
+    /// Builds the half-open range `0 .. upper`. The `0` is an unconstrained numeric literal so it unifies
+    /// to `upper`'s type during range resolution. Used to lower array index iteration.
+    fn make_range(position: ast::Position, upper: ast::Expression) -> ast::Expression {
+        let zero = ast::Expression::Literal(ast::Literal {
+            position,
+            value: ast::LiteralValue::Numeric(Numeric::Unsigned(0)),
+            type_name: None,
+            type_id: None,
+        });
+        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Range,
+            left: ast::BinaryOperand::Expression(zero),
+            right: ast::BinaryOperand::Expression(upper),
             type_id: None,
             op_resolved: false,
         }))

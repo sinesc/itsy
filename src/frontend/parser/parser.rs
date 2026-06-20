@@ -1513,22 +1513,14 @@ fn var_expr(position: Position, name: &str, binding_id: BindingId) -> Expression
     Expression::Variable(Variable { position, ident: Ident { position, name: name.to_string() }, binding_id })
 }
 
-/// Builds a `receiver.method(args...)` call expression, matching the access+call node shape the
-/// expression parser produces. Used by desugaring code.
-fn method_call_expr(receiver: Expression, method: &str, args: Vec<Expression>, position: Position) -> Expression {
-    let access = Expression::BinaryOp(Box::new(BinaryOp {
-        position,
-        op          : BinaryOperator::Access,
-        left        : BinaryOperand::Expression(receiver),
-        right       : BinaryOperand::Member(Member { position, ident: Ident { position, name: method.to_string() }, type_id: None, constant_id: None }),
-        type_id     : None,
-        op_resolved : false,
-    }));
+/// Builds a `receiver[index]` index expression, matching the node shape the expression parser
+/// produces. Used by desugaring code.
+fn index_expr(receiver: Expression, index: Expression, position: Position) -> Expression {
     Expression::BinaryOp(Box::new(BinaryOp {
         position,
-        op          : BinaryOperator::Call,
-        left        : BinaryOperand::Expression(access),
-        right       : BinaryOperand::ArgumentList(ArgumentList { position, args }),
+        op          : BinaryOperator::Index,
+        left        : BinaryOperand::Expression(receiver),
+        right       : BinaryOperand::Expression(index),
         type_id     : None,
         op_resolved : false,
     }))
@@ -1589,18 +1581,24 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
 
 /// Matches a for loop statement.
 ///
-/// The single-binding form `for k in iterable { .. }` produces a plain `ForLoop`. The two-binding
-/// form `for k, v in map { .. }` (only valid for maps) is desugared here into a loop over the map's
-/// keys plus a value lookup, so the rest of the pipeline only ever sees single-binding loops:
+/// Iteration binds either values or keys/indices of the iterated collection, depending on the
+/// binding form (see [`ForIterate`]):
+///
+/// - `for v in coll` — bind values ([`Values`](ForIterate::Values)).
+/// - `for k, _ in coll` — bind keys/indices alone ([`Keys`](ForIterate::Keys)).
+/// - `for _, v in coll` — bind values, ignoring keys (equivalent to the single-binding form).
+/// - `for k, v in coll` — bind both. Desugared here into a key loop plus a per-iteration value
+///   lookup, so the rest of the pipeline only ever sees single-binding loops:
 ///
 /// ```text
-/// for k, v in <map> { <body> }
+/// for k, v in <coll> { <body> }
 /// // becomes
-/// { let $map = <map>; for k in $map { let v = $map.get(k); <body> } }
+/// { let $iter = <coll>; for k, _ in $iter { let v = $iter[k]; <body> } }
 /// ```
 ///
-/// The map is bound to a hidden temporary so it is evaluated exactly once and both the key iteration
-/// (lowered to `$map.keys()` by the resolver) and the per-iteration value lookup share it.
+/// The collection is bound to a hidden temporary so it is evaluated exactly once and both the key
+/// iteration (lowered to `$iter.keys()` for maps / a counting range for arrays by the resolver) and
+/// the per-iteration value lookup share it.
 fn for_loop(i: Input) -> Output<Statement> {
     fn loop_range(i: Input) -> Output<Expression> {
         let position = i.position();
@@ -1616,7 +1614,8 @@ fn for_loop(i: Input) -> Output<Statement> {
             }))
         )(i)
     }
-    const MAP_TEMP: &str = "for$map"; // '$' can't occur in user identifiers, so this never collides
+    const MAP_TEMP: &str = "for$iter"; // '$' can't occur in user identifiers, so this never collides
+    fn is_blank(decl: &VarDecl) -> bool { decl.ident.name == "_" }
     let position = i.position();
     let nav = i.clone();
     // Outer scope: hosts the wrapping block and the hidden map temporary in the two-binding case. In
@@ -1639,32 +1638,39 @@ fn for_loop(i: Input) -> Output<Statement> {
             })
         ),
         move |(key, value, expr, mut block, for_scope_id)| {
-            let iter = LetBinding {
-                position, binding_id: key.binding_id, ident: key.ident.clone(), mutable: true, expr: None, ty: None,
+            let let_binding = |decl: &VarDecl| LetBinding {
+                position, binding_id: decl.binding_id, ident: decl.ident.clone(), mutable: true, expr: None, ty: None,
             };
             match value {
-                None => Statement::ForLoop(ForLoop { position, iter, expr, block, scope_id: for_scope_id, key_value: false }),
+                // `for v in expr` — bind values.
+                None => Statement::ForLoop(ForLoop { position, iter: let_binding(&key), expr, block, scope_id: for_scope_id, iterate: ForIterate::Values }),
+                // `for k, _ in expr` — bind keys/indices alone.
+                Some(value) if is_blank(&value) => Statement::ForLoop(ForLoop { position, iter: let_binding(&key), expr, block, scope_id: for_scope_id, iterate: ForIterate::Keys }),
+                // `for _, v in expr` — bind values, ignoring keys; equivalent to the single-binding form (the
+                // key can't be looked up against a `_` binding anyway).
+                Some(value) if is_blank(&key) => Statement::ForLoop(ForLoop { position, iter: let_binding(&value), expr, block, scope_id: for_scope_id, iterate: ForIterate::Values }),
+                // `for k, v in expr` — bind both. Desugar into a key loop plus a per-iteration value lookup.
                 Some(value) => {
-                    // declare the hidden map temporary in the outer scope (popped from the inner scope already)
+                    // declare the hidden iterable temporary in the outer scope (popped from the inner scope already)
                     let map_binding_id = if nav.flags().is_dead { BindingId::new(0) } else { nav.add_binding(MAP_TEMP) };
                     let outer_scope_id = nav.scope_id();
-                    // let v = $map.get(k);
+                    // let v = $iter[k];  (indexing resolves for both maps and arrays; for maps it compiles
+                    // to the same `map_get` opcode that `.get(k)` would)
                     let value_let = LetBinding {
                         position, binding_id: value.binding_id, ident: value.ident, mutable: true, ty: None,
-                        expr: Some(method_call_expr(
+                        expr: Some(index_expr(
                             var_expr(position, MAP_TEMP, map_binding_id),
-                            "get",
-                            vec![ var_expr(position, &key.ident.name, key.binding_id) ],
+                            var_expr(position, &key.ident.name, key.binding_id),
                             position,
                         )),
                     };
                     block.statements.insert(0, Statement::LetBinding(value_let));
-                    // for k in $map { let v = ...; <body> }
+                    // for k, _ in $iter { let v = ...; <body> }
                     let for_loop = ForLoop {
-                        position, iter, block, scope_id: for_scope_id, key_value: true,
+                        position, iter: let_binding(&key), block, scope_id: for_scope_id, iterate: ForIterate::Keys,
                         expr: var_expr(position, MAP_TEMP, map_binding_id),
                     };
-                    // { let $map = <map>; for k in $map { .. } }
+                    // { let $iter = <map>; for k, _ in $iter { .. } }
                     let map_let = LetBinding {
                         position, binding_id: map_binding_id, ident: Ident { position, name: MAP_TEMP.to_string() },
                         mutable: false, ty: None, expr: Some(expr),

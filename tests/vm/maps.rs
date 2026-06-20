@@ -292,10 +292,34 @@ fn map_values_string() {
 }
 
 #[test]
-fn for_in_map_string_keys() {
+fn for_in_map_values() {
+    // the single-binding form iterates values (mirroring arrays)
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
-        for k in m {
+        for v in m {
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 1u64, 2, 3 ]);
+}
+
+#[test]
+fn for_in_map_string_values() {
+    let result = run(stringify!(
+        let m = [ 1u64 => "one", 2u64 => "two", 3u64 => "three" ];
+        for v in m {
+            ret_str(v);
+        }
+    ));
+    assert_all(&result, &[ "one".to_string(), "two".to_string(), "three".to_string() ]);
+}
+
+#[test]
+fn for_in_map_string_keys() {
+    // `key, _` iterates keys alone
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        for k, _ in m {
             ret_str(k);
         }
     ));
@@ -306,7 +330,7 @@ fn for_in_map_string_keys() {
 fn for_in_map_primitive_keys() {
     let result = run(stringify!(
         let m = [ 10u64 => 100u64, 20u64 => 200u64, 30u64 => 300u64 ];
-        for k in m {
+        for k, _ in m {
             ret_u64(k);
         }
     ));
@@ -318,11 +342,23 @@ fn for_in_map_lookup_value() {
     // iterate keys and look up the corresponding value through the map being iterated
     let result = run(stringify!(
         let m = [ 1u64 => 100u64, 2u64 => 200u64, 3u64 => 300u64 ];
-        for k in m {
+        for k, _ in m {
             ret_u64(m[k]);
         }
     ));
     assert_all(&result, &[ 100u64, 200, 300 ]);
+}
+
+#[test]
+fn for_in_map_ignore_key() {
+    // `_, value` iterates values, ignoring keys
+    let result = run(stringify!(
+        let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
+        for _, v in m {
+            ret_u64(v);
+        }
+    ));
+    assert_all(&result, &[ 1u64, 2, 3 ]);
 }
 
 #[test]
@@ -363,24 +399,11 @@ fn for_in_map_key_value_mutate_during_iteration() {
 }
 
 #[test]
-fn for_in_map_key_value_rejects_array() {
-    // the two-binding form is only valid over maps; iterating an array must name the offending type
-    // rather than leaking the desugaring's internal temporary
-    let err = build_err(stringify!(
-        let a = [ 1, 2, 3 ];
-        for k, v in a {
-            ret_i32(k + v);
-        }
-    ));
-    assert!(err.contains("key/value iteration") && !err.contains("for$map"), "unexpected error: {}", err);
-}
-
-#[test]
 fn for_in_map_skips_removed() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
         m.remove("b");
-        for k in m {
+        for k, _ in m {
             ret_str(k);
         }
     ));
@@ -392,7 +415,7 @@ fn for_in_map_empty() {
     let result = run(stringify!(
         let m = [ "a" => 1u64 ];
         m.remove("a");
-        for k in m {
+        for k, _ in m {
             ret_str(k);
         }
         ret_u64(m.len());
@@ -407,7 +430,7 @@ fn for_in_map_struct_keys() {
         fn main() {
             let m = [ Point { x: 1, y: 2 } => 10u64, Point { x: 3, y: 4 } => 20u64 ];
             // iterate struct keys, using each as a lookup key and reading its fields
-            for k in m {
+            for k, _ in m {
                 ret_i32(k.x + k.y);
             }
         }
@@ -487,7 +510,7 @@ fn map_compaction_after_many_removes() {
         ret_u64(m.len());
         ret_u64(m[15u64]);
         ret_u64(m[19u64]);
-        for k in m {
+        for k, _ in m {
             ret_u64(k);
         }
     ));
@@ -538,7 +561,7 @@ fn map_grown_then_iterated() {
             m[i] = i;
         }
         let mut sum = 0u64;
-        for k in m {
+        for k, _ in m {
             sum += k;
         }
         ret_u64(sum);
@@ -569,7 +592,7 @@ fn for_in_map_remove_during_iteration() {
     // removing the current key during iteration is supported (the loop walks a key snapshot)
     let result = run(stringify!(
         let m = [ 1u64 => 1u64, 2u64 => 2u64, 3u64 => 3u64, 4u64 => 4u64 ];
-        for k in m {
+        for k, _ in m {
             if k % 2u64 == 0u64 {
                 m.remove(k);
             }
@@ -587,7 +610,7 @@ fn for_in_map_remove_all_during_iteration_string_keys() {
     // alive for the duration of its iteration even after it is dropped from the map
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
-        for k in m {
+        for k, _ in m {
             m.remove(k);
         }
         ret_u64(m.len());
@@ -602,7 +625,7 @@ fn for_in_map_insert_during_iteration_is_snapshot() {
     let result = run(stringify!(
         let m = [ 1u64 => 10u64, 2u64 => 20u64 ];
         let mut count = 0u64;
-        for k in m {
+        for k, _ in m {
             m[k + 100u64] = 0u64;
             count += 1u64;
         }
@@ -616,7 +639,7 @@ fn for_in_map_insert_during_iteration_is_snapshot() {
 fn for_in_map_break_continue() {
     let result = run(stringify!(
         let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64, 4u64 => 40u64 ];
-        for k in m {
+        for k, _ in m {
             if k == 2u64 {
                 continue;
             }

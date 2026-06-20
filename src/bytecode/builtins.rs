@@ -73,6 +73,15 @@ impl_builtins! {
     /// meaning that when an array already bound to one variable is bound to another, both of the
     /// variables will point at the same data.
     ///
+    /// Iteration mirrors maps:
+    ///
+    /// - `for value in array` — iterate values.
+    /// - `for index, value in array` — iterate indices and values.
+    /// - `for index, _ in array` — iterate indices alone.
+    ///
+    /// The index range is snapshotted at loop entry, so the body may grow the array without extending
+    /// the iteration.
+    ///
     /// # Examples
     ///
     /// ``` ignore
@@ -1321,11 +1330,15 @@ pub mod documentation {
     ///
     /// Maps associate `Key`s with `Value`s. Like arrays, maps are a reference type: binding a map
     /// already bound to one variable to another makes both variables point at the same data.
-    /// Iteration (`for key in map` or `for key, value in map`), indexing (`map[key]`) and the literal
-    /// syntax (`[ key => value ]`) are part of the language; the methods below are the named operations.
+    /// Iteration, indexing (`map[key]`) and the literal syntax (`[ key => value ]`) are part of the
+    /// language; the methods below are the named operations. The iteration forms mirror arrays:
     ///
-    /// Iteration walks a snapshot of the map's keys taken in insertion order, so the body is free to
-    /// insert into or remove from the map without disturbing the iteration.
+    /// - `for value in map` — iterate values.
+    /// - `for key, value in map` — iterate keys and values.
+    /// - `for key, _ in map` — iterate keys alone.
+    ///
+    /// Iteration walks a snapshot taken in insertion order, so the body is free to insert into or remove
+    /// from the map without disturbing the iteration.
     ///
     /// # Examples
     ///

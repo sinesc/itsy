@@ -1105,6 +1105,21 @@ impl_resolvable!(TraitDef {
 });
 
 
+/// Selects what a `for`-loop binds its iteration variable to when iterating a collection.
+///
+/// The single-binding form `for v in coll` binds values ([`Values`](ForIterate::Values)); the
+/// two-binding forms bind keys/indices ([`Keys`](ForIterate::Keys)): `for k, _ in coll` iterates
+/// keys alone, while `for k, v in coll` is desugared by the parser into a `Keys` loop plus a
+/// per-iteration value lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForIterate {
+    /// Bind each value. For a map this lowers to iterating `map.values()`.
+    Values,
+    /// Bind each key/index. For a map this lowers to iterating `map.keys()`; for an array it lowers to a
+    /// counting range `0 .. array.len()`.
+    Keys,
+}
+
 /// A for-in loop, e.g. `for i in 0..10 { ... }`.
 #[derive(Debug)]
 pub struct ForLoop {
@@ -1113,9 +1128,11 @@ pub struct ForLoop {
     pub expr    : Expression,
     pub block   : Block,
     pub scope_id: ScopeId,
-    /// Set for the loop synthesized from the two-binding `for key, value in map` form. The iterated
-    /// expression must resolve to a map; the resolver uses this to reject non-maps with a clear error.
-    pub key_value: bool,
+    /// Whether the loop binds values or keys/indices of the iterated collection. The resolver uses
+    /// this to lower a map to `.values()` or `.keys()`, and to reject (not-yet-supported) array index
+    /// iteration with a clear error. Once a map has been lowered to an array, this is reset to
+    /// [`Values`](ForIterate::Values) so repeated resolver passes treat it as a plain by-value walk.
+    pub iterate: ForIterate,
 }
 
 impl_positioned!(ForLoop);

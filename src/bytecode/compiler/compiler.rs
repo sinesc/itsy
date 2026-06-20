@@ -1044,8 +1044,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
         let iter_type_id = item.iter.type_id(self).ice()?;
-        // handle ranges or arrays. Maps were lowered to iterating `map.keys()` during resolution, so they
-        // reach here as an ordinary array-typed expression. (NOTE: must match Resolver::resolve_for_loop.)
+        // handle ranges or arrays. Maps were lowered to iterating `map.keys()`/`map.values()` during
+        // resolution, so they reach here as an ordinary array-typed expression, walked by value.
+        // (NOTE: must match Resolver::resolve_for_loop.)
         let result = match &item.expr {
             BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
                 self.compile_for_loop_range(item, iter_local, iter_type_id)
