@@ -5,7 +5,7 @@
 //!
 //! Look at the [build_str] or [itsy_api!] example to get started integrating Itsy into a project.
 //!
-//! You can find documentation for the language in the [Itsy language reference](crate::internals::documentation).
+//! You can find documentation for the language in the [Itsy language reference](crate::documentation).
 
 #[path="frontend/frontend.rs"]
 #[cfg(feature="compiler")]
@@ -18,6 +18,8 @@ mod bytecode;
 mod interface;
 mod prelude;
 mod config;
+#[cfg(doc)]
+pub mod documentation;
 
 pub use interface::*;
 

@@ -63,8 +63,6 @@ pub mod internals {
         #[cfg(feature="compiler")]
         pub use crate::bytecode::builtins::BuiltinType;
     }
-    #[cfg(doc)]
-    pub use crate::bytecode::builtins::documentation;
 }
 
 #[cfg(feature="compiler")]
