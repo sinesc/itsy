@@ -33,27 +33,41 @@ pub(super) struct IntrinsicCast {
     pub(super) method          : &'static str,
 }
 
-/// Describes an intrinsic operator trait that backs an arithmetic operator for custom types. Each has a
-/// single required method `fn <method>(self: Self, rhs: Self) -> Self`. See the registration loop in
-/// Resolver::resolve_binary_op and Resolver::resolve_assignment).
+/// Return type of an intrinsic operator trait's required method: either the implementing type itself
+/// (`Self`, e.g. `Add::add(self, rhs) -> Self`) or a fixed primitive type (e.g. `Eq::eq(self, rhs) -> bool`).
+pub(super) enum IntrinsicResult {
+    /// The method returns `Self` (the implementing type), like the arithmetic operator traits.
+    SelfType,
+    /// The method returns the given (primitive) type, like `Eq` returning `bool`.
+    Type(Type),
+}
+
+/// Describes an intrinsic operator trait that backs a binary operator for custom types. Each has a single
+/// required method `fn <method>(self: Self, rhs: Self) -> <result>` whose return type is given by `result`
+/// (`Self` for the arithmetic traits, `bool` for `Eq`). See the registration loop in `resolve`,
+/// Resolver::resolve_binary_op and Resolver::resolve_assignment.
 pub(super) struct IntrinsicOpTrait {
-    /// The operator this trait backs, e.g. `Add` for `+`.
+    /// The operator this trait backs, e.g. `Add` for `+`. `Eq` is keyed under `Equal` and backs both
+    /// `==` and `!=` (see `Resolver::resolve_binary_op`).
     pub(super) op          : ast::BinaryOperator,
     /// Name of the trait scripts implement, e.g. `Add`.
     pub(super) trait_name  : &'static str,
     /// The trait's single required method, e.g. `add`.
     pub(super) method      : &'static str,
+    /// Return type of the required method (`Self` or a fixed primitive).
+    pub(super) result      : IntrinsicResult,
 }
 
 /// The set of intrinsic operator traits known to the compiler. These let custom types implement the
-/// arithmetic operators; an operator applied to a non-numeric type is lowered to a call of the
-/// corresponding trait method (e.g. `a + b` to `a.add(b)`, `a += b` to `a = a.add(b)`).
+/// binary operators; an operator applied to a type that has no built-in meaning for it is lowered to a
+/// call of the corresponding trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`).
 pub(super) const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
-    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem" },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add", result: IntrinsicResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub", result: IntrinsicResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul", result: IntrinsicResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div", result: IntrinsicResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem", result: IntrinsicResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Equal, trait_name: "Eq", method: "eq", result: IntrinsicResult::Type(Type::bool) },
 ];
 
 /// A resolved intrinsic operator: the trait that backs an operator and the trait method to dispatch to.

@@ -20,7 +20,7 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin, GeneratorBuiltin}};
-use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, ResultTypeInfo};
+use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -36,9 +36,10 @@ pub(crate) struct Resolver<'ctx> {
     /// the `ToString` trait/`to_string`). A cast to such a target that is not a built-in primitive cast
     /// is lowered to a call of the trait method on the cast operand, provided the operand implements it.
     intrinsic_casts : &'ctx UnorderedMap<TypeId, IntrinsicCast>,
-    /// Maps an arithmetic operator to the intrinsic operator trait that backs it (e.g. `+` -> the `Add`
-    /// trait/`add`). An operator applied to a non-numeric type is lowered to a call of the trait method
-    /// on the operands, provided they implement it.
+    /// Maps a binary operator to the intrinsic operator trait that backs it (e.g. `+` -> the `Add`
+    /// trait/`add`). An operator applied to a type with no built-in meaning for it is lowered to a call of
+    /// the trait method on the operands, provided they implement it. `Eq` is keyed under `Equal` and backs
+    /// both `==` and `!=` (`a != b` lowers to the negated `eq` result).
     intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
     /// Type id of the built-in `Error` trait. Fixed `Err` payload type of every synthesized `Result<T>`.
     error_trait_type_id: TypeId,
@@ -129,17 +130,23 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method });
     }
 
-    // register intrinsic operator traits (e.g. `Add`). These are ordinary traits scripts implement via
-    // `impl Add for MyType { ... }`; an operator on a non-numeric type lowers to a call of the trait method
-    // (e.g. `a + b` to `a.add(b)`). Add a row to INTRINSIC_OP_TRAITS to back a further operator.
+    // register intrinsic operator traits (e.g. `Add`, `Eq`). These are ordinary traits scripts implement via
+    // `impl Add for MyType { ... }`; an operator on a type with no built-in meaning for it lowers to a call
+    // of the trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`). Add a row to
+    // INTRINSIC_OP_TRAITS to back a further operator.
     let mut intrinsic_ops = UnorderedMap::new();
     for intrinsic in INTRINSIC_OP_TRAITS {
         let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
-        // required method `fn <method>(self: Self, rhs: Self) -> Self`, registered exactly as the resolver
+        // required method `fn <method>(self: Self, rhs: Self) -> <result>`, where the result is either `Self`
+        // (the arithmetic traits) or a fixed primitive (`Eq::eq -> bool`). Registered exactly as the resolver
         // would for a source-defined trait method so impl-matching and vtable construction pick it up.
+        let result_type_id = match &intrinsic.result {
+            IntrinsicResult::SelfType => trait_type_id,
+            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+        };
         let constant_id = scopes.insert_function(
             &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
-            Some(trait_type_id),
+            Some(result_type_id),
             vec![ Some(trait_type_id), Some(trait_type_id) ],
             Some(FunctionKind::Method(trait_type_id)),
         );
@@ -2021,6 +2028,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
+                    // operator overloading: `==`/`!=` on a type implementing the intrinsic `Eq` trait are
+                    // lowered to a call of its `eq` method (overriding the built-in deep comparison). The `Eq`
+                    // trait backs both operators and is keyed under `Equal` in `intrinsic_ops`; `!=` negates
+                    // the `eq` result. Types that do not implement `Eq` keep the built-in comparison, so a
+                    // missing impl is not an error here. Ordering comparisons (`<`, `>`, ...) never dispatch.
+                    if matches!(item.op, Equal | NotEqual) {
+                        let intrinsic = self.intrinsic_ops.get(&Equal).copied().ice()?;
+                        if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
+                            let negate = item.op == NotEqual;
+                            return self.rewrite_eq_op_to_method(item, intrinsic.method, negate, expected_result);
+                        }
+                    }
                 }
             },
             Add | Sub | Mul | Div | Rem => {
@@ -2761,6 +2780,46 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         match Self::make_method_call(receiver, method, vec![ rhs ], position) {
             ast::Expression::BinaryOp(call) => *item = *call,
             _ => return Self::ice("make_method_call did not produce a binary operation"),
+        }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Rewrites an equality comparison `a == b` / `a != b` on a type implementing the intrinsic `Eq` trait
+    /// into a call of its `eq` method and resolves it. `==` lowers to `a.eq(b)`; `!=` lowers to the negated
+    /// form `a.eq(b) == false`, which the built-in boolean comparison then evaluates. Mirrors
+    /// `rewrite_binary_op_to_method` (used for the arithmetic operator traits) but accounts for `eq`
+    /// returning `bool` rather than `Self`.
+    fn rewrite_eq_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, method: &str, negate: bool, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        let call = Self::make_method_call(receiver, method, vec![ rhs ], position);
+        if negate {
+            // `a != b` becomes `a.eq(b) == false`: comparing the boolean `eq` result against `false`
+            // negates it through the built-in boolean comparison (the `false` operand is a primitive, so
+            // this re-resolves as a regular comparison and is not itself dispatched through `Eq`).
+            let false_literal = ast::Expression::Literal(ast::Literal {
+                position,
+                value: ast::LiteralValue::Bool(false),
+                type_name: None,
+                type_id: None,
+            });
+            item.op = ast::BinaryOperator::Equal;
+            item.left = ast::BinaryOperand::Expression(call);
+            item.right = ast::BinaryOperand::Expression(false_literal);
+            item.type_id = None;
+            item.op_resolved = false;
+        } else {
+            match call {
+                ast::Expression::BinaryOp(call) => *item = *call,
+                _ => return Self::ice("make_method_call did not produce a binary operation"),
+            }
         }
         self.resolve_binary_op(item, expected_result)
     }

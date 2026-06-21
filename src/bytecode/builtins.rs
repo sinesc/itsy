@@ -1527,6 +1527,28 @@ pub mod documentation {
     /// v += Vec2 { x: 1, y: 1 };                               // Vec2 { x: 5, y: 7 }  (uses Add)
     /// let scaled = v * Vec2 { x: 2, y: 2 };                   // Vec2 { x: 10, y: 14 }
     /// ```
+    ///
+    /// # The equality trait
+    ///
+    /// [`Eq`](traits::Eq) overloads the `==` and `!=` operators. Its single method
+    /// `fn eq(self: Self, rhs: Self) -> bool` decides whether two values are equal; `!=` is the negation of
+    /// `eq` and needs no separate method. Implementing it overrides the built-in deep comparison, which is
+    /// what lets a type define its own notion of equality (e.g. ignoring a cached field):
+    ///
+    /// ``` ignore
+    /// struct Money { cents: i64, note: String }
+    ///
+    /// impl Eq for Money {
+    ///     fn eq(self: Self, rhs: Self) -> bool {
+    ///         self.cents == rhs.cents   // compare by value only, ignoring the note
+    ///     }
+    /// }
+    ///
+    /// let a = Money { cents: 500, note: "rent" };
+    /// let b = Money { cents: 500, note: "gift" };
+    /// let equal = a == b;   // true
+    /// let differ = a != b;  // false
+    /// ```
     pub mod traits {
 
         /// Converts a value to a [`String`](crate::internals::documentation::String).
@@ -1587,6 +1609,13 @@ pub mod documentation {
         pub trait Rem {
             /// Returns the result of `self % rhs`.
             fn rem(self: Self, rhs: Self) -> Self;
+        }
+
+        /// Overloads the `==` and `!=` operators. See [the equality trait](self#the-equality-trait)
+        /// for an example.
+        pub trait Eq {
+            /// Returns `true` if `self` equals `rhs`. The `!=` operator returns the negation of this.
+            fn eq(self: Self, rhs: Self) -> bool;
         }
 
         /// The error type of [`Result`](crate::internals::documentation::Result).

@@ -200,6 +200,122 @@ fn missing_impl_compound() {
     assert!(err.contains("does not implement required trait `Add`"), "unexpected error: {}", err);
 }
 
+// --- equality via the Eq trait ---
+
+#[test]
+fn eq_struct() {
+    // `Eq` overrides the built-in deep comparison: this `eq` ignores the `note` field, so values that
+    // differ only in `note` compare equal and `!=` is the negation of that
+    let result = run(stringify!(
+        struct Money { cents: i64, note: String }
+        impl Eq for Money {
+            fn eq(self: Self, rhs: Self) -> bool {
+                self.cents == rhs.cents
+            }
+        }
+        fn main() {
+            let a = Money { cents: 500, note: "rent" };
+            let b = Money { cents: 500, note: "gift" };
+            let c = Money { cents: 750, note: "rent" };
+            ret_bool(a == b);
+            ret_bool(a != b);
+            ret_bool(a == c);
+            ret_bool(a != c);
+        }
+    ));
+    assert_all(&result, &[ true, false, false, true ]);
+}
+
+#[test]
+fn eq_enum() {
+    let result = run(stringify!(
+        enum E { A(i64), B(i64) }
+        impl Eq for E {
+            fn eq(self: Self, rhs: Self) -> bool {
+                // equal only when both are the A variant carrying the same value
+                match self {
+                    E::A(x) => match rhs { E::A(y) => x == y, E::B(y) => false },
+                    E::B(x) => false,
+                }
+            }
+        }
+        fn main() {
+            ret_bool(E::A(3) == E::A(3));
+            ret_bool(E::A(3) == E::A(4));
+            ret_bool(E::A(3) == E::B(3));
+            ret_bool(E::A(3) != E::B(3));
+        }
+    ));
+    assert_all(&result, &[ true, false, false, true ]);
+}
+
+#[test]
+fn eq_in_condition() {
+    // the lowered comparison works anywhere a bool is expected, e.g. an `if` condition
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl Eq for N { fn eq(self: Self, rhs: Self) -> bool { self.v == rhs.v } }
+        fn main() {
+            let a = N { v: 1 };
+            let b = N { v: 1 };
+            if a == b {
+                ret_i64(10);
+            }
+            if a != b {
+                ret_i64(20);
+            } else {
+                ret_i64(30);
+            }
+        }
+    ));
+    assert_all(&result, &[ 10i64, 30 ]);
+}
+
+#[test]
+fn eq_forward_impl() {
+    // the Eq trait is implemented after the expression that uses it
+    let result = run(stringify!(
+        fn main() {
+            ret_bool(N { v: 1 } == N { v: 1 });
+            ret_bool(N { v: 1 } == N { v: 2 });
+        }
+        struct N { v: i64 }
+        impl Eq for N { fn eq(self: Self, rhs: Self) -> bool { self.v == rhs.v } }
+    ));
+    assert_all(&result, &[ true, false ]);
+}
+
+#[test]
+fn eq_dynamic_dispatch() {
+    // `==` through trait-object-typed operands dispatches `eq` virtually, like the arithmetic traits
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl Eq for N { fn eq(self: Self, rhs: Self) -> bool { self.v == rhs.v } }
+        fn check(a: Eq, b: Eq) -> bool {
+            a == b
+        }
+        fn main() {
+            ret_bool(check(N { v: 5 }, N { v: 5 }));
+            ret_bool(check(N { v: 5 }, N { v: 6 }));
+        }
+    ));
+    assert_all(&result, &[ true, false ]);
+}
+
+#[test]
+fn eq_without_impl_uses_builtin() {
+    // a type that does not implement Eq still compares via the built-in deep comparison (field by field)
+    let result = run(stringify!(
+        struct P { x: i64, y: i64 }
+        fn main() {
+            ret_bool(P { x: 1, y: 2 } == P { x: 1, y: 2 });
+            ret_bool(P { x: 1, y: 2 } == P { x: 1, y: 9 });
+            ret_bool(P { x: 1, y: 2 } != P { x: 9, y: 2 });
+        }
+    ));
+    assert_all(&result, &[ true, false, true ]);
+}
+
 #[test]
 fn numeric_unaffected() {
     // built-in numeric arithmetic and string concatenation still work alongside the operator traits
