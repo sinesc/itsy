@@ -11,7 +11,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin}};
+use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin, GeneratorBuiltin}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use placeholder::{LoopControlStack, LoopControl, Functions};
@@ -44,6 +44,9 @@ pub(crate) struct Compiler<T> {
     trait_vtable_base: StackAddress,
     /// Mapping from trait implementor function ids to trait function ids.
     trait_function_implementors: UnorderedMap<FunctionId, FunctionId>,
+    /// Monotonic counter assigning a unique id to each `yield` site, written into the generator object
+    /// on suspension (reserved for milestone-4 mid-flight-drop cleanup; see generators.md).
+    next_yield_id: StackAddress,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -103,6 +106,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
         trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&resolved, &trait_functions, &trait_implementors)?,
+        next_yield_id               : 0,
         resolved,
     };
 
@@ -251,17 +255,38 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             S::Yield(yield_stmt) => {
-                // milestone 1: generators parse and resolve, but codegen is not implemented yet.
-                Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generators".to_string()), &self.module_path))
+                if yield_stmt.key.is_some() {
+                    // milestone 3: keyed generators (`yield key, value`)
+                    return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator key/value yield".to_string()), &self.module_path));
+                }
+                let (value_size, value_is_ref) = { let ty = self.ty(&yield_stmt.value); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
+                if value_is_ref {
+                    // milestone 3: reference-typed yields need refcount handling in the generator object
+                    return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed value".to_string()), &self.module_path));
+                }
+                comment!(self, "yield");
+                self.compile_expression(&yield_stmt.value)?;
+                let yield_id = self.next_yield_id;
+                self.next_yield_id += 1;
+                self.writer.gen_yield(yield_id, value_size);
+                Ok(())
             },
             S::Return(ast::Return { expr, .. }) => {
-                comment!(self, "block returning");
-                self.compile_expression(expr)?;
-                // inc result, then dec everything
-                self.write_cnt(self.ty(expr), true, HeapRefOp::Inc)?;
-                self.write_scope_destructor(BranchingScope::Function)?;
-                self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree)?;
-                self.write_ret()?;
+                if self.locals.is_generator() {
+                    // a generator's `return` carries no value (resolver-enforced); release locals and
+                    // complete the generator instead of performing a normal value return.
+                    comment!(self, "generator returning");
+                    self.write_scope_destructor(BranchingScope::Function)?;
+                    self.writer.gen_return();
+                } else {
+                    comment!(self, "block returning");
+                    self.compile_expression(expr)?;
+                    // inc result, then dec everything
+                    self.write_cnt(self.ty(expr), true, HeapRefOp::Inc)?;
+                    self.write_scope_destructor(BranchingScope::Function)?;
+                    self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree)?;
+                    self.write_ret()?;
+                }
                 Ok(())
             },
         }
@@ -517,10 +542,37 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.write_call(function_id);
                 }
             },
-            FunctionKind::Function => {
+            FunctionKind::GeneratorBuiltin(type_id, generator_builtin) => {
+                // receiver (the generator) is arg[0]; each method is dispatched to its dedicated opcode
                 self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", constant.path);
-                self.write_call(function_id);
+                match generator_builtin {
+                    GeneratorBuiltin::Next => { self.writer.gen_next(); },
+                    GeneratorBuiltin::Value => {
+                        let (_key_type_id, value_type_id) = self.generator_signature(type_id).ice()?;
+                        self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
+                    },
+                    GeneratorBuiltin::Key => {
+                        // milestone 3: keyed generators
+                        return Err(CompileError::new(item, CompileErrorKind::Unsupported("generator key()".to_string()), &self.module_path));
+                    },
+                };
+            },
+            FunctionKind::Function => {
+                self.compile_call_args(item, function_kind)?;
+                // a call to a generator function constructs a generator object instead of running the body
+                let ret_type_id = self.resolved.function(function_id).ret_type_id(self);
+                if ret_type_id.map_or(false, |ret_type_id| self.generator_signature(ret_type_id).is_some()) {
+                    comment!(self, "make generator {}()", constant.path);
+                    let arg_size = self.resolved.function(function_id).arg_size(self);
+                    // push the entry address (forward-reference safe) above the args, then construct
+                    let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
+                    self.write_immediate_sa(function_addr)?;
+                    self.writer.gen_make(arg_size);
+                } else {
+                    comment!(self, "call {}()", constant.path);
+                    self.write_call(function_id);
+                }
             },
             FunctionKind::Variant(type_id, variant_index) => {
                 let index_type = Type::unsigned(size_of::<VariantIndex>());
@@ -1131,6 +1183,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let mut frame = StackFrame::new();
         // use the resolved return type rather than the (possibly absent, for inferred closures) explicit annotation
         frame.ret_size = self.function_by_id(function_id).ret_size(self);
+        // a function returning `Generator<..>` is a generator: it suspends via `yield` and completes via
+        // the generator-return opcode instead of a normal `ret`.
+        frame.is_generator = self.function_by_id(function_id).ret_type_id(self).map_or(false, |ret_type_id| self.generator_signature(ret_type_id).is_some());
         for arg in item.sig.params.iter() {
             frame.insert(arg.binding_id, frame.arg_pos);
             self.init_state.declare(arg.binding_id);
@@ -1727,6 +1782,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             Ok(())
         };
         let position = self.writer.const_len();
+        // a generator carrier is structurally a struct, but its heap object holds an opaque header +
+        // frozen frame, not its `$value`/`$key` fields. Emit a Closure (opaque) constructor so the
+        // refcounter refcounts the object without recursing into the (non-existent) field layout.
+        // The frozen frame's own nested refs are released on the happy path by the body's scope
+        // destructors; mid-flight-drop cleanup is milestone 4 (see generators.md).
+        if self.generator_signature(type_id).is_some() {
+            *prev_primitive = None;
+            self.writer.store_const(Constructor::Closure);
+            return Ok(position);
+        }
         match self.ty(&type_id) {
             Type::Array(array) => {
                 *prev_primitive = None;

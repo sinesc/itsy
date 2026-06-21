@@ -18,7 +18,7 @@ use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
 use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
-use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin}};
+use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin, GeneratorBuiltin}};
 
 /// Temporary internal state during program type/binding resolution.
 /// Describes an intrinsic conversion trait that backs an `as` cast to a particular target type.
@@ -450,6 +450,43 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     Some(ret_type_id.unwrap_or(TypeId::VOID)),
                     arg_type_ids.into_iter().map(Some).collect::<Vec<Option<TypeId>>>(),
                     Some(FunctionKind::MapBuiltin(type_id, map_builtin))
+                ))
+            },
+        })
+    }
+
+    /// Create a generator method signature (`next`/`value`/`key`). Like the map builtins these are
+    /// registered as [`FunctionKind::GeneratorBuiltin`] and lowered to dedicated opcodes; the receiver
+    /// (the generator) is prepended as the first argument. `value`/`key` return the generator's value
+    /// and key types respectively; `key` only exists for `Generator<K, V>`.
+    fn try_create_generator_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
+
+        if let Some(constant_id) = self.scopes.constant_id(ScopeId::ROOT, name, type_id) {
+            return Ok(Some(constant_id));
+        }
+
+        let (key_type_id, value_type_id) = match self.generator_signature(type_id) {
+            Some(sig) => sig,
+            None => return Ok(None),
+        };
+
+        // (builtin, return type, explicit argument types) — the receiver is prepended below
+        let spec: Option<(GeneratorBuiltin, TypeId, Vec<TypeId>)> = match name {
+            "next"  => Some((GeneratorBuiltin::Next, self.primitive_type_id(Type::bool)?, vec![])),
+            "value" => Some((GeneratorBuiltin::Value, value_type_id, vec![])),
+            "key"   => key_type_id.map(|key_type_id| (GeneratorBuiltin::Key, key_type_id, vec![])),
+            _ => None,
+        };
+
+        Ok(match spec {
+            None => None,
+            Some((gen_builtin, ret_type_id, mut arg_type_ids)) => {
+                arg_type_ids.insert(0, type_id); // prepend the receiver (the generator itself)
+                Some(self.scopes.insert_function(
+                    name,
+                    Some(ret_type_id),
+                    arg_type_ids.into_iter().map(Some).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::GeneratorBuiltin(type_id, gen_builtin))
                 ))
             },
         })
@@ -2334,9 +2371,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         let is_array = left_ty.as_array().is_some();
                         let is_map = left_ty.as_map().is_some();
                         let is_scalar = left_ty.is_float() || left_ty.is_integer() || left_ty.is_string();
+                        // a generator carrier is structurally a struct; recognize it before the struct path
+                        let is_generator = self.generator_signature(left_type_id).is_some();
                         // constituent trait ids if the receiver is a multiple-trait bound (`A + B`)
                         let trait_bound_ids = left_ty.as_trait_bound().cloned();
-                        let constant_id = if is_array {
+                        let constant_id = if is_generator {
+                            // lookup generator builtin (next/value/key) or try to create it
+                            self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
+                                .or(self.try_create_generator_builtin(member_name, owning_type_id)?)
+                        } else if is_array {
                             // lookup array builtin or try to create it
                             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                                 .or(self.try_create_array_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)

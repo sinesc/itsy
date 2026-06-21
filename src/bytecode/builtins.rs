@@ -28,6 +28,21 @@ pub enum MapBuiltin {
     Len,
 }
 
+/// Identifies a built-in generator method.
+///
+/// Like the map methods, generator methods are dispatched through dedicated VM opcodes (the `gen_*`
+/// opcodes in `opcodes.rs`) rather than the `impl_builtins!` machinery: `value()`/`key()` have
+/// parametric return types and `next()` drives the coroutine. The resolver registers these as
+/// [`FunctionKind::GeneratorBuiltin`](crate::shared::meta::FunctionKind) and the compiler lowers each
+/// to its opcode.
+#[cfg(feature="compiler")]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GeneratorBuiltin {
+    Next,
+    Value,
+    Key,
+}
+
 /// Appends len chars from source starting at start to target. If len is None the entire remaining source will be copied.
 #[cfg(feature="runtime")]
 fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut String) -> Chars<'a> {

@@ -1757,6 +1757,36 @@ impl_opcodes!{
         self.state = VMState::Yielded;
     }*/
 
+    /// Constructs a generator from the arguments on the stack (its entry address was pushed above them)
+    /// and pushes a reference to it. Does not run the generator body.
+    fn gen_make(&mut self, arg_size: FrameAddress) {
+        self.gen_make_impl(arg_size);
+    }
+
+    /// Resumes the generator referenced on the stack top, transferring control into its body. Control
+    /// returns to the instruction following this one (with a bool result) once the generator yields or
+    /// completes.
+    fn gen_next(&mut self) {
+        self.gen_next_impl();
+    }
+
+    /// Suspends the running generator, stashing the yielded value (of the given size) under the given
+    /// yield-point id, and returns control to the driving `next()` with a `true` result.
+    fn gen_yield(&mut self, yield_id: StackAddress, value_size: FrameAddress) {
+        self.gen_yield_impl(yield_id, value_size);
+    }
+
+    /// Completes the running generator and returns control to the driving `next()` with a `false` result.
+    fn gen_return(&mut self) {
+        self.gen_return_impl();
+    }
+
+    /// Reads the generator's last yielded value (of the given size) and pushes it, consuming the
+    /// generator reference on the stack top.
+    fn gen_value(&mut self, value_size: FrameAddress) {
+        self.gen_value_impl(value_size);
+    }
+
     /// Terminate program execution.
     fn exit(&mut self) [ return ] {
         self.state = VMState::Terminated;

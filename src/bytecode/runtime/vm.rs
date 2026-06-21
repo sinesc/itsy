@@ -1,10 +1,42 @@
 //! A virtual machine for running Itsy bytecode.
 
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
+use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, FrameAddress};
 use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
+
+/// Layout of a generator heap object's data: a fixed header followed by the frozen stack frame.
+/// The frame is stored as opaque bytes (the refcounter treats the whole object as a `Closure`-like
+/// opaque value), per the milestone-2 design-in constraint. `next()`/`value()` read the header.
+pub(crate) const GEN_STATE_OFFSET: usize = 0;                                        // u8 generator state
+pub(crate) const GEN_PC_OFFSET: usize = GEN_STATE_OFFSET + 1;                        // StackAddress resume program counter
+pub(crate) const GEN_YIELD_OFFSET: usize = GEN_PC_OFFSET + size_of::<StackAddress>();// StackAddress current yield-point id (reserved for milestone 4 drop cleanup)
+pub(crate) const GEN_VALUE_OFFSET: usize = GEN_YIELD_OFFSET + size_of::<StackAddress>(); // last yielded value
+pub(crate) const GEN_VALUE_SIZE: usize = 8;                                          // value slot holds any primitive (<= 8 bytes)
+pub(crate) const GEN_FRAME_OFFSET: usize = GEN_VALUE_OFFSET + GEN_VALUE_SIZE;        // frozen frame bytes follow
+
+/// Generator state stored at `GEN_STATE_OFFSET`.
+pub(crate) const GEN_NOT_STARTED: u8 = 0;
+pub(crate) const GEN_SUSPENDED: u8 = 1;
+pub(crate) const GEN_DONE: u8 = 2;
+pub(crate) const GEN_RUNNING: u8 = 3;
+
+/// Caller-resume bookkeeping pushed by `gen_next` and consumed by `gen_yield`/`gen_return` to transfer
+/// control back to the code that resumed the generator. The exec loop never unwinds; control simply
+/// transfers between the caller frame and the (relocated) generator frame on the shared stack.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct GenControl {
+    /// Frame pointer to restore for the caller.
+    pub caller_fp: StackAddress,
+    /// Stack pointer to truncate back to (also where the generator frame was copied and where
+    /// `next()`'s bool result is written).
+    pub caller_sp: StackAddress,
+    /// Program counter at which the caller continues after `next()`.
+    pub caller_pc: StackAddress,
+    /// Heap index of the generator being driven.
+    pub gen_index: StackAddress,
+}
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -32,6 +64,8 @@ pub struct VM<T, U> {
     pub(crate) state        : VMState,
     pub stack               : Stack,
     pub heap                : Heap,
+    /// Stack of in-flight generator resumptions (see [`GenControl`]).
+    pub(crate) gen_control  : Vec<GenControl>,
 }
 
 // todo check where bounds here, some seam pointless
@@ -54,6 +88,7 @@ impl<T, U> VM<T, U> {
             state       : VMState::Ready,
             stack       : stack,
             heap        : heap,
+            gen_control : Vec::new(),
         }
     }
 
@@ -102,6 +137,7 @@ impl<T, U> VM<T, U> {
         self.pc = 0;
         self.error_pc = 0;
         self.state = VMState::Ready;
+        self.gen_control.clear();
     }
 }
 
@@ -130,6 +166,101 @@ impl<T, U> VM<T, U> {
         }
         stack.begin();
         stack
+    }
+
+    /// Constructs a generator object from the arguments currently on the stack and pushes a reference to
+    /// it. The entry address was pushed (forward-reference safe) immediately above the arguments and is
+    /// popped here. The generator does not run yet; its initial frame is `ARGS | prev_fp | prev_pc`
+    /// (the locals are reserved by the function prologue on the first `next()`).
+    pub(crate) fn gen_make_impl(self: &mut Self, arg_size: FrameAddress) {
+        let entry: StackAddress = self.stack.pop();
+        let arg_size = arg_size as usize;
+        let data_start = self.stack.sp() as usize - arg_size;
+        let mut data = Vec::with_capacity(GEN_FRAME_OFFSET + arg_size + 2 * size_of::<StackAddress>());
+        data.push(GEN_NOT_STARTED);
+        data.extend_from_slice(&entry.to_ne_bytes());                   // resume pc = function entry
+        data.extend_from_slice(&(0 as StackAddress).to_ne_bytes());     // yield-point id
+        data.resize(GEN_FRAME_OFFSET, 0);                              // zero the value slot
+        data.extend_from_slice(&self.stack.data()[data_start..data_start + arg_size]); // captured args
+        data.resize(data.len() + 2 * size_of::<StackAddress>(), 0);     // prev_fp / prev_pc slots
+        let index = self.heap.alloc_place(data, ItemIndex::MAX);
+        self.stack.truncate(data_start as StackAddress);
+        self.stack.push(HeapRef::new(index, 0));
+    }
+
+    /// Resumes the generator referenced on the stack top: copies its frozen frame onto the live stack,
+    /// records caller-resume bookkeeping and transfers control into the generator body. The bool result
+    /// of `next()` is written later by `gen_yield`/`gen_return` (or here, immediately, if already done).
+    pub(crate) fn gen_next_impl(self: &mut Self) {
+        let gen_ref: HeapRef = self.stack.pop();
+        let gen_index = gen_ref.index();
+        if self.heap.item(gen_index).data[GEN_STATE_OFFSET] == GEN_DONE {
+            self.stack.push(0u8); // next() == false
+            return;
+        }
+        let resume_pc = StackAddress::from_ne_bytes(self.heap.item(gen_index).data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].try_into().unwrap());
+        let frame = self.heap.item(gen_index).data[GEN_FRAME_OFFSET..].to_vec();
+        let caller_sp = self.stack.sp();
+        self.gen_control.push(GenControl { caller_fp: self.stack.fp, caller_sp, caller_pc: self.pc, gen_index });
+        self.stack.extend_from(&frame);
+        self.stack.fp = caller_sp;
+        self.pc = resume_pc;
+        self.heap.item_mut(gen_index).data[GEN_STATE_OFFSET] = GEN_RUNNING;
+    }
+
+    /// Suspends the running generator: stashes the yielded value, freezes the current frame back into the
+    /// generator object, restores the caller and pushes `true` as the result of the driving `next()`.
+    pub(crate) fn gen_yield_impl(self: &mut Self, yield_id: StackAddress, value_size: FrameAddress) {
+        let value_size = value_size as usize;
+        // pop the yielded value off the stack top
+        let sp = self.stack.sp() as usize;
+        let value_bytes = self.stack.data()[sp - value_size..sp].to_vec();
+        self.stack.truncate((sp - value_size) as StackAddress);
+        // freeze [fp..sp]; with the value popped, sp is exactly the end of the frame
+        let fp = self.stack.fp as usize;
+        let frame_end = self.stack.sp() as usize;
+        let frame = self.stack.data()[fp..frame_end].to_vec();
+        let resume_pc = self.pc;
+        let control = *self.gen_control.last().expect("yield outside generator resumption");
+        {
+            let data = &mut self.heap.item_mut(control.gen_index).data;
+            data[GEN_STATE_OFFSET] = GEN_SUSPENDED;
+            data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].copy_from_slice(&resume_pc.to_ne_bytes());
+            data[GEN_YIELD_OFFSET..GEN_YIELD_OFFSET + size_of::<StackAddress>()].copy_from_slice(&yield_id.to_ne_bytes());
+            data[GEN_VALUE_OFFSET..GEN_VALUE_OFFSET + value_size].copy_from_slice(&value_bytes);
+            data.truncate(GEN_FRAME_OFFSET);
+            data.extend_from_slice(&frame);
+        }
+        self.gen_control.pop();
+        self.stack.truncate(control.caller_sp);
+        self.stack.fp = control.caller_fp;
+        self.pc = control.caller_pc;
+        self.stack.push(1u8); // next() == true
+    }
+
+    /// Completes the running generator (its body returned or fell off the end): marks it done, releases
+    /// the frozen frame, restores the caller and pushes `false` as the result of the driving `next()`.
+    pub(crate) fn gen_return_impl(self: &mut Self) {
+        let control = *self.gen_control.last().expect("generator return outside generator resumption");
+        self.gen_control.pop();
+        {
+            let data = &mut self.heap.item_mut(control.gen_index).data;
+            data[GEN_STATE_OFFSET] = GEN_DONE;
+            data.truncate(GEN_FRAME_OFFSET); // a done generator never resumes
+        }
+        self.stack.truncate(control.caller_sp);
+        self.stack.fp = control.caller_fp;
+        self.pc = control.caller_pc;
+        self.stack.push(0u8); // next() == false
+    }
+
+    /// Reads the generator's last-yielded value (its size known at compile time) and pushes it. The
+    /// generator reference on the stack top is consumed (borrowed; its refcount is owned by the caller).
+    pub(crate) fn gen_value_impl(self: &mut Self, value_size: FrameAddress) {
+        let value_size = value_size as usize;
+        let gen_ref: HeapRef = self.stack.pop();
+        let value_bytes = self.heap.item(gen_ref.index()).data[GEN_VALUE_OFFSET..GEN_VALUE_OFFSET + value_size].to_vec();
+        self.stack.extend_from(&value_bytes);
     }
 
     /// Resolves a value's constructor offset, following the indirection used for trait implementors (offset 0,

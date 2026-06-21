@@ -12,6 +12,9 @@ pub struct StackFrame {
     pub var_pos : FrameAddress,
     /// Size of the local block return value.
     pub ret_size: u8,
+    /// Whether the function owning this frame is a generator (its body uses `yield` and returns via
+    /// the generator-completion opcode rather than a normal `ret`).
+    pub is_generator: bool,
 }
 
 impl StackFrame {
@@ -22,6 +25,7 @@ impl StackFrame {
             arg_pos : 0,
             var_pos : 0,
             ret_size: 0,
+            is_generator: false,
         }
     }
     /// Add new local variable.
@@ -58,6 +62,10 @@ impl StackFrames {
     /// Returns the return value size in bytes for the top stack frame descriptor.
     pub fn ret_size(self: &Self) -> u8 {
         self.0.last().expect(Self::NO_STACK).ret_size
+    }
+    /// Returns whether the function owning the top stack frame is a generator.
+    pub fn is_generator(self: &Self) -> bool {
+        self.0.last().expect(Self::NO_STACK).is_generator
     }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &mut Self, binding_id: BindingId) -> FrameAddress {
