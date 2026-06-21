@@ -1776,6 +1776,13 @@ impl_opcodes!{
         self.gen_yield_impl(yield_id, value_size);
     }
 
+    /// Keyed variant of `gen_yield`: suspends the running generator, stashing the yielded key and value
+    /// (the stack holds `key` then `value`, value on top) under the given yield-point id, and returns
+    /// control to the driving `next()` with a `true` result.
+    fn gen_yield_kv(&mut self, yield_id: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+        self.gen_yield_kv_impl(yield_id, key_size, value_size);
+    }
+
     /// Completes the running generator and returns control to the driving `next()` with a `false` result.
     fn gen_return(&mut self) {
         self.gen_return_impl();
@@ -1785,6 +1792,12 @@ impl_opcodes!{
     /// generator reference on the stack top.
     fn gen_value(&mut self, value_size: FrameAddress) {
         self.gen_value_impl(value_size);
+    }
+
+    /// Reads the generator's last yielded key (`Generator<K, V>` only, of the given size) and pushes it,
+    /// consuming the generator reference on the stack top.
+    fn gen_key(&mut self, key_size: FrameAddress) {
+        self.gen_key_impl(key_size);
     }
 
     /// Terminate program execution.

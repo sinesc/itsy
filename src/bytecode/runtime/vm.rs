@@ -8,13 +8,15 @@ use crate::bytecode::opcodes::OpCode;
 
 /// Layout of a generator heap object's data: a fixed header followed by the frozen stack frame.
 /// The frame is stored as opaque bytes (the refcounter treats the whole object as a `Closure`-like
-/// opaque value), per the milestone-2 design-in constraint. `next()`/`value()` read the header.
+/// opaque value), per the milestone-2 design-in constraint. `next()`/`value()`/`key()` read the header.
 pub(crate) const GEN_STATE_OFFSET: usize = 0;                                        // u8 generator state
 pub(crate) const GEN_PC_OFFSET: usize = GEN_STATE_OFFSET + 1;                        // StackAddress resume program counter
 pub(crate) const GEN_YIELD_OFFSET: usize = GEN_PC_OFFSET + size_of::<StackAddress>();// StackAddress current yield-point id (reserved for milestone 4 drop cleanup)
 pub(crate) const GEN_VALUE_OFFSET: usize = GEN_YIELD_OFFSET + size_of::<StackAddress>(); // last yielded value
 pub(crate) const GEN_VALUE_SIZE: usize = 8;                                          // value slot holds any primitive (<= 8 bytes)
-pub(crate) const GEN_FRAME_OFFSET: usize = GEN_VALUE_OFFSET + GEN_VALUE_SIZE;        // frozen frame bytes follow
+pub(crate) const GEN_KEY_OFFSET: usize = GEN_VALUE_OFFSET + GEN_VALUE_SIZE;          // last yielded key (`Generator<K, V>` only; unused otherwise)
+pub(crate) const GEN_KEY_SIZE: usize = 8;                                            // key slot holds any primitive (<= 8 bytes)
+pub(crate) const GEN_FRAME_OFFSET: usize = GEN_KEY_OFFSET + GEN_KEY_SIZE;            // frozen frame bytes follow
 
 /// Generator state stored at `GEN_STATE_OFFSET`.
 pub(crate) const GEN_NOT_STARTED: u8 = 0;
@@ -238,6 +240,40 @@ impl<T, U> VM<T, U> {
         self.stack.push(1u8); // next() == true
     }
 
+    /// Keyed variant of [`gen_yield_impl`]: the stack top holds `key` then `value` (value on top, key
+    /// below). Both are stashed into the generator object before the frame is frozen and control returns
+    /// to the driving `next()`.
+    pub(crate) fn gen_yield_kv_impl(self: &mut Self, yield_id: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+        let key_size = key_size as usize;
+        let value_size = value_size as usize;
+        // pop the yielded value (top) and key (below it) off the stack
+        let sp = self.stack.sp() as usize;
+        let value_bytes = self.stack.data()[sp - value_size..sp].to_vec();
+        let key_bytes = self.stack.data()[sp - value_size - key_size..sp - value_size].to_vec();
+        self.stack.truncate((sp - value_size - key_size) as StackAddress);
+        // freeze [fp..sp]; with key and value popped, sp is exactly the end of the frame
+        let fp = self.stack.fp as usize;
+        let frame_end = self.stack.sp() as usize;
+        let frame = self.stack.data()[fp..frame_end].to_vec();
+        let resume_pc = self.pc;
+        let control = *self.gen_control.last().expect("yield outside generator resumption");
+        {
+            let data = &mut self.heap.item_mut(control.gen_index).data;
+            data[GEN_STATE_OFFSET] = GEN_SUSPENDED;
+            data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].copy_from_slice(&resume_pc.to_ne_bytes());
+            data[GEN_YIELD_OFFSET..GEN_YIELD_OFFSET + size_of::<StackAddress>()].copy_from_slice(&yield_id.to_ne_bytes());
+            data[GEN_VALUE_OFFSET..GEN_VALUE_OFFSET + value_size].copy_from_slice(&value_bytes);
+            data[GEN_KEY_OFFSET..GEN_KEY_OFFSET + key_size].copy_from_slice(&key_bytes);
+            data.truncate(GEN_FRAME_OFFSET);
+            data.extend_from_slice(&frame);
+        }
+        self.gen_control.pop();
+        self.stack.truncate(control.caller_sp);
+        self.stack.fp = control.caller_fp;
+        self.pc = control.caller_pc;
+        self.stack.push(1u8); // next() == true
+    }
+
     /// Completes the running generator (its body returned or fell off the end): marks it done, releases
     /// the frozen frame, restores the caller and pushes `false` as the result of the driving `next()`.
     pub(crate) fn gen_return_impl(self: &mut Self) {
@@ -261,6 +297,16 @@ impl<T, U> VM<T, U> {
         let gen_ref: HeapRef = self.stack.pop();
         let value_bytes = self.heap.item(gen_ref.index()).data[GEN_VALUE_OFFSET..GEN_VALUE_OFFSET + value_size].to_vec();
         self.stack.extend_from(&value_bytes);
+    }
+
+    /// Reads the generator's last-yielded key (`Generator<K, V>` only; its size known at compile time)
+    /// and pushes it. The generator reference on the stack top is consumed (borrowed; its refcount is
+    /// owned by the caller).
+    pub(crate) fn gen_key_impl(self: &mut Self, key_size: FrameAddress) {
+        let key_size = key_size as usize;
+        let gen_ref: HeapRef = self.stack.pop();
+        let key_bytes = self.heap.item(gen_ref.index()).data[GEN_KEY_OFFSET..GEN_KEY_OFFSET + key_size].to_vec();
+        self.stack.extend_from(&key_bytes);
     }
 
     /// Resolves a value's constructor offset, following the indirection used for trait implementors (offset 0,

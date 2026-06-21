@@ -1881,6 +1881,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // map's keys/values to `map.keys()`/`map.values()`, an array's indices to a counting range
                 // `0 .. array.len()`.
                 self.resolve_expression(&mut item.expr, None)?;
+                // generator iteration: the compiler drives next()/value()/key() (see
+                // Compiler::compile_for_loop_generator). Here we only bind the iteration variable's type
+                // and, for `for k, v`, repoint the parser-inserted value lookup at `.value()`. Checked
+                // before the map/array logic so a generator never misroutes to those paths.
+                if let Some((key_type_id, value_type_id)) = item.expr.type_id(self).and_then(|t| self.generator_signature(t)) {
+                    match item.iterate {
+                        ast::ForIterate::Values => {
+                            self.set_type_id(&mut item.iter, value_type_id)?;
+                        },
+                        ast::ForIterate::Keys => {
+                            // `for k, _ in g` / `for k, v in g`: a value-only generator can't be key-iterated.
+                            let key_type_id = key_type_id.usr(Some(&item.expr), ResolveErrorKind::NotKeyValueIterable(self.type_name(value_type_id)))?;
+                            self.set_type_id(&mut item.iter, key_type_id)?;
+                            self.rewrite_generator_value_lookup(item);
+                        },
+                    }
+                    self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
+                    self.scope_id = parent_scope_id;
+                    return self.resolved(item);
+                }
                 let item_is_map = self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some());
                 let item_is_array = self.item_type(&item.expr).map_or(false, |ty| ty.as_array().is_some());
                 if item.iterate == ast::ForIterate::Keys && item_is_array {
@@ -2161,6 +2181,37 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             type_id: None,
             op_resolved: false,
         }))
+    }
+
+    /// For the `for k, v in g` desugaring the parser inserts `let v = $iter[k]` as the block's first
+    /// statement (looking the value up by key, as it would for a map or array). A generator can't be
+    /// indexed, so repoint that lookup at `$iter.value()`. Idempotent across resolver passes: only an
+    /// index whose receiver is the loop's own generator variable is rewritten, and afterwards it is a
+    /// method call (not an index), so a later pass leaves it alone.
+    fn rewrite_generator_value_lookup(self: &mut Self, item: &mut ast::ForLoop) {
+        let gen_binding_id = match &item.expr {
+            ast::Expression::Variable(var) => var.binding_id,
+            _ => return,
+        };
+        let first = match item.block.statements.first_mut() {
+            Some(ast::Statement::LetBinding(let_binding)) => let_binding,
+            _ => return,
+        };
+        let is_target_index = matches!(
+            first.expr.as_ref(),
+            Some(ast::Expression::BinaryOp(bo))
+                if bo.op == ast::BinaryOperator::Index
+                && bo.left.as_expression().and_then(|e| e.as_variable()).map_or(false, |v| v.binding_id == gen_binding_id)
+        );
+        if !is_target_index {
+            return;
+        }
+        if let Some(ast::Expression::BinaryOp(bo)) = first.expr.take() {
+            let ast::BinaryOp { left, position, .. } = *bo;
+            if let ast::BinaryOperand::Expression(receiver) = left {
+                first.expr = Some(Self::make_method_call(receiver, "value", Vec::new(), position));
+            }
+        }
     }
 
     /// Builds the half-open range `0 .. upper`. The `0` is an unconstrained numeric literal so it unifies

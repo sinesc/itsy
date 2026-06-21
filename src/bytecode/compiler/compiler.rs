@@ -255,20 +255,31 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             S::Yield(yield_stmt) => {
-                if yield_stmt.key.is_some() {
-                    // milestone 3: keyed generators (`yield key, value`)
-                    return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator key/value yield".to_string()), &self.module_path));
-                }
                 let (value_size, value_is_ref) = { let ty = self.ty(&yield_stmt.value); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
                 if value_is_ref {
-                    // milestone 3: reference-typed yields need refcount handling in the generator object
+                    // milestone 5: reference-typed yields need refcount handling in the generator object
                     return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed value".to_string()), &self.module_path));
                 }
                 comment!(self, "yield");
-                self.compile_expression(&yield_stmt.value)?;
                 let yield_id = self.next_yield_id;
                 self.next_yield_id += 1;
-                self.writer.gen_yield(yield_id, value_size);
+                match &yield_stmt.key {
+                    Some(key) => {
+                        let (key_size, key_is_ref) = { let ty = self.ty(key); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
+                        if key_is_ref {
+                            // milestone 5: reference-typed yields need refcount handling in the generator object
+                            return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed key".to_string()), &self.module_path));
+                        }
+                        // push key then value (value ends on top, matching gen_yield_kv's expectation)
+                        self.compile_expression(key)?;
+                        self.compile_expression(&yield_stmt.value)?;
+                        self.writer.gen_yield_kv(yield_id, key_size, value_size);
+                    },
+                    None => {
+                        self.compile_expression(&yield_stmt.value)?;
+                        self.writer.gen_yield(yield_id, value_size);
+                    },
+                }
                 Ok(())
             },
             S::Return(ast::Return { expr, .. }) => {
@@ -553,8 +564,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
                     },
                     GeneratorBuiltin::Key => {
-                        // milestone 3: keyed generators
-                        return Err(CompileError::new(item, CompileErrorKind::Unsupported("generator key()".to_string()), &self.module_path));
+                        let (key_type_id, _value_type_id) = self.generator_signature(type_id).ice()?;
+                        let key_type_id = key_type_id.ice()?;
+                        self.writer.gen_key(self.ty(&key_type_id).primitive_size() as FrameAddress);
                     },
                 };
             },
@@ -1091,6 +1103,55 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
+    /// Compiles iteration over a generator, desugaring `for v in g { .. }` to the equivalent of
+    /// `while g.next() { let v = g.value(); .. }` (and `for k, v in g` to additionally bind `g.key()`;
+    /// the per-iteration `v` lookup is rewritten to `g.value()` during resolution). The generator
+    /// reference is evaluated once and kept on the stack for the loop's duration, cloned for each
+    /// `gen_next`/`gen_value`/`gen_key` (each borrows the reference; its refcount is owned here).
+    fn compile_for_loop_generator(self: &mut Self, item: &ast::ForLoop, iter_loc: FrameAddress) -> CompileResult {
+        comment!(self, "for in generator");
+        let gen_type_id = item.expr.type_id(self).ice()?;
+        let (key_type_id, value_type_id) = self.generator_signature(gen_type_id).ice()?;
+        // evaluate the generator once, keep its reference on the stack and inc it for the loop's duration
+        self.compile_expression(&item.expr)?;
+        self.write_cnt(self.ty(&item.expr), true, HeapRefOp::Inc)?;
+        let loop_start = self.writer.position();
+        // resume the generator (gen_next consumes a clone of the reference); exit when it reports done
+        self.write_clone(self.ty(&gen_type_id));
+        self.writer.gen_next();
+        let exit_jump = self.writer.j0(123);
+        // bind the iteration variable from the generator's current key (Keys) or value (Values)
+        self.write_clone(self.ty(&gen_type_id));
+        match item.iterate {
+            ast::ForIterate::Values => {
+                self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
+            },
+            ast::ForIterate::Keys => {
+                let key_type_id = key_type_id.ice()?;
+                self.writer.gen_key(self.ty(&key_type_id).primitive_size() as FrameAddress);
+            },
+        }
+        let iter_type_id = item.iter.type_id(self).ice()?;
+        self.write_store(self.ty(&iter_type_id), iter_loc, None)?;
+        // compile inner block
+        self.loop_control.push();
+        self.compile_block(&item.block)?;
+        let loop_controls = self.loop_control.pop();
+        self.writer.jmp(loop_start);
+        // fix exit and break/continue addresses
+        let exit_target = self.writer.position();
+        self.writer.overwrite(exit_jump, |w| w.j0(exit_target));
+        for loop_control in &loop_controls {
+            match loop_control {
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
+            };
+        }
+        // release the generator reference held across the loop (cnt pops it off the stack)
+        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;
+        Ok(())
+    }
+
     /// Compiles a for - in loop
     fn compile_for_loop(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
         use ast::{Expression::*, BinaryOperator as Op};
@@ -1100,14 +1161,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         let iter_local = self.locals.lookup(binding_id);
         self.init_state.initialize(binding_id);
         let iter_type_id = item.iter.type_id(self).ice()?;
-        // handle ranges or arrays. Maps were lowered to iterating `map.keys()`/`map.values()` during
-        // resolution, so they reach here as an ordinary array-typed expression, walked by value.
+        // handle ranges, generators or arrays. Maps were lowered to iterating `map.keys()`/`map.values()`
+        // during resolution, so they reach here as an ordinary array-typed expression, walked by value.
         // (NOTE: must match Resolver::resolve_for_loop.)
-        let result = match &item.expr {
-            BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
-                self.compile_for_loop_range(item, iter_local, iter_type_id)
-            },
-            _ => self.compile_for_loop_array(item, iter_local, iter_type_id),
+        let is_generator = item.expr.type_id(self).map_or(false, |t| self.generator_signature(t).is_some());
+        let result = if is_generator {
+            self.compile_for_loop_generator(item, iter_local)
+        } else {
+            match &item.expr {
+                BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
+                    self.compile_for_loop_range(item, iter_local, iter_type_id)
+                },
+                _ => self.compile_for_loop_array(item, iter_local, iter_type_id),
+            }
         };
         self.init_state.pop();
         result
