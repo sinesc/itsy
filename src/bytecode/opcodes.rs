@@ -2,12 +2,12 @@
 
 use crate::prelude::*;
 use crate::{FrameAddress, StackAddress, ItemIndex};
-use crate::bytecode::{Constructor, HeapRefOp, builtins::Builtin, macros::impl_opcodes};
+use crate::bytecode::{HeapRefOp, builtins::Builtin, macros::impl_opcodes};
 #[cfg(feature="runtime")]
 use crate::{
     StackOffset,
     bytecode::{
-        HeapRef,
+        HeapRef, Constructor,
         runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState, map::{MAP_HEADER, MAP_EMPTY}}
     }
 };
