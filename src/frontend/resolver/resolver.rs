@@ -5,6 +5,7 @@ mod scopes;
 mod stage;
 mod exhaustiveness;
 mod apinamespace;
+mod intrinsic;
 pub mod error;
 pub mod resolved;
 
@@ -19,81 +20,9 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin, GeneratorBuiltin}};
+use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, ResultTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
-/// Describes an intrinsic conversion trait that backs an `as` cast to a particular target type.
-/// See the registration loop in [resolve] and [Resolver::resolve_cast].
-struct IntrinsicCastTrait {
-    /// Name of the trait scripts implement, e.g. `ToString`.
-    trait_name  : &'static str,
-    /// The trait's single required method, e.g. `to_string`.
-    method      : &'static str,
-    /// The cast target type the trait converts to, e.g. `String`.
-    target      : Type,
-}
-
-/// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
-/// a cast (e.g. a future `Display` backing some target type).
-const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
-    IntrinsicCastTrait { trait_name: "ToString", method: "to_string", target: Type::String },
-];
-
-/// A resolved intrinsic cast: the trait that backs a cast to a particular target type and the trait
-/// method to dispatch to. Built from [IntrinsicCastTrait] once the trait has been registered.
-#[derive(Copy, Clone)]
-struct IntrinsicCast {
-    /// Type id of the registered trait (e.g. `ToString`).
-    trait_type_id   : TypeId,
-    /// The trait's required method (e.g. `to_string`).
-    method          : &'static str,
-}
-
-/// Describes an intrinsic operator trait that backs an arithmetic operator for custom types. Each has a
-/// single required method `fn <method>(self: Self, rhs: Self) -> Self`. See the registration loop in
-/// [resolve], [Resolver::resolve_binary_op] and [Resolver::resolve_assignment].
-struct IntrinsicOpTrait {
-    /// The operator this trait backs, e.g. `Add` for `+`.
-    op          : ast::BinaryOperator,
-    /// Name of the trait scripts implement, e.g. `Add`.
-    trait_name  : &'static str,
-    /// The trait's single required method, e.g. `add`.
-    method      : &'static str,
-}
-
-/// The set of intrinsic operator traits known to the compiler. These let custom types implement the
-/// arithmetic operators; an operator applied to a non-numeric type is lowered to a call of the
-/// corresponding trait method (e.g. `a + b` to `a.add(b)`, `a += b` to `a = a.add(b)`).
-const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
-    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div" },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem" },
-];
-
-/// A resolved intrinsic operator: the trait that backs an operator and the trait method to dispatch to.
-/// Built from [IntrinsicOpTrait] once the trait has been registered.
-#[derive(Copy, Clone)]
-struct IntrinsicOp {
-    /// Type id of the registered trait (e.g. `Add`).
-    trait_type_id   : TypeId,
-    /// The trait's required method (e.g. `add`).
-    method          : &'static str,
-}
-
-/// Bookkeeping for a synthesized `Result<T>` data enum, keyed by its (deduplicated) enum type id. Lets
-/// the resolver recognize a type as a `Result` and bind `Ok`/`Err` calls to its variant constructors.
-#[derive(Copy, Clone)]
-struct ResultTypeInfo {
-    /// Success type `T` (the `Ok` payload). Read by the `?` operator.
-    #[allow(dead_code)]
-    ok_type_id      : TypeId,
-    /// Constructor for the `Ok(T)` variant (`FunctionKind::Variant`, index 0).
-    ok_constructor  : ConstantId,
-    /// Constructor for the `Err(Error)` variant (`FunctionKind::Variant`, index 1).
-    err_constructor : ConstantId,
-}
-
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
     stage           : stage::Stage,
@@ -369,7 +298,7 @@ fn type_contains_self(scopes: &scopes::Scopes, start: TypeId) -> bool {
     reaches(scopes, start, start, &mut Set::new())
 }
 
-/// Utility methods to update a typeslot with a resolved type and increase the resolution counter.
+/// General utility methods.
 impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 
     /// Try to create concrete array builtin function signature for the given array type
@@ -633,16 +562,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(())
     }
 
-    /*fn try_set_type_id(self: &mut Self, item: &mut (impl Typeable+Positioned), new_type_id: TypeId) -> ResolveResult {
-        if let Some(item_type_id) = item.type_id(self) {
-            self.check_type_accepted_for(item, new_type_id, item_type_id)?;
-        }
-        if self.stage.infer_as_concrete() || self.type_by_id(new_type_id).is_concrete() {
-            *item.type_id_mut(self) = Some(new_type_id);
-        }
-        Ok(())
-    }*/
-
     /// Returns the type of given AST item.
     fn item_type(self: &Self, item: &impl Typeable) -> Option<&Type> {
         match item.type_id(self) {
@@ -661,8 +580,89 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    /// Resolves a constant name to a constant.
+    fn try_resolve_constant_enum(self: &mut Self, item: &mut ast::Constant) -> Option<ConstantId> {
+
+        let enum_info = if item.path.segments.len() > 1 {
+            // "Enum::Test" -> drop Test, then alias-resolve Enum to e.g. MyModule::Enum
+            let type_name = item.path.to_string(-1);
+            let variant_name = item.path.segments[item.path.segments.len() - 1].name.clone();
+            Some((self.scopes.alias(self.scope_id, &type_name).map(|a| a.to_string()).unwrap_or_else(|| self.make_path(&[ type_name ])), variant_name))
+        } else {
+            // "Test" -> alias-resolve to MyModule::Enum::Test, then drop Test.
+            let alias = item.path.to_string(0);
+            if let Some(qualified_item) = self.scopes.alias(self.scope_id, &alias) {
+                let mut qualified = path_to_parts(qualified_item);
+                qualified.pop();
+                Some((parts_to_path(&qualified), alias.clone()))
+            } else {
+                None
+            }
+        };
+        if let Some((type_name, variant_name)) = enum_info {
+            if let Some(type_id) = self.scopes.type_id(self.scope_id, &type_name) {
+                let qualified_name = type_name + "::" + &variant_name;
+                // unit variants are constants owned by the enum type; data-variant constructors are
+                // functions owned by VOID (see insert_function). Try both so the leading path segment
+                // (e.g. a `use`-aliased API/module namespace) is resolved for either kind.
+                self.scopes.constant_id(self.scope_id, &qualified_name, type_id)
+                    .or_else(|| self.scopes.constant_id(self.scope_id, &qualified_name, TypeId::VOID))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Returns the type id of the `Result<T>` data enum for the given success type, synthesizing it on
+    /// first use. `Result<T>` is represented as an anonymous data enum with variants `Ok(T)` and
+    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id. On first
+    /// synthesis the two variant constructors are created and recorded in `result_types`.
+    fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
+        let error_trait_type_id = self.error_trait_type_id;
+        let variants = vec![
+            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ])),
+            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ])),
+        ];
+        // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
+        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
+        let result_type_id = self.scopes.insert_anonymous_type(true, ty);
+        if !self.result_types.contains_key(&result_type_id) {
+            // names embed the enum type id to stay unique across distinct `Result<T>`; they are never
+            // looked up by name (callers bind to the constructor's constant id directly).
+            let raw = result_type_id.into_usize();
+            let ok_constructor = self.scopes.insert_function(
+                &format!("Result#{raw}::Ok"), Some(result_type_id), vec![ Some(ok_type_id) ],
+                Some(FunctionKind::Variant(result_type_id, 0)),
+            );
+            let err_constructor = self.scopes.insert_function(
+                &format!("Result#{raw}::Err"), Some(result_type_id), vec![ Some(error_trait_type_id) ],
+                Some(FunctionKind::Variant(result_type_id, 1)),
+            );
+            self.result_types.insert(result_type_id, ResultTypeInfo { ok_type_id, ok_constructor, err_constructor });
+        }
+        result_type_id
+    }
+
+    /// Returns the type id of the `Generator<V>` / `Generator<K, V>` carrier for the given key/value
+    /// types, synthesizing it on first use. The carrier is an anonymous struct with sentinel fields
+    /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
+    /// code, so the structural `generator_signature` check can identify it. Structurally identical
+    /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
+    /// carrier will hold at runtime is *not* modelled as typed fields here — that stays opaque bytes.
+    fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
+        let mut fields = Map::new();
+        fields.insert("$value".to_string(), Some(value_type_id));
+        if let Some(key_type_id) = key_type_id {
+            fields.insert("$key".to_string(), Some(key_type_id));
+        }
+        let ty = Type::Struct(Struct { fields, impl_traits: Map::new() });
+        self.scopes.insert_anonymous_type(true, ty)
+    }
+
     /// Transforms a method call from a.b.c() format to c(a.b) if c is a function name (i.e. not a function reference)
-    fn transform_constant_call(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+    fn rewrite_method_call_to_constant_call(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
         let mut constant = None;
         if let Some(binary_op) = call_exp.as_binary_op_mut() {
             if binary_op.op == ast::BinaryOperator::Access {
@@ -686,81 +686,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let arg = std::mem::replace(binary_op.left.as_expression_mut().ice()?, ast::Expression::void(ast::Position(0)));
             *call_exp = ast::Expression::Constant(constant);
             call_args.args.insert(0, arg);
-        }
-        Ok(())
-    }
-
-    /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
-    /// element type from the value argument.
-    /// Note: method names/parameter index for inference are hardcoded in value_index match block and may need to be updated for new array builtins.
-    fn try_infer_array_element_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
-        // identify `<array>.<method>` access whose array element type is still unresolved
-        let (array_type_id, value_index) = {
-            let binary_op = match call_exp.as_binary_op_mut() {
-                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
-                _ => return Ok(()),
-            };
-            // which (pre-transform, so the receiver is not yet prepended) argument carries the Element value
-            let value_index = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
-                Some("push") => 0,
-                Some("insert") => 1,
-                _ => return Ok(()),
-            };
-            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_array()) {
-                Some(Some(&Array { type_id: None })) => (binary_op.left.type_id(self).ice()?, value_index),
-                _ => return Ok(()),
-            }
-        };
-        if let Some(arg) = call_args.args.get_mut(value_index) {
-            self.resolve_expression(arg, None)?;
-            if let Some(element_type_id) = arg.type_id(self) {
-                self.type_by_id_mut(array_type_id).as_array_mut().ice()?.type_id = Some(element_type_id);
-            }
-        }
-        Ok(())
-    }
-
-    /// For a call like `map.insert(k, v)` (or `get`/`remove`) whose receiver map has a still-unknown key or
-    /// value type, infer those types from the relevant arguments (the map equivalent of
-    /// [`Self::try_create_array_builtin`]'s element inference). Required so methods can be called on an empty
-    /// map literal `[ => ]` whose types are not yet determined.
-    fn try_infer_map_types_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
-        // identify `<map>.<method>` access and which (pre-transform, receiver not yet prepended) arguments
-        // carry the key and value
-        let (map_type_id, key_index, value_index) = {
-            let binary_op = match call_exp.as_binary_op_mut() {
-                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
-                _ => return Ok(()),
-            };
-            let (key_index, value_index) = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
-                Some("insert") => (Some(0), Some(1)),
-                Some("get") | Some("remove") => (Some(0), None),
-                _ => return Ok(()),
-            };
-            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_map()) {
-                Some(Some(_)) => (binary_op.left.type_id(self).ice()?, key_index, value_index),
-                _ => return Ok(()),
-            }
-        };
-        if let Some(key_index) = key_index {
-            if self.type_by_id(map_type_id).as_map().ice()?.key_type_id.is_none() {
-                if let Some(arg) = call_args.args.get_mut(key_index) {
-                    self.resolve_expression(arg, None)?;
-                    if let Some(key_type_id) = arg.type_id(self) {
-                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.key_type_id = Some(key_type_id);
-                    }
-                }
-            }
-        }
-        if let Some(value_index) = value_index {
-            if self.type_by_id(map_type_id).as_map().ice()?.value_type_id.is_none() {
-                if let Some(arg) = call_args.args.get_mut(value_index) {
-                    self.resolve_expression(arg, None)?;
-                    if let Some(value_type_id) = arg.type_id(self) {
-                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.value_type_id = Some(value_type_id);
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -794,6 +719,104 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Pattern::Struct(structure) => structure.fields.iter().any(|(_, field)| Self::pattern_introduces_binding(field)),
             Pattern::Or(or) => or.alternatives.iter().any(Self::pattern_introduces_binding),
         }
+    }
+
+    /// Looks up the constant for an intrinsic operator trait's method on the given target type, used to
+    /// dispatch a compound assignment in-place. Concrete implementors resolve to their own impl method
+    /// (static dispatch); a trait-object target resolves to the trait's required method (virtual dispatch).
+    /// Returns `None` while the implementation is not yet known.
+    fn intrinsic_op_method_constant(self: &Self, type_id: TypeId, intrinsic: &IntrinsicOp) -> Option<ConstantId> {
+        if let Some(impl_traits) = self.type_by_id(type_id).impl_traits_map() {
+            if let Some(impl_trait) = impl_traits.get(&intrinsic.trait_type_id) {
+                if let Some(Some(constant_id)) = impl_trait.functions.get(intrinsic.method) {
+                    return Some(*constant_id);
+                }
+            }
+        }
+        if self.type_by_id(type_id).is_trait_object() {
+            if let Some(trt) = self.type_by_id(intrinsic.trait_type_id).as_trait() {
+                if let Some(Some(constant_id)) = trt.required.get(intrinsic.method) {
+                    return Some(*constant_id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Builds an unresolved method-call expression `receiver.method(args...)` for the resolver to lower
+    /// intrinsic-trait operations (casts, operators) onto the regular method-call machinery.
+    fn make_method_call(receiver: ast::Expression, method: &str, args: Vec<ast::Expression>, position: ast::Position) -> ast::Expression {
+        let access = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Access,
+            left: ast::BinaryOperand::Expression(receiver),
+            right: ast::BinaryOperand::Member(ast::Member {
+                position,
+                ident: ast::Ident { position, name: method.to_string() },
+                type_id: None,
+                constant_id: None,
+            }),
+            type_id: None,
+            op_resolved: false,
+        }));
+        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Call,
+            left: ast::BinaryOperand::Expression(access),
+            right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args }),
+            type_id: None,
+            op_resolved: false,
+        }))
+    }
+
+    /// For the `for k, v in g` desugaring the parser inserts `let v = $iter[k]` as the block's first
+    /// statement (looking the value up by key, as it would for a map or array). A generator can't be
+    /// indexed, so repoint that lookup at `$iter.value()`. Idempotent across resolver passes: only an
+    /// index whose receiver is the loop's own generator variable is rewritten, and afterwards it is a
+    /// method call (not an index), so a later pass leaves it alone.
+    fn rewrite_generator_value_lookup(self: &mut Self, item: &mut ast::ForLoop) {
+        let gen_binding_id = match &item.expr {
+            ast::Expression::Variable(var) => var.binding_id,
+            _ => return,
+        };
+        let first = match item.block.statements.first_mut() {
+            Some(ast::Statement::LetBinding(let_binding)) => let_binding,
+            _ => return,
+        };
+        let is_target_index = matches!(
+            first.expr.as_ref(),
+            Some(ast::Expression::BinaryOp(bo))
+                if bo.op == ast::BinaryOperator::Index
+                && bo.left.as_expression().and_then(|e| e.as_variable()).map_or(false, |v| v.binding_id == gen_binding_id)
+        );
+        if !is_target_index {
+            return;
+        }
+        if let Some(ast::Expression::BinaryOp(bo)) = first.expr.take() {
+            let ast::BinaryOp { left, position, .. } = *bo;
+            if let ast::BinaryOperand::Expression(receiver) = left {
+                first.expr = Some(Self::make_method_call(receiver, "value", Vec::new(), position));
+            }
+        }
+    }
+
+    /// Builds the half-open range `0 .. upper`. The `0` is an unconstrained numeric literal so it unifies
+    /// to `upper`'s type during range resolution. Used to lower array index iteration.
+    fn make_range(position: ast::Position, upper: ast::Expression) -> ast::Expression {
+        let zero = ast::Expression::Literal(ast::Literal {
+            position,
+            value: ast::LiteralValue::Numeric(Numeric::Unsigned(0)),
+            type_name: None,
+            type_id: None,
+        });
+        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
+            position,
+            op: ast::BinaryOperator::Range,
+            left: ast::BinaryOperand::Expression(zero),
+            right: ast::BinaryOperand::Expression(upper),
+            type_id: None,
+            op_resolved: false,
+        }))
     }
 }
 
@@ -995,36 +1018,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         Ok(item.type_id)
     }
 
-    /// Returns the type id of the `Result<T>` data enum for the given success type, synthesizing it on
-    /// first use. `Result<T>` is represented as an anonymous data enum with variants `Ok(T)` and
-    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id. On first
-    /// synthesis the two variant constructors are created and recorded in `result_types`.
-    fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
-        let error_trait_type_id = self.error_trait_type_id;
-        let variants = vec![
-            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ])),
-            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ])),
-        ];
-        // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
-        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
-        let result_type_id = self.scopes.insert_anonymous_type(true, ty);
-        if !self.result_types.contains_key(&result_type_id) {
-            // names embed the enum type id to stay unique across distinct `Result<T>`; they are never
-            // looked up by name (callers bind to the constructor's constant id directly).
-            let raw = result_type_id.into_usize();
-            let ok_constructor = self.scopes.insert_function(
-                &format!("Result#{raw}::Ok"), Some(result_type_id), vec![ Some(ok_type_id) ],
-                Some(FunctionKind::Variant(result_type_id, 0)),
-            );
-            let err_constructor = self.scopes.insert_function(
-                &format!("Result#{raw}::Err"), Some(result_type_id), vec![ Some(error_trait_type_id) ],
-                Some(FunctionKind::Variant(result_type_id, 1)),
-            );
-            self.result_types.insert(result_type_id, ResultTypeInfo { ok_type_id, ok_constructor, err_constructor });
-        }
-        result_type_id
-    }
-
     /// Resolves a generator definition `Generator<V>` / `Generator<K, V>` into its synthesized struct
     /// carrier.
     fn resolve_generator_type(self: &mut Self, item: &mut ast::GeneratorDef) -> ResolveResult<Option<TypeId>> {
@@ -1047,70 +1040,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         self.types_resolved(item, None)?;
         Ok(item.type_id)
-    }
-
-    /// Returns the type id of the `Generator<V>` / `Generator<K, V>` carrier for the given key/value
-    /// types, synthesizing it on first use. The carrier is an anonymous struct with sentinel fields
-    /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
-    /// code, so the structural `generator_signature` check can identify it. Structurally identical
-    /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
-    /// carrier will hold at runtime is *not* modelled as typed fields here — that stays opaque bytes
-    /// (see the milestone 2 design-in constraints).
-    fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
-        let mut fields = Map::new();
-        fields.insert("$value".to_string(), Some(value_type_id));
-        if let Some(key_type_id) = key_type_id {
-            fields.insert("$key".to_string(), Some(key_type_id));
-        }
-        let ty = Type::Struct(Struct { fields, impl_traits: Map::new() });
-        self.scopes.insert_anonymous_type(true, ty)
-    }
-
-    /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant
-    /// constructor so the generic call resolution below handles argument checking and the result type.
-    /// `T` comes from the expected result type when available, otherwise (for `Ok`) is inferred from the
-    /// argument. `Err` without an expected `Result` type cannot infer `T` and is left unbound (reported as
-    /// an undefined identifier in the final stage).
-    fn try_bind_result_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
-        let variant = match item.left.as_expression().and_then(|e| e.as_constant()) {
-            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 => match c.path.segments[0].name.as_str() {
-                "Ok" => 0 as VariantIndex,
-                "Err" => 1 as VariantIndex,
-                _ => return Ok(()),
-            },
-            _ => return Ok(()),
-        };
-        // an expected result type pins T directly; this is the common case (`return Ok(x)`, match arms, ...)
-        let expected_result_type = expected_result.filter(|t| self.result_types.contains_key(t));
-        let result_type_id = match (variant, expected_result_type) {
-            (_, Some(result_type_id)) => Some(result_type_id),
-            // Ok(x): infer T from the argument's type
-            (0, None) => {
-                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
-                    self.resolve_expression(arg, None)?;
-                    arg.type_id(self).map(|ok_type_id| self.synthesize_result_type(ok_type_id))
-                } else {
-                    None
-                }
-            },
-            // Err(e): cannot determine T from the error alone; wait for / require context
-            (_, None) => None,
-        };
-        if let Some(result_type_id) = result_type_id {
-            let info = *self.result_types.get(&result_type_id).ice()?;
-            let constructor = if variant == 0 { info.ok_constructor } else { info.err_constructor };
-            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(constructor);
-        } else if self.stage.must_resolve() {
-            // the constructor could not be bound to any `Result<T>`: there is no result type to infer from
-            // (e.g. `?` or a bare `Err`/`Ok` in a function that does not return `Result`). Report this
-            // directly instead of letting the unbound `Ok`/`Err` surface as a misleading "undefined identifier".
-            let from_try = item.right.as_argument_list().and_then(|a| a.args.first())
-                .and_then(|arg| arg.as_variable())
-                .map_or(false, |var| var.ident.name == "try$err" || var.ident.name == "try$ok");
-            let expected = expected_result.map(|type_id| self.type_name(type_id));
-            return Err(ResolveError::new(item, ResolveErrorKind::ResultOutsideResultContext(from_try, expected), self.module_path));
-        }
-        Ok(())
     }
 
     /// Resolves a map definition.
@@ -1618,41 +1547,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves a constant name to a constant.
-    fn try_resolve_constant_enum(self: &mut Self, item: &mut ast::Constant) -> Option<ConstantId> {
-
-        let enum_info = if item.path.segments.len() > 1 {
-            // "Enum::Test" -> drop Test, then alias-resolve Enum to e.g. MyModule::Enum
-            let type_name = item.path.to_string(-1);
-            let variant_name = item.path.segments[item.path.segments.len() - 1].name.clone();
-            Some((self.scopes.alias(self.scope_id, &type_name).map(|a| a.to_string()).unwrap_or_else(|| self.make_path(&[ type_name ])), variant_name))
-        } else {
-            // "Test" -> alias-resolve to MyModule::Enum::Test, then drop Test.
-            let alias = item.path.to_string(0);
-            if let Some(qualified_item) = self.scopes.alias(self.scope_id, &alias) {
-                let mut qualified = path_to_parts(qualified_item);
-                qualified.pop();
-                Some((parts_to_path(&qualified), alias.clone()))
-            } else {
-                None
-            }
-        };
-        if let Some((type_name, variant_name)) = enum_info {
-            if let Some(type_id) = self.scopes.type_id(self.scope_id, &type_name) {
-                let qualified_name = type_name + "::" + &variant_name;
-                // unit variants are constants owned by the enum type; data-variant constructors are
-                // functions owned by VOID (see insert_function). Try both so the leading path segment
-                // (e.g. a `use`-aliased API/module namespace) is resolved for either kind.
-                self.scopes.constant_id(self.scope_id, &qualified_name, type_id)
-                    .or_else(|| self.scopes.constant_id(self.scope_id, &qualified_name, TypeId::VOID))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Resolves a constant name to a constant.
     fn resolve_constant(self: &mut Self, item: &mut ast::Constant, expected_result: Option<TypeId>) -> ResolveResult {
         // try resolving enum first
         if item.constant_id.is_none() {
@@ -2047,28 +1941,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.types_resolved(item, expected_result)
     }
 
-    /// Looks up the constant for an intrinsic operator trait's method on the given target type, used to
-    /// dispatch a compound assignment in-place. Concrete implementors resolve to their own impl method
-    /// (static dispatch); a trait-object target resolves to the trait's required method (virtual dispatch).
-    /// Returns `None` while the implementation is not yet known.
-    fn intrinsic_op_method_constant(self: &Self, type_id: TypeId, intrinsic: &IntrinsicOp) -> Option<ConstantId> {
-        if let Some(impl_traits) = self.type_by_id(type_id).impl_traits_map() {
-            if let Some(impl_trait) = impl_traits.get(&intrinsic.trait_type_id) {
-                if let Some(Some(constant_id)) = impl_trait.functions.get(intrinsic.method) {
-                    return Some(*constant_id);
-                }
-            }
-        }
-        if self.type_by_id(type_id).is_trait_object() {
-            if let Some(trt) = self.type_by_id(intrinsic.trait_type_id).as_trait() {
-                if let Some(Some(constant_id)) = trt.required.get(intrinsic.method) {
-                    return Some(*constant_id);
-                }
-            }
-        }
-        None
-    }
-
     /// Resolves a type cast. Built-in primitive conversions are validated against the conversion matrix;
     /// a cast to a type backed by an intrinsic conversion trait (e.g. `String` via `ToString`) that is not
     /// a built-in cast is lowered to a call of the trait's method on the operand (e.g. `expr.to_string()`).
@@ -2106,7 +1978,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Some(intrinsic) => {
                 if self.type_accepted_for(from_type_id, intrinsic.trait_type_id) {
                     // operand implements the backing trait: lower to a call of the trait method
-                    self.lower_cast_to_method(item, intrinsic.method, expected_result)
+                    self.rewrite_cast_to_method(item, intrinsic.method, expected_result)
                 } else if self.stage.must_resolve() {
                     // resolution has stalled: no impl block will make the trait appear, so the operand
                     // genuinely does not implement it
@@ -2124,113 +1996,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 Err(ResolveError::new(item, ResolveErrorKind::InvalidCast(from_name, to_name), self.module_path))
             },
         }
-    }
-
-    /// Rewrites a cast expression `expr as T` into a method call `expr.<method>()` and resolves it. Used to
-    /// dispatch casts backed by an intrinsic conversion trait (e.g. `ToString`) through the regular method
-    /// call machinery, which handles both static dispatch and dynamic dispatch on trait objects.
-    fn lower_cast_to_method(self: &mut Self, item: &mut ast::Expression, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
-        let cast = item.as_cast_mut().ice()?;
-        let position = cast.position;
-        let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
-        *item = Self::make_method_call(receiver, method, Vec::new(), position);
-        self.resolve_expression(item, expected_result)
-    }
-
-    /// Rewrites an arithmetic binary operation `a OP b` into a method call `a.<method>(b)` and resolves it.
-    /// Used to dispatch operators backed by an intrinsic operator trait (e.g. `Add`) through the regular
-    /// method-call machinery, reusing its static and dynamic dispatch.
-    fn lower_binary_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
-        let position = item.position;
-        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
-            ast::BinaryOperand::Expression(expr) => expr,
-            _ => return Self::ice("binary operator left operand is not an expression"),
-        };
-        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
-            ast::BinaryOperand::Expression(expr) => expr,
-            _ => return Self::ice("binary operator right operand is not an expression"),
-        };
-        match Self::make_method_call(receiver, method, vec![ rhs ], position) {
-            ast::Expression::BinaryOp(call) => *item = *call,
-            _ => return Self::ice("make_method_call did not produce a binary operation"),
-        }
-        self.resolve_binary_op(item, expected_result)
-    }
-
-    /// Builds an unresolved method-call expression `receiver.method(args...)` for the resolver to lower
-    /// intrinsic-trait operations (casts, operators) onto the regular method-call machinery.
-    fn make_method_call(receiver: ast::Expression, method: &str, args: Vec<ast::Expression>, position: ast::Position) -> ast::Expression {
-        let access = ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
-            position,
-            op: ast::BinaryOperator::Access,
-            left: ast::BinaryOperand::Expression(receiver),
-            right: ast::BinaryOperand::Member(ast::Member {
-                position,
-                ident: ast::Ident { position, name: method.to_string() },
-                type_id: None,
-                constant_id: None,
-            }),
-            type_id: None,
-            op_resolved: false,
-        }));
-        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
-            position,
-            op: ast::BinaryOperator::Call,
-            left: ast::BinaryOperand::Expression(access),
-            right: ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args }),
-            type_id: None,
-            op_resolved: false,
-        }))
-    }
-
-    /// For the `for k, v in g` desugaring the parser inserts `let v = $iter[k]` as the block's first
-    /// statement (looking the value up by key, as it would for a map or array). A generator can't be
-    /// indexed, so repoint that lookup at `$iter.value()`. Idempotent across resolver passes: only an
-    /// index whose receiver is the loop's own generator variable is rewritten, and afterwards it is a
-    /// method call (not an index), so a later pass leaves it alone.
-    fn rewrite_generator_value_lookup(self: &mut Self, item: &mut ast::ForLoop) {
-        let gen_binding_id = match &item.expr {
-            ast::Expression::Variable(var) => var.binding_id,
-            _ => return,
-        };
-        let first = match item.block.statements.first_mut() {
-            Some(ast::Statement::LetBinding(let_binding)) => let_binding,
-            _ => return,
-        };
-        let is_target_index = matches!(
-            first.expr.as_ref(),
-            Some(ast::Expression::BinaryOp(bo))
-                if bo.op == ast::BinaryOperator::Index
-                && bo.left.as_expression().and_then(|e| e.as_variable()).map_or(false, |v| v.binding_id == gen_binding_id)
-        );
-        if !is_target_index {
-            return;
-        }
-        if let Some(ast::Expression::BinaryOp(bo)) = first.expr.take() {
-            let ast::BinaryOp { left, position, .. } = *bo;
-            if let ast::BinaryOperand::Expression(receiver) = left {
-                first.expr = Some(Self::make_method_call(receiver, "value", Vec::new(), position));
-            }
-        }
-    }
-
-    /// Builds the half-open range `0 .. upper`. The `0` is an unconstrained numeric literal so it unifies
-    /// to `upper`'s type during range resolution. Used to lower array index iteration.
-    fn make_range(position: ast::Position, upper: ast::Expression) -> ast::Expression {
-        let zero = ast::Expression::Literal(ast::Literal {
-            position,
-            value: ast::LiteralValue::Numeric(Numeric::Unsigned(0)),
-            type_name: None,
-            type_id: None,
-        });
-        ast::Expression::BinaryOp(Box::new(ast::BinaryOp {
-            position,
-            op: ast::BinaryOperator::Range,
-            left: ast::BinaryOperand::Expression(zero),
-            right: ast::BinaryOperand::Expression(upper),
-            type_id: None,
-            op_resolved: false,
-        }))
     }
 
     /// Resolves a binary operation.
@@ -2281,7 +2046,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         // trait (then lowered) or resolution stalls (dedicated error).
                         let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;
                         if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
-                            return self.lower_binary_op_to_method(item, intrinsic.method, expected_result);
+                            return self.rewrite_binary_op_to_method(item, intrinsic.method, expected_result);
                         } else if self.stage.must_resolve() {
                             let type_name = self.type_name(common_type_id);
                             let trait_name = self.type_name(intrinsic.trait_type_id);
@@ -2518,7 +2283,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // unknown, but for `push`/`insert` that type is exactly what the value argument supplies.
                 self.try_infer_array_element_from_args(call_func, call_args)?;
                 self.try_infer_map_types_from_args(call_func, call_args)?;
-                self.transform_constant_call(call_func, call_args)?;
+                self.rewrite_method_call_to_constant_call(call_func, call_args)?;
                 let num_args = call_args.args.len();
                 // set return type from signature
                 if let Some(function_type_id) = call_func.type_id(self) {
@@ -2888,6 +2653,163 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         self.types_resolved(item, expected_type_id)
+    }
+}
+
+/// Utility methods for resolve_binary_op.
+impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
+
+    /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
+    /// element type from the value argument.
+    /// Note: method names/parameter index for inference are hardcoded in value_index match block and may need to be updated for new array builtins.
+    fn try_infer_array_element_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+        // identify `<array>.<method>` access whose array element type is still unresolved
+        let (array_type_id, value_index) = {
+            let binary_op = match call_exp.as_binary_op_mut() {
+                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
+                _ => return Ok(()),
+            };
+            // which (pre-transform, so the receiver is not yet prepended) argument carries the Element value
+            let value_index = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
+                Some("push") => 0,
+                Some("insert") => 1,
+                _ => return Ok(()),
+            };
+            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_array()) {
+                Some(Some(&Array { type_id: None })) => (binary_op.left.type_id(self).ice()?, value_index),
+                _ => return Ok(()),
+            }
+        };
+        if let Some(arg) = call_args.args.get_mut(value_index) {
+            self.resolve_expression(arg, None)?;
+            if let Some(element_type_id) = arg.type_id(self) {
+                self.type_by_id_mut(array_type_id).as_array_mut().ice()?.type_id = Some(element_type_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// For a call like `map.insert(k, v)` (or `get`/`remove`) whose receiver map has a still-unknown key or
+    /// value type, infer those types from the relevant arguments (the map equivalent of
+    /// [`Self::try_create_array_builtin`]'s element inference). Required so methods can be called on an empty
+    /// map literal `[ => ]` whose types are not yet determined.
+    fn try_infer_map_types_from_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
+        // identify `<map>.<method>` access and which (pre-transform, receiver not yet prepended) arguments
+        // carry the key and value
+        let (map_type_id, key_index, value_index) = {
+            let binary_op = match call_exp.as_binary_op_mut() {
+                Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
+                _ => return Ok(()),
+            };
+            let (key_index, value_index) = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
+                Some("insert") => (Some(0), Some(1)),
+                Some("get") | Some("remove") => (Some(0), None),
+                _ => return Ok(()),
+            };
+            match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_map()) {
+                Some(Some(_)) => (binary_op.left.type_id(self).ice()?, key_index, value_index),
+                _ => return Ok(()),
+            }
+        };
+        if let Some(key_index) = key_index {
+            if self.type_by_id(map_type_id).as_map().ice()?.key_type_id.is_none() {
+                if let Some(arg) = call_args.args.get_mut(key_index) {
+                    self.resolve_expression(arg, None)?;
+                    if let Some(key_type_id) = arg.type_id(self) {
+                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.key_type_id = Some(key_type_id);
+                    }
+                }
+            }
+        }
+        if let Some(value_index) = value_index {
+            if self.type_by_id(map_type_id).as_map().ice()?.value_type_id.is_none() {
+                if let Some(arg) = call_args.args.get_mut(value_index) {
+                    self.resolve_expression(arg, None)?;
+                    if let Some(value_type_id) = arg.type_id(self) {
+                        self.type_by_id_mut(map_type_id).as_map_mut().ice()?.value_type_id = Some(value_type_id);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Rewrites a cast expression `expr as T` into a method call `expr.<method>()` and resolves it. Used to
+    /// dispatch casts backed by an intrinsic conversion trait (e.g. `ToString`) through the regular method
+    /// call machinery, which handles both static dispatch and dynamic dispatch on trait objects.
+    fn rewrite_cast_to_method(self: &mut Self, item: &mut ast::Expression, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let cast = item.as_cast_mut().ice()?;
+        let position = cast.position;
+        let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
+        *item = Self::make_method_call(receiver, method, Vec::new(), position);
+        self.resolve_expression(item, expected_result)
+    }
+
+    /// Rewrites an arithmetic binary operation `a OP b` into a method call `a.<method>(b)` and resolves it.
+    /// Used to dispatch operators backed by an intrinsic operator trait (e.g. `Add`) through the regular
+    /// method-call machinery, reusing its static and dynamic dispatch.
+    fn rewrite_binary_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        match Self::make_method_call(receiver, method, vec![ rhs ], position) {
+            ast::Expression::BinaryOp(call) => *item = *call,
+            _ => return Self::ice("make_method_call did not produce a binary operation"),
+        }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant
+    /// constructor so the generic call resolution below handles argument checking and the result type.
+    /// `T` comes from the expected result type when available, otherwise (for `Ok`) is inferred from the
+    /// argument. `Err` without an expected `Result` type cannot infer `T` and is left unbound (reported as
+    /// an undefined identifier in the final stage).
+    fn try_bind_result_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
+        let variant = match item.left.as_expression().and_then(|e| e.as_constant()) {
+            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 => match c.path.segments[0].name.as_str() {
+                "Ok" => 0 as VariantIndex,
+                "Err" => 1 as VariantIndex,
+                _ => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+        // an expected result type pins T directly; this is the common case (`return Ok(x)`, match arms, ...)
+        let expected_result_type = expected_result.filter(|t| self.result_types.contains_key(t));
+        let result_type_id = match (variant, expected_result_type) {
+            (_, Some(result_type_id)) => Some(result_type_id),
+            // Ok(x): infer T from the argument's type
+            (0, None) => {
+                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
+                    self.resolve_expression(arg, None)?;
+                    arg.type_id(self).map(|ok_type_id| self.synthesize_result_type(ok_type_id))
+                } else {
+                    None
+                }
+            },
+            // Err(e): cannot determine T from the error alone; wait for / require context
+            (_, None) => None,
+        };
+        if let Some(result_type_id) = result_type_id {
+            let info = *self.result_types.get(&result_type_id).ice()?;
+            let constructor = if variant == 0 { info.ok_constructor } else { info.err_constructor };
+            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(constructor);
+        } else if self.stage.must_resolve() {
+            // the constructor could not be bound to any `Result<T>`: there is no result type to infer from
+            // (e.g. `?` or a bare `Err`/`Ok` in a function that does not return `Result`). Report this
+            // directly instead of letting the unbound `Ok`/`Err` surface as a misleading "undefined identifier".
+            let from_try = item.right.as_argument_list().and_then(|a| a.args.first())
+                .and_then(|arg| arg.as_variable())
+                .map_or(false, |var| var.ident.name == "try$err" || var.ident.name == "try$ok");
+            let expected = expected_result.map(|type_id| self.type_name(type_id));
+            return Err(ResolveError::new(item, ResolveErrorKind::ResultOutsideResultContext(from_try, expected), self.module_path));
+        }
+        Ok(())
     }
 }
 
