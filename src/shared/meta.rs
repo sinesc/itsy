@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
 use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
-use crate::bytecode::builtins::{BuiltinType, GeneratorBuiltin};
+use crate::bytecode::builtins::BuiltinType;
 
 /// Information about a binding in a resolved program.
 #[derive(Debug)]
@@ -188,7 +188,6 @@ pub enum FunctionKind {
     Method(TypeId),
     Rust(RustFnIndex),
     Builtin(TypeId, BuiltinType),
-    GeneratorBuiltin(TypeId, GeneratorBuiltin),
     Variant(TypeId, VariantIndex),
 }
 

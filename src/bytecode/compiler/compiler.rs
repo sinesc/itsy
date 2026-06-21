@@ -11,7 +11,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{Builtin, BuiltinType, GeneratorBuiltin}};
+use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{Builtin, BuiltinType}};
 #[cfg(feature="call_function")]
 use crate::bytecode::call_function::build_function_table;
 use stack_frame::{StackFrame, StackFrames};
@@ -574,23 +574,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     comment!(self, "call {}()", constant.path);
                     self.write_call(function_id);
                 }
-            },
-            FunctionKind::GeneratorBuiltin(type_id, generator_builtin) => {
-                // receiver (the generator) is arg[0]; each method is dispatched to its dedicated opcode
-                self.compile_call_args(item, function_kind)?;
-                comment!(self, "call {}()", constant.path);
-                match generator_builtin {
-                    GeneratorBuiltin::Next => { self.writer.gen_next(); },
-                    GeneratorBuiltin::Value => {
-                        let (_key_type_id, value_type_id) = self.generator_signature(type_id).ice()?;
-                        self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
-                    },
-                    GeneratorBuiltin::Key => {
-                        let (key_type_id, _value_type_id) = self.generator_signature(type_id).ice()?;
-                        let key_type_id = key_type_id.ice()?;
-                        self.writer.gen_key(self.ty(&key_type_id).primitive_size() as FrameAddress);
-                    },
-                };
             },
             FunctionKind::Function => {
                 self.compile_call_args(item, function_kind)?;
@@ -2392,6 +2375,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             (Type::Map(_), BuiltinType::Map(map_builtin)) => {
                 map_builtin.write(self, type_id, None)
+            },
+            (_, BuiltinType::Generator(generator_builtin)) => {
+                // Generator builtins use dedicated gen_* opcodes (handled in the default @write arm).
+                generator_builtin.write(self, type_id, None)
             },
             _ => Self::ice(&format!("Builtin {builtin:?} not implemented for {ty}"))?,
         })

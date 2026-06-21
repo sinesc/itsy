@@ -38,6 +38,8 @@ macro_rules! impl_builtins {
     (@handle_param_type Value) => { HeapRef };
     (@handle_param_type KeyArray) => { HeapRef };
     (@handle_param_type ValueArray) => { HeapRef };
+    (@handle_param_type GenValue) => { HeapRef };
+    (@handle_param_type GenKey) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap().to_string() };
@@ -47,6 +49,8 @@ macro_rules! impl_builtins {
     (@handle_ref_param_value $vm:ident, Value, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, KeyArray, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, ValueArray, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, GenValue, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, GenKey, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
     // VM: Translate some pseudo-type names to concrete rust types.
     (@map_ref_type str) => { &str };
@@ -57,6 +61,8 @@ macro_rules! impl_builtins {
     (@map_ref_type Value) => { HeapRef };
     (@map_ref_type KeyArray) => { HeapRef };
     (@map_ref_type ValueArray) => { HeapRef };
+    (@map_ref_type GenValue) => { HeapRef };
+    (@map_ref_type GenKey) => { HeapRef };
     (@map_ref_type $other:ident) => { $other };
     // VM: Generate reference counting code for some pseudo type arguments.
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
@@ -69,6 +75,9 @@ macro_rules! impl_builtins {
     (@handle_ref_param_free $vm:ident, Value, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, KeyArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, ValueArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    // Generator pseudo-types: refcounting is not needed (opcodes handle it directly).
+    (@handle_ref_param_free $vm:ident, GenValue, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, GenKey, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -122,6 +131,15 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, ValueArray) => { {
         let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
         $resolver.create_array_type(map_ty.value_type_id.unwrap())
+    } };
+    // Generator pseudo-types: resolve via generator_signature.
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, GenValue) => { {
+        let (_key_type_id, value_type_id) = $resolver.generator_signature($type_id).unwrap();
+        value_type_id
+    } };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, GenKey) => { {
+        let (key_type_id, _value_type_id) = $resolver.generator_signature($type_id).unwrap();
+        key_type_id.unwrap()
     } };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, str) => { $resolver.primitive_type_id(Type::String).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackAddress) => { $resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap() };
@@ -183,18 +201,29 @@ macro_rules! impl_builtins {
             };
         }
     } };
-    // Map builtins: use call_builtinx with the map constructor (key/value sub-constructors derived at runtime).
-    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, map($variant:ident)) => { {
-        let constructor = $compiler.constructor($ty).unwrap();
-        let _ = $compiler.writer.call_builtinx(Builtin::$variant, constructor, 0);
-    } };
     (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
-        // Map types need call_builtinx with the map constructor; all others use call_builtin.
-        // For maps, we pass the map constructor as element_constructor (second arg) so that
-        // the + constructor marker in the function signature binds it correctly.
         if matches!($ty, Type::Map(_)) {
+            // Map types need call_builtinx with the map constructor; all others use call_builtin.
+            // For maps, we pass the map constructor as element_constructor (second arg) so that
+            // the + constructor marker in the function signature binds it correctly.
             let constructor = $compiler.constructor($ty).unwrap();
             let _ = $compiler.writer.call_builtinx(Builtin::$variant, 0, constructor);
+        } else if $compiler.generator_signature($type_id).is_some() {
+            // Generator types use dedicated gen_* opcodes (not call_builtin) since gen_next cannot
+            // be expressed as function (builtin). For these the macro emits the code to write the actual opcodes.
+            match stringify!($variant) {
+                "gen_next" => { $compiler.writer.gen_next(); },
+                "gen_value" => {
+                    let (_key_type_id, value_type_id) = $compiler.generator_signature($type_id).unwrap();
+                    $compiler.writer.gen_value($compiler.type_by_id(value_type_id).primitive_size() as $crate::FrameAddress);
+                },
+                "gen_key" => {
+                    let (key_type_id, _value_type_id) = $compiler.generator_signature($type_id).unwrap();
+                    let key_type_id = key_type_id.unwrap();
+                    $compiler.writer.gen_key($compiler.type_by_id(key_type_id).primitive_size() as $crate::FrameAddress);
+                },
+                _ => panic!("Unknown generator builtin variant: {}", stringify!($variant)),
+            }
         } else {
             let _ = $compiler.writer.call_builtin(Builtin::$variant);
         }
@@ -357,6 +386,8 @@ macro_rules! impl_builtins {
             struct Value { }
             struct KeyArray { }
             struct ValueArray { }
+            struct GenKey { }
+            struct GenValue { }
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }

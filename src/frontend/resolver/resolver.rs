@@ -19,7 +19,7 @@ use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
 use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
-use crate::bytecode::{VMFunc, builtins::{builtin_types, GeneratorBuiltin}};
+use crate::bytecode::{VMFunc, builtins::builtin_types};
 use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
@@ -366,38 +366,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         })
     }
 
-    /// Create a generator method signature (`next`/`value`/`key`). Like the map builtins these are
-    /// registered as [`FunctionKind::GeneratorBuiltin`] and lowered to dedicated opcodes; the receiver
-    /// (the generator) is prepended as the first argument. `value`/`key` return the generator's value
-    /// and key types respectively; `key` only exists for `Generator<K, V>`.
+    /// Create a generator method signature (`next`/`value`/`key`). Uses the macro-generated
+    /// [`builtin_types::Generator::resolve`] function, registered as [`FunctionKind::Builtin`].
     fn try_create_generator_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
 
         if let Some(constant_id) = self.scopes.constant_id(ScopeId::ROOT, name, type_id) {
             return Ok(Some(constant_id));
         }
 
-        let (key_type_id, value_type_id) = match self.generator_signature(type_id) {
-            Some(sig) => sig,
-            None => return Ok(None),
-        };
-
-        // (builtin, return type, explicit argument types) — the receiver is prepended below
-        let spec: Option<(GeneratorBuiltin, TypeId, Vec<TypeId>)> = match name {
-            "next"  => Some((GeneratorBuiltin::Next, self.primitive_type_id(Type::bool)?, vec![])),
-            "value" => Some((GeneratorBuiltin::Value, value_type_id, vec![])),
-            "key"   => key_type_id.map(|key_type_id| (GeneratorBuiltin::Key, key_type_id, vec![])),
-            _ => None,
-        };
-
-        Ok(match spec {
+        // Pass type_id as inner_type_id so that GenValue/GenKey pseudo-types can resolve via
+        // generator_signature, and the require_type check falls through to Type::void.
+        Ok(match builtin_types::Generator::resolve(self, name, type_id, Some(type_id)) {
             None => None,
-            Some((gen_builtin, ret_type_id, mut arg_type_ids)) => {
-                arg_type_ids.insert(0, type_id); // prepend the receiver (the generator itself)
+            Some((builtin_type, result_type_id, arg_type_ids)) => {
                 Some(self.scopes.insert_function(
                     name,
-                    Some(ret_type_id),
-                    arg_type_ids.into_iter().map(Some).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::GeneratorBuiltin(type_id, gen_builtin))
+                    Some(result_type_id),
+                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::Builtin(type_id, builtin_type))
                 ))
             },
         })

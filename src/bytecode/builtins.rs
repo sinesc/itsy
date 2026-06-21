@@ -7,21 +7,6 @@ use crate::bytecode::macros::impl_builtins;
 #[cfg(feature="runtime")]
 use std::str::Chars;
 
-/// Identifies a built-in generator method.
-///
-/// Like the map methods, generator methods are dispatched through dedicated VM opcodes (the `gen_*`
-/// opcodes in `opcodes.rs`) rather than the `impl_builtins!` machinery: `value()`/`key()` have
-/// parametric return types and `next()` drives the coroutine. The resolver registers these as
-/// [`FunctionKind::GeneratorBuiltin`](crate::shared::meta::FunctionKind) and the compiler lowers each
-/// to its opcode.
-#[cfg(feature="compiler")]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum GeneratorBuiltin {
-    Next,
-    Value,
-    Key,
-}
-
 /// Appends len chars from source starting at start to target. If len is None the entire remaining source will be copied.
 #[cfg(feature="runtime")]
 fn append<'a>(start: usize, len: Option<usize>, source: &'a str, target: &mut String) -> Chars<'a> {
@@ -1497,6 +1482,72 @@ impl_builtins! {
                 let clone_index = vm.heap.alloc_copy(&data, ItemIndex::MAX);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
                 HeapRef::new(clone_index, 0)
+            }
+        }
+    }
+
+    /// A lazily-produced sequence of values, written `Generator<V>` or `Generator<K, V>`.
+    ///
+    /// A generator is what you get by calling a generator function — any `fn` whose body uses
+    /// `yield`. Calling such a function does **not** run its body; it returns a `Generator` whose
+    /// execution is advanced on demand. Each `yield` in the body hands a value (form
+    /// `Generator<V>`) or a key/value pair (form `Generator<K, V>`) back to whoever is driving the
+    /// generator, then suspends until the next request.
+    ///
+    /// Like arrays and maps a generator is a reference type. It is also **single-shot**: once it
+    /// runs to completion it stays exhausted and cannot be restarted.
+    ///
+    /// The usual way to consume one is a `for` loop, which drives it to exhaustion for you.
+    ///
+    /// # Examples
+    ///
+    /// ``` ignore
+    /// fn count_up(n: i32) -> Generator<i32> {
+    ///     let mut i = 0;
+    ///     while i < n {
+    ///         yield i;
+    ///         i += 1;
+    ///     }
+    /// }
+    ///
+    /// for v in count_up(3) {
+    ///     print("{v}\n");   // 0, 1, 2
+    /// }
+    /// ```
+    Generator {
+        /// Resumes the generator until its next `yield` and returns `true`, or returns `false` once
+        /// the generator has finished. After `false` is returned the generator is exhausted and
+        /// `value`/`key` must no longer be called.
+        next(self: Self) -> bool {
+            fn gen_next(this: HeapRef) -> bool {
+                // Placeholder; actual execution is via the gen_next opcode.
+                // Search for the 'Generator types use dedicated gen_* opcodes' comment in impl_builtins.rs for explanation.
+                true
+            }
+        }
+
+        /// Returns the value produced by the most recent `next`.
+        ///
+        /// # Error
+        ///
+        /// Halts the VM if called before the first `next`, or after `next` has returned `false`. The VM
+        /// is resumable.
+        value(self: Self) -> GenValue {
+            fn gen_value(this: HeapRef) -> GenValue {
+                HeapRef::new(0, 0) // see gen_next
+            }
+        }
+
+        /// Returns the key produced by the most recent `next`. Only available on the
+        /// key/value form `Generator<K, V>`.
+        ///
+        /// # Error
+        ///
+        /// Halts the VM if called before the first `next`, or after `next` has returned `false`. The VM
+        /// is resumable.
+        key(self: Self) -> GenKey {
+            fn gen_key(this: HeapRef) -> GenKey {
+                HeapRef::new(0, 0) // see gen_next
             }
         }
     }

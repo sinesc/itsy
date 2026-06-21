@@ -200,7 +200,6 @@ pub(crate) trait Resolvable: Display {
             Some(FunctionKind::Method(type_id)) => self.check_type_id(container, type_id, seen),
             Some(FunctionKind::Rust(_)) => Progress::new(1, 1),
             Some(FunctionKind::Builtin(type_id, _)) => self.check_type_id(container, type_id, seen),
-            Some(FunctionKind::GeneratorBuiltin(type_id, _)) => self.check_type_id(container, type_id, seen),
             Some(FunctionKind::Variant(type_id, _)) => self.check_type_id(container, type_id, seen),
         };
         progress + self.check_type_id(container, function.callable_type_id, seen)

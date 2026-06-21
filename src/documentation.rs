@@ -59,67 +59,6 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// ```
 pub struct Result { }
 
-/// A lazily-produced sequence of values, written `Generator<V>` or `Generator<K, V>`.
-///
-/// A generator is what you get by calling a [generator function](self::generators) — any `fn` whose
-/// body uses `yield`. Calling such a function does **not** run its body; it returns a `Generator`
-/// whose execution is advanced on demand. Each `yield` in the body hands a value (form
-/// `Generator<V>`) or a key/value pair (form `Generator<K, V>`) back to whoever is driving the
-/// generator, then suspends until the next request. This makes it possible to describe long or even
-/// unbounded sequences without ever materializing them as an array.
-///
-/// Like arrays and maps a generator is a reference type. It is also **single-shot**: once it runs to
-/// completion it stays exhausted and cannot be restarted.
-///
-/// The usual way to consume one is a `for` loop, which drives it to exhaustion for you:
-///
-/// ``` ignore
-/// fn count_up(n: i32) -> Generator<i32> {
-///     let mut i = 0;
-///     while i < n {
-///         yield i;
-///         i += 1;
-///     }
-/// }
-///
-/// for v in count_up(3) {
-///     print("{v}\n");   // 0, 1, 2
-/// }
-/// ```
-///
-/// The key/value form is iterated like a map, with `for key, value in g` (or `for key, _ in g` for
-/// the keys alone). See the [generators] reference for writing generator functions
-/// and for driving a generator by hand with the methods below.
-pub struct Generator { }
-
-// Placeholder types referenced by `Generator`'s method signatures.
-struct Key { }
-struct Value { }
-
-impl Generator {
-    /// Resumes the generator until its next `yield` and returns `true`, or returns `false` once the
-    /// generator has finished. After `false` is returned the generator is exhausted and
-    /// [`value`](Self::value)/[`key`](Self::key) must no longer be called.
-    pub fn next(self: Self) -> bool { }
-
-    /// Returns the value produced by the most recent [`next`](Self::next).
-    ///
-    /// # Error
-    ///
-    /// Halts the VM if called before the first `next`, or after `next` has returned `false`. The VM
-    /// is resumable.
-    pub fn value(self: Self) -> Value { }
-
-    /// Returns the key produced by the most recent [`next`](Self::next). Only available on the
-    /// key/value form `Generator<K, V>`.
-    ///
-    /// # Error
-    ///
-    /// Halts the VM if called before the first `next`, or after `next` has returned `false`. The VM
-    /// is resumable.
-    pub fn key(self: Self) -> Key { }
-}
-
 /// Intrinsic traits recognized by the compiler.
 ///
 /// Unlike user-defined traits, these are known to the compiler: implementing one for a custom type
