@@ -1477,7 +1477,7 @@ impl_builtins! {
 
         /// Returns a shallow copy of the map.
         clone(self: Self) -> Map {
-            fn map_clone(&mut vm + constructor, this: Map) -> HeapRef {
+            fn map_clone(&mut vm + constructor, this: Map) -> Map {
                 let data = vm.heap.item(this.index()).data.clone();
                 let clone_index = vm.heap.alloc_copy(&data, ItemIndex::MAX);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
