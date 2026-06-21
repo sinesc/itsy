@@ -11,7 +11,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin, GeneratorBuiltin}};
+use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{Builtin, BuiltinType, GeneratorBuiltin}};
 #[cfg(feature="call_function")]
 use crate::bytecode::call_function::build_function_table;
 use stack_frame::{StackFrame, StackFrames};
@@ -440,7 +440,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         self.compile_expression(bin.left.as_expression().ice()?)?;  // stack: map
                         self.compile_expression(bin.right.as_expression().ice()?)?; // stack: map key
                         self.compile_expression(&item.right)?;                      // stack: map key value
-                        self.writer.map_insert(constructor);                        // stack: --
+                        self.writer.call_builtinx(Builtin::map_insert, 0, constructor);                        // stack: --
                         return Ok(());
                     }
                 }
@@ -560,24 +560,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.compile_call_args(item, function_kind)?;
                 comment!(self, "call {}()", constant.path);
                 self.write_builtin(self.ty(&type_id), builtin_type)?;
-            },
-            FunctionKind::MapBuiltin(type_id, map_builtin) => {
-                // receiver (the map) is arg[0], followed by the method's explicit args; the map opcodes
-                // consume them in that order. Each is dispatched to its dedicated opcode.
-                self.compile_call_args(item, function_kind)?;
-                comment!(self, "call {}()", constant.path);
-                let constructor = self.constructor(self.ty(&type_id))?;
-                match map_builtin {
-                    MapBuiltin::Insert => { self.writer.map_insert(constructor); },
-                    MapBuiltin::Get    => { self.writer.map_get(constructor); },
-                    MapBuiltin::ContainsKey => { self.writer.map_contains_key(constructor); },
-                    MapBuiltin::Remove => { self.writer.map_remove(constructor); },
-                    MapBuiltin::Clear  => { self.writer.map_clear(constructor); },
-                    MapBuiltin::Keys   => { self.writer.map_keys(constructor); },
-                    MapBuiltin::Values => { self.writer.map_values(constructor); },
-                    MapBuiltin::Len    => { self.writer.map_len(constructor); },
-                    MapBuiltin::Clone  => { self.writer.map_clone(constructor); },
-                };
             },
             FunctionKind::Method(object_type_id) => {
                 self.compile_call_args(item, function_kind)?;
@@ -1531,7 +1513,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // never reaches here, so only the read (Index) is expected.
             let constructor = self.constructor(compare_type)?;
             match item.op {
-                Index => { self.writer.map_get(constructor); },
+                Index => { self.writer.call_builtinx(Builtin::map_get, 0, constructor); },
                 _ => Self::ice_at(item, "unsupported map offset operation")?,
             }
             return Ok(());
@@ -2407,6 +2389,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             },
             (Type::String, BuiltinType::String(string_builtin)) => {
                 string_builtin.write(self, type_id, None)
+            },
+            (Type::Map(_), BuiltinType::Map(map_builtin)) => {
+                map_builtin.write(self, type_id, None)
             },
             _ => Self::ice(&format!("Builtin {builtin:?} not implemented for {ty}"))?,
         })

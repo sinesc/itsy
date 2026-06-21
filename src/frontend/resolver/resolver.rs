@@ -19,7 +19,7 @@ use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
 use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
-use crate::bytecode::{VMFunc, builtins::{builtin_types, MapBuiltin, GeneratorBuiltin}};
+use crate::bytecode::{VMFunc, builtins::{builtin_types, GeneratorBuiltin}};
 use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
@@ -335,11 +335,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
-    /// Try to create a concrete map builtin function signature for the given map type. Map methods are
-    /// dispatched via dedicated VM opcodes (see `map_*` in opcodes.rs), so unlike array/scalar builtins
-    /// these are registered as [`FunctionKind::MapBuiltin`] rather than going through the impl_builtins!
-    /// machinery. The receiver (the map itself) is prepended as the first argument, mirroring how the
-    /// array builtins encode `this`.
+    /// Try to create a concrete map builtin function signature for the given map type. Uses the
+    /// macro-generated [`builtin_types::Map::resolve`] function, registered as [`FunctionKind::Builtin`].
     fn try_create_map_builtin(self: &mut Self, item: &ast::Expression, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
 
         if let Some(constant_id) = self.scopes.constant_id(ScopeId::ROOT, name, type_id) {
@@ -347,9 +344,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
 
         let map_ty = self.type_by_id(type_id).as_map().ice()?;
-        let (key_type_id, value_type_id) = match (map_ty.key_type_id, map_ty.value_type_id) {
+        let (key_type_id, _value_type_id) = match (map_ty.key_type_id, map_ty.value_type_id) {
             (Some(key_type_id), Some(value_type_id)) => (key_type_id, value_type_id),
-            // key/value types not resolved yet: can't build the signature until they are
             _ => return if self.stage.must_resolve() {
                 Err(ResolveError::new(item, ResolveErrorKind::CannotResolve(format!("{}", &item)), self.module_path))
             } else {
@@ -357,36 +353,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             },
         };
 
-        // (builtin, return type, explicit argument types) — the receiver is prepended below
-        let spec: Option<(MapBuiltin, Option<TypeId>, Vec<TypeId>)> = match name {
-            "insert" => Some((MapBuiltin::Insert, None, vec![ key_type_id, value_type_id ])),
-            "get"    => Some((MapBuiltin::Get, Some(value_type_id), vec![ key_type_id ])),
-            "contains_key" => Some((MapBuiltin::ContainsKey, Some(self.primitive_type_id(Type::bool)?), vec![ key_type_id ])),
-            "remove" => Some((MapBuiltin::Remove, None, vec![ key_type_id ])),
-            "clear"  => Some((MapBuiltin::Clear, None, vec![])),
-            "clone"  => Some((MapBuiltin::Clone, Some(type_id), vec![])),
-            "len"    => Some((MapBuiltin::Len, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?), vec![])),
-            "keys"   => {
-                let array_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: Some(key_type_id) }));
-                Some((MapBuiltin::Keys, Some(array_type_id), vec![]))
-            },
-            "values" => {
-                let array_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: Some(value_type_id) }));
-                Some((MapBuiltin::Values, Some(array_type_id), vec![]))
-            },
-            _ => None,
-        };
-
-        Ok(match spec {
+        Ok(match builtin_types::Map::resolve(self, name, type_id, Some(key_type_id)) {
             None => None,
-            Some((map_builtin, ret_type_id, mut arg_type_ids)) => {
-                // prepend the receiver (the map itself), as the array builtins do for `this`
-                arg_type_ids.insert(0, type_id);
+            Some((builtin_type, result_type_id, arg_type_ids)) => {
                 Some(self.scopes.insert_function(
                     name,
-                    Some(ret_type_id.unwrap_or(TypeId::VOID)),
-                    arg_type_ids.into_iter().map(Some).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::MapBuiltin(type_id, map_builtin))
+                    Some(result_type_id),
+                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
+                    Some(FunctionKind::Builtin(type_id, builtin_type))
                 ))
             },
         })
@@ -454,6 +428,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 ))
             },
         })
+    }
+
+    /// Creates an Array<T> type and returns its TypeId.
+    pub(crate) fn create_array_type(self: &mut Self, element_type_id: TypeId) -> TypeId {
+        use crate::shared::meta::Array;
+        self.scopes.insert_type(None, Type::Array(Array { type_id: Some(element_type_id) }))
     }
 
     /// Returns TypeId of a type suitable to represent the given numeric. Will only consider i32, i64 and f32.

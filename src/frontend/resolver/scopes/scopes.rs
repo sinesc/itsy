@@ -116,7 +116,6 @@ impl Scopes {
         let type_id = match kind {
             Some(FunctionKind::Method(type_id)) => type_id,
             Some(FunctionKind::Builtin(type_id, _)) => type_id,
-            Some(FunctionKind::MapBuiltin(type_id, _)) => type_id,
             _ => TypeId::VOID,
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));

@@ -1,13 +1,31 @@
 /// Macro to generate bytecode writers and readers from instruction signatures.
 macro_rules! impl_builtins {
     // VM: Pushes the return value and converts some special cases.
-    (@handle_ret_value $vm:ident, bool, $value:ident) => { $vm.stack.push($value as u8); };
-    (@handle_ret_value $vm:ident, String, $value:ident) => { {
+    // The fourth parameter ($constructor) is the owning-type constructor (needed by Value/Map for refcounting).
+    (@handle_ret_value $vm:ident, bool, $value:ident, $_ctor:ident) => { $vm.stack.push($value as u8); };
+    (@handle_ret_value $vm:ident, String, $value:ident, $_ctor:ident) => { {
         let index = $vm.heap.alloc_copy($value.as_bytes(), $crate::ItemIndex::MAX);
         $vm.stack.push(HeapRef::new(index, 0));
     } };
-    (@handle_ret_value $vm:ident, $_:tt, $value:ident) => { $vm.stack.push($value);  };
+    (@handle_ret_value $vm:ident, Value, $value:ident, $constructor:ident) => { {
+        use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+        let (_key_ctor, value_ctor) = $crate::bytecode::Constructor::map_sub_constructors(&$vm.stack, $constructor);
+        if $crate::bytecode::Constructor::is_primitive(&$vm.stack, value_ctor) {
+            let n = $crate::bytecode::Constructor::primitive_size(&$vm.stack, value_ctor);
+            $vm.map_unbox_push_primitive($value, n);
+            $vm.heap.ref_item($value.index(), $crate::bytecode::HeapRefOp::Free);
+        } else {
+            $vm.heap.ref_item($value.index(), $crate::bytecode::HeapRefOp::Inc);
+            $vm.stack.push($value);
+            $vm.heap.ref_item($value.index(), $crate::bytecode::HeapRefOp::DecNoFree);
+        }
+    } };
+    (@handle_ret_value $vm:ident, Map, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, KeyArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, ValueArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, $_:tt, $value:ident, $_ctor:ident) => { $vm.stack.push($value);  };
     // VM: Pops an argument and converts some special cases.
+    // Note: Map/Key/Value/KeyArray/ValueArray are handled by @load_args_map and will not reach this rule.
     (@handle_param_value $vm:ident, bool) => { { let tmp: u8 = $vm.stack.pop(); tmp != 0 } };
     (@handle_param_value $vm:ident, $_:tt) => { $vm.stack.pop() };
     // VM: Translate parameter list/result pseudo-types to internally used types.
@@ -15,21 +33,42 @@ macro_rules! impl_builtins {
     (@handle_param_type str) => { HeapRef };
     (@handle_param_type Array) => { HeapRef };
     (@handle_param_type Element) => { HeapRef };
+    (@handle_param_type Map) => { HeapRef };
+    (@handle_param_type Key) => { HeapRef };
+    (@handle_param_type Value) => { HeapRef };
+    (@handle_param_type KeyArray) => { HeapRef };
+    (@handle_param_type ValueArray) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
     // VM: Convert some pseudo-type arguments to values of concrete rust types. This happens after the value was initially loaded as the type prescribed by @handle_param_type.
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap().to_string() };
     (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap() };
+    (@handle_ref_param_value $vm:ident, Map, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, Key, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, Value, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, KeyArray, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, ValueArray, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
     // VM: Translate some pseudo-type names to concrete rust types.
     (@map_ref_type str) => { &str };
     (@map_ref_type Array) => { HeapRef };
     (@map_ref_type Element) => { HeapRef };
+    (@map_ref_type Map) => { HeapRef };
+    (@map_ref_type Key) => { HeapRef };
+    (@map_ref_type Value) => { HeapRef };
+    (@map_ref_type KeyArray) => { HeapRef };
+    (@map_ref_type ValueArray) => { HeapRef };
     (@map_ref_type $other:ident) => { $other };
     // VM: Generate reference counting code for some pseudo type arguments.
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, Array, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $constructor, $crate::bytecode::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, Element, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { $vm.refcount_value(HeapRef::new($arg_name.index(), 0), $element_constructor, $crate::bytecode::HeapRefOp::Free) };
+    // Map pseudo-types: refcounting is handled inside the code block, not by the macro.
+    (@handle_ref_param_free $vm:ident, Map, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, Key, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, Value, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, KeyArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, ValueArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -38,12 +77,52 @@ macro_rules! impl_builtins {
         )*
     };
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:ident $($rest:tt)* ] $($reversed:tt)*) => {
-        impl_builtins!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
+        impl_builtins!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*);
+    };
+    // VM: Load arguments for single-variant builtins, with awareness of Map sub-constructors.
+    // Like @load_args_reverse but handles Map/Key/Value correctly using the constructor.
+    // Uses element_constructor for Map/Key/Value (the map constructor is passed as element_constructor by the compiler).
+    // Processes args in reverse order (right-to-left) so stack pops happen in the correct LIFO order.
+    (@load_args_map $vm:ident, $constructor:ident, $element_constructor:ident []) => { };
+    (@load_args_map $vm:ident, $constructor:ident, $element_constructor:ident [$first:ident $first_type:tt $($rest:tt)*]) => {
+        impl_builtins!(@load_args_map $vm, $constructor, $element_constructor [$($rest)*]);
+        impl_builtins!(@load_args_map_one $vm, $constructor, $element_constructor, $first, $first_type);
+    };
+    (@load_args_map_one $vm:ident, $_constructor:ident, $element_constructor:ident, $arg_name:ident, Key) => {
+        let (key_ctor, _) = $crate::bytecode::Constructor::map_sub_constructors(&$vm.stack, $element_constructor);
+        let $arg_name: HeapRef = $vm.map_box_pop(key_ctor);
+    };
+    (@load_args_map_one $vm:ident, $_constructor:ident, $element_constructor:ident, $arg_name:ident, Value) => {
+        let (_, value_ctor) = $crate::bytecode::Constructor::map_sub_constructors(&$vm.stack, $element_constructor);
+        let $arg_name: HeapRef = $vm.map_box_pop(value_ctor);
+    };
+    (@load_args_map_one $vm:ident, $_constructor:ident, $_element_constructor:ident, $arg_name:ident, Map) => {
+        let $arg_name: HeapRef = $vm.stack.pop();
+    };
+    (@load_args_map_one $vm:ident, $_constructor:ident, $_element_constructor:ident, $arg_name:ident, $arg_type:tt) => {
+        let $arg_name: impl_builtins!(@handle_param_type $arg_type) = impl_builtins!(@handle_param_value $vm, $arg_type);
     };
     // Resolver: Type id mapping for resolve() function
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Self) => { $type_id };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Map) => { $type_id };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Array) => { $type_id };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Element) => { $inner_type_id.expect("Generic inner type is not resolved.") };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Key) => { {
+        let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
+        map_ty.key_type_id.unwrap()
+    } };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, Value) => { {
+        let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
+        map_ty.value_type_id.unwrap()
+    } };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, KeyArray) => { {
+        let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
+        $resolver.create_array_type(map_ty.key_type_id.unwrap())
+    } };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, ValueArray) => { {
+        let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
+        $resolver.create_array_type(map_ty.value_type_id.unwrap())
+    } };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, str) => { $resolver.primitive_type_id(Type::String).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackAddress) => { $resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackOffset) => { $resolver.primitive_type_id(crate::STACK_OFFSET_TYPE).unwrap() };
@@ -52,7 +131,7 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident) => { TypeId::VOID };
     // Compiler: Write implementation variants
     // TODO these cases are super ugly. maybe a muncher could make this better?
-    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident, $variant_x:ident) => { {
         let $element_ty = $element_ty.unwrap();
         if $element_ty.is_ref() {
             let constructor = $compiler.constructor($ty).unwrap();
@@ -69,14 +148,14 @@ macro_rules! impl_builtins {
             };
         }
     } };
-    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_32:ident, $variant_64:ident) => { {
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant_32:ident, $variant_64:ident) => { {
         match $ty.primitive_size() {
             8 => $compiler.writer.call_builtin(Builtin::$variant_64),
             4 => $compiler.writer.call_builtin(Builtin::$variant_32),
             _ => panic!("Invalid type size for builtin call."),
         };
     } };
-    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident) => { {
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant_8:ident, $variant_16:ident, $variant_32:ident, $variant_64:ident) => { {
         match $ty.primitive_size() {
             8 => $compiler.writer.call_builtin(Builtin::$variant_64),
             4 => $compiler.writer.call_builtin(Builtin::$variant_32),
@@ -85,7 +164,7 @@ macro_rules! impl_builtins {
             _ => panic!("Invalid type size for builtin call."),
         };
     } };
-    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant_i8:ident, $variant_i16:ident, $variant_i32:ident, $variant_i64:ident, $variant_u8:ident, $variant_u16:ident, $variant_u32:ident, $variant_u64:ident) => { {
         if $ty.is_signed() {
             match $ty.primitive_size() {
                 8 => $compiler.writer.call_builtin(Builtin::$variant_i64),
@@ -104,8 +183,21 @@ macro_rules! impl_builtins {
             };
         }
     } };
-    (@write $compiler:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
-        $compiler.writer.call_builtin(Builtin::$variant)
+    // Map builtins: use call_builtinx with the map constructor (key/value sub-constructors derived at runtime).
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, map($variant:ident)) => { {
+        let constructor = $compiler.constructor($ty).unwrap();
+        let _ = $compiler.writer.call_builtinx(Builtin::$variant, constructor, 0);
+    } };
+    (@write $compiler:ident, $type_id:ident, $ty:ident, $element_ty:ident, $variant:ident) => { {
+        // Map types need call_builtinx with the map constructor; all others use call_builtin.
+        // For maps, we pass the map constructor as element_constructor (second arg) so that
+        // the + constructor marker in the function signature binds it correctly.
+        if matches!($ty, Type::Map(_)) {
+            let constructor = $compiler.constructor($ty).unwrap();
+            let _ = $compiler.writer.call_builtinx(Builtin::$variant, 0, constructor);
+        } else {
+            let _ = $compiler.writer.call_builtin(Builtin::$variant);
+        }
     } };
     // Main definition block
     (
@@ -181,7 +273,7 @@ macro_rules! impl_builtins {
 
                 impl $builtin_type {
                     #[allow(unused_variables)]
-                    pub(crate) fn resolve(resolver: &Resolver, name: &str, type_id: TypeId, inner_type_id: Option<TypeId>) -> Option<(BuiltinType, TypeId, Vec<TypeId>)> {
+                    pub(crate) fn resolve(resolver: &mut Resolver, name: &str, type_id: TypeId, inner_type_id: Option<TypeId>) -> Option<(BuiltinType, TypeId, Vec<TypeId>)> {
                         // The require_type here is only used to typecheck primitive types of the same type-group against each other.
                         // Since the resolver already invokes the correct type-group version of this function (e.g. Integer::resolve vs String::resolve)
                         // we don't have to worry about guarding against types not present in this group.
@@ -231,7 +323,7 @@ macro_rules! impl_builtins {
                         match self {
                             $( // function
                                 Self::$builtin_function => {
-                                    impl_builtins!(@write compiler, ty, element_ty
+                                    impl_builtins!(@write compiler, type_id, ty, element_ty
                                         $( // implementation
                                             $( // builtin variants
                                                 $(
@@ -254,14 +346,17 @@ macro_rules! impl_builtins {
 
         // Auto-generated per-type documentation items. These are contributed to the hand-owned
         // `documentation` module (defined in builtins.rs) via a glob re-export, so that hand-written
-        // entries which are not generated by this macro (e.g. `Map`, dispatched through dedicated
-        // opcodes rather than the builtin machinery) can live alongside them under one namespace.
+        // entries which are not generated by this macro can live alongside them under one namespace.
         #[cfg(doc)]
         pub(crate) mod builtin_type_documentation {
             // Placeholder types referenced by generated method signatures. Kept private (not
             // re-exported) so they don't render as standalone types, matching their pseudo-type role.
             struct Element { }
             struct UnsignedSelf { }
+            struct Key { }
+            struct Value { }
+            struct KeyArray { }
+            struct ValueArray { }
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }
@@ -336,7 +431,7 @@ macro_rules! impl_builtins {
                                             // Set return value, if any.
                                             $(
                                                 let ret_typed: impl_builtins!(@map_ref_type $vret_type) = ret;
-                                                impl_builtins!(@handle_ret_value vm, $vret_type, ret_typed);
+                                                impl_builtins!(@handle_ret_value vm, $vret_type, ret_typed, constructor);
                                             )?
                                         },
                                     )+
@@ -349,8 +444,8 @@ macro_rules! impl_builtins {
                                         #[allow(dead_code)]
                                         /// Single variant builtins don't provide U. This definition of U is intended to shadow the VM's generic U in order to trigger an error on accidental use. This is not the U you are looking for.
                                         trait U { }
-                                        // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                                        impl_builtins!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
+                                        // Load arguments. For Map builtins this handles Key/Value/Map correctly via map_box_pop/stack.pop().
+                                        impl_builtins!(@load_args_map vm, constructor, element_constructor [ $( $arg_name $arg_type )* ]);
                                         // Run code.
                                         let ret = {
                                             // Shadow HeapRef arguments with actual argument value.
@@ -372,7 +467,7 @@ macro_rules! impl_builtins {
                                         // Set return value, if any.
                                         $(
                                             let ret_typed: impl_builtins!(@map_ref_type $ret_type) = ret;
-                                            impl_builtins!(@handle_ret_value vm, $ret_type, ret_typed);
+                                            impl_builtins!(@handle_ret_value vm, $ret_type, ret_typed, element_constructor);
                                         )?
                                     },
                                 )?

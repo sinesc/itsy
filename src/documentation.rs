@@ -28,73 +28,6 @@
 #[doc(inline)]
 pub use crate::bytecode::builtins::builtin_type_documentation::*;
 
-// Placeholder types referenced by `Map`'s method signatures. Kept private (not rendered as
-// standalone types) to mirror how the macro treats `Element`/`UnsignedSelf`.
-struct Key { }
-struct Value { }
-
-/// Dynamically sized key/value map type.
-///
-/// Maps associate `Key`s with `Value`s. Like arrays, maps are a reference type: binding a map
-/// already bound to one variable to another makes both variables point at the same data.
-/// Iteration, indexing (`map[key]`) and the literal syntax (`[ key => value ]`) are part of the
-/// language; the methods below are the named operations. The iteration forms mirror arrays:
-///
-/// - `for value in map` — iterate values.
-/// - `for key, value in map` — iterate keys and values.
-/// - `for key, _ in map` — iterate keys alone.
-///
-/// Iteration walks a snapshot taken in insertion order, so the body is free to insert into or remove
-/// from the map without disturbing the iteration.
-///
-/// # Examples
-///
-/// ``` ignore
-/// let ages = [ "Anna" => 30, "Bert" => 42 ];
-/// ages.insert("Cleo", 19);
-///
-/// for name, age in ages {
-///     print("{name} is {age}\n");
-/// }
-/// ```
-pub struct Map { }
-
-impl Map {
-    /// Inserts a key/value pair into the map, replacing and dropping any previous value stored
-    /// under an equal key.
-    pub fn insert(self: Self, key: Key, value: Value) { }
-
-    /// Returns the value stored under the given key.
-    ///
-    /// # Error
-    ///
-    /// Halts the VM if the key is not present in the map. The VM is resumable.
-    pub fn get(self: Self, key: Key) -> Value { }
-
-    /// Returns `true` if the map contains a value for the given key.
-    pub fn contains_key(self: Self, key: Key) -> bool { }
-
-    /// Removes the entry stored under the given key, doing nothing if the key is absent.
-    pub fn remove(self: Self, key: Key) { }
-
-    /// Removes all entries from the map.
-    pub fn clear(self: Self) { }
-
-    /// Returns an array of the map's keys in insertion order.
-    pub fn keys(self: Self) -> Array { }
-
-    /// Returns an array of the map's values in insertion order.
-    pub fn values(self: Self) -> Array { }
-
-    /// Returns the number of entries in the map.
-    pub fn len(self: Self) -> u64 { }
-
-    /// Returns a shallow copy of the map. Keys and values are shared with the original (for reference
-    /// types this means both maps observe mutations through the shared values), but the two maps'
-    /// sets of entries are independent: inserting into or removing from one does not affect the other.
-    pub fn clone(self: Self) -> Map { }
-}
-
 /// Success-or-error type, written `Result<T>`.
 ///
 /// A `Result<T>` is either `Ok(value)` carrying a success value of type `T`, or `Err(error)`
@@ -158,6 +91,10 @@ pub struct Result { }
 /// the keys alone). See the [generators] reference for writing generator functions
 /// and for driving a generator by hand with the methods below.
 pub struct Generator { }
+
+// Placeholder types referenced by `Generator`'s method signatures.
+struct Key { }
+struct Value { }
 
 impl Generator {
     /// Resumes the generator until its next `yield` and returns `true`, or returns `false` once the
