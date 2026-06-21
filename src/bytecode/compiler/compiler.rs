@@ -263,6 +263,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.loop_control.add_jump(LoopControl::Continue(continue_jump));
                 Ok(())
             },
+            S::Suspend(_) => {
+                // suspend the VM; execution resumes at the following instruction on the next run() call.
+                // No stack/heap teardown: the retained frame is what makes resumption possible.
+                comment!(self, "suspend");
+                self.writer.suspend();
+                Ok(())
+            },
             S::Yield(yield_stmt) => {
                 // a ref-typed value/key is retained by the generator's value/key slot (replace semantics);
                 // its constructor drives that refcounting, GEN_PRIMITIVE_CTOR marks a primitive (no refcount).

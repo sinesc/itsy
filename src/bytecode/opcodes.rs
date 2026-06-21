@@ -1752,10 +1752,11 @@ impl_opcodes!{
         self.stack.push(HeapRef::new(array_index, 0));
     }
 
-    /* /// Yield program execution.
-    fn yld(&mut self) return {
-        self.state = VMState::Yielded;
-    }*/
+    /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
+    /// run() again. Unlike `exit`, no stack/heap teardown is performed.
+    fn suspend(&mut self) [ return ] {
+        self.state = VMState::Suspended;
+    }
 
     /// Constructs a generator from the arguments on the stack (its entry address was pushed above them)
     /// and pushes a reference to it. Does not run the generator body. `entry_map` is the const-pool offset

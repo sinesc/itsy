@@ -45,7 +45,7 @@ pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
 
 // Implement some VM methods to write values of specific types to the VM context.
 itsy_api! {
-    TestFns<Context> {
+    pub TestFns<Context> {
         fn ret_u8(&mut context, value: u8) {
             context.push(Box::new(value));
         }

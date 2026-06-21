@@ -358,7 +358,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction, Cast)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Yield, Break, Continue, Expression, Module, UseDecl, EnumDef)
+        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Yield, Break, Continue, Suspend, Expression, Module, UseDecl, EnumDef)
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
@@ -472,6 +472,7 @@ pub enum Statement {
     Yield(Yield),
     Break(Break),
     Continue(Continue),
+    Suspend(Suspend),
     Expression(Expression),
     Module(ModuleDecl),
     UseDecl(UseDecl),
@@ -1275,6 +1276,19 @@ pub struct Continue {
 impl_positioned!(Continue);
 impl_resolvable!(always Continue);
 impl_display!(Continue, "continue");
+
+
+/// A suspend statement. Suspends the entire VM, retaining stack and heap state; execution resumes at
+/// the following instruction when the host calls run() again. Unlike break/continue/return it does not
+/// interrupt control flow.
+#[derive(Debug)]
+pub struct Suspend {
+    pub position: Position,
+}
+
+impl_positioned!(Suspend);
+impl_resolvable!(always Suspend);
+impl_display!(Suspend, "suspend");
 
 
 /// A deconstruction pattern, e.g. `_`, `123`, `name` or `Enum::Variant(123, inner)`.

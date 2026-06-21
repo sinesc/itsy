@@ -12,8 +12,9 @@ use super::generator::GenControl;
 pub enum VMState {
     /// The program is ready to run.
     Ready,
-    /// The program has yielded. It can be resumed.
-    Yielded,
+    /// The program has suspended via a `suspend` statement, retaining its stack and heap. It can be
+    /// resumed by calling [`VM::run`] again.
+    Suspended,
     /// The program has terminated and must be reset before it can be run again.
     Terminated,
     /// The program encountered a runtime error and must be reset before it can be run again.
@@ -63,7 +64,7 @@ impl<T, U> VM<T, U> {
 
     /// Executes the current program until it yields or terminates.
     pub fn run(self: &mut Self, context: &mut U) -> RuntimeResult<VMState> where T: VMFunc<T> + VMData<T, U> {
-        if self.state != VMState::Ready && self.state != VMState::Yielded {
+        if self.state != VMState::Ready && self.state != VMState::Suspended {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
         self.exec(context);
@@ -75,12 +76,12 @@ impl<T, U> VM<T, U> {
                 self.state = VMState::Error(kind);
                 Err(RuntimeError::new(self.pc, kind, None))
             },
-            VMState::Terminated | VMState::Yielded => Ok(self.state),
+            VMState::Terminated | VMState::Suspended => Ok(self.state),
         }
     }
 
     /// Clears runtime error, allowing the VM to resume via run(). This is a no-op if the VM is
-    /// in Ready or Yielded state and an error in Terminated state.
+    /// in Ready or Suspended state and an error in Terminated state.
     pub fn clear_error(self: &mut Self) -> RuntimeResult where T: VMFunc<T> + VMData<T, U> {
         match self.state {
             VMState::Error(_) => {
@@ -88,7 +89,7 @@ impl<T, U> VM<T, U> {
                 self.state = VMState::Ready;
                 Ok(())
             },
-            VMState::Ready | VMState::Yielded => Ok(()),
+            VMState::Ready | VMState::Suspended => Ok(()),
             _ => Err(RuntimeError::new(0, RuntimeErrorKind::CannotClear, None)),
         }
     }
@@ -411,7 +412,7 @@ impl<T, U> VM<T, U> {
 impl<T, U> VM<T, U> {
     /// Executes single bytecode instruction.
     pub fn step(self: &mut Self, context: &mut U) -> RuntimeResult<VMState> where T: VMFunc<T> + VMData<T, U> {
-        if self.state != VMState::Ready && self.state != VMState::Yielded {
+        if self.state != VMState::Ready && self.state != VMState::Suspended {
             return Err(RuntimeError::new(0, RuntimeErrorKind::NotReady, None));
         }
         self.exec_step(context);
@@ -424,7 +425,7 @@ impl<T, U> VM<T, U> {
                 let opcode = None;
                 Err(RuntimeError::new(self.pc, kind, opcode))
             },
-            VMState::Terminated | VMState::Yielded | VMState::Ready => Ok(self.state),
+            VMState::Terminated | VMState::Suspended | VMState::Ready => Ok(self.state),
         }
     }
 

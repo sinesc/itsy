@@ -36,6 +36,7 @@ const KEYWORDS: &[ &'static str ] = &[
     "pub",
     "return",
     "struct",
+    "suspend",
     "trait",
     "true",
     "use",
@@ -1772,6 +1773,18 @@ fn continue_statement(i: Input) -> Output<Continue> {
     )(i)
 }
 
+/// Matches a suspend statement. Only legal inside a function.
+fn suspend_statement(i: Input) -> Output<Suspend> {
+    let position = i.position();
+    map(
+        preceded(
+            check_flags(keyword("suspend"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalSuspend) }),
+            punct(";")
+        ),
+        move |_| Suspend { position }
+    )(i)
+}
+
 /// Matches a statement.
 fn statement(i: Input) -> Output<Statement> {
     let j = i.clone();
@@ -1786,6 +1799,7 @@ fn statement(i: Input) -> Output<Statement> {
         map(yield_statement, |m| Statement::Yield(m)),
         map(break_statement, |m| Statement::Break(m)),
         map(continue_statement, |m| Statement::Continue(m)),
+        map(suspend_statement, |m| Statement::Suspend(m)),
         map(block, |m| Statement::Block(m)),
         map(snap(terminated(expression, punct(";"))), |m| Statement::Expression(m)),
     ))(i);

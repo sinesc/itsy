@@ -31,6 +31,8 @@ mod result;
 mod generators;
 #[path="vm/closure.rs"]
 mod closure;
+#[path="vm/suspend.rs"]
+mod suspend;
 #[cfg(feature="derive")]
 #[path="vm/api_types.rs"]
 mod api_types;

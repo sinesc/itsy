@@ -849,7 +849,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Expression(expression) => self.resolve_expression(expression, None),
             UseDecl(use_declaration) => self.resolve_use_decl(use_declaration),
             EnumDef(enum_def) => self.resolve_enum_type(enum_def),
-            Module(_) | Break(_) | Continue(_) => { Ok(()) /* nothing to do here */ },
+            Module(_) | Break(_) | Continue(_) | Suspend(_) => { Ok(()) /* nothing to do here */ },
         }
     }
 
