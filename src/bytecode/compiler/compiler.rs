@@ -12,6 +12,8 @@ use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
 use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin, GeneratorBuiltin}};
+#[cfg(feature="call_function")]
+use crate::bytecode::call_function::build_function_table;
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use placeholder::{LoopControlStack, LoopControl, Functions};
@@ -140,10 +142,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
 
     // write placeholder jump to program entry
     let initial_pos = compiler.writer.call(123, 0);
+    // the exit following the entry call doubles as the return target for host-initiated calls
+    // (VM::call_function): a function returning here breaks the exec loop back to the host
+    #[cfg(feature="call_function")]
+    let host_return_addr = compiler.writer.position();
     compiler.writer.exit();
 
     // compile program
-    for module in modules {
+    for module in &modules {
         compiler.module_path = module.path.clone();
         for statement in module.statements() {
             if let Err(mut err) = compiler.compile_statement(statement) {
@@ -167,12 +173,32 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let entry_arg_size = compiler.resolved.function(entry_fn).arg_size(&compiler);
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_addr, entry_arg_size));
 
+    // build the host-callable function table from all top-level (free) functions so a host can invoke
+    // them by name via VM::call_function (see bytecode::call_function)
+    #[cfg(feature="call_function")]
+    let functions = build_function_table(&compiler, &modules)?;
+
     // return generated program
-    Ok(compiler.writer.into_program())
+    #[cfg_attr(not(feature="call_function"), allow(unused_mut))]
+    let mut program = compiler.writer.into_program();
+    #[cfg(feature="call_function")]
+    {
+        program.functions = functions;
+        program.host_return_addr = host_return_addr;
+    }
+    Ok(program)
 }
 
 /// Methods for compiling individual code structures.
 impl<T> Compiler<T> where T: VMFunc<T> {
+
+    /// Returns the bytecode address of the given function, if it has already been registered. Used by
+    /// [`build_function_table`](crate::bytecode::call_function::build_function_table) to fill the
+    /// host-callable function table.
+    #[cfg(feature="call_function")]
+    pub(crate) fn function_address(self: &Self, function_id: FunctionId) -> Option<StackAddress> {
+        self.functions.get(function_id)
+    }
 
     /// Compiles the given statement.
     fn compile_statement(self: &mut Self, item: &ast::Statement) -> CompileResult {

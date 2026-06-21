@@ -19,9 +19,10 @@ members = [ "itsy-derive" ]
 #codegen-units = 1
 
 [features]
-default = [ "compiler", "runtime" ]
+default = [ "compiler", "runtime", "call_function" ]
 compiler = [ "nom" ]
 runtime = [ ]
+call_function = [ ]
 debugging = [ ]
 symbols = [ ]
 comments = [ ]

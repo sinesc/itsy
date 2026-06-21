@@ -13,6 +13,8 @@ pub mod compiler;
 #[cfg(feature="runtime")]
 pub mod runtime;
 pub mod marshal;
+#[cfg(feature="call_function")]
+pub mod call_function;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
@@ -20,6 +22,8 @@ use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnInde
 use writer::{Writer, StoreConst};
 #[cfg(feature="runtime")]
 use crate::{ItemIndex, bytecode::runtime::{vm::VM, stack::{Stack, StackOp}}};
+#[cfg(feature="call_function")]
+use call_function::FunctionMeta;
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
@@ -60,11 +64,17 @@ pub struct Program<T> {
     pub(crate) instructions     : Vec<u8>,
     pub(crate) consts           : Vec<u8>,
     pub(crate) const_descriptors: Vec<ConstDescriptor>,
+    /// Table of host-callable top-level functions, keyed by name.
+    #[cfg(feature="call_function")]
+    pub(crate) functions        : Map<String, FunctionMeta>,
+    /// Address of a halt instruction used as the return target for host-initiated function calls.
+    #[cfg(feature="call_function")]
+    pub(crate) host_return_addr : StackAddress,
 }
 
 /// Consume bytes from the front of a slice and return them.
 // TODO: once stabilized, nightly take() could replace this
-fn read<'a>(slice: &mut &'a[ u8 ], num_bytes: usize) -> Option<&'a[ u8 ]> {
+pub(crate) fn read<'a>(slice: &mut &'a[ u8 ], num_bytes: usize) -> Option<&'a[ u8 ]> {
     if slice.len() < num_bytes {
         None
     } else {
@@ -82,6 +92,10 @@ impl<T> Program<T> where T: VMFunc<T> {
             instructions        : Vec::new(),
             consts              : Vec::new(),
             const_descriptors   : Vec::new(),
+            #[cfg(feature="call_function")]
+            functions           : Map::new(),
+            #[cfg(feature="call_function")]
+            host_return_addr    : 0,
         }
     }
     /// Serializes the program to a byte vector, e.g. to be saved to a file.
@@ -99,6 +113,9 @@ impl<T> Program<T> where T: VMFunc<T> {
         for descriptor in &self.const_descriptors {
             result.extend_from_slice(&descriptor.to_bytes()[..]);
         }
+        // save host-call return address and the callable function table
+        #[cfg(feature="call_function")]
+        call_function::serialize_function_table(self.host_return_addr, &self.functions, &mut result);
         result
     }
     /// Deserializes a program from a byte vector, returning the programm on succcess or None if the input data is not a valid program.
@@ -120,11 +137,18 @@ impl<T> Program<T> where T: VMFunc<T> {
         for _ in 0..const_descriptors_size {
             const_descriptors.push(ConstDescriptor::from_bytes(read(&mut program, ConstDescriptor::SERIALIZED_SIZE)?)?);
         }
+        // read host-call return address and the callable function table
+        #[cfg(feature="call_function")]
+        let (host_return_addr, functions) = call_function::deserialize_function_table(&mut program)?;
         Some(Self {
             rust_fn: PhantomData,
             instructions,
             consts,
             const_descriptors,
+            #[cfg(feature="call_function")]
+            functions,
+            #[cfg(feature="call_function")]
+            host_return_addr,
         })
     }
 }

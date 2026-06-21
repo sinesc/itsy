@@ -86,5 +86,5 @@ pub mod compiler {
 #[cfg(feature="runtime")]
 pub mod runtime {
     //! Bytecode execution.
-    pub use crate::bytecode::runtime::{vm::{VM, VMState}, error::{RuntimeError, RuntimeErrorKind}};
+    pub use crate::bytecode::runtime::{vm::{VM, VMState}, error::{RuntimeError, RuntimeErrorKind, CallError, CallResult}};
 }

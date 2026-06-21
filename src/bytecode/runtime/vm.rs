@@ -3,6 +3,10 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
 use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
+#[cfg(feature="call_function")]
+use std::any::Any;
+#[cfg(feature="call_function")]
+use crate::bytecode::call_function::{ValueKind, FunctionMeta, arg_matches, match_value_kind};
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
 use super::generator::GenControl;
@@ -36,6 +40,12 @@ pub struct VM<T, U> {
     pub heap                : Heap,
     /// Stack of in-flight generator resumptions (see [`GenControl`]).
     pub(crate) gen_control  : Vec<GenControl>,
+    /// Host-callable top-level functions, keyed by name (see [`VM::call_function`]).
+    #[cfg(feature="call_function")]
+    pub(crate) functions    : Map<String, FunctionMeta>,
+    /// Return target for host-initiated function calls (a halt instruction).
+    #[cfg(feature="call_function")]
+    pub(crate) host_return_addr: StackAddress,
 }
 
 // todo check where bounds here, some seam pointless
@@ -44,6 +54,9 @@ pub struct VM<T, U> {
 impl<T, U> VM<T, U> {
     /// Create a new VM instance with the given Program.
     pub fn new(program: Program<T>) -> Self where T: VMFunc<T> + VMData<T, U> {
+        #[cfg(feature="call_function")]
+        let Program { instructions, consts, const_descriptors, functions, host_return_addr, .. } = program;
+        #[cfg(not(feature="call_function"))]
         let Program { instructions, consts, const_descriptors, .. } = program;
         let stack = Self::init_consts(&consts, &const_descriptors);
         // occupy heap element 0 so we can identify intialized heap objects their address != 0
@@ -59,6 +72,10 @@ impl<T, U> VM<T, U> {
             stack       : stack,
             heap        : heap,
             gen_control : Vec::new(),
+            #[cfg(feature="call_function")]
+            functions   : functions,
+            #[cfg(feature="call_function")]
+            host_return_addr: host_return_addr,
         }
     }
 
@@ -78,6 +95,101 @@ impl<T, U> VM<T, U> {
             },
             VMState::Terminated | VMState::Suspended => Ok(self.state),
         }
+    }
+
+    /// Invokes a top-level Itsy function by name, marshalling `args` onto the stack, running the
+    /// function to completion and returning its result boxed as `Any`.
+    /// Supported argument and return types are the primitives (`u8`..`i64`, `f32`/`f64`, `bool`) and
+    /// `String`; other types yield [`CallError::UnsupportedType`]. Arguments must downcast exactly to
+    /// the declared parameter type (no implicit widening). A `void` function returns `Box<()>`.
+    ///
+    /// The VM's prior state (e.g. [`Suspended`](VMState::Suspended)) is restored on success, so this can
+    /// be called against a suspended VM's retained stack and heap. On a runtime error the VM is left in
+    /// its error state and [`CallError::Runtime`] is returned.
+    #[cfg(feature="call_function")]
+    pub fn call_function(self: &mut Self, context: &mut U, name: &str, args: &[ &dyn Any ]) -> CallResult where T: VMFunc<T> + VMData<T, U> {
+        let meta = match self.functions.get(name) {
+            Some(meta) => meta.clone(),
+            None => return Err(CallError::FunctionNotFound(name.to_string())),
+        };
+        if args.len() != meta.args.len() {
+            return Err(CallError::ArgumentCountMismatch { expected: meta.args.len(), got: args.len() });
+        }
+        if meta.ret == ValueKind::Unsupported {
+            return Err(CallError::UnsupportedType { expected: "return value" });
+        }
+        // validate all argument types up front so a failure never leaves partially-pushed args or
+        // orphaned heap allocations on the stack/heap
+        for (index, (arg, kind)) in args.iter().zip(meta.args.iter()).enumerate() {
+            if *kind == ValueKind::Unsupported {
+                return Err(CallError::UnsupportedType { expected: "argument" });
+            }
+            if !arg_matches(*arg, *kind) {
+                return Err(CallError::ArgumentTypeMismatch { index, expected: kind.type_name() });
+            }
+        }
+        // save state to restore once the call completes; restore_sp marks the pre-call stack top
+        let saved_pc = self.pc;
+        let saved_state = self.state;
+        let restore_sp = self.stack.sp();
+        // marshal arguments onto the stack (infallible after validation above)
+        for (arg, kind) in args.iter().zip(meta.args.iter()) {
+            self.push_argument(*arg, *kind);
+        }
+        // set up the call: returning from the function lands on the host halt instruction, which breaks
+        // the exec loop back to us. Setting pc first makes call() record it as the return address.
+        self.pc = self.host_return_addr;
+        self.call(meta.addr, meta.arg_size);
+        self.exec(context);
+        // only a clean return to the host halt (Terminated) is a successful call
+        match self.state {
+            VMState::Terminated => { },
+            VMState::Error(kind) => return Err(CallError::Runtime(RuntimeError::new(self.error_pc, kind, None))),
+            _ => return Err(CallError::Runtime(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady, None))),
+        }
+        // read the result off the stack top, then truncate back to the pre-call stack and restore state
+        let result = self.read_result(meta.ret);
+        self.stack.truncate(restore_sp);
+        self.pc = saved_pc;
+        self.state = saved_state;
+        Ok(result)
+    }
+
+    /// Pushes a validated argument onto the stack. String arguments are allocated on the heap with a
+    /// reference count of 1, mirroring the caller-side increment the compiler emits; the called
+    /// function's epilogue then releases them.
+    #[cfg(feature="call_function")]
+    fn push_argument(self: &mut Self, arg: &dyn Any, kind: ValueKind) where T: VMFunc<T> + VMData<T, U> {
+        match_value_kind!(kind,
+            numeric(|N| self.stack.push(*arg.downcast_ref::<N>().unwrap())),
+            ValueKind::bool => self.stack.push(*arg.downcast_ref::<bool>().unwrap() as u8),
+            ValueKind::String => {
+                let s = arg.downcast_ref::<String>().unwrap();
+                let index = self.heap.alloc_copy(s.as_bytes(), ItemIndex::MAX);
+                self.heap.ref_item(index, HeapRefOp::Inc);
+                self.stack.push(HeapRef::new(index, 0));
+            },
+            ValueKind::void | ValueKind::Unsupported => { },
+        )
+    }
+
+    /// Reads the function result of the given kind off the stack top and boxes it. String results are
+    /// read out of the heap and the (reference count 0) heap object is freed.
+    #[cfg(feature="call_function")]
+    fn read_result(self: &mut Self, kind: ValueKind) -> Box<dyn Any> where T: VMFunc<T> + VMData<T, U> {
+        match_value_kind!(kind,
+            numeric(|N| { let v: N = self.stack.top(); Box::new(v) }),
+            ValueKind::void => Box::new(()),
+            ValueKind::bool => { let v: u8 = self.stack.top(); Box::new(v != 0) },
+            ValueKind::String => {
+                let item: HeapRef = self.stack.top();
+                let string = self.heap.string(item).unwrap().to_string();
+                self.heap.ref_item(item.index(), HeapRefOp::Free);
+                Box::new(string)
+            },
+            // unreachable: rejected before the call
+            ValueKind::Unsupported => Box::new(()),
+        )
     }
 
     /// Clears runtime error, allowing the VM to resume via run(). This is a no-op if the VM is

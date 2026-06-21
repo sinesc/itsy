@@ -56,7 +56,7 @@ impl Display for CompileError {
 pub type CompileResult<T = ()> = Result<T, CompileError>;
 
 /// Trait to convert an Option to a Result compatible with ResolveResult
-pub(super) trait OptionToCompileError<T> {
+pub(crate) trait OptionToCompileError<T> {
     fn ice_msg(self: Self, message: &str) -> CompileResult<T>;
     fn ice(self: Self) -> CompileResult<T>;
 }
