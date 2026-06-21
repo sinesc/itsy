@@ -7,6 +7,7 @@ pub enum CompileErrorKind {
     IncompatibleTraitMethod(String),
     Uninitialized(String),
     MaybeInitialized(String),
+    Unsupported(String),
     Internal(String),
 }
 
@@ -46,6 +47,7 @@ impl Display for CompileError {
             CompileErrorKind::IncompatibleTraitMethod(method) => write!(f, "Incompatible trait method implementation for method `{method}`"),
             CompileErrorKind::Uninitialized(variable) => write!(f, "Uninitialized variable `{variable}`"),
             CompileErrorKind::MaybeInitialized(variable) => write!(f, "Variable `{variable}` might not be initialized"),
+            CompileErrorKind::Unsupported(msg) => write!(f, "Not yet implemented: {msg}"),
             CompileErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }

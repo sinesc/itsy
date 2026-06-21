@@ -5,7 +5,7 @@ pub mod typed_ids;
 pub mod meta;
 pub mod error;
 
-use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, MapType, Callable, Function, Enum, EnumVariant}};
+use crate::shared::{typed_ids::{TypeId, BindingId, ConstantId, FunctionId}, meta::{Type, Binding, Constant, Array, MapType, Callable, Function, Enum, EnumVariant, Struct}};
 use crate::prelude::*;
 
 /// A container holding AST metadata
@@ -102,6 +102,26 @@ pub trait MetaContainer {
         }
         None
     }
+    /// If the given type is a compiler-synthesized `Generator<V>` / `Generator<K, V>` carrier, returns
+    /// its `(key, value)` signature (key is `None` for the single-argument form). The carrier is an
+    /// anonymous struct with sentinel fields `$value` (and `$key`); the `$` makes the names
+    /// unwritable by user code, so this structural check unambiguously identifies generators and lets
+    /// `type_name` render them legibly (see `synthesize_generator_type`).
+    fn generator_signature(self: &Self, type_id: TypeId) -> Option<(Option<TypeId>, TypeId)> {
+        if let Type::Struct(Struct { fields, .. }) = self.type_by_id(type_id) {
+            let value_type_id = (*fields.get("$value")?)?;
+            match fields.len() {
+                1 => Some((None, value_type_id)),
+                2 => {
+                    let key_type_id = (*fields.get("$key")?)?;
+                    Some((Some(key_type_id), value_type_id))
+                },
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
     // Returns recursively resolved type name.
     fn type_name(self: &Self, type_id: TypeId) -> String {
         let ty = self.type_by_id(type_id);
@@ -109,6 +129,11 @@ pub trait MetaContainer {
             type_name.to_string()
         } else if let Some(ok_type_id) = self.result_ok_type_id(type_id) {
             format!("Result<{}>", self.type_name(ok_type_id))
+        } else if let Some((key_type_id, value_type_id)) = self.generator_signature(type_id) {
+            match key_type_id {
+                Some(key_type_id) => format!("Generator<{}, {}>", self.type_name(key_type_id), self.type_name(value_type_id)),
+                None => format!("Generator<{}>", self.type_name(value_type_id)),
+            }
         } else {
             match ty {
                 Type::void => "void".to_string(), // void is explicitly not a named type so we have to manually give it a name here

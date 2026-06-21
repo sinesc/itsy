@@ -27,6 +27,8 @@ mod controlflow;
 mod enums;
 #[path="vm/result.rs"]
 mod result;
+#[path="vm/generators.rs"]
+mod generators;
 #[path="vm/closure.rs"]
 mod closure;
 #[cfg(feature="derive")]

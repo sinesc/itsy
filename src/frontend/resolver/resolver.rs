@@ -778,6 +778,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             WhileLoop(while_loop) => self.resolve_while_loop(while_loop),
             Block(block) => self.resolve_block(block, None),
             Return(ret) => self.resolve_return(ret),
+            Yield(yield_stmt) => self.resolve_yield(yield_stmt),
             Expression(expression) => self.resolve_expression(expression, None),
             UseDecl(use_declaration) => self.resolve_use_decl(use_declaration),
             EnumDef(enum_def) => self.resolve_enum_type(enum_def),
@@ -836,6 +837,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             ArrayDef(array) => self.resolve_array_type(array),
             MapDef(map) => self.resolve_map_type(map),
             ResultDef(result) => self.resolve_result_type(result),
+            GeneratorDef(generator) => self.resolve_generator_type(generator),
             CallableDef(callable) => self.resolve_callable_type(callable),
             TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
         }
@@ -984,6 +986,47 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.result_types.insert(result_type_id, ResultTypeInfo { ok_type_id, ok_constructor, err_constructor });
         }
         result_type_id
+    }
+
+    /// Resolves a generator definition `Generator<V>` / `Generator<K, V>` into its synthesized struct
+    /// carrier.
+    fn resolve_generator_type(self: &mut Self, item: &mut ast::GeneratorDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        // resolve the value type and the optional key type first
+        let value_type_id = self.resolve_inline_type(&mut item.value_type)?;
+        let key_type_id = match &mut item.key_type {
+            Some(key_type) => self.resolve_inline_type(key_type)?,
+            None => None,
+        };
+        // synthesize once the value (and the key, if this generator has one) are resolved
+        if item.type_id.is_none() {
+            if let Some(value_type_id) = value_type_id {
+                if item.key_type.is_none() || key_type_id.is_some() {
+                    item.type_id = Some(self.synthesize_generator_type(key_type_id, value_type_id));
+                }
+            }
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
+    }
+
+    /// Returns the type id of the `Generator<V>` / `Generator<K, V>` carrier for the given key/value
+    /// types, synthesizing it on first use. The carrier is an anonymous struct with sentinel fields
+    /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
+    /// code, so the structural `generator_signature` check can identify it. Structurally identical
+    /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
+    /// carrier will hold at runtime is *not* modelled as typed fields here — that stays opaque bytes
+    /// (see the milestone 2 design-in constraints).
+    fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
+        let mut fields = Map::new();
+        fields.insert("$value".to_string(), Some(value_type_id));
+        if let Some(key_type_id) = key_type_id {
+            fields.insert("$key".to_string(), Some(key_type_id));
+        }
+        let ty = Type::Struct(Struct { fields, impl_traits: Map::new() });
+        self.scopes.insert_anonymous_type(true, ty)
     }
 
     /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant
@@ -1419,6 +1462,19 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// Resolves a return statement.
     fn resolve_return(self: &mut Self, item: &mut ast::Return) -> ResolveResult {
         let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of return outside of function".to_string()))?;
+        // a generator's `return` is for early exit only: `return;` is allowed, `return <expr>;` is not.
+        // handled before the regular path so a valueless return is not checked against the `Generator<..>`
+        // return type (which would surface a misleading void-vs-generator mismatch).
+        if let Some(function_id) = function_id {
+            if let Some(ret_type_id) = self.scopes.function_ref(function_id).ret_type_id(self) {
+                if self.generator_signature(ret_type_id).is_some() {
+                    if !item.expr.is_void() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation("a generator's `return` is for early exit only and may not return a value".to_string()), self.module_path));
+                    }
+                    return self.types_resolved(&mut item.expr, Some(TypeId::VOID));
+                }
+            }
+        }
         let ret_type_id = if let Some(function_id) = function_id {
             let declared_ret_type_id = self.scopes.function_ref(function_id).ret_type_id(self);
             // resolve before the unresolved-check below, so a returned expression that fails to resolve
@@ -1447,6 +1503,52 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         };
         // check return type matches function result type
         self.types_resolved(&mut item.expr, ret_type_id)
+    }
+
+    /// Resolves a yield statement, validating it against the enclosing generator function's declared
+    /// `Generator<V>` / `Generator<K, V>` return type. Validation is deferred until that return type
+    /// is resolved (the resolver runs in repeated passes); operands are resolved every pass to make
+    /// progress, with the generator's key/value types fed in as expected types once they are known.
+    fn resolve_yield(self: &mut Self, item: &mut ast::Yield) -> ResolveResult {
+        let function_id = self.scopes.scope_function_id(self.scope_id).usr(Some(item), ResolveErrorKind::InvalidOperation("Use of yield outside of function".to_string()))?;
+        let ret_type_id = function_id.and_then(|function_id| self.scopes.function_ref(function_id).ret_type_id(self));
+        let gen_sig = ret_type_id.and_then(|ret_type_id| self.generator_signature(ret_type_id));
+        // resolve operands, supplying the generator's key/value types as expectations when known
+        let (expected_key, expected_value) = match gen_sig {
+            Some((key_type_id, value_type_id)) => (key_type_id, Some(value_type_id)),
+            None => (None, None),
+        };
+        self.resolve_expression(&mut item.value, expected_value)?;
+        if let Some(key) = &mut item.key {
+            self.resolve_expression(key, expected_key)?;
+        }
+        // validate against the enclosing function once its return type is known
+        if let Some(ret_type_id) = ret_type_id {
+            match gen_sig {
+                None => {
+                    let ret_name = self.type_name(ret_type_id);
+                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("`yield` is only allowed in a generator function (one returning `Generator<...>`); this function returns `{ret_name}`")), self.module_path));
+                },
+                Some((key_type_id, value_type_id)) => {
+                    // a key may be yielded iff the generator declares one
+                    match (item.key.is_some(), key_type_id) {
+                        (true, None) => return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation("this generator yields values only; use `yield value`, not `yield key, value`".to_string()), self.module_path)),
+                        (false, Some(_)) => return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation("this generator yields key/value pairs; use `yield key, value`".to_string()), self.module_path)),
+                        _ => {},
+                    }
+                    // type-check operands against the declared value (and key) types
+                    if let Some(value_expr_type_id) = item.value.type_id(self) {
+                        self.check_type_accepted_for(&item.value, value_expr_type_id, value_type_id)?;
+                    }
+                    if let (Some(key), Some(key_type_id)) = (&item.key, key_type_id) {
+                        if let Some(key_expr_type_id) = key.type_id(self) {
+                            self.check_type_accepted_for(key, key_expr_type_id, key_type_id)?;
+                        }
+                    }
+                },
+            }
+        }
+        Ok(())
     }
 
     /// Resolves a variable name to a variable.

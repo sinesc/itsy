@@ -250,6 +250,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.loop_control.add_jump(LoopControl::Continue(continue_jump));
                 Ok(())
             },
+            S::Yield(yield_stmt) => {
+                // milestone 1: generators parse and resolve, but codegen is not implemented yet.
+                Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generators".to_string()), &self.module_path))
+            },
             S::Return(ast::Return { expr, .. }) => {
                 comment!(self, "block returning");
                 self.compile_expression(expr)?;

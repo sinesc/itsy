@@ -130,3 +130,34 @@ fn try_operator_postfix() {
         }
     ").unwrap();
 }
+
+#[test]
+fn generator_type_annotation() {
+    // `Generator<V>` and `Generator<K, V>` parse in return-type and parameter positions, including
+    // nested type arguments, without colliding with the `<`/`>` comparison operators.
+    parse("
+        fn a() -> Generator<i32> { }
+        fn b() -> Generator<String, i32> { }
+        fn c(g: Generator<[ u8 ]>) { }
+    ").unwrap();
+}
+
+#[test]
+fn yield_statement() {
+    // both the value and key/value forms of `yield` parse inside a function body
+    parse("
+        fn a() -> Generator<i32> {
+            yield 1;
+            yield 1 + 2;
+        }
+        fn b() -> Generator<String, i32> {
+            yield \"k\", 1;
+        }
+    ").unwrap();
+}
+
+#[test]
+fn yield_outside_function_rejected() {
+    // `yield` is not legal at module scope
+    assert!(parse("yield 1;").is_err());
+}

@@ -40,6 +40,7 @@ const KEYWORDS: &[ &'static str ] = &[
     "true",
     "use",
     "while",
+    "yield",
 ];
 
 /// Runs the given parser. If the parser succeeds the given checker function is run. If it returns true, the parser result is returned, otherwise a failure.
@@ -245,9 +246,10 @@ fn inline_type(i: Input) -> Output<InlineType> {
         )(i)
     }
     alt((
-        // `result_def` must precede `type_name_or_bound`, otherwise `Result` is consumed as a plain
-        // type name and the `<T>` argument is left dangling.
+        // `result_def`/`generator_def` must precede `type_name_or_bound`, otherwise `Result`/`Generator`
+        // is consumed as a plain type name and the `<...>` argument is left dangling.
         map(result_def, |r| InlineType::ResultDef(Box::new(r))),
+        map(generator_def, |g| InlineType::GeneratorDef(Box::new(g))),
         type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(map_def, |m| InlineType::MapDef(Box::new(m))),
@@ -265,6 +267,32 @@ fn result_def(i: Input) -> Output<ResultDef> {
             position,
             ok_type: ok,
             type_id: None,
+        }
+    )(i)
+}
+
+/// Matches a generator type definition, e.g. `Generator<V>` or `Generator<K, V>`. With two type
+/// arguments the first is the key type and the second the value type; with one, only the value type.
+fn generator_def(i: Input) -> Output<GeneratorDef> {
+    let position = i.position();
+    map(
+        delimited(
+            pair(keyword("Generator"), punct("<")),
+            pair(inline_type, opt(preceded(punct(","), inline_type))),
+            punct(">")
+        ),
+        move |(first, second)| {
+            // `Generator<V>` -> (key: None, value: V); `Generator<K, V>` -> (key: K, value: V)
+            let (key_type, value_type) = match second {
+                Some(value) => (Some(first), value),
+                None => (None, first),
+            };
+            GeneratorDef {
+                position,
+                key_type,
+                value_type,
+                type_id: None,
+            }
         }
     )(i)
 }
@@ -659,6 +687,26 @@ fn return_statement(i: Input) -> Output<Return> {
         move |m| Return {
             position,
             expr: m.unwrap_or_else(|| Expression::void(position)),
+        }
+    )(i)
+}
+
+/// Matches a yield statement, e.g. `yield value;` or `yield key, value;`. Only legal inside a
+/// function (the resolver further restricts it to generator functions).
+fn yield_statement(i: Input) -> Output<Yield> {
+    let position = i.position();
+    map(
+        preceded(
+            check_flags(keyword("yield"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalYield) }),
+            terminated(pair(expression, opt(preceded(punct(","), expression))), punct(";"))
+        ),
+        move |(first, second)| {
+            // `yield value;` -> (key: None, value); `yield key, value;` -> (key, value)
+            let (key, value) = match second {
+                Some(value) => (Some(first), value),
+                None => (None, first),
+            };
+            Yield { position, key, value }
         }
     )(i)
 }
@@ -1735,6 +1783,7 @@ fn statement(i: Input) -> Output<Statement> {
         for_loop,
         map(while_loop, |m| Statement::WhileLoop(m)),
         map(return_statement, |m| Statement::Return(m)),
+        map(yield_statement, |m| Statement::Yield(m)),
         map(break_statement, |m| Statement::Break(m)),
         map(continue_statement, |m| Statement::Continue(m)),
         map(block, |m| Statement::Block(m)),
