@@ -177,6 +177,17 @@ impl InitState {
         in_loop
     }
 
+    /// Whether the binding is currently in scope, i.e. declared in one of the currently-open branchings.
+    ///
+    /// This differs from [`initialized`](Self::initialized): `pop()` propagates a closed scope's binding
+    /// *states* into the parent (with `declared = false`), so a binding from an already-exited block can
+    /// still report as initialized even though it is out of scope and was released by that block's
+    /// destructor. Generator drop-cleanup must consider only bindings that are both in scope and
+    /// initialized at the suspension point.
+    pub fn in_scope(self: &Self, binding_id: BindingId) -> bool {
+        self.branchings.iter().any(|branching| branching.bindings.get(&binding_id).map_or(false, |binding| binding.declared))
+    }
+
     /// Whether a binding is initialized in the current branching path at the current code position.
     pub fn initialized(self: &Self, binding_id: BindingId) -> BranchingState {
         for branching in self.branchings.iter().rev() {

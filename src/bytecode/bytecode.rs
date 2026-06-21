@@ -219,6 +219,7 @@ pub enum Constructor {
     Enum        = 179,  // Enum(constructor_size, implementor index, num_variants, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
     Closure     = 181,
     Map         = 182,  // Map(constructor_size, key constructor, value constructor): copies a map. Keys and values are boxed, i.e. each stored inline as a HeapRef.
+    Generator   = 183,  // Generator: an opaque generator carrier. Carries no inline layout; on free, the live heap refs held by its frozen frame are released via the live-ref-map referenced from the carrier's header (see runtime::vm).
 }
 
 /// Information about a serialized constructor
@@ -252,6 +253,7 @@ impl Constructor {
             x if x == Self::Enum as u8 => Self::Enum,
             x if x == Self::Closure as u8 => Self::Closure,
             x if x == Self::Map as u8 => Self::Map,
+            x if x == Self::Generator as u8 => Self::Generator,
             index @ _ => panic!("Invalid constructor type {}.", index),
         }
     }
@@ -275,9 +277,10 @@ impl Constructor {
                     next: offset + SIZE,
                 }
             },
-            Self::String | Self::Closure | Self::Virtual => {
+            Self::String | Self::Closure | Self::Virtual | Self::Generator => {
                 // no additional data attached: a virtual constructor is resolved at runtime via the
-                // referenced object's implementor index, strings/closures carry no nested layout
+                // referenced object's implementor index, strings/closures carry no nested layout, and a
+                // generator carrier's live refs are described by a map referenced from its heap header
                 ConstructorData {
                     offset,
                     next: offset,

@@ -67,6 +67,10 @@ impl StackFrames {
     pub fn is_generator(self: &Self) -> bool {
         self.0.last().expect(Self::NO_STACK).is_generator
     }
+    /// Returns a reference to the top (current) stack frame descriptor.
+    pub fn current(self: &Self) -> &StackFrame {
+        self.0.last().expect(Self::NO_STACK)
+    }
     /// Look up local variable descriptor for the given BindingId.
     pub fn lookup(self: &mut Self, binding_id: BindingId) -> FrameAddress {
         self.0.last().expect(Self::NO_STACK).lookup(binding_id)

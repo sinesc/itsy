@@ -1758,9 +1758,11 @@ impl_opcodes!{
     }*/
 
     /// Constructs a generator from the arguments on the stack (its entry address was pushed above them)
-    /// and pushes a reference to it. Does not run the generator body.
-    fn gen_make(&mut self, arg_size: FrameAddress) {
-        self.gen_make_impl(arg_size);
+    /// and pushes a reference to it. Does not run the generator body. `entry_map` is the const-pool offset
+    /// of the live-ref-map describing the captured ref-typed arguments, released if the not-yet-started
+    /// generator is dropped.
+    fn gen_make(&mut self, arg_size: FrameAddress, entry_map: StackAddress) {
+        self.gen_make_impl(arg_size, entry_map);
     }
 
     /// Resumes the generator referenced on the stack top, transferring control into its body. Control
@@ -1770,17 +1772,18 @@ impl_opcodes!{
         self.gen_next_impl();
     }
 
-    /// Suspends the running generator, stashing the yielded value (of the given size) under the given
-    /// yield-point id, and returns control to the driving `next()` with a `true` result.
-    fn gen_yield(&mut self, yield_id: StackAddress, value_size: FrameAddress) {
-        self.gen_yield_impl(yield_id, value_size);
+    /// Suspends the running generator, stashing the yielded value (of the given size) and recording
+    /// `live_ref_map` (the const-pool offset of this suspension point's live-ref-map, used for drop
+    /// cleanup) in the header, then returns control to the driving `next()` with a `true` result.
+    fn gen_yield(&mut self, live_ref_map: StackAddress, value_size: FrameAddress) {
+        self.gen_yield_impl(live_ref_map, value_size);
     }
 
     /// Keyed variant of `gen_yield`: suspends the running generator, stashing the yielded key and value
-    /// (the stack holds `key` then `value`, value on top) under the given yield-point id, and returns
-    /// control to the driving `next()` with a `true` result.
-    fn gen_yield_kv(&mut self, yield_id: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
-        self.gen_yield_kv_impl(yield_id, key_size, value_size);
+    /// (the stack holds `key` then `value`, value on top) and recording `live_ref_map` (this suspension
+    /// point's live-ref-map offset) in the header, then returns control to the driving `next()`.
+    fn gen_yield_kv(&mut self, live_ref_map: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+        self.gen_yield_kv_impl(live_ref_map, key_size, value_size);
     }
 
     /// Completes the running generator and returns control to the driving `next()` with a `false` result.

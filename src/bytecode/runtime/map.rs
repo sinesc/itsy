@@ -215,8 +215,8 @@ impl<T, U> VM<T, U> {
             Constructor::String => {
                 fnv_bytes(FNV_OFFSET, self.heap.string(item).unwrap_or("").as_bytes())
             },
-            // closures and maps compare by reference identity, so hash by it too
-            Constructor::Closure | Constructor::Map => item.index() as u64,
+            // closures, generators and maps compare by reference identity, so hash by it too
+            Constructor::Closure | Constructor::Map | Constructor::Generator => item.index() as u64,
             Constructor::Virtual => {
                 match self.resolve_constructor_offset(item, 0) {
                     None => item.index() as u64,

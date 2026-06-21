@@ -44,9 +44,6 @@ pub(crate) struct Compiler<T> {
     trait_vtable_base: StackAddress,
     /// Mapping from trait implementor function ids to trait function ids.
     trait_function_implementors: UnorderedMap<FunctionId, FunctionId>,
-    /// Monotonic counter assigning a unique id to each `yield` site, written into the generator object
-    /// on suspension (reserved for milestone-4 mid-flight-drop cleanup; see generators.md).
-    next_yield_id: StackAddress,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -106,7 +103,6 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
         trait_implementor_indices   : Compiler::<T>::enumerate_trait_implementor_indices(&trait_implementors),
         trait_function_implementors : Compiler::<T>::map_trait_function_implementors(&resolved, &trait_functions, &trait_implementors)?,
-        next_yield_id               : 0,
         resolved,
     };
 
@@ -261,8 +257,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed value".to_string()), &self.module_path));
                 }
                 comment!(self, "yield");
-                let yield_id = self.next_yield_id;
-                self.next_yield_id += 1;
+                // record which ref-typed frame slots are live at this suspension point so a mid-flight
+                // drop can release them; the map's const-pool offset is stashed in the generator header.
+                let live_ref_map = self.write_generator_live_ref_map(&self.collect_generator_live_refs()?);
                 match &yield_stmt.key {
                     Some(key) => {
                         let (key_size, key_is_ref) = { let ty = self.ty(key); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
@@ -273,11 +270,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                         // push key then value (value ends on top, matching gen_yield_kv's expectation)
                         self.compile_expression(key)?;
                         self.compile_expression(&yield_stmt.value)?;
-                        self.writer.gen_yield_kv(yield_id, key_size, value_size);
+                        self.writer.gen_yield_kv(live_ref_map, key_size, value_size);
                     },
                     None => {
                         self.compile_expression(&yield_stmt.value)?;
-                        self.writer.gen_yield(yield_id, value_size);
+                        self.writer.gen_yield(live_ref_map, value_size);
                     },
                 }
                 Ok(())
@@ -577,10 +574,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if ret_type_id.map_or(false, |ret_type_id| self.generator_signature(ret_type_id).is_some()) {
                     comment!(self, "make generator {}()", constant.path);
                     let arg_size = self.resolved.function(function_id).arg_size(self);
+                    // live-ref-map for the captured ref-typed args, released if the generator is dropped before it is ever started
+                    let entry_map = self.write_generator_entry_map(function_id)?;
                     // push the entry address (forward-reference safe) above the args, then construct
                     let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                     self.write_immediate_sa(function_addr)?;
-                    self.writer.gen_make(arg_size);
+                    self.writer.gen_make(arg_size, entry_map);
                 } else {
                     comment!(self, "call {}()", constant.path);
                     self.write_call(function_id);
@@ -1849,13 +1848,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         };
         let position = self.writer.const_len();
         // a generator carrier is structurally a struct, but its heap object holds an opaque header +
-        // frozen frame, not its `$value`/`$key` fields. Emit a Closure (opaque) constructor so the
-        // refcounter refcounts the object without recursing into the (non-existent) field layout.
-        // The frozen frame's own nested refs are released on the happy path by the body's scope
-        // destructors; mid-flight-drop cleanup is milestone 4 (see generators.md).
+        // frozen frame, not its `$value`/`$key` fields. Emit a Generator constructor so the refcounter
+        // refcounts the object without recursing into the (non-existent) field layout. The frozen frame's
+        // own nested refs are released on the happy path by the body's scope destructors; on a mid-flight
+        // drop they are released via the live-ref-map referenced from the carrier's header (milestone 4).
         if self.generator_signature(type_id).is_some() {
             *prev_primitive = None;
-            self.writer.store_const(Constructor::Closure);
+            self.writer.store_const(Constructor::Generator);
             return Ok(position);
         }
         match self.ty(&type_id) {
@@ -2051,6 +2050,56 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             8 => self.writer.immediate64(v as u64),
             size @ _ => Self::ice(&format!("Invalid stack address size: {:?}", size))?,
         })
+    }
+
+    /// Collects the ref-typed frame slots that are live (in scope and initialized) at the current
+    /// position within a generator body. Each entry is `(frame_offset, constructor_offset)`; on a
+    /// mid-flight drop the VM uses these to release the frozen frame's heap references. `MaybeInitialized`
+    /// slots are included — at runtime a null reference (heap index 0) marks them as actually uninitialized
+    /// and is skipped.
+    fn collect_generator_live_refs(self: &Self) -> CompileResult<Vec<(StackAddress, StackAddress)>> {
+        let frame = self.locals.current();
+        let mut entries = Vec::new();
+        for (&binding_id, &local) in frame.map.iter() {
+            if self.init_state.in_scope(binding_id) && self.init_state.initialized(binding_id) != BranchingState::Uninitialized {
+                let type_id = self.binding_by_id(binding_id).type_id.ice()?;
+                let ty = self.ty(&type_id);
+                if ty.is_ref() {
+                    entries.push((local as StackAddress, self.constructor(ty)?));
+                }
+            }
+        }
+        Ok(entries)
+    }
+
+    /// Builds the generator entry live-ref-map: the ref-typed arguments captured into a not-yet-started
+    /// generator's frame, released if it is dropped before the first `next()`. Arguments occupy the start
+    /// of the frame in declaration order, so their frame offsets are the cumulative argument sizes.
+    fn write_generator_entry_map(self: &Self, function_id: FunctionId) -> CompileResult<StackAddress> {
+        let mut entries = Vec::new();
+        let mut frame_offset: StackAddress = 0;
+        for arg_type_id in self.resolved.function(function_id).arg_type_ids(self) {
+            let ty = self.ty(&arg_type_id.ice()?);
+            if ty.is_ref() {
+                entries.push((frame_offset, self.constructor(ty)?));
+            }
+            frame_offset += ty.primitive_size() as StackAddress;
+        }
+        Ok(self.write_generator_live_ref_map(&entries))
+    }
+
+    /// Serializes a generator live-ref-map into the const pool and returns its offset. The map is a count
+    /// of live reference slots followed by that many `(frame_offset, constructor_offset)` pairs (each
+    /// StackAddress-sized). Its offset is stored in the generator header so the VM can release the frozen
+    /// frame's references on a mid-flight drop.
+    fn write_generator_live_ref_map(self: &Self, entries: &[ (StackAddress, StackAddress) ]) -> StackAddress {
+        let position = self.writer.const_len();
+        self.writer.store_const(entries.len() as ItemIndex);
+        for &(frame_offset, constructor_offset) in entries {
+            self.writer.store_const(frame_offset);
+            self.writer.store_const(constructor_offset);
+        }
+        position
     }
 
     /// Writes a primitive cast.

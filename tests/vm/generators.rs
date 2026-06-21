@@ -5,6 +5,11 @@ use crate::util::*;
 //
 // Milestone 3: keyed generators (`Generator<K, V>`, key()) of primitive key/value types, plus for-loop
 // iteration (`for v in g` and `for k, v in g`). Reference-typed yields remain deferred to milestone 5.
+//
+// Milestone 4: drop-cleanup of unfinished generators. A generator dropped while NotStarted or Suspended
+// releases the heap references held by its frozen frame (ref-typed args/locals) via the per-suspension
+// live-ref-map. The `run` helper turns any leak into a HeapCorruption panic and any double-free into a
+// refcount-underflow panic, so these tests fail loudly on a regression even without explicit assertions.
 
 #[test]
 fn value_generator_manual_drive() {
@@ -423,4 +428,209 @@ fn return_with_value_in_generator_rejected() {
         fn main() { }
     ));
     assert!(err.contains("early exit"), "unexpected error: {}", err);
+}
+
+// --- Milestone 4: drop-cleanup of unfinished generators ---
+
+#[test]
+fn drop_suspended_releases_ref_local() {
+    // a generator holding a ref-typed local, partially consumed then dropped while suspended: the frozen
+    // frame's array must be released (otherwise HeapCorruption fires at end of run).
+    let result = run(stringify!(
+        fn gen() -> Generator<i32> {
+            let arr = [10, 20, 30];
+            let mut i = 0;
+            while i < 3 { yield arr[i]; i += 1; }
+        }
+        fn main() {
+            let g = gen();
+            g.next();
+            ret_i32(g.value());
+            // g dropped here while suspended; arr must be released
+        }
+    ));
+    assert_all(&result, &[ 10i32 ]);
+}
+
+#[test]
+fn drop_not_started_releases_ref_args() {
+    // a generator constructed with ref-typed arguments but never started: the captured array must be
+    // released when the generator is dropped.
+    let result = run(stringify!(
+        fn gen(data: [i32]) -> Generator<i32> {
+            let mut i = 0;
+            while i < 3 { yield data[i]; i += 1; }
+        }
+        fn main() {
+            let g = gen([7, 8, 9]);
+            // never started; the captured array must be released on drop
+        }
+    ));
+    assert_all(&result, &[] as &[ i32 ]);
+}
+
+#[test]
+fn for_loop_break_releases_ref_local() {
+    // breaking out of a for-loop leaves the generator suspended mid-iteration; its ref-typed local must
+    // still be released.
+    let result = run(stringify!(
+        fn gen() -> Generator<i32> {
+            let arr = [10, 20, 30, 40];
+            let mut i = 0;
+            while i < 4 { yield arr[i]; i += 1; }
+        }
+        fn main() {
+            for v in gen() {
+                ret_i32(v);
+                if v == 20 { break; }
+            }
+        }
+    ));
+    assert_all(&result, &[ 10i32, 20 ]);
+}
+
+#[test]
+fn partial_consumption_releases_ref_arg_and_local() {
+    // both a ref-typed argument and a ref-typed local are live across the suspension point at which the
+    // generator is dropped; both must be released.
+    let result = run(stringify!(
+        fn gen(prefix: [i32]) -> Generator<i32> {
+            let extra = [100, 200];
+            yield prefix[0];
+            yield extra[0];
+            yield extra[1];
+        }
+        fn main() {
+            let g = gen([1, 2]);
+            g.next();
+            ret_i32(g.value());
+            g.next();
+            ret_i32(g.value());
+            // dropped after two of three yields; prefix and extra must be released
+        }
+    ));
+    assert_all(&result, &[ 1i32, 100 ]);
+}
+
+#[test]
+fn full_consumption_with_refs_no_double_free() {
+    // the happy path with ref-typed arg and local: the body's normal scope destructors release the
+    // frame's refs, and the drop-cleanup must not release them a second time (no refcount underflow).
+    let result = run(stringify!(
+        fn gen(prefix: [i32]) -> Generator<i32> {
+            let extra = [100, 200];
+            yield prefix[0];
+            yield extra[0];
+            yield extra[1];
+        }
+        fn main() {
+            let g = gen([1, 2]);
+            let mut sum = 0;
+            while g.next() { sum += g.value(); }
+            ret_i32(sum);
+        }
+    ));
+    assert_all(&result, &[ 301i32 ]);
+}
+
+#[test]
+fn drop_maybe_initialized_ref_local_present() {
+    // a ref-typed local initialized on only one branch is MaybeInitialized at the suspension point. When
+    // the branch ran, the live-ref-map's runtime null-check sees a real reference and releases it.
+    let result = run(stringify!(
+        fn gen(flag: bool) -> Generator<i32> {
+            let arr;
+            if flag { arr = [1, 2, 3]; }
+            yield 7;
+            yield 8;
+        }
+        fn main() {
+            let g = gen(true);
+            g.next();
+            ret_i32(g.value());
+        }
+    ));
+    assert_all(&result, &[ 7i32 ]);
+}
+
+#[test]
+fn drop_maybe_initialized_ref_local_absent() {
+    // same generator, but the initializing branch did not run: the slot holds a null reference and the
+    // drop-cleanup must skip it rather than touch heap object 0.
+    let result = run(stringify!(
+        fn gen(flag: bool) -> Generator<i32> {
+            let arr;
+            if flag { arr = [1, 2, 3]; }
+            yield 7;
+            yield 8;
+        }
+        fn main() {
+            let g = gen(false);
+            g.next();
+            ret_i32(g.value());
+        }
+    ));
+    assert_all(&result, &[ 7i32 ]);
+}
+
+#[test]
+fn drop_string_typed_local() {
+    // strings are reference types too; a suspended generator holding one must release it on drop.
+    let result = run(stringify!(
+        fn gen() -> Generator<i32> {
+            let s = "hello";
+            yield s.len() as i32;
+            yield 0;
+        }
+        fn main() {
+            let g = gen();
+            g.next();
+            ret_i32(g.value());
+        }
+    ));
+    assert_all(&result, &[ 5i32 ]);
+}
+
+#[test]
+fn interleaved_generators_with_refs_partial() {
+    // two independent generators each holding ref-typed locals, advanced out of order and both dropped
+    // while suspended: each frame's refs must be released independently.
+    let result = run(stringify!(
+        fn gen(base: i32) -> Generator<i32> {
+            let arr = [base, base + 1, base + 2];
+            let mut i = 0;
+            while i < 3 { yield arr[i]; i += 1; }
+        }
+        fn main() {
+            let a = gen(10);
+            let b = gen(20);
+            a.next();
+            ret_i32(a.value());
+            b.next();
+            ret_i32(b.value());
+            a.next();
+            ret_i32(a.value());
+            // both dropped while suspended
+        }
+    ));
+    assert_all(&result, &[ 10i32, 20, 11 ]);
+}
+
+#[test]
+fn drop_nested_ref_local() {
+    // a nested reference type (array of arrays) held across the suspension point must be released
+    // recursively on drop.
+    let result = run(stringify!(
+        fn gen() -> Generator<i32> {
+            let grid = [[1, 2], [3, 4]];
+            yield grid[0][0];
+            yield grid[1][1];
+        }
+        fn main() {
+            let g = gen();
+            g.next();
+            ret_i32(g.value());
+        }
+    ));
+    assert_all(&result, &[ 1i32 ]);
 }
