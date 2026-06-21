@@ -26,6 +26,7 @@ pub enum MapBuiltin {
     Keys,
     Values,
     Len,
+    Clone,
 }
 
 /// Identifies a built-in generator method.
@@ -266,6 +267,30 @@ impl_builtins! {
                 data.truncate(data.len() - ELEMENT_SIZE);
                 vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
                 result
+            }
+        }
+
+        /// Returns a shallow copy of the array.
+        clone(self: Self) -> Self {
+            fn <
+                array_clone8<T: u8>(this: Array) -> Array,
+                array_clone16<T: u16>(this: Array) -> Array,
+                array_clone32<T: u32>(this: Array) -> Array,
+                array_clone64<T: u64>(this: Array) -> Array,
+            >(&mut vm) {
+                let index = this.index();
+                let implementor = vm.heap.item_implementor_index(index);
+                let data = vm.heap.item(index).data.clone();
+                let new_index = vm.heap.alloc_copy(&data, implementor);
+                HeapRef::new(new_index, 0)
+            }
+
+            fn array_clonex(&mut vm, this: Array) -> Array {
+                let index = this.index();
+                let implementor = vm.heap.item_implementor_index(index);
+                let data = vm.heap.item(index).data.clone();
+                let new_index = vm.heap.alloc_copy(&data, implementor);
+                HeapRef::new(new_index, 0)
             }
         }
 
@@ -1401,6 +1426,11 @@ pub mod documentation {
 
         /// Returns the number of entries in the map.
         pub fn len(self: Self) -> u64 { }
+
+        /// Returns a shallow copy of the map. Keys and values are shared with the original (for reference
+        /// types this means both maps observe mutations through the shared values), but the two maps'
+        /// sets of entries are independent: inserting into or removing from one does not affect the other.
+        pub fn clone(self: Self) -> Map { }
     }
 
     /// Success-or-error type, written `Result<T>`.

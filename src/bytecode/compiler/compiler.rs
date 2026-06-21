@@ -576,6 +576,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     MapBuiltin::Keys   => { self.writer.map_keys(constructor); },
                     MapBuiltin::Values => { self.writer.map_values(constructor); },
                     MapBuiltin::Len    => { self.writer.map_len(constructor); },
+                    MapBuiltin::Clone  => { self.writer.map_clone(constructor); },
                 };
             },
             FunctionKind::Method(object_type_id) => {

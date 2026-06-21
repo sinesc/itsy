@@ -364,6 +364,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             "contains_key" => Some((MapBuiltin::ContainsKey, Some(self.primitive_type_id(Type::bool)?), vec![ key_type_id ])),
             "remove" => Some((MapBuiltin::Remove, None, vec![ key_type_id ])),
             "clear"  => Some((MapBuiltin::Clear, None, vec![])),
+            "clone"  => Some((MapBuiltin::Clone, Some(type_id), vec![])),
             "len"    => Some((MapBuiltin::Len, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?), vec![])),
             "keys"   => {
                 let array_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: Some(key_type_id) }));

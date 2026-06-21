@@ -1752,6 +1752,15 @@ impl_opcodes!{
         self.stack.push(HeapRef::new(array_index, 0));
     }
 
+    /// Push shallow map clone. Stack on entry (top): map reference.
+    fn map_clone(&mut self, constructor: StackAddress) {
+        let map: HeapRef = self.stack.pop();
+        let data = self.heap.item(map.index()).data.clone();
+        let clone_index = self.heap.alloc_copy(&data, ItemIndex::MAX);
+        self.refcount_value(map, constructor, HeapRefOp::Free);
+        self.stack.push(HeapRef::new(clone_index, 0));
+    }
+
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
     /// run() again. Unlike `exit`, no stack/heap teardown is performed.
     fn suspend(&mut self) [ return ] {
