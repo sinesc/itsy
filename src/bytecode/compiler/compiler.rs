@@ -1876,7 +1876,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // frozen frame, not its `$value`/`$key` fields. Emit a Generator constructor so the refcounter
         // refcounts the object without recursing into the (non-existent) field layout. The frozen frame's
         // own nested refs are released on the happy path by the body's scope destructors; on a mid-flight
-        // drop they are released via the live-ref-map referenced from the carrier's header (milestone 4).
+        // drop they are released via the live-ref-map referenced from the carrier's header
         if self.generator_signature(type_id).is_some() {
             *prev_primitive = None;
             self.writer.store_const(Constructor::Generator);
