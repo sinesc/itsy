@@ -11,7 +11,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin, GeneratorBuiltin}};
+use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{BuiltinType, MapBuiltin, GeneratorBuiltin}};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use placeholder::{LoopControlStack, LoopControl, Functions};
@@ -123,6 +123,19 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         if let Some(&implementor_index) = compiler.trait_implementor_indices.get(&type_id) {
             compiler.writer.update_const((implementor_index as usize * size_of::<StackAddress>()) as StackAddress, position);
         }
+    }
+
+    // patch generator carrier constructors with their value/key constructor offsets now that all
+    // constructors exist (they were emitted as forward-reference placeholders in store_constructor)
+    let generator_carriers: Vec<(StackAddress, (Option<TypeId>, TypeId))> = compiler.constructors.iter()
+        .filter_map(|(&type_id, &position)| compiler.generator_signature(type_id).map(|sig| (position, sig)))
+        .collect();
+    for (position, (key_type_id, value_type_id)) in generator_carriers {
+        let value_ctor = compiler.generator_slot_constructor(Some(value_type_id))?;
+        let key_ctor = compiler.generator_slot_constructor(key_type_id)?;
+        let value_ctor_pos = position + size_of::<Constructor>() as StackAddress; // skip the 1-byte Generator op
+        compiler.writer.update_const(value_ctor_pos, value_ctor);
+        compiler.writer.update_const(value_ctor_pos + size_of::<StackAddress>() as StackAddress, key_ctor);
     }
 
     // write placeholder jump to program entry
@@ -251,30 +264,24 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 Ok(())
             },
             S::Yield(yield_stmt) => {
-                let (value_size, value_is_ref) = { let ty = self.ty(&yield_stmt.value); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
-                if value_is_ref {
-                    // milestone 5: reference-typed yields need refcount handling in the generator object
-                    return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed value".to_string()), &self.module_path));
-                }
+                // a ref-typed value/key is retained by the generator's value/key slot (replace semantics);
+                // its constructor drives that refcounting, GEN_PRIMITIVE_CTOR marks a primitive (no refcount).
+                let (value_size, value_ctor) = { let ty = self.ty(&yield_stmt.value); (ty.primitive_size() as FrameAddress, if ty.is_ref() { self.constructor(ty)? } else { GEN_PRIMITIVE_CTOR }) };
                 comment!(self, "yield");
                 // record which ref-typed frame slots are live at this suspension point so a mid-flight
                 // drop can release them; the map's const-pool offset is stashed in the generator header.
                 let live_ref_map = self.write_generator_live_ref_map(&self.collect_generator_live_refs()?);
                 match &yield_stmt.key {
                     Some(key) => {
-                        let (key_size, key_is_ref) = { let ty = self.ty(key); (ty.primitive_size() as FrameAddress, ty.is_ref()) };
-                        if key_is_ref {
-                            // milestone 5: reference-typed yields need refcount handling in the generator object
-                            return Err(CompileError::new(yield_stmt, CompileErrorKind::Unsupported("generator yield of a reference-typed key".to_string()), &self.module_path));
-                        }
+                        let (key_size, key_ctor) = { let ty = self.ty(key); (ty.primitive_size() as FrameAddress, if ty.is_ref() { self.constructor(ty)? } else { GEN_PRIMITIVE_CTOR }) };
                         // push key then value (value ends on top, matching gen_yield_kv's expectation)
                         self.compile_expression(key)?;
                         self.compile_expression(&yield_stmt.value)?;
-                        self.writer.gen_yield_kv(live_ref_map, key_size, value_size);
+                        self.writer.gen_yield_kv(live_ref_map, key_ctor, value_ctor, key_size, value_size);
                     },
                     None => {
                         self.compile_expression(&yield_stmt.value)?;
-                        self.writer.gen_yield(live_ref_map, value_size);
+                        self.writer.gen_yield(live_ref_map, value_ctor, value_size);
                     },
                 }
                 Ok(())
@@ -282,10 +289,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             S::Return(ast::Return { expr, .. }) => {
                 if self.locals.is_generator() {
                     // a generator's `return` carries no value (resolver-enforced); release locals and
-                    // complete the generator instead of performing a normal value return.
+                    // complete the generator instead of performing a normal value return. The value/key
+                    // constructors release any reference still held in the header value/key slots.
                     comment!(self, "generator returning");
                     self.write_scope_destructor(BranchingScope::Function)?;
-                    self.writer.gen_return();
+                    let (value_ctor, key_ctor) = self.locals.generator_slot_ctors();
+                    self.writer.gen_return(value_ctor, key_ctor);
                 } else {
                     comment!(self, "block returning");
                     self.compile_expression(expr)?;
@@ -1250,7 +1259,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         frame.ret_size = self.function_by_id(function_id).ret_size(self);
         // a function returning `Generator<..>` is a generator: it suspends via `yield` and completes via
         // the generator-return opcode instead of a normal `ret`.
-        frame.is_generator = self.function_by_id(function_id).ret_type_id(self).map_or(false, |ret_type_id| self.generator_signature(ret_type_id).is_some());
+        let ret_type_id = self.function_by_id(function_id).ret_type_id(self);
+        if let Some((key_type_id, value_type_id)) = ret_type_id.and_then(|rt| self.generator_signature(rt)) {
+            frame.is_generator = true;
+            // value/key slot constructors, used to release a yielded reference held in the header on completion
+            frame.generator_value_ctor = self.generator_slot_constructor(Some(value_type_id))?;
+            frame.generator_key_ctor = self.generator_slot_constructor(key_type_id)?;
+        }
         for arg in item.sig.params.iter() {
             frame.insert(arg.binding_id, frame.arg_pos);
             self.init_state.declare(arg.binding_id);
@@ -1657,6 +1672,16 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
+    /// Returns the constructor offset for a generator value/key slot of the given type, or
+    /// `GEN_PRIMITIVE_CTOR` if the type is primitive or absent (no key). Reference types are refcounted
+    /// in the slot; primitives are not.
+    fn generator_slot_constructor(self: &Self, type_id: Option<TypeId>) -> CompileResult<StackAddress> {
+        Ok(match type_id {
+            Some(type_id) if self.ty(&type_id).is_ref() => self.constructor(self.ty(&type_id))?,
+            _ => GEN_PRIMITIVE_CTOR,
+        })
+    }
+
     /// Returns constructor index for given type or 0.
     pub(super) fn constructor(self: &Self, ty: &Type) -> CompileResult<StackAddress> {
         if ty.is_callable() { // TODO unify cases, consider always storing the concrete constuctor as meta information on the heap object (like currently the implementor index)
@@ -1855,6 +1880,11 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if self.generator_signature(type_id).is_some() {
             *prev_primitive = None;
             self.writer.store_const(Constructor::Generator);
+            // value- and key-constructor offsets, used to release the yielded value/key held in the header
+            // on drop. Written as placeholders here and patched after all constructors are serialized,
+            // since the value/key types' constructors may not exist yet (forward references).
+            self.writer.store_const(GEN_PRIMITIVE_CTOR);
+            self.writer.store_const(GEN_PRIMITIVE_CTOR);
             return Ok(position);
         }
         match self.ty(&type_id) {

@@ -219,8 +219,13 @@ pub enum Constructor {
     Enum        = 179,  // Enum(constructor_size, implementor index, num_variants, variant 1 num_fields, field constructor, ..., variant 2 num_fields, ...): copies an enum
     Closure     = 181,
     Map         = 182,  // Map(constructor_size, key constructor, value constructor): copies a map. Keys and values are boxed, i.e. each stored inline as a HeapRef.
-    Generator   = 183,  // Generator: an opaque generator carrier. Carries no inline layout; on free, the live heap refs held by its frozen frame are released via the live-ref-map referenced from the carrier's header (see runtime::vm).
+    Generator   = 183,  // Generator(value_ctor, key_ctor): an opaque generator carrier. The two StackAddress args are the value/key constructor offsets (GEN_PRIMITIVE_CTOR = no ref slot); they release the yielded value/key held in the header. The frozen frame's live refs are released via a separate live-ref-map referenced from that header (see runtime::vm).
 }
+
+/// Sentinel stored in a `Constructor::Generator` value/key constructor slot (and passed to `gen_yield`/
+/// `gen_yield_kv`/`gen_return`) to indicate the slot holds a primitive, not a heap reference, and must
+/// not be refcounted. Distinct from constructor offset 0 (trait/virtual) and 1 (dynamic/callable).
+pub const GEN_PRIMITIVE_CTOR: StackAddress = StackAddress::MAX;
 
 /// Information about a serialized constructor
 #[cfg(feature="runtime")]
@@ -277,13 +282,22 @@ impl Constructor {
                     next: offset + SIZE,
                 }
             },
-            Self::String | Self::Closure | Self::Virtual | Self::Generator => {
+            Self::String | Self::Closure | Self::Virtual => {
                 // no additional data attached: a virtual constructor is resolved at runtime via the
-                // referenced object's implementor index, strings/closures carry no nested layout, and a
-                // generator carrier's live refs are described by a map referenced from its heap header
+                // referenced object's implementor index, strings/closures carry no nested layout
                 ConstructorData {
                     offset,
                     next: offset,
+                }
+            },
+            Self::Generator => {
+                // two StackAddress args: the value- and key-constructor offsets (0 = primitive/none),
+                // used to release the yielded value/key held in the carrier header on drop. The frozen
+                // frame's own live refs are described by a separate map referenced from that header.
+                const SIZE: StackAddress = (2 * size_of::<StackAddress>()) as StackAddress;
+                ConstructorData {
+                    offset,
+                    next: offset + SIZE,
                 }
             },
         }

@@ -1774,21 +1774,27 @@ impl_opcodes!{
 
     /// Suspends the running generator, stashing the yielded value (of the given size) and recording
     /// `live_ref_map` (the const-pool offset of this suspension point's live-ref-map, used for drop
-    /// cleanup) in the header, then returns control to the driving `next()` with a `true` result.
-    fn gen_yield(&mut self, live_ref_map: StackAddress, value_size: FrameAddress) {
-        self.gen_yield_impl(live_ref_map, value_size);
+    /// cleanup) in the header, then returns control to the driving `next()` with a `true` result. When
+    /// `value_ctor` is not `GEN_PRIMITIVE_CTOR`, the value is a heap reference: the previous slot value
+    /// is released and the new one retained (replace semantics).
+    fn gen_yield(&mut self, live_ref_map: StackAddress, value_ctor: StackAddress, value_size: FrameAddress) {
+        self.gen_yield_impl(live_ref_map, value_ctor, value_size);
     }
 
     /// Keyed variant of `gen_yield`: suspends the running generator, stashing the yielded key and value
     /// (the stack holds `key` then `value`, value on top) and recording `live_ref_map` (this suspension
-    /// point's live-ref-map offset) in the header, then returns control to the driving `next()`.
-    fn gen_yield_kv(&mut self, live_ref_map: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
-        self.gen_yield_kv_impl(live_ref_map, key_size, value_size);
+    /// point's live-ref-map offset) in the header, then returns control to the driving `next()`. A
+    /// `key_ctor`/`value_ctor` other than `GEN_PRIMITIVE_CTOR` marks that slot as a heap reference
+    /// (replace semantics).
+    fn gen_yield_kv(&mut self, live_ref_map: StackAddress, key_ctor: StackAddress, value_ctor: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+        self.gen_yield_kv_impl(live_ref_map, key_ctor, value_ctor, key_size, value_size);
     }
 
-    /// Completes the running generator and returns control to the driving `next()` with a `false` result.
-    fn gen_return(&mut self) {
-        self.gen_return_impl();
+    /// Completes the running generator and returns control to the driving `next()` with a `false`
+    /// result. `value_ctor`/`key_ctor` (other than `GEN_PRIMITIVE_CTOR`) release the last-yielded
+    /// reference held in the header value/key slot.
+    fn gen_return(&mut self, value_ctor: StackAddress, key_ctor: StackAddress) {
+        self.gen_return_impl(value_ctor, key_ctor);
     }
 
     /// Reads the generator's last yielded value (of the given size) and pushes it, consuming the

@@ -367,18 +367,6 @@ fn for_loop_empty_generator() {
 // --- resolver/compiler rejections (still enforced) ---
 
 #[test]
-fn reference_typed_key_not_yet_implemented() {
-    // a String (reference-typed) key needs refcount handling in the generator object: milestone 5
-    let err = build_err(stringify!(
-        fn pairs() -> Generator<String, i32> {
-            yield "a", 1;
-        }
-        fn main() { }
-    ));
-    assert!(err.contains("reference-typed"), "unexpected error: {}", err);
-}
-
-#[test]
 fn value_only_generator_key_iteration_rejected() {
     // a `Generator<V>` yields values only and cannot be iterated by key
     let err = build_err(stringify!(
@@ -633,4 +621,272 @@ fn drop_nested_ref_local() {
         }
     ));
     assert_all(&result, &[ 1i32 ]);
+}
+
+// --- Milestone 5: reference-typed yields ---
+//
+// The yielded value/key may now be a reference type (String, arrays, ...). The generator's header
+// value/key slot owns a refcount on the yielded reference (replace semantics on each yield, released on
+// completion or drop); value()/key() return a borrow. The `run` helper turns any leak into a
+// HeapCorruption panic and any double-free into a refcount-underflow panic.
+
+#[test]
+fn string_value_generator_manual_drive() {
+    let result = run(stringify!(
+        fn names() -> Generator<String> {
+            yield "alice";
+            let local = "bob";
+            yield local;
+        }
+        fn main() {
+            let g = names();
+            while g.next() { ret_string(g.value()); }
+        }
+    ));
+    assert_all(&result, &[ "alice".to_string(), "bob".to_string() ]);
+}
+
+#[test]
+fn array_value_generator_manual_drive() {
+    let result = run(stringify!(
+        fn rows() -> Generator<[i32]> {
+            let mut i = 0;
+            while i < 3 {
+                yield [i, i * i];
+                i += 1;
+            }
+        }
+        fn main() {
+            let g = rows();
+            while g.next() {
+                let row = g.value();
+                ret_i32(row[0]);
+                ret_i32(row[1]);
+            }
+        }
+    ));
+    assert_all(&result, &[ 0i32, 0, 1, 1, 2, 4 ]);
+}
+
+#[test]
+fn keyed_string_value_generator() {
+    // String key, i32 value; the string key's length is returned alongside the value so both are checked
+    // through a single (i32) result sequence.
+    let result = run(stringify!(
+        fn scores() -> Generator<String, i32> {
+            yield "aa", 1;
+            yield "bbb", 2;
+        }
+        fn main() {
+            let g = scores();
+            while g.next() {
+                ret_i32(g.key().len() as i32);
+                ret_i32(g.value());
+            }
+        }
+    ));
+    assert_all(&result, &[ 2i32, 1, 3, 2 ]);
+}
+
+#[test]
+fn keyed_ref_key_and_value_generator() {
+    // both key and value are reference types
+    let result = run(stringify!(
+        fn pairs() -> Generator<String, [i32]> {
+            yield "x", [10, 11];
+            yield "yy", [20, 21];
+        }
+        fn main() {
+            let g = pairs();
+            while g.next() {
+                ret_i32(g.key().len() as i32);
+                let v = g.value();
+                ret_i32(v[1]);
+            }
+        }
+    ));
+    assert_all(&result, &[ 1i32, 11, 2, 21 ]);
+}
+
+#[test]
+fn for_loop_string_value_generator() {
+    let result = run(stringify!(
+        fn names() -> Generator<String> {
+            yield "one";
+            yield "two";
+            yield "three";
+        }
+        fn main() {
+            for v in names() { ret_string(v); }
+        }
+    ));
+    assert_all(&result, &[ "one".to_string(), "two".to_string(), "three".to_string() ]);
+}
+
+#[test]
+fn for_loop_array_value_generator() {
+    let result = run(stringify!(
+        fn rows() -> Generator<[i32]> {
+            yield [1, 2];
+            yield [3, 4];
+        }
+        fn main() {
+            for row in rows() {
+                ret_i32(row[0]);
+                ret_i32(row[1]);
+            }
+        }
+    ));
+    assert_all(&result, &[ 1i32, 2, 3, 4 ]);
+}
+
+#[test]
+fn for_loop_keyed_ref_generator() {
+    let result = run(stringify!(
+        fn pairs() -> Generator<String, [i32]> {
+            yield "aa", [1];
+            yield "bbb", [2];
+        }
+        fn main() {
+            for k, v in pairs() {
+                ret_i32(k.len() as i32);
+                ret_i32(v[0]);
+            }
+        }
+    ));
+    assert_all(&result, &[ 2i32, 1, 3, 2 ]);
+}
+
+#[test]
+fn for_loop_break_ref_value() {
+    // breaking out leaves the generator suspended holding a ref value: heap-clean drop
+    let result = run(stringify!(
+        fn rows() -> Generator<[i32]> {
+            let mut i = 0;
+            while i < 5 { yield [i]; i += 1; }
+        }
+        fn main() {
+            for row in rows() {
+                ret_i32(row[0]);
+                if row[0] == 1 { break; }
+            }
+        }
+    ));
+    assert_all(&result, &[ 0i32, 1 ]);
+}
+
+#[test]
+fn drop_suspended_ref_value() {
+    // partially consume a ref-yielding generator then drop it while suspended: the value slot and the
+    // frozen frame's ref local must both be released.
+    let result = run(stringify!(
+        fn gen() -> Generator<[i32]> {
+            let kept = [100, 200];
+            yield kept;
+            yield [1];
+            yield [2];
+        }
+        fn main() {
+            let g = gen();
+            g.next();
+            ret_i32(g.value()[0]);
+            g.next();
+            // dropped while suspended after two yields
+        }
+    ));
+    assert_all(&result, &[ 100i32 ]);
+}
+
+#[test]
+fn drop_not_started_ref_value_with_ref_arg() {
+    // a ref-yielding generator with a ref-typed argument, never started: the captured argument is
+    // released on drop (the value slot is still null).
+    let result = run(stringify!(
+        fn echo(data: [i32]) -> Generator<[i32]> {
+            yield data;
+            yield [0];
+        }
+        fn main() {
+            let g = echo([1, 2, 3]);
+            // never started
+        }
+    ));
+    assert_all(&result, &[] as &[ i32 ]);
+}
+
+#[test]
+fn full_consumption_ref_value_no_double_free() {
+    // running a ref-yielding generator to completion: gen_return releases the last value slot, and the
+    // body's scope destructors release the locals — neither may double-free.
+    let result = run(stringify!(
+        fn gen() -> Generator<[i32]> {
+            let local = [9];
+            yield local;
+            yield [8];
+            yield [7];
+        }
+        fn main() {
+            let g = gen();
+            let mut sum = 0;
+            while g.next() { sum += g.value()[0]; }
+            ret_i32(sum);
+        }
+    ));
+    assert_all(&result, &[ 24i32 ]);
+}
+
+#[test]
+fn reyield_same_ref_value() {
+    // yielding the same reference repeatedly exercises the replace-semantics next==prev fast path; then
+    // drop while suspended must release it exactly once.
+    let result = run(stringify!(
+        fn same() -> Generator<[i32]> {
+            let shared = [7, 8];
+            yield shared;
+            yield shared;
+            yield shared;
+        }
+        fn main() {
+            let g = same();
+            g.next();
+            g.next();
+            ret_i32(g.value()[1]);
+        }
+    ));
+    assert_all(&result, &[ 8i32 ]);
+}
+
+#[test]
+fn ref_value_passed_to_function() {
+    // value() returns a borrow; passing it to a function increments it as an argument, so the value
+    // survives the call and the generator's slot ownership stays balanced.
+    let result = run(stringify!(
+        fn one() -> Generator<[i32]> { yield [42, 43]; }
+        fn first(a: [i32]) -> i32 { a[0] }
+        fn main() {
+            let g = one();
+            g.next();
+            ret_i32(first(g.value()));
+        }
+    ));
+    assert_all(&result, &[ 42i32 ]);
+}
+
+#[test]
+fn ref_value_returned_from_wrapper() {
+    // returning value() out of an enclosing function: the return inc/dec dance plus the generator's
+    // drop keep the array alive for the caller and free it exactly once.
+    let result = run(stringify!(
+        fn one() -> Generator<[i32]> { yield [5, 6]; }
+        fn get() -> [i32] {
+            let g = one();
+            g.next();
+            return g.value();
+        }
+        fn main() {
+            let x = get();
+            ret_i32(x[1]);
+        }
+    ));
+    assert_all(&result, &[ 6i32 ]);
 }

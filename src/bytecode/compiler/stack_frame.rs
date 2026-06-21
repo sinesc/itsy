@@ -1,5 +1,6 @@
 use crate::prelude::*;
-use crate::FrameAddress;
+use crate::{FrameAddress, StackAddress};
+use crate::bytecode::GEN_PRIMITIVE_CTOR;
 use crate::shared::typed_ids::BindingId;
 
 /// Maps bindings and arguments to indices relative to the stack frame.
@@ -15,6 +16,10 @@ pub struct StackFrame {
     /// Whether the function owning this frame is a generator (its body uses `yield` and returns via
     /// the generator-completion opcode rather than a normal `ret`).
     pub is_generator: bool,
+    /// For a generator frame: the value/key constructor offsets used to release any reference held in
+    /// the carrier's value/key slot on completion (`GEN_PRIMITIVE_CTOR` for a primitive/absent slot).
+    pub generator_value_ctor: StackAddress,
+    pub generator_key_ctor: StackAddress,
 }
 
 impl StackFrame {
@@ -26,6 +31,8 @@ impl StackFrame {
             var_pos : 0,
             ret_size: 0,
             is_generator: false,
+            generator_value_ctor: GEN_PRIMITIVE_CTOR,
+            generator_key_ctor: GEN_PRIMITIVE_CTOR,
         }
     }
     /// Add new local variable.
@@ -66,6 +73,12 @@ impl StackFrames {
     /// Returns whether the function owning the top stack frame is a generator.
     pub fn is_generator(self: &Self) -> bool {
         self.0.last().expect(Self::NO_STACK).is_generator
+    }
+    /// Returns the (value, key) constructor offsets of the top generator frame, used to release the
+    /// references held in the carrier's value/key slots on completion.
+    pub fn generator_slot_ctors(self: &Self) -> (StackAddress, StackAddress) {
+        let frame = self.0.last().expect(Self::NO_STACK);
+        (frame.generator_value_ctor, frame.generator_key_ctor)
     }
     /// Returns a reference to the top (current) stack frame descriptor.
     pub fn current(self: &Self) -> &StackFrame {

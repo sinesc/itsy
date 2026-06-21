@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, FrameAddress};
-use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
+use crate::bytecode::{HeapRef, HeapRefOp, Constructor, GEN_PRIMITIVE_CTOR, Program, ConstDescriptor, ConstEndianness, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
 
@@ -212,7 +212,7 @@ impl<T, U> VM<T, U> {
 
     /// Suspends the running generator: stashes the yielded value, freezes the current frame back into the
     /// generator object, restores the caller and pushes `true` as the result of the driving `next()`.
-    pub(crate) fn gen_yield_impl(self: &mut Self, live_ref_map: StackAddress, value_size: FrameAddress) {
+    pub(crate) fn gen_yield_impl(self: &mut Self, live_ref_map: StackAddress, value_ctor: StackAddress, value_size: FrameAddress) {
         let value_size = value_size as usize;
         // pop the yielded value off the stack top
         let sp = self.stack.sp() as usize;
@@ -224,6 +224,8 @@ impl<T, U> VM<T, U> {
         let frame = self.stack.data()[fp..frame_end].to_vec();
         let resume_pc = self.pc;
         let control = *self.gen_control.last().expect("yield outside generator resumption");
+        // a reference-typed value is retained by the value slot (replace semantics: release the previous slot value)
+        self.gen_replace_slot(control.gen_index, GEN_VALUE_OFFSET, &value_bytes, value_ctor);
         {
             let data = &mut self.heap.item_mut(control.gen_index).data;
             data[GEN_STATE_OFFSET] = GEN_SUSPENDED;
@@ -243,7 +245,7 @@ impl<T, U> VM<T, U> {
     /// Keyed variant of [`gen_yield_impl`]: the stack top holds `key` then `value` (value on top, key
     /// below). Both are stashed into the generator object before the frame is frozen and control returns
     /// to the driving `next()`.
-    pub(crate) fn gen_yield_kv_impl(self: &mut Self, live_ref_map: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+    pub(crate) fn gen_yield_kv_impl(self: &mut Self, live_ref_map: StackAddress, key_ctor: StackAddress, value_ctor: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
         let key_size = key_size as usize;
         let value_size = value_size as usize;
         // pop the yielded value (top) and key (below it) off the stack
@@ -257,6 +259,9 @@ impl<T, U> VM<T, U> {
         let frame = self.stack.data()[fp..frame_end].to_vec();
         let resume_pc = self.pc;
         let control = *self.gen_control.last().expect("yield outside generator resumption");
+        // reference-typed key/value are retained by their slots (replace semantics)
+        self.gen_replace_slot(control.gen_index, GEN_VALUE_OFFSET, &value_bytes, value_ctor);
+        self.gen_replace_slot(control.gen_index, GEN_KEY_OFFSET, &key_bytes, key_ctor);
         {
             let data = &mut self.heap.item_mut(control.gen_index).data;
             data[GEN_STATE_OFFSET] = GEN_SUSPENDED;
@@ -276,9 +281,12 @@ impl<T, U> VM<T, U> {
 
     /// Completes the running generator (its body returned or fell off the end): marks it done, releases
     /// the frozen frame, restores the caller and pushes `false` as the result of the driving `next()`.
-    pub(crate) fn gen_return_impl(self: &mut Self) {
+    pub(crate) fn gen_return_impl(self: &mut Self, value_ctor: StackAddress, key_ctor: StackAddress) {
         let control = *self.gen_control.last().expect("generator return outside generator resumption");
         self.gen_control.pop();
+        // release the last-yielded reference held in the value/key slots (value()/key() are illegal once done)
+        self.gen_release_slot(control.gen_index, GEN_VALUE_OFFSET, value_ctor);
+        self.gen_release_slot(control.gen_index, GEN_KEY_OFFSET, key_ctor);
         {
             let data = &mut self.heap.item_mut(control.gen_index).data;
             data[GEN_STATE_OFFSET] = GEN_DONE;
@@ -309,12 +317,51 @@ impl<T, U> VM<T, U> {
         self.stack.extend_from(&key_bytes);
     }
 
-    /// Releases the live heap references held by a (to-be-freed) generator carrier's frozen frame. The
-    /// carrier's header records the const-pool offset of the live-ref-map for its current suspension point
-    /// (the entry point while `NotStarted`, the active `yield` while `Suspended`); a `Done`/`Running`
-    /// generator holds no releasable frame refs. The map is a `count` followed by `count` pairs of
-    /// `(frame_offset, constructor_offset)`; each slot whose stored reference is non-null is refcounted.
-    fn refcount_generator_frame(self: &mut Self, gen_index: StackAddress, op: HeapRefOp, epoch: usize) {
+    /// Reads a heap reference stored at `offset` within a generator carrier's heap object.
+    fn gen_slot_ref(self: &Self, gen_index: StackAddress, offset: usize) -> HeapRef {
+        const REF_SIZE: usize = size_of::<crate::HeapAddress>();
+        HeapRef::from_ne_bytes(self.heap.item(gen_index).data[offset..offset + REF_SIZE].try_into().unwrap())
+    }
+
+    /// Stores a (about to be written) reference-typed value into a generator header slot with replace
+    /// semantics: retains the new reference and releases the one it overwrites. A no-op for primitive
+    /// slots (`GEN_PRIMITIVE_CTOR`). The actual byte write into the slot is performed by the caller.
+    fn gen_replace_slot(self: &mut Self, gen_index: StackAddress, offset: usize, value_bytes: &[ u8 ], constructor_offset: StackAddress) {
+        if constructor_offset == GEN_PRIMITIVE_CTOR {
+            return;
+        }
+        let next = HeapRef::from_ne_bytes(value_bytes.try_into().expect("reference-typed generator slot value is not heap-reference sized"));
+        let prev = self.gen_slot_ref(gen_index, offset);
+        if next != prev {
+            self.refcount_value(next, constructor_offset, HeapRefOp::Inc);
+            // prev may be null on the first yield (the slot starts zeroed)
+            if prev.index() != 0 {
+                self.refcount_value(prev, constructor_offset, HeapRefOp::Dec);
+            }
+        }
+    }
+
+    /// Releases (with `Dec`) the reference held in a generator header slot, if it is reference-typed and
+    /// non-null. Used on generator completion; a no-op for primitive slots (`GEN_PRIMITIVE_CTOR`).
+    fn gen_release_slot(self: &mut Self, gen_index: StackAddress, offset: usize, constructor_offset: StackAddress) {
+        if constructor_offset == GEN_PRIMITIVE_CTOR {
+            return;
+        }
+        let reference = self.gen_slot_ref(gen_index, offset);
+        if reference.index() != 0 {
+            self.refcount_value(reference, constructor_offset, HeapRefOp::Dec);
+        }
+    }
+
+    /// Releases the live heap references held by a (to-be-freed) generator carrier: the ref-typed slots
+    /// of its frozen frame plus the yielded value/key held in the header. The carrier's header records
+    /// the const-pool offset of the live-ref-map for its current suspension point (the entry point while
+    /// `NotStarted`, the active `yield` while `Suspended`); a `Done`/`Running` generator holds no
+    /// releasable refs (a done generator already released its slots in `gen_return`). The map is a
+    /// `count` followed by `count` pairs of `(frame_offset, constructor_offset)`; each slot whose stored
+    /// reference is non-null is refcounted. `value_ctor`/`key_ctor` (from the carrier's
+    /// `Constructor::Generator`) release the header value/key slots unless `GEN_PRIMITIVE_CTOR`.
+    fn refcount_generator_frame(self: &mut Self, gen_index: StackAddress, value_ctor: StackAddress, key_ctor: StackAddress, op: HeapRefOp, epoch: usize) {
         const REF_SIZE: usize = size_of::<crate::HeapAddress>();
         // collect (reference, constructor_offset) pairs first to release the immutable borrows before refcounting
         let mut live: Vec<(HeapRef, StackAddress)> = Vec::new();
@@ -337,6 +384,15 @@ impl<T, U> VM<T, U> {
                 // a null reference (heap index 0) marks an uninitialized/maybe-uninitialized slot: skip it
                 if reference.index() != 0 {
                     live.push((reference, constructor_offset));
+                }
+            }
+            // the yielded value/key held in the header are released too (Suspended only; NotStarted slots are null)
+            for (slot, ctor) in [ (GEN_VALUE_OFFSET, value_ctor), (GEN_KEY_OFFSET, key_ctor) ] {
+                if ctor != GEN_PRIMITIVE_CTOR {
+                    let reference = HeapRef::from_ne_bytes(data[slot..slot + REF_SIZE].try_into().unwrap());
+                    if reference.index() != 0 {
+                        live.push((reference, ctor));
+                    }
                 }
             }
         }
@@ -441,13 +497,16 @@ impl<T, U> VM<T, U> {
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::Generator => {
-                    // A generator carrier's frozen frame may hold heap references (ref-typed args/locals).
-                    // They are owned exclusively by the frame, so they must be released exactly once, when
-                    // the carrier itself is freed — never touched as its refcount otherwise rises and falls
-                    // (so Inc/DecNoFree skip the frame). On the free path, the live references at the current
-                    // suspension point are released via the live-ref-map recorded in the carrier's header.
+                    // A generator carrier's frozen frame (ref-typed args/locals) and its yielded value/key
+                    // slots hold heap references owned exclusively by the carrier, so they are released
+                    // exactly once, when the carrier itself is freed — never touched as its refcount
+                    // otherwise rises and falls (so Inc/DecNoFree skip them). The Generator constructor
+                    // carries the value/key constructor offsets; the frame refs come from the live-ref-map
+                    // recorded in the carrier's header.
                     if op == HeapRefOp::Dec || op == HeapRefOp::Free {
-                        self.refcount_generator_frame(item_index, op, epoch);
+                        let value_ctor: StackAddress = self.stack.load(parsed.offset);
+                        let key_ctor: StackAddress = self.stack.load(parsed.offset + size_of::<StackAddress>() as StackAddress);
+                        self.refcount_generator_frame(item_index, value_ctor, key_ctor, op, epoch);
                     }
                     self.heap.ref_item(item_index, op);
                 },
