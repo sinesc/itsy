@@ -86,7 +86,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     let ResolvedProgram { modules, resolved, entry_fn, .. } = program;
 
     // find all trait functions and all trait implementors
-    let trait_functions = Compiler::<T>::filter_trait_functions(&resolved);
+    let trait_functions = Compiler::<T>::filter_trait_functions(&resolved)?;
     let trait_implementors: Vec<_> = resolved.implementors().collect();
 
     // save flattened list of trait implementations and their concrete function ids for later serialization (once compilation is done and absolute function addresses are known)
@@ -1098,7 +1098,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // repeat/exit loop, fix exit address
         self.writer.jmp(loop_start);
         let exit_target = self.writer.position();
-        self.writer.overwrite(loop_start, |_| self.write_arrayiter(self.ty(&element_type_id), element_loc, exit_target).unwrap(/*TODO*/));
+        self.writer.overwrite(loop_start, |_| self.write_arrayiter(self.ty(&element_type_id), element_loc, exit_target))?;
         // fix break/continue addresses
         for loop_control in &loop_controls {
             match loop_control {
@@ -2687,13 +2687,21 @@ impl<T> Compiler<T> {
     }
 
     /// Generate flat list of all traits and their functions
-    fn filter_trait_functions(resolved: &Resolved) -> Vec<(TypeId, &String, FunctionId)> {
-        resolved.traits()
-            .flat_map(|(type_id, trt)| {
-                trt.provided.iter().map(move |(function_name, constant_id)| (type_id, function_name, resolved.constant(constant_id.unwrap()).value.as_function_id().unwrap()))
-                .chain(trt.required.iter().map(move |(function_name, constant_id)| (type_id, function_name, resolved.constant(constant_id.unwrap()).value.as_function_id().unwrap())))
-            })
-            .collect()
+    fn filter_trait_functions(resolved: &Resolved) -> CompileResult<Vec<(TypeId, &String, FunctionId)>> {
+        let mut result = Vec::new();
+        for (type_id, trt) in resolved.traits() {
+            for (function_name, constant_id) in trt.provided.iter() {
+                let constant_id = constant_id.ice_msg("Unresolved trait provided function constant")?;
+                let function_id = resolved.constant(constant_id).value.as_function_id().ice_msg("Trait provided function constant is not a function")?;
+                result.push((type_id, function_name, function_id));
+            }
+            for (function_name, constant_id) in trt.required.iter() {
+                let constant_id = constant_id.ice_msg("Unresolved trait required function constant")?;
+                let function_id = resolved.constant(constant_id).value.as_function_id().ice_msg("Trait required function constant is not a function")?;
+                result.push((type_id, function_name, function_id));
+            }
+        }
+        Ok(result)
     }
 
     /// Contiguously index trait functions so vtable position can be computed by multiplying indices
