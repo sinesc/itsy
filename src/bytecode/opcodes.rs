@@ -8,7 +8,7 @@ use crate::{
     StackOffset,
     bytecode::{
         HeapRef, Constructor,
-        runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState, map::MAP_HEADER}
+        runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState, map::MAP_HEADER, generator::{GEN_FRAME_OFFSET, GEN_NOT_STARTED, GEN_STATE_OFFSET, GEN_DONE, GEN_RUNNING, GEN_PC_OFFSET, GEN_VALUE_OFFSET, GEN_KEY_OFFSET, GenControl}}
     }
 };
 
@@ -1597,62 +1597,110 @@ impl_opcodes!{
         self.map_put(map.index(), key, value, key_ctor, value_ctor, false);
     }
 
+    /// Creates a new generator from captured arguments on the stack and pushes a reference to it.
+    fn gen_new(&mut self, arg_size: FrameAddress, entry_map: StackAddress) {
+        let entry: StackAddress = self.stack.pop();
+        let arg_size = arg_size as usize;
+        let data_start = self.stack.sp() as usize - arg_size;
+        let mut data = Vec::with_capacity(GEN_FRAME_OFFSET + arg_size + 2 * size_of::<StackAddress>());
+        data.push(GEN_NOT_STARTED);
+        data.extend_from_slice(&entry.to_ne_bytes());                   // resume pc = function entry
+        data.extend_from_slice(&entry_map.to_ne_bytes());              // live-ref-map for the captured args (NotStarted drop cleanup)
+        data.resize(GEN_FRAME_OFFSET, 0);                              // zero the value slot
+        data.extend_from_slice(&self.stack.data()[data_start..data_start + arg_size]); // captured args
+        data.resize(data.len() + 2 * size_of::<StackAddress>(), 0);     // prev_fp / prev_pc slots
+        let index = self.heap.alloc_place(data, ItemIndex::MAX);
+        self.stack.truncate(data_start as StackAddress);
+        self.stack.push(HeapRef::new(index, 0));
+    }
+
+    /// Resumes the generator on the stack top, transferring control into its body and pushing a bool result.
+    fn gen_next(&mut self) {
+        let gen_ref: HeapRef = self.stack.pop();
+        let gen_index = gen_ref.index();
+        if self.heap.item(gen_index).data[GEN_STATE_OFFSET] == GEN_DONE {
+            self.stack.push(0u8); // next() == false
+            return;
+        }
+        let resume_pc = StackAddress::from_ne_bytes(self.heap.item(gen_index).data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].try_into().unwrap());
+        let frame = self.heap.item(gen_index).data[GEN_FRAME_OFFSET..].to_vec();
+        let caller_sp = self.stack.sp();
+        self.gen_control.push(GenControl { caller_fp: self.stack.fp, caller_sp, caller_pc: self.pc, gen_index });
+        self.stack.extend_from(&frame);
+        self.stack.fp = caller_sp;
+        self.pc = resume_pc;
+        self.heap.item_mut(gen_index).data[GEN_STATE_OFFSET] = GEN_RUNNING;
+    }
+
+    /// Suspends the running generator, stashing the yielded value and returning control to the driving `next()` with `true`.
+    fn gen_yield(&mut self, live_ref_map: StackAddress, value_ctor: StackAddress, value_size: FrameAddress) {
+        let value_size = value_size as usize;
+        let sp = self.stack.sp() as usize;
+        let value_bytes = self.stack.data()[sp - value_size..sp].to_vec();
+        self.stack.truncate((sp - value_size) as StackAddress);
+        let fp = self.stack.fp as usize;
+        let frame_end = self.stack.sp() as usize;
+        let frame = self.stack.data()[fp..frame_end].to_vec();
+        let resume_pc = self.pc;
+        let control = *self.gen_control.last().expect("yield outside generator resumption");
+        self.gen_replace_slot(control.gen_index, GEN_VALUE_OFFSET, &value_bytes, value_ctor);
+        self.gen_suspend(control.gen_index, resume_pc, live_ref_map, &value_bytes, value_size, None, frame);
+        self.gen_restore_caller(control, 1u8);
+    }
+
+    /// Suspends the running generator, stashing the yielded key and value and returning control to the driving `next()` with `true`.
+    fn gen_yield_kv(&mut self, live_ref_map: StackAddress, key_ctor: StackAddress, value_ctor: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
+        let key_size = key_size as usize;
+        let value_size = value_size as usize;
+        let sp = self.stack.sp() as usize;
+        let value_bytes = self.stack.data()[sp - value_size..sp].to_vec();
+        let key_bytes = self.stack.data()[sp - value_size - key_size..sp - value_size].to_vec();
+        self.stack.truncate((sp - value_size - key_size) as StackAddress);
+        let fp = self.stack.fp as usize;
+        let frame_end = self.stack.sp() as usize;
+        let frame = self.stack.data()[fp..frame_end].to_vec();
+        let resume_pc = self.pc;
+        let control = *self.gen_control.last().expect("yield outside generator resumption");
+        self.gen_replace_slot(control.gen_index, GEN_VALUE_OFFSET, &value_bytes, value_ctor);
+        self.gen_replace_slot(control.gen_index, GEN_KEY_OFFSET, &key_bytes, key_ctor);
+        self.gen_suspend(control.gen_index, resume_pc, live_ref_map, &value_bytes, value_size, Some((&key_bytes, key_size)), frame);
+        self.gen_restore_caller(control, 1u8);
+    }
+
+    /// Completes the running generator, releasing the last-yielded references and returning `false` to the driving `next()`.
+    fn gen_return(&mut self, value_ctor: StackAddress, key_ctor: StackAddress) {
+        let control = *self.gen_control.last().expect("generator return outside generator resumption");
+        self.gen_control.pop();
+        self.gen_release_slot(control.gen_index, GEN_VALUE_OFFSET, value_ctor);
+        self.gen_release_slot(control.gen_index, GEN_KEY_OFFSET, key_ctor);
+        {
+            let data = &mut self.heap.item_mut(control.gen_index).data;
+            data[GEN_STATE_OFFSET] = GEN_DONE;
+            data.truncate(GEN_FRAME_OFFSET);
+        }
+        self.gen_restore_caller(control, 0u8);
+    }
+
+    /// Reads the generator's last yielded value and pushes it, consuming the generator reference.
+    fn gen_value(&mut self, value_size: FrameAddress) {
+        let value_size = value_size as usize;
+        let gen_ref: HeapRef = self.stack.pop();
+        let value_bytes = self.heap.item(gen_ref.index()).data[GEN_VALUE_OFFSET..GEN_VALUE_OFFSET + value_size].to_vec();
+        self.stack.extend_from(&value_bytes);
+    }
+
+    /// Reads the generator's last yielded key and pushes it, consuming the generator reference.
+    fn gen_key(&mut self, key_size: FrameAddress) {
+        let key_size = key_size as usize;
+        let gen_ref: HeapRef = self.stack.pop();
+        let key_bytes = self.heap.item(gen_ref.index()).data[GEN_KEY_OFFSET..GEN_KEY_OFFSET + key_size].to_vec();
+        self.stack.extend_from(&key_bytes);
+    }
+
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
     /// run() again. Unlike `exit`, no stack/heap teardown is performed.
     fn suspend(&mut self) [ return ] {
         self.state = VMState::Suspended;
-    }
-
-    /// Constructs a generator from the arguments on the stack (its entry address was pushed above them)
-    /// and pushes a reference to it. Does not run the generator body. `entry_map` is the const-pool offset
-    /// of the live-ref-map describing the captured ref-typed arguments, released if the not-yet-started
-    /// generator is dropped.
-    fn gen_make(&mut self, arg_size: FrameAddress, entry_map: StackAddress) {
-        self.gen_make_impl(arg_size, entry_map);
-    }
-
-    /// Resumes the generator referenced on the stack top, transferring control into its body. Control
-    /// returns to the instruction following this one (with a bool result) once the generator yields or
-    /// completes.
-    fn gen_next(&mut self) {
-        self.gen_next_impl();
-    }
-
-    /// Suspends the running generator, stashing the yielded value (of the given size) and recording
-    /// `live_ref_map` (the const-pool offset of this suspension point's live-ref-map, used for drop
-    /// cleanup) in the header, then returns control to the driving `next()` with a `true` result. When
-    /// `value_ctor` is not `GEN_PRIMITIVE_CTOR`, the value is a heap reference: the previous slot value
-    /// is released and the new one retained (replace semantics).
-    fn gen_yield(&mut self, live_ref_map: StackAddress, value_ctor: StackAddress, value_size: FrameAddress) {
-        self.gen_yield_impl(live_ref_map, value_ctor, value_size);
-    }
-
-    /// Keyed variant of `gen_yield`: suspends the running generator, stashing the yielded key and value
-    /// (the stack holds `key` then `value`, value on top) and recording `live_ref_map` (this suspension
-    /// point's live-ref-map offset) in the header, then returns control to the driving `next()`. A
-    /// `key_ctor`/`value_ctor` other than `GEN_PRIMITIVE_CTOR` marks that slot as a heap reference
-    /// (replace semantics).
-    fn gen_yield_kv(&mut self, live_ref_map: StackAddress, key_ctor: StackAddress, value_ctor: StackAddress, key_size: FrameAddress, value_size: FrameAddress) {
-        self.gen_yield_kv_impl(live_ref_map, key_ctor, value_ctor, key_size, value_size);
-    }
-
-    /// Completes the running generator and returns control to the driving `next()` with a `false`
-    /// result. `value_ctor`/`key_ctor` (other than `GEN_PRIMITIVE_CTOR`) release the last-yielded
-    /// reference held in the header value/key slot.
-    fn gen_return(&mut self, value_ctor: StackAddress, key_ctor: StackAddress) {
-        self.gen_return_impl(value_ctor, key_ctor);
-    }
-
-    /// Reads the generator's last yielded value (of the given size) and pushes it, consuming the
-    /// generator reference on the stack top.
-    fn gen_value(&mut self, value_size: FrameAddress) {
-        self.gen_value_impl(value_size);
-    }
-
-    /// Reads the generator's last yielded key (`Generator<K, V>` only, of the given size) and pushes it,
-    /// consuming the generator reference on the stack top.
-    fn gen_key(&mut self, key_size: FrameAddress) {
-        self.gen_key_impl(key_size);
     }
 
     /// Terminate program execution.

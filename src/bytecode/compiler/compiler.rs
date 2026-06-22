@@ -587,7 +587,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // push the entry address (forward-reference safe) above the args, then construct
                     let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
                     self.write_immediate_sa(function_addr)?;
-                    self.writer.gen_make(arg_size, entry_map);
+                    self.writer.gen_new(arg_size, entry_map);
                 } else {
                     comment!(self, "call {}()", constant.path);
                     self.write_call(function_id);
