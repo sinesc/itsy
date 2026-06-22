@@ -132,9 +132,9 @@ impl<T, U> VM<T, U> {
         let saved_pc = self.pc;
         let saved_state = self.state;
         let restore_sp = self.stack.sp();
-        // marshal arguments onto the stack (infallible after validation above)
+        // marshal arguments onto the stack (infallible after validation above, but returns Result to avoid panics)
         for (arg, kind) in args.iter().zip(meta.args.iter()) {
-            self.push_argument(*arg, *kind);
+            self.push_argument(*arg, *kind)?;
         }
         // set up the call: returning from the function lands on the host halt instruction, which breaks
         // the exec loop back to us. Setting pc first makes call() record it as the return address.
@@ -148,7 +148,7 @@ impl<T, U> VM<T, U> {
             _ => return Err(CallError::Runtime(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady, None))),
         }
         // read the result off the stack top, then truncate back to the pre-call stack and restore state
-        let result = self.read_result(meta.ret);
+        let result = self.read_result(meta.ret)?;
         self.stack.truncate(restore_sp);
         self.pc = saved_pc;
         self.state = saved_state;
@@ -159,36 +159,59 @@ impl<T, U> VM<T, U> {
     /// reference count of 1, mirroring the caller-side increment the compiler emits; the called
     /// function's epilogue then releases them.
     #[cfg(feature="call_function")]
-    fn push_argument(self: &mut Self, arg: &dyn Any, kind: ValueKind) where T: VMFunc<T> + VMData<T, U> {
-        match_value_kind!(kind,
-            numeric(|N| self.stack.push(*arg.downcast_ref::<N>().unwrap())),
-            ValueKind::bool => self.stack.push(*arg.downcast_ref::<bool>().unwrap() as u8),
-            ValueKind::String => {
-                let s = arg.downcast_ref::<String>().unwrap();
-                let index = self.heap.alloc_copy(s.as_bytes(), ItemIndex::MAX);
-                self.heap.ref_item(index, HeapRefOp::Inc);
-                self.stack.push(HeapRef::new(index, 0));
+    fn push_argument(self: &mut Self, arg: &dyn Any, kind: ValueKind) -> Result<(), CallError> where T: VMFunc<T> + VMData<T, U> {
+        match_value_kind!(
+            kind,
+            numeric(|N| {
+                if let Some(v) = arg.downcast_ref::<N>() {
+                    self.stack.push(*v);
+                    Ok(())
+                } else {
+                    Err(CallError::UnsupportedType { expected: "numeric" })
+                }
+            }),
+            ValueKind::bool => {
+                if let Some(v) = arg.downcast_ref::<bool>() {
+                    self.stack.push(*v as u8);
+                    Ok(())
+                } else {
+                    Err(CallError::UnsupportedType { expected: "bool" })
+                }
             },
-            ValueKind::void | ValueKind::Unsupported => { },
+            ValueKind::String => {
+                if let Some(s) = arg.downcast_ref::<String>() {
+                    let index = self.heap.alloc_copy(s.as_bytes(), ItemIndex::MAX);
+                    self.heap.ref_item(index, HeapRefOp::Inc);
+                    self.stack.push(HeapRef::new(index, 0));
+                    Ok(())
+                } else {
+                    Err(CallError::UnsupportedType { expected: "String" })
+                }
+            },
+            ValueKind::void | ValueKind::Unsupported => Ok(()),
         )
     }
 
     /// Reads the function result of the given kind off the stack top and boxes it. String results are
     /// read out of the heap and the (reference count 0) heap object is freed.
     #[cfg(feature="call_function")]
-    fn read_result(self: &mut Self, kind: ValueKind) -> Box<dyn Any> where T: VMFunc<T> + VMData<T, U> {
-        match_value_kind!(kind,
-            numeric(|N| { let v: N = self.stack.top(); Box::new(v) }),
-            ValueKind::void => Box::new(()),
-            ValueKind::bool => { let v: u8 = self.stack.top(); Box::new(v != 0) },
+    fn read_result(self: &mut Self, kind: ValueKind) -> Result<Box<dyn Any>, CallError> where T: VMFunc<T> + VMData<T, U> {
+        match_value_kind!(
+            kind,
+            numeric(|N| { let v: N = self.stack.top(); Ok(Box::new(v)) }),
+            ValueKind::void => Ok(Box::new(())),
+            ValueKind::bool => { let v: u8 = self.stack.top(); Ok(Box::new(v != 0)) },
             ValueKind::String => {
                 let item: HeapRef = self.stack.top();
-                let string = self.heap.string(item).unwrap().to_string();
+                let string_opt = self.heap.string(item).map(|s| s.to_string());
                 self.heap.ref_item(item.index(), HeapRefOp::Free);
-                Box::new(string)
+                match string_opt {
+                    Some(s) => Ok(Box::new(s)),
+                    None => Err(CallError::UnsupportedType { expected: "String" }),
+                }
             },
             // unreachable: rejected before the call
-            ValueKind::Unsupported => Box::new(()),
+            ValueKind::Unsupported => Ok(Box::new(())),
         )
     }
 
