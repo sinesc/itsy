@@ -1,0 +1,19 @@
+<style>
+/* Hide rustdoc's auto-generated "Auto Trait Implementations" and "Blanket
+   Implementations" sections. They are noise for the embedded Itsy language
+   documentation (the `documentation` module) */
+
+/* main content: section headings + their impl lists */
+#synthetic-implementations,
+#synthetic-implementations-list,
+#blanket-implementations,
+#blanket-implementations-list,
+
+/* sidebar: the heading and the list of links beneath it */
+.sidebar h3:has(> a[href="#synthetic-implementations"]),
+.sidebar h3:has(> a[href="#synthetic-implementations"]) + ul,
+.sidebar h3:has(> a[href="#blanket-implementations"]),
+.sidebar h3:has(> a[href="#blanket-implementations"]) + ul {
+    display: none !important;
+}
+</style>
