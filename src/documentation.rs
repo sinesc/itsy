@@ -12,8 +12,8 @@
 //!
 //! [Arrays](crate::documentation::Array), variable-length lists of values of the same type: `[ v, ... ]`.\
 //! [Maps](crate::documentation::Map), variable-length associations of keys to values: `[ k => v, ... ]`.\
-//! Structs, product of multiple types: `struct { field1: Type1, ... }`.\
-//! Enums, disjoint union (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
+//! [Structs](crate::documentation::structs), product of multiple types: `struct { field1: Type1, ... }`.\
+//! [Enums](crate::documentation::enums), disjoint union (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
 //!
 //! # Built-in container types
 //!
@@ -22,8 +22,10 @@
 //!
 //! # Traits
 //!
-//! [Intrinsic traits](crate::documentation::traits) are recognized by the compiler. Implementing one for
-//! a custom type makes the language functionality it backs work on that type (e.g. `Add` backs `+`, `ToString` backs `as String`).
+//! [Traits](crate::documentation::traits) define shared behavior that structs and enums can implement.\
+//! [Intrinsic traits](crate::documentation::intrinsic_traits) are a special subset recognized by the compiler:
+//! implementing one for a custom type makes the language functionality it backs work on that type
+//! (e.g. `Add` backs `+`, `ToString` backs `as String`).
 //!
 //! # Generators
 //!
@@ -36,7 +38,7 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// Success-or-error type, written `Result<T>`.
 ///
 /// A `Result<T>` is either `Ok(value)` carrying a success value of type `T`, or `Err(error)`
-/// carrying any value implementing the [`Error`](self::traits::Error) trait. Unlike Rust's
+/// carrying any value implementing the [`Error`](self::intrinsic_traits::Error) trait. Unlike Rust's
 /// `Result<T, E>` the error type is not a parameter: every error is an `Error`, which is what lets
 /// errors of different concrete types flow through one `Result<T>`.
 ///
@@ -105,6 +107,363 @@ pub struct Result { }
 /// ```
 pub struct Option { }
 
+/// Structs: fixed collections of named fields.
+///
+/// A struct groups multiple values of potentially different types under one name. Fields are
+/// accessed with dot notation (`value.field`). Structs are reference types: binding a struct to
+/// another variable shares the data rather than copying it.
+///
+/// # Defining a struct
+///
+/// ``` ignore
+/// struct Point {
+///     x: i32,
+///     y: i32,
+/// }
+/// ```
+///
+/// # Constructing a struct
+///
+/// Use the struct name followed by a brace-delimited list of `field: value` pairs:
+///
+/// ``` ignore
+/// let origin = Point { x: 0, y: 0 };
+/// let p = Point { x: 3, y: 7 };
+/// ```
+///
+/// Fields can be of any type, including other structs, arrays, strings, or enums. Nested
+/// construction is supported:
+///
+/// ``` ignore
+/// struct Inner {
+///     v: i32,
+///     label: String,
+/// }
+/// struct Outer {
+///     inner: Inner,
+///     tag: i32,
+/// }
+///
+/// let o = Outer {
+///     inner: Inner { v: 42, label: "hello" },
+///     tag: 1,
+/// };
+/// ```
+///
+/// # Accessing fields
+///
+/// Use dot notation to read fields. For mutable bindings, fields can also be assigned to:
+///
+/// ``` ignore
+/// let p = Point { x: 1, y: 2 };
+/// print("{p.x}, {p.y}");   // 1, 2
+///
+/// let mut p2 = Point { x: 1, y: 2 };
+/// p2.x = 10;
+/// ```
+///
+/// # Struct methods
+///
+/// Methods are defined inside `impl` blocks on the struct. `Self` refers to the struct type,
+/// and `self: Self` gives access to the instance:
+///
+/// ``` ignore
+/// impl Point {
+///     fn distance(self: Self) -> f64 {
+///         (self.x as f64 * self.x as f64 + self.y as f64 * self.y as f64).sqrt()
+///     }
+///     fn new(x: i32, y: i32) -> Self {
+///         Point { x: x, y: y }
+///     }
+/// }
+///
+/// let p = Point::new(3, 4);
+/// print("{p.distance()}");  // 5.0
+/// ```
+///
+/// # Matching structs
+///
+/// Structs can be deconstructed in `match` patterns. All fields must be accounted for unless
+/// a trailing `..` is used:
+///
+/// ``` ignore
+/// match p {
+///     Point { x: 0, y: 0 } => print("origin"),
+///     Point { x, y } => print("({x}, {y})"),  // shorthand binding
+/// }
+/// ```
+///
+/// The `..` rest pattern ignores unlisted fields:
+///
+/// ``` ignore
+/// struct Flags { a: bool, b: bool, c: bool }
+///
+/// match f {
+///     Flags { a: true, .. } => print("a is set"),
+///     Flags { .. } => print("a is not set"),
+/// }
+/// ```
+///
+/// # Destructuring in `let`
+///
+/// Struct fields can be extracted directly in a `let` binding:
+///
+/// ``` ignore
+/// let Point { x, y } = p;            // shorthand
+/// let Point { x: px, y: py } = p;    // explicit renaming
+/// let Point { x, .. } = p;           // extract only x
+/// ```
+///
+/// # Equality
+///
+/// Two structs are equal (`==`) when all their fields are equal, compared recursively.
+/// Implementing the [`Eq`](crate::documentation::intrinsic_traits::Eq) intrinsic trait overrides
+/// this default with a custom notion of equality.
+///
+/// # Recursion
+///
+/// A struct cannot contain a field of its own type (direct or indirect) because that would make it
+/// infinitely sized. Use arrays or other container types to build recursive data structures.
+pub mod structs { }
+
+/// Enums: disjoint unions with named variants.
+///
+/// An enum represents a value that is exactly one of several possible *variants*. Variants can be
+/// simple (unit variants, like tags) or can carry data (data variants).
+///
+/// # Defining an enum
+///
+/// ``` ignore
+/// enum Direction {
+///     North,
+///     East,
+///     South,
+///     West,
+/// }
+/// ```
+///
+/// # Data variants
+///
+/// Variants can carry values of any type. Multiple values are separated by commas:
+///
+/// ``` ignore
+/// enum Shape {
+///     Circle(i32),
+///     Square(i32),
+///     Rect(i32, i32),
+/// }
+/// ```
+///
+/// # Constructing enum values
+///
+/// Use `EnumName::Variant` for unit variants and `EnumName::Variant(value)` for data variants:
+///
+/// ``` ignore
+/// let dir = Direction::North;
+/// let circle = Shape::Circle(5);
+/// let rect = Shape::Rect(3, 4);
+/// ```
+///
+/// # Discriminant values
+///
+/// Like Rust, variants can have explicit discriminant values. Unspecified variants get the next
+/// integer after the previous one:
+///
+/// ``` ignore
+/// enum Status {
+///     Pending = 1,
+///     Active,    // 2
+///     Done,      // 3
+/// }
+///
+/// let s = Status::Active;
+/// print("{s as u8}");  // 2
+/// ```
+///
+/// # Matching enums
+///
+/// The `match` expression is the primary way to inspect an enum. Every variant must be covered,
+/// either explicitly or with a wildcard (`_`):
+///
+/// ``` ignore
+/// match dir {
+///     Direction::North => print("up"),
+///     Direction::South => print("down"),
+///     _ => print("sideways"),
+/// }
+/// ```
+///
+/// Data variant patterns bind the payload to names:
+///
+/// ``` ignore
+/// match shape {
+///     Shape::Circle(r) => print("circle radius {r}"),
+///     Shape::Square(s) => print("square side {s}"),
+///     Shape::Rect(w, h) => print("rect {w}x{h}"),
+/// }
+/// ```
+///
+/// # Equality
+///
+/// Two enum values are equal (`==`) when they are the same variant with equal payloads. Unit
+/// variants compare by identity; data variants compare their payloads recursively.
+///
+/// # Enums with traits
+///
+/// Like structs, enums can implement traits. This lets you define shared behavior across
+/// different enum variants:
+///
+/// ``` ignore
+/// trait Describe {
+///     fn kind(self: Self) -> String;
+/// }
+///
+/// impl Describe for Shape {
+///     fn kind(self: Self) -> String {
+///         match self {
+///             Shape::Circle(_) => "circle",
+///             Shape::Square(_) => "square",
+///             Shape::Rect(_, _) => "rectangle",
+///         }
+///     }
+/// }
+/// ```
+///
+/// # Recursion
+///
+/// An enum cannot have a data variant that carries the enum itself by value, as that would make
+/// it infinitely sized. Use arrays or other container types for recursive data structures.
+pub mod enums { }
+
+/// User-defined traits: shared behavior for structs and enums.
+///
+/// A trait declares a set of methods that any type can implement. Once a type implements a trait,
+/// it can be used anywhere that trait is expected — no `dyn` or `impl` keywords are needed.
+///
+/// # Defining a trait
+///
+/// A trait declares one or more required methods. It can also provide default implementations
+/// that implementors inherit automatically:
+///
+/// ``` ignore
+/// trait Speaker {
+///     fn speak(self: Self) -> String;
+///     fn shout(self: Self) -> String {
+///         let words = self.speak();
+///         words.to_uppercase() + "!"
+///     }
+/// }
+/// ```
+///
+/// # Implementing a trait
+///
+/// Use `impl TraitName for TypeName { ... }` to provide the required methods. Default methods are
+/// inherited but can be overridden:
+///
+/// ``` ignore
+/// struct Dog { name: String }
+///
+/// impl Speaker for Dog {
+///     fn speak(self: Self) -> String {
+///         "woof, I'm " + self.name
+///     }
+/// }
+///
+/// let rex = Dog { name: "Rex" };
+/// print(rex.speak());   // woof, I'm Rex
+/// print(rex.shout());   // WOOF, I'M REX!
+/// ```
+///
+/// Traits can be implemented on both structs and enums:
+///
+/// ``` ignore
+/// enum Shape { Circle(i32), Square(i32) }
+///
+/// trait Describe {
+///     fn kind(self: Self) -> String;
+/// }
+///
+/// impl Describe for Shape {
+///     fn kind(self: Self) -> String {
+///         match self {
+///             Shape::Circle(_) => "circle",
+///             Shape::Square(_) => "square",
+///         }
+///     }
+/// }
+/// ```
+///
+/// # Trait objects
+///
+/// A trait name can be used as a type in function parameters, struct fields, and arrays. When a
+/// concrete value is passed to a trait-typed slot, it is stored as a *trait object* — the concrete
+/// type is preserved at runtime so the correct implementation is dispatched dynamically:
+///
+/// ``` ignore
+/// struct Cat { lives: u8 }
+///
+/// impl Speaker for Cat {
+///     fn speak(self: Self) -> String {
+///         "meow x" + self.lives as String
+///     }
+/// }
+///
+/// fn make_sound(who: Speaker) {
+///     print(who.speak());
+/// }
+///
+/// make_sound(Dog { name: "Rex" });  // woof, I'm Rex
+/// make_sound(Cat { lives: 9 });     // meow x9
+/// ```
+///
+/// # Multiple trait bounds
+///
+/// A parameter can require multiple traits using `+`. The value must implement every listed trait:
+///
+/// ``` ignore
+/// trait Named {
+///     fn name(self: Self) -> String;
+/// }
+/// trait Aged {
+///     fn age(self: Self) -> u8;
+/// }
+///
+/// struct Person { n: String, a: u8 }
+///
+/// impl Named for Person {
+///     fn name(self: Self) -> String { self.n }
+/// }
+/// impl Aged for Person {
+///     fn age(self: Self) -> u8 { self.a }
+/// }
+///
+/// fn describe(who: Named + Aged) {
+///     print("{who.name()} is {who.age()} years old");
+/// }
+/// ```
+///
+/// # Returning concrete types from trait return slots
+///
+/// A function declaring a trait return type may return a concrete implementor. The returned value
+/// is dispatched dynamically:
+///
+/// ``` ignore
+/// fn make_pet(kind: String) -> Speaker {
+///     if kind == "dog" {
+///         Dog { name: "Spot" }
+///     } else {
+///         Cat { lives: 7 }
+///     }
+/// }
+/// ```
+///
+/// # Intrinsic traits
+///
+/// In addition to user-defined traits, the compiler recognizes a set of [intrinsic traits](crate::documentation::intrinsic_traits)
+/// that back language features like operators and casts. These are implemented with the same `impl`
+/// syntax but are known to the compiler and in scope without a `use`.
+pub mod traits { }
+
 /// Intrinsic traits recognized by the compiler.
 ///
 /// Unlike user-defined traits, these are known to the compiler: implementing one for a custom type
@@ -116,8 +475,8 @@ pub struct Option { }
 ///
 /// # The arithmetic operator traits
 ///
-/// [`Add`](traits::Add), [`Sub`](traits::Sub), [`Mul`](traits::Mul), [`Div`](traits::Div) and
-/// [`Rem`](traits::Rem) overload the binary arithmetic operators. They all
+/// [`Add`](crate::documentation::intrinsic_traits::Add), [`Sub`](crate::documentation::intrinsic_traits::Sub), [`Mul`](crate::documentation::intrinsic_traits::Mul), [`Div`](crate::documentation::intrinsic_traits::Div) and
+/// [`Rem`](crate::documentation::intrinsic_traits::Rem) overload the binary arithmetic operators. They all
 /// share one shape — `fn op(self: Self, rhs: Self) -> Self` — taking a right-hand operand of the same
 /// type and producing a value of that type. Each one backs both its binary operator *and* the matching
 /// compound-assignment form (`Add` backs `+` and `+=`, `Sub` backs `-` and `-=`, and so on); there is
@@ -144,7 +503,7 @@ pub struct Option { }
 ///
 /// # The equality trait
 ///
-/// [`Eq`](traits::Eq) overloads the `==` and `!=` operators. Its single method
+/// [`Eq`](crate::documentation::intrinsic_traits::Eq) overloads the `==` and `!=` operators. Its single method
 /// `fn eq(self: Self, rhs: Self) -> bool` decides whether two values are equal; `!=` is the negation of
 /// `eq` and needs no separate method. Implementing it overrides the built-in deep comparison, which is
 /// what lets a type define its own notion of equality (e.g. ignoring a cached field):
@@ -163,7 +522,7 @@ pub struct Option { }
 /// let equal = a == b;   // true
 /// let differ = a != b;  // false
 /// ```
-pub mod traits {
+pub mod intrinsic_traits {
 
     /// Converts a value to a [`String`](crate::documentation::String).
     ///
