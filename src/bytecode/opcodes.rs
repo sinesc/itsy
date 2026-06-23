@@ -123,122 +123,6 @@ impl_opcodes!{
         }
     }
 
-    /// Sets program counter to start if value in variable iter is less than or equal to the top
-    /// value on the stack. Does not consume top stack value.
-    fn <
-        loops8<T: i8>(iter: FrameAddress, start: StackAddress),
-        loops16<T: i16>(iter: FrameAddress, start: StackAddress),
-        loops32<T: i32>(iter: FrameAddress, start: StackAddress),
-        loops64<T: i64>(iter: FrameAddress, start: StackAddress),
-        loopu8<T: u8>(iter: FrameAddress, start: StackAddress),
-        loopu16<T: u16>(iter: FrameAddress, start: StackAddress),
-        loopu32<T: u32>(iter: FrameAddress, start: StackAddress),
-        loopu64<T: u64>(iter: FrameAddress, start: StackAddress)
-    >(&mut self) {
-        use crate::bytecode::runtime::stack::StackOffsetOp;
-        let iter_loc = self.stack.offset_fp(iter as StackAddress);
-        let upper_loc = self.stack.offset_sp(size_of::<T>());
-        let upper: T = self.stack.load(upper_loc);
-        let current: T = self.stack.load(iter_loc);
-        if current != upper {
-            self.pc = start;
-        }
-        self.stack.store(iter_loc, T::wrapping_add(current, 1 as T));
-    }
-
-    /// Pops heap reference. Sets program counter to exit and returns if the reference
-    /// offset points at the end of the referenced heap object.
-    /// Otherwise fetches element at reference offset, moves offset to the next element,
-    /// pushes the modified reference and stores the data in element.
-    fn <
-        arrayiter8<T: Data8>(element: FrameAddress, exit: StackAddress),
-        arrayiter16<T: Data16>(element: FrameAddress, exit: StackAddress),
-        arrayiter32<T: Data32>(element: FrameAddress, exit: StackAddress),
-        arrayiter64<T: Data64>(element: FrameAddress, exit: StackAddress)
-    >(&mut self) {
-        use crate::bytecode::runtime::stack::StackOffsetOp;
-        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
-        let mut item: HeapRef = self.stack.load(top_loc);
-        if item.offset() >= self.heap.item(item.index()).data.len() {
-            self.pc = exit;
-            return;
-        }
-        let data: T = self.heap.read(item);
-        item.add_offset(size_of::<T>() as StackOffset);
-        self.stack.store(top_loc, item);
-        self.stack.store_fp(element, data);
-    }
-
-    /// As `arrayiter`, but additionally stores the running element index (as a `StackAddress`) into
-    /// `index`. Used by `for k, v in array` to bind both the index and the element.
-    fn <
-        array_iter_iv8<T: Data8>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
-        array_iter_iv16<T: Data16>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
-        array_iter_iv32<T: Data32>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
-        array_iter_iv64<T: Data64>(index: FrameAddress, element: FrameAddress, exit: StackAddress)
-    >(&mut self) {
-        use crate::bytecode::runtime::stack::StackOffsetOp;
-        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
-        let mut item: HeapRef = self.stack.load(top_loc);
-        if item.offset() >= self.heap.item(item.index()).data.len() {
-            self.pc = exit;
-            return;
-        }
-        let cur_index = item.offset() / size_of::<T>() as StackAddress;
-        let data: T = self.heap.read(item);
-        item.add_offset(size_of::<T>() as StackOffset);
-        self.stack.store(top_loc, item);
-        self.stack.store_fp(element, data);
-        self.stack.store_fp(index, cur_index);
-    }
-
-    /// Iterates a map's values. Walks the insertion-ordered entries of the map referenced on the stack
-    /// top (skipping tombstones), unboxes the current value into `value`, advances the stored cursor and
-    /// continues; sets the program counter to `exit` (leaving the reference on the stack) once exhausted.
-    fn map_iter(&mut self, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
-        use crate::bytecode::runtime::stack::StackOffsetOp;
-        let (_key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
-        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
-        let mut item: HeapRef = self.stack.load(top_loc);
-        let idx = item.index();
-        match self.map_iter_advance(idx, item.offset()) {
-            Some((entry_off, next_off)) => {
-                let hr = size_of::<HeapRef>() as StackAddress;
-                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
-                self.map_unbox_to_frame(value_box, value_ctor, value);
-                item = HeapRef::new(idx, next_off);
-                self.stack.store(top_loc, item);
-            },
-            None => {
-                self.pc = exit;
-            },
-        }
-    }
-
-    /// As `map_iter`, but additionally unboxes the current entry's key into `key`. Used by
-    /// `for k, v in map` to bind both the key and the value.
-    fn map_iter_kv(&mut self, key: FrameAddress, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
-        use crate::bytecode::runtime::stack::StackOffsetOp;
-        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
-        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
-        let mut item: HeapRef = self.stack.load(top_loc);
-        let idx = item.index();
-        match self.map_iter_advance(idx, item.offset()) {
-            Some((entry_off, next_off)) => {
-                let hr = size_of::<HeapRef>() as StackAddress;
-                let key_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off));
-                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
-                self.map_unbox_to_frame(key_box, key_ctor, key);
-                self.map_unbox_to_frame(value_box, value_ctor, value);
-                item = HeapRef::new(idx, next_off);
-                self.stack.store(top_loc, item);
-            },
-            None => {
-                self.pc = exit;
-            },
-        }
-    }
-
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
     fn <
         zclampf32<T: f32>(),
@@ -1267,6 +1151,29 @@ impl_opcodes!{
         self.stack.push((a >= b) as Data8);
     }
 
+    /// Sets program counter to start if value in variable iter is less than or equal to the top
+    /// value on the stack. Does not consume top stack value.
+    fn <
+        loops8<T: i8>(iter: FrameAddress, start: StackAddress),
+        loops16<T: i16>(iter: FrameAddress, start: StackAddress),
+        loops32<T: i32>(iter: FrameAddress, start: StackAddress),
+        loops64<T: i64>(iter: FrameAddress, start: StackAddress),
+        loopu8<T: u8>(iter: FrameAddress, start: StackAddress),
+        loopu16<T: u16>(iter: FrameAddress, start: StackAddress),
+        loopu32<T: u32>(iter: FrameAddress, start: StackAddress),
+        loopu64<T: u64>(iter: FrameAddress, start: StackAddress)
+    >(&mut self) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let iter_loc = self.stack.offset_fp(iter as StackAddress);
+        let upper_loc = self.stack.offset_sp(size_of::<T>());
+        let upper: T = self.stack.load(upper_loc);
+        let current: T = self.stack.load(iter_loc);
+        if current != upper {
+            self.pc = start;
+        }
+        self.stack.store(iter_loc, T::wrapping_add(current, 1 as T));
+    }
+    
     /// Jumps unconditionally to the given address.
     fn jmp(&mut self, addr: StackAddress) {
         self.pc = addr;
@@ -1646,6 +1553,99 @@ impl_opcodes!{
         self.refcount_value(item, constructor, HeapRefOp::Free);
         self.heap.ref_item(data.index(), HeapRefOp::DecNoFree);
         self.stack.push(data);
+    }
+
+    /// Pops heap reference. Sets program counter to exit and returns if the reference
+    /// offset points at the end of the referenced heap object.
+    /// Otherwise fetches element at reference offset, moves offset to the next element,
+    /// pushes the modified reference and stores the data in element.
+    fn <
+        array_iter8<T: Data8>(element: FrameAddress, exit: StackAddress),
+        array_iter16<T: Data16>(element: FrameAddress, exit: StackAddress),
+        array_iter32<T: Data32>(element: FrameAddress, exit: StackAddress),
+        array_iter64<T: Data64>(element: FrameAddress, exit: StackAddress)
+    >(&mut self) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        if item.offset() >= self.heap.item(item.index()).data.len() {
+            self.pc = exit;
+            return;
+        }
+        let data: T = self.heap.read(item);
+        item.add_offset(size_of::<T>() as StackOffset);
+        self.stack.store(top_loc, item);
+        self.stack.store_fp(element, data);
+    }
+
+    /// As `array_iter`, but additionally stores the running element index (as a `StackAddress`) into
+    /// `index`. Used by `for k, v in array` to bind both the index and the element.
+    fn <
+        array_iter_iv8<T: Data8>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv16<T: Data16>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv32<T: Data32>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv64<T: Data64>(index: FrameAddress, element: FrameAddress, exit: StackAddress)
+    >(&mut self) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        if item.offset() >= self.heap.item(item.index()).data.len() {
+            self.pc = exit;
+            return;
+        }
+        let cur_index = item.offset() / size_of::<T>() as StackAddress;
+        let data: T = self.heap.read(item);
+        item.add_offset(size_of::<T>() as StackOffset);
+        self.stack.store(top_loc, item);
+        self.stack.store_fp(element, data);
+        self.stack.store_fp(index, cur_index);
+    }
+
+    /// Iterates a map's values. Walks the insertion-ordered entries of the map referenced on the stack
+    /// top (skipping tombstones), unboxes the current value into `value`, advances the stored cursor and
+    /// continues; sets the program counter to `exit` (leaving the reference on the stack) once exhausted.
+    fn map_iter(&mut self, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let (_key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
+    }
+
+    /// As `map_iter`, but additionally unboxes the current entry's key into `key`. Used by
+    /// `for k, v in map` to bind both the key and the value.
+    fn map_iter_kv(&mut self, key: FrameAddress, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let key_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off));
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(key_box, key_ctor, key);
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
     }
 
     /// Allocate a new empty map and push a reference to it.

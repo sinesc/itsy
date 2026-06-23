@@ -42,9 +42,8 @@ fn fnv_bytes(mut h: u64, bytes: &[u8]) -> u64 {
     h
 }
 
-
+/// Map layout access
 impl<T, U> VM<T, U> {
-    // -- Layout access ------------------------------------------------------------------------------------
 
     /// Returns the byte offset of the entries region for the map at `idx` (past the header and buckets).
     pub(crate) fn map_entries_offset(self: &Self, idx: StackAddress) -> StackAddress {
@@ -88,8 +87,10 @@ impl<T, U> VM<T, U> {
         }
         result
     }
+}
 
-    // -- Boxing / unboxing -------------------------------------------------------------------------------
+/// Map boxing / unboxing
+impl<T, U> VM<T, U> {
 
     /// Adjusts the refcount of a boxed map key or value. Boxed primitives are leaf heap objects whose
     /// refcount is adjusted directly; boxed reference values are descended into via their constructor.
@@ -127,13 +128,6 @@ impl<T, U> VM<T, U> {
         }
     }
 
-    /// Pushes a boxed primitive value onto the stack by copying its bytes. Reference values are pushed
-    /// directly by the caller (see [`op_map_get`]).
-    pub(crate) fn map_unbox_push_primitive(self: &mut Self, value: HeapRef, primitive_size: usize) {
-        let bytes = self.heap.item(value.index()).data[0..primitive_size].to_vec();
-        self.stack.extend_from(&bytes);
-    }
-
     /// Finds the next live entry of the map at `idx` at or after the cursor byte-offset `cursor`,
     /// skipping tombstones. Returns the live entry's byte-offset together with the offset to resume
     /// from on the next call, or `None` once the entries region is exhausted. Used by the `map_iter`
@@ -159,7 +153,7 @@ impl<T, U> VM<T, U> {
     /// Unboxes a boxed map key/value into a frame-local slot at `frame_offset` using the given
     /// sub-constructor: a primitive is copied as raw bytes, a reference value is stored as its `HeapRef`.
     /// The boxed entries are kept alive by the retained clone the iteration walks, so the stored value
-    /// is a borrow (no refcount change), mirroring how `arrayiter` binds array elements.
+    /// is a borrow (no refcount change), mirroring how `array_iter` binds array elements.
     pub(crate) fn map_unbox_to_frame(self: &mut Self, boxed: HeapRef, ctor_offset: StackAddress, frame_offset: FrameAddress) {
         if Constructor::is_primitive(&self.stack, ctor_offset) {
             let n = Constructor::primitive_size(&self.stack, ctor_offset);
@@ -175,8 +169,10 @@ impl<T, U> VM<T, U> {
             self.stack.store_fp(frame_offset, boxed);
         }
     }
+}
 
-    // -- Equality / hashing -----------------------------------------------------------------------------
+/// Map equality / hashing
+impl<T, U> VM<T, U> {
 
     /// Compares two boxed keys/values for equality using the given sub-constructor.
     fn map_box_eq(self: &Self, a: HeapRef, b: HeapRef, ctor_offset: StackAddress) -> bool {
@@ -292,8 +288,10 @@ impl<T, U> VM<T, U> {
         }
         h
     }
+}
 
-    // -- Bucket management ------------------------------------------------------------------------------
+/// Map bucket management
+impl<T, U> VM<T, U> {
 
     /// Returns the entry index of `key` in the map at `idx`, probing the hash buckets. Boxed keys are
     /// compared by value via [`map_box_eq`].

@@ -1140,14 +1140,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     }
 
     /// Compiles iteration over an array. The array is cloned at loop entry and the clone is retained for
-    /// the loop's duration (so the body may mutate the original); `arrayiter`/`array_iter_iv` walks the
+    /// the loop's duration (so the body may mutate the original); `array_iter`/`array_iter_iv` walks the
     /// clone, binding each element into `element_loc` and (for `for k, v`) the running index into
     /// `index_loc`.
     fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, index_loc: Option<FrameAddress>, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
         // clone the array; the clone (top of stack) is walked while the body may mutate the original
         self.compile_for_loop_clone(item)?;
-        let loop_start = self.write_array_iter(self.ty(&element_type_id), index_loc, element_loc, 123)?;
+        let loop_start = self.write_array_iter_iv(self.ty(&element_type_id), index_loc, element_loc, 123)?;
         // compile inner block
         self.loop_control.push();
         self.compile_block(&item.block)?;
@@ -1155,7 +1155,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // repeat/exit loop, fix exit address
         self.writer.jmp(loop_start);
         let exit_target = self.writer.position();
-        self.writer.overwrite(loop_start, |_| self.write_array_iter(self.ty(&element_type_id), index_loc, element_loc, exit_target))?;
+        self.writer.overwrite(loop_start, |_| self.write_array_iter_iv(self.ty(&element_type_id), index_loc, element_loc, exit_target))?;
         // fix break/continue addresses
         for loop_control in &loop_controls {
             match loop_control {
@@ -2497,20 +2497,20 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(select_integer_type!(self, ty, loop, iter, start))
     }
 
-    /// Write arrayiter instruction.
-    fn write_arrayiter(self: &Self, element_ty: &Type, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
+    /// Write array:iter instruction.
+    fn write_array_iter(self: &Self, element_ty: &Type, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
         Ok(if element_ty.is_ref() {
-            self.writer.arrayiter64(element, exit)
+            self.writer.array_iter64(element, exit)
         } else {
-            select_primitive_size!(self, element_ty, arrayiter, element, exit)
+            select_primitive_size!(self, element_ty, array_iter, element, exit)
         })
     }
 
-    /// Writes an array iteration instruction: `arrayiter` for value-only iteration (`index` is `None`),
+    /// Writes an array iteration instruction: `array:iter` for value-only iteration (`index` is `None`),
     /// or `array_iter_iv` which additionally stores the running index into `index` (`for k, v`).
-    fn write_array_iter(self: &Self, element_ty: &Type, index: Option<FrameAddress>, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
+    fn write_array_iter_iv(self: &Self, element_ty: &Type, index: Option<FrameAddress>, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
         Ok(match index {
-            None => self.write_arrayiter(element_ty, element, exit)?,
+            None => self.write_array_iter(element_ty, element, exit)?,
             Some(index) => if element_ty.is_ref() {
                 self.writer.array_iter_iv64(index, element, exit)
             } else {

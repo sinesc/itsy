@@ -12,10 +12,10 @@
 //!
 //! [Arrays](crate::documentation::Array), variable-length lists of values of the same type: `[ v, ... ]`.\
 //! [Maps](crate::documentation::Map), variable-length associations of keys to values: `[ k => v, ... ]`.\
-//! [Structs](crate::documentation::structs), product of multiple types: `struct { field1: Type1, ... }`.\
-//! [Enums](crate::documentation::enums), disjoint union (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
+//! [Structs](crate::documentation::structs), products of multiple types: `struct { field1: Type1, ... }`.\
+//! [Enums](crate::documentation::enums), disjoint unions (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
 //!
-//! # Built-in container types
+//! # Special purpose container
 //!
 //! [Result], success-or-error type: `Result<T>` with `Ok(value)` and `Err(error)`.\
 //! [Option], nullable type: `Option<T>` with `Some(value)` and `None`.
