@@ -528,6 +528,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if first_type_id == second_type_id {
             return Ok(());
         }
+        // unify arrays: propagate known element type onto the unresolved counterpart
         let inner = match (self.type_by_id(first_type_id).as_array(), self.type_by_id(second_type_id).as_array()) {
             (Some(first), Some(second)) => Some((first.type_id, second.type_id)),
             _ => None,
@@ -537,6 +538,39 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 (Some(first_inner), Some(second_inner)) => self.unify_type_ids(first_inner, second_inner)?,
                 (Some(first_inner), None) => self.type_by_id_mut(second_type_id).as_array_mut().ice()?.type_id = Some(first_inner),
                 (None, Some(second_inner)) => self.type_by_id_mut(first_type_id).as_array_mut().ice()?.type_id = Some(second_inner),
+                (None, None) => {},
+            }
+        }
+        // unify maps: propagate known key/value types onto the unresolved counterpart
+        let map_inner = match (self.type_by_id(first_type_id).as_map(), self.type_by_id(second_type_id).as_map()) {
+            (Some(first), Some(second)) => Some((first.key_type_id, second.key_type_id, first.value_type_id, second.value_type_id)),
+            _ => None,
+        };
+        if let Some((first_key, second_key, first_value, second_value)) = map_inner {
+            // unify keys
+            match (first_key, second_key) {
+                (Some(fk), Some(sk)) => self.unify_type_ids(fk, sk)?,
+                (Some(fk), None) => {
+                    let map_ty = self.type_by_id_mut(second_type_id).as_map_mut().ice()?;
+                    map_ty.key_type_id = Some(fk);
+                },
+                (None, Some(sk)) => {
+                    let map_ty = self.type_by_id_mut(first_type_id).as_map_mut().ice()?;
+                    map_ty.key_type_id = Some(sk);
+                },
+                (None, None) => {},
+            }
+            // unify values
+            match (first_value, second_value) {
+                (Some(fv), Some(sv)) => self.unify_type_ids(fv, sv)?,
+                (Some(fv), None) => {
+                    let map_ty = self.type_by_id_mut(second_type_id).as_map_mut().ice()?;
+                    map_ty.value_type_id = Some(fv);
+                },
+                (None, Some(sv)) => {
+                    let map_ty = self.type_by_id_mut(first_type_id).as_map_mut().ice()?;
+                    map_ty.value_type_id = Some(sv);
+                },
                 (None, None) => {},
             }
         }
@@ -1641,6 +1675,17 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             // resolve the pattern against the matched value's type before the body so pattern bindings are typed
             self.resolve_pattern(pattern, subject_type_id)?;
             self.resolve_block(block, expected_result)?;
+        }
+        // unify arm result types so that partially-resolved compound types (e.g. empty map literal
+        // `[ => ]` with unknown value type) pick up concrete types from sibling arms
+        if item.branches.len() > 1 {
+            if let Some(first_type_id) = item.branches[0].1.type_id(self) {
+                for (_, block) in item.branches.iter().skip(1) {
+                    if let Some(block_type_id) = block.type_id(self) {
+                        self.unify_type_ids(first_type_id, block_type_id)?;
+                    }
+                }
+            }
         }
         self.scope_id = parent_scope_id;
         // the match must cover every possible value of the subject (the compiler relies on this: a non-matching
