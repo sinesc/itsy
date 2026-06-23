@@ -383,3 +383,476 @@ fn for_in_index_rejects_non_collection() {
     ));
     assert!(err.contains("key/index iteration") && !err.contains("for$iter"), "unexpected error: {}", err);
 }
+
+#[test]
+fn array_get_primitive() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30 ];
+
+        // in-bounds access
+        let x = a.get(0);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        let y = a.get(1);
+        match y { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        let z = a.get(2);
+        match z { Some(v) => ret_i32(v), None => ret_i32(-1) };
+
+        // out-of-bounds access
+        let none = a.get(3);
+        match none { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        let none2 = a.get(100);
+        match none2 { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ 10i32, 20, 30, -1, -1 ]);
+}
+
+#[test]
+fn array_get_ref_type() {
+    let result = run(stringify!(
+        struct Item {
+            value: u8,
+        }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            a.push(Item { value: 3 });
+
+            // in-bounds access
+            let x = a.get(0);
+            match x { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+            let y = a.get(1);
+            match y { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+            let z = a.get(2);
+            match z { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+
+            // out-of-bounds access
+            let none = a.get(3);
+            match none { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+
+            // array is unchanged after get (unlike remove)
+            ret_u8(a.len() as u8);
+            let w = a.get(0);
+            match w { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+        }
+    ));
+    assert_all(&result, &[ 1u8, 2, 3, 0, 3, 1 ]);
+}
+
+#[test]
+fn array_get_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        let x = a.get(0);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ -1i32 ]);
+}
+
+#[test]
+fn array_is_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        ret_bool(a.is_empty());
+        a.push(1);
+        ret_bool(a.is_empty());
+        a.clear();
+        ret_bool(a.is_empty());
+    ));
+    assert_all(&result, &[ true, false, true ]);
+}
+
+#[test]
+fn array_clear_primitive() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3 ];
+        a.clear();
+        ret_u64(a.len());
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn array_clear_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            a.clear();
+            ret_u64(a.len());
+        }
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn array_contains_primitive() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30 ];
+        ret_bool(a.contains(10));
+        ret_bool(a.contains(20));
+        ret_bool(a.contains(30));
+        ret_bool(a.contains(40));
+        ret_bool(a.contains(0));
+    ));
+    assert_all(&result, &[ true, true, true, false, false ]);
+}
+
+#[test]
+fn array_contains_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let x = Item { value: 42 };
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(x);
+            a.push(Item { value: 3 });
+            ret_bool(a.contains(x));
+            ret_bool(a.contains(Item { value: 99 }));
+        }
+    ));
+    assert_all(&result, &[ true, false ]);
+}
+
+#[test]
+fn array_contains_ref_type_deep_equality() {
+    // contains compares by value (like the primitive variants and `==`), not by reference identity:
+    // a distinct instance with equal field values is found.
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            ret_bool(a.contains(Item { value: 2 }));
+            ret_bool(a.contains(Item { value: 3 }));
+        }
+    ));
+    assert_all(&result, &[ true, false ]);
+}
+
+#[test]
+fn array_contains_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        ret_bool(a.contains(1));
+    ));
+    assert_all(&result, &[ false ]);
+}
+
+#[test]
+fn array_first_primitive() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30 ];
+        let x = a.first();
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ 10i32 ]);
+}
+
+#[test]
+fn array_first_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        let x = a.first();
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ -1i32 ]);
+}
+
+#[test]
+fn array_first_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            let x = a.first();
+            match x { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+        }
+    ));
+    assert_all(&result, &[ 1u8 ]);
+}
+
+#[test]
+fn array_last_primitive() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30 ];
+        let x = a.last();
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ 30i32 ]);
+}
+
+#[test]
+fn array_last_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        let x = a.last();
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ -1i32 ]);
+}
+
+#[test]
+fn array_last_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            let x = a.last();
+            match x { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+        }
+    ));
+    assert_all(&result, &[ 2u8 ]);
+}
+
+#[test]
+fn array_extend_primitive() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2 ];
+        let b = [ 3, 4, 5 ];
+        a.extend(b);
+        ret_u64(a.len());
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+        ret_i32(a[3]);
+        ret_i32(a[4]);
+    ));
+    assert_all!(&result, [ 5u64, 1i32, 2, 3, 4, 5 ]);
+}
+
+#[test]
+fn array_extend_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            let b: [ Item ] = [ ];
+            b.push(Item { value: 2 });
+            b.push(Item { value: 3 });
+            a.extend(b);
+            ret_u64(a.len());
+            ret_u8(a[0].value);
+            ret_u8(a[1].value);
+            ret_u8(a[2].value);
+        }
+    ));
+    assert_all!(&result, [ 3u64, 1u8, 2u8, 3u8 ]);
+}
+
+#[test]
+fn array_extend_empty() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2 ];
+        let b: [ i32 ] = [ ];
+        a.extend(b);
+        ret_u64(a.len());
+    ));
+    assert_all(&result, &[ 2u64 ]);
+}
+
+#[test]
+fn array_swap_primitive() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3, 4 ];
+        a.swap(0, 3);
+        ret_i32(a[0]);
+        ret_i32(a[3]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+    ));
+    assert_all(&result, &[ 4i32, 1, 2, 3 ]);
+}
+
+#[test]
+fn array_swap_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            a.push(Item { value: 3 });
+            a.swap(0, 2);
+            ret_u8(a[0].value);
+            ret_u8(a[2].value);
+        }
+    ));
+    assert_all(&result, &[ 3u8, 1 ]);
+}
+
+#[test]
+fn array_swap_same_index() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3 ];
+        a.swap(1, 1);
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+    ));
+    assert_all(&result, &[ 1i32, 2, 3 ]);
+}
+
+#[test]
+fn array_resize_grow_primitive() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2 ];
+        a.resize(5, 0);
+        ret_u64(a.len());
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+        ret_i32(a[3]);
+        ret_i32(a[4]);
+    ));
+    assert_all!(&result, [ 5u64, 1i32, 2, 0, 0, 0 ]);
+}
+
+#[test]
+fn array_resize_shrink_primitive() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3, 4, 5 ];
+        a.resize(2, 0);
+        ret_u64(a.len());
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+    ));
+    assert_all!(&result, [ 2u64, 1i32, 2 ]);
+}
+
+#[test]
+fn array_resize_grow_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let fill = Item { value: 99 };
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.resize(4, fill);
+            ret_u64(a.len());
+            ret_u8(a[0].value);
+            ret_u8(a[1].value);
+            ret_u8(a[2].value);
+            ret_u8(a[3].value);
+        }
+    ));
+    assert_all!(&result, [ 4u64, 1u8, 99u8, 99u8, 99u8 ]);
+}
+
+#[test]
+fn array_resize_shrink_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            a.push(Item { value: 3 });
+            a.resize(1, Item { value: 0 });
+            ret_u64(a.len());
+            ret_u8(a[0].value);
+        }
+    ));
+    assert_all!(&result, [ 1u64, 1u8 ]);
+}
+
+#[test]
+fn array_resize_same_size() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3 ];
+        a.resize(3, 0);
+        ret_u64(a.len());
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+    ));
+    assert_all!(&result, [ 3u64, 1i32, 2, 3 ]);
+}
+
+#[test]
+fn array_resize_to_zero() {
+    let result = run(stringify!(
+        let a = [ 1i32, 2, 3 ];
+        a.resize(0, 0);
+        ret_u64(a.len());
+    ));
+    assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+fn array_swap_remove_primitive() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30, 40 ];
+        let x = a.swap_remove(1);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        ret_u64(a.len());
+        // element at index 1 is now the old last element (40)
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+        ret_i32(a[2]);
+    ));
+    assert_all!(&result, [ 20i32, 3u64, 10i32, 40, 30 ]);
+}
+
+#[test]
+fn array_swap_remove_last() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20, 30 ];
+        let x = a.swap_remove(2);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        ret_u64(a.len());
+        ret_i32(a[0]);
+        ret_i32(a[1]);
+    ));
+    assert_all!(&result, [ 30i32, 2u64, 10, 20 ]);
+}
+
+#[test]
+fn array_swap_remove_out_of_bounds() {
+    let result = run(stringify!(
+        let a = [ 10i32, 20 ];
+        let x = a.swap_remove(5);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+        ret_u64(a.len());
+    ));
+    assert_all!(&result, [ -1i32, 2u64 ]);
+}
+
+#[test]
+fn array_swap_remove_empty() {
+    let result = run(stringify!(
+        let a: [ i32 ] = [ ];
+        let x = a.swap_remove(0);
+        match x { Some(v) => ret_i32(v), None => ret_i32(-1) };
+    ));
+    assert_all(&result, &[ -1i32 ]);
+}
+
+#[test]
+fn array_swap_remove_ref_type() {
+    let result = run(stringify!(
+        struct Item { value: u8 }
+        fn main() {
+            let a: [ Item ] = [ ];
+            a.push(Item { value: 1 });
+            a.push(Item { value: 2 });
+            a.push(Item { value: 3 });
+            let x = a.swap_remove(0);
+            match x { Some(v) => ret_u8(v.value), None => ret_u8(0) };
+            ret_u64(a.len());
+            // first element should now be the old last (3)
+            ret_u8(a[0].value);
+            ret_u8(a[1].value);
+        }
+    ));
+    assert_all!(&result, [ 1u8, 2u64, 3u8, 2u8 ]);
+}

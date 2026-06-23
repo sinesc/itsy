@@ -209,6 +209,40 @@ impl_builtins! {
             }
         }
 
+        /// Returns the element at the given index, or `None` if the index is out of range.
+        get(self: Self, element: u64) -> OptionalElement {
+            fn <
+                array_get8<T: u8>(this: Array, element: StackAddress) -> OptionalElement,
+                array_get16<T: u16>(this: Array, element: StackAddress) -> OptionalElement,
+                array_get32<T: u32>(this: Array, element: StackAddress) -> OptionalElement,
+                array_get64<T: u64>(this: Array, element: StackAddress) -> OptionalElement,
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let offset = element as usize * ELEMENT_SIZE;
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if offset + ELEMENT_SIZE > data.len() {
+                    vm.option_none()
+                } else {
+                    let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    vm.option_some_bytes(&result.to_ne_bytes())
+                }
+            }
+
+            fn array_getx(&mut vm + constructor, this: Array, element: StackAddress) -> OptionalElement {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let offset = element as usize * ELEMENT_SIZE;
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if offset + ELEMENT_SIZE > data.len() {
+                    vm.option_none()
+                } else {
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    vm.option_some_ref(payload)
+                }
+            }
+        }
+
         /// Removes and returns the element at position index within the array, shifting all elements after it to the left.
         /// Returns `None` if the index is out of range.
         remove(self: Self, element: u64 ) -> OptionalElement {
@@ -307,6 +341,321 @@ impl_builtins! {
                     let right: HeapRef = vm.heap.load(index, right_offset);
                     vm.heap.store(index, left_offset, right);
                     vm.heap.store(index, right_offset, left);
+                }
+            }
+        }
+
+        /// Returns true if the array has no elements.
+        is_empty(self: Self) -> bool {
+            fn <
+                array_is_empty8<T: u8>(this: Array) -> bool,
+                array_is_empty16<T: u16>(this: Array) -> bool,
+                array_is_empty32<T: u32>(this: Array) -> bool,
+                array_is_empty64<T: u64>(this: Array) -> bool,
+            >(&mut vm) {
+                vm.heap.item(this.index()).data.is_empty()
+            }
+
+            fn array_is_emptyx(&mut vm + constructor, this: Array) -> bool {
+                vm.heap.item(this.index()).data.is_empty()
+            }
+        }
+
+        /// Removes all elements from the array.
+        clear(self: Self) {
+            fn <
+                array_clear8<T: u8>(this: Array),
+                array_clear16<T: u16>(this: Array),
+                array_clear32<T: u32>(this: Array),
+                array_clear64<T: u64>(this: Array),
+            >(&mut vm) {
+                vm.heap.item_mut(this.index()).data.clear();
+            }
+
+            fn array_clearx(&mut vm + constructor, this: Array) {
+                let index = this.index();
+                let current_size = vm.heap.item(index).data.len();
+                if current_size > 0 {
+                    let mut cursor = HeapRef::new(index, 0);
+                    let end = HeapRef::new(index, current_size as StackAddress);
+                    while cursor < end {
+                        let item: HeapRef = vm.heap.read_seq(&mut cursor);
+                        vm.refcount_value(item, constructor, HeapRefOp::Dec);
+                    }
+                }
+                vm.heap.item_mut(index).data.clear();
+            }
+        }
+
+        /// Returns true if the array contains the given element.
+        contains(self: Self, value: Element) -> bool {
+            fn <
+                array_contains8<T: u8>(this: Array, value: u8) -> bool,
+                array_contains16<T: u16>(this: Array, value: u16) -> bool,
+                array_contains32<T: u32>(this: Array, value: u32) -> bool,
+                array_contains64<T: u64>(this: Array, value: u64) -> bool,
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                let num_elements = data.len() / ELEMENT_SIZE;
+                for i in 0..num_elements {
+                    let offset = (i * ELEMENT_SIZE) as StackAddress;
+                    let elem: T = vm.heap.read(HeapRef::new(index, offset));
+                    if elem == value {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            fn array_containsx(&mut vm + constructor, this: Array, value: Element) -> bool {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let index = this.index();
+                let num_elements = vm.heap.item(index).data.len() / ELEMENT_SIZE;
+                let mut found = false;
+                for i in 0..num_elements {
+                    let offset = (i * ELEMENT_SIZE) as StackAddress;
+                    let elem: HeapRef = vm.heap.read(HeapRef::new(index, offset));
+                    // Deep equality, consistent with the primitive variants and the `==` operator.
+                    if vm.compare_value(elem, value, constructor) {
+                        found = true;
+                        break;
+                    }
+                }
+                found
+            }
+        }
+
+        /// Returns the first element of the array, or `None` if the array is empty.
+        first(self: Self) -> OptionalElement {
+            fn <
+                array_first8<T: u8>(this: Array) -> OptionalElement,
+                array_first16<T: u16>(this: Array) -> OptionalElement,
+                array_first32<T: u32>(this: Array) -> OptionalElement,
+                array_first64<T: u64>(this: Array) -> OptionalElement,
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if data.len() < ELEMENT_SIZE {
+                    vm.option_none()
+                } else {
+                    let result: T = vm.heap.read(HeapRef::new(index, 0));
+                    vm.option_some_bytes(&result.to_ne_bytes())
+                }
+            }
+
+            fn array_firstx(&mut vm + constructor, this: Array) -> OptionalElement {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if data.len() < ELEMENT_SIZE {
+                    vm.option_none()
+                } else {
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(index, 0));
+                    vm.option_some_ref(payload)
+                }
+            }
+        }
+
+        /// Returns the last element of the array, or `None` if the array is empty.
+        last(self: Self) -> OptionalElement {
+            fn <
+                array_last8<T: u8>(this: Array) -> OptionalElement,
+                array_last16<T: u16>(this: Array) -> OptionalElement,
+                array_last32<T: u32>(this: Array) -> OptionalElement,
+                array_last64<T: u64>(this: Array) -> OptionalElement,
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if data.len() < ELEMENT_SIZE {
+                    vm.option_none()
+                } else {
+                    let offset = data.len() - ELEMENT_SIZE;
+                    let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    vm.option_some_bytes(&result.to_ne_bytes())
+                }
+            }
+
+            fn array_lastx(&mut vm + constructor, this: Array) -> OptionalElement {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let index = this.index();
+                let data = &vm.heap.item(index).data;
+                if data.len() < ELEMENT_SIZE {
+                    vm.option_none()
+                } else {
+                    let offset = data.len() - ELEMENT_SIZE;
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    vm.option_some_ref(payload)
+                }
+            }
+        }
+
+        /// Appends all elements from another array to this one.
+        extend(self: Self, other: Self) {
+            fn <
+                array_extend8<T: u8>(this: Array, other: Array),
+                array_extend16<T: u16>(this: Array, other: Array),
+                array_extend32<T: u32>(this: Array, other: Array),
+                array_extend64<T: u64>(this: Array, other: Array),
+            >(&mut vm) {
+                let this_index = this.index();
+                let other_index = other.index();
+                let other_data = vm.heap.item(other_index).data.clone();
+                vm.heap.item_mut(this_index).data.extend_from_slice(&other_data);
+            }
+
+            fn array_extendx(&mut vm + constructor, this: Array, other: Array) {
+                let this_index = this.index();
+                let other_index = other.index();
+                let other_data = &vm.heap.item(other_index).data;
+                let other_len = other_data.len();
+                if other_len > 0 {
+                    let mut cursor = HeapRef::new(other_index, 0);
+                    let end = HeapRef::new(other_index, other_len as StackAddress);
+                    while cursor < end {
+                        let item: HeapRef = vm.heap.read_seq(&mut cursor);
+                        vm.heap.item_mut(this_index).data.extend_from_slice(&item.to_ne_bytes());
+                        vm.refcount_value(item, constructor, HeapRefOp::Inc);
+                    }
+                }
+            }
+        }
+
+        /// Swaps the elements at index_a and index_b in place.
+        swap(self: Self, index_a: u64, index_b: u64) {
+            fn <
+                array_swap8<T: u8>(this: Array, index_a: StackAddress, index_b: StackAddress),
+                array_swap16<T: u16>(this: Array, index_a: StackAddress, index_b: StackAddress),
+                array_swap32<T: u32>(this: Array, index_a: StackAddress, index_b: StackAddress),
+                array_swap64<T: u64>(this: Array, index_a: StackAddress, index_b: StackAddress),
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let index = this.index();
+                let offset_a = (index_a as usize * ELEMENT_SIZE) as StackAddress;
+                let offset_b = (index_b as usize * ELEMENT_SIZE) as StackAddress;
+                let a: T = vm.heap.load(index, offset_a);
+                let b: T = vm.heap.load(index, offset_b);
+                vm.heap.store(index, offset_a, b);
+                vm.heap.store(index, offset_b, a);
+            }
+
+            fn array_swapx(&mut vm + constructor, this: Array, index_a: StackAddress, index_b: StackAddress) {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let index = this.index();
+                let offset_a = (index_a as usize * ELEMENT_SIZE) as StackAddress;
+                let offset_b = (index_b as usize * ELEMENT_SIZE) as StackAddress;
+                let a: HeapRef = vm.heap.load(index, offset_a);
+                let b: HeapRef = vm.heap.load(index, offset_b);
+                vm.heap.store(index, offset_a, b);
+                vm.heap.store(index, offset_b, a);
+            }
+        }
+
+        /// Resizes the array to the given size. If larger, new elements are filled with the given value.
+        /// If smaller, elements beyond the new size are dropped.
+        resize(self: Self, new_size: u64, fill: Element) {
+            fn <
+                array_resize8<T: u8>(this: Array, new_size: StackAddress, fill: u8),
+                array_resize16<T: u16>(this: Array, new_size: StackAddress, fill: u16),
+                array_resize32<T: u32>(this: Array, new_size: StackAddress, fill: u32),
+                array_resize64<T: u64>(this: Array, new_size: StackAddress, fill: u64),
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let index = this.index();
+                let current_size = vm.heap.item(index).data.len();
+                let new_data_size = ELEMENT_SIZE * new_size as usize;
+                if new_data_size < current_size {
+                    vm.heap.item_mut(index).data.truncate(new_data_size);
+                } else if new_data_size > current_size {
+                    let fill_bytes = fill.to_ne_bytes();
+                    let data = &mut vm.heap.item_mut(index).data;
+                    data.resize(new_data_size, 0);
+                    for i in current_size..new_data_size {
+                        data[i] = fill_bytes[i % ELEMENT_SIZE];
+                    }
+                }
+            }
+
+            fn array_resizex(&mut vm + constructor, this: Array, new_size: StackAddress, fill: Element) {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let index = this.index();
+                let current_size = vm.heap.item(index).data.len();
+                let new_data_size = ELEMENT_SIZE * new_size as usize;
+                if new_data_size < current_size {
+                    let mut cursor = HeapRef::new(index, new_data_size as StackAddress);
+                    let end = HeapRef::new(index, current_size as StackAddress);
+                    while cursor < end {
+                        let item: HeapRef = vm.heap.read_seq(&mut cursor);
+                        vm.refcount_value(item, constructor, HeapRefOp::Dec);
+                    }
+                    vm.heap.item_mut(index).data.truncate(new_data_size);
+                } else if new_data_size > current_size {
+                    let extra_elements = (new_data_size - current_size) / ELEMENT_SIZE;
+                    let fill_bytes = fill.to_ne_bytes();
+                    for _ in 0..extra_elements {
+                        vm.heap.item_mut(index).data.extend_from_slice(&fill_bytes);
+                    }
+                    for _ in 0..extra_elements {
+                        vm.refcount_value(fill, constructor, HeapRefOp::Inc);
+                    }
+                }
+            }
+        }
+
+        /// Removes the element at the given index by swapping it with the last element.
+        /// Returns the removed element, or `None` if the index is out of range.
+        /// Order of elements is not preserved.
+        swap_remove(self: Self, index: u64) -> OptionalElement {
+            fn <
+                array_swap_remove8<T: u8>(this: Array, index: StackAddress) -> OptionalElement,
+                array_swap_remove16<T: u16>(this: Array, index: StackAddress) -> OptionalElement,
+                array_swap_remove32<T: u32>(this: Array, index: StackAddress) -> OptionalElement,
+                array_swap_remove64<T: u64>(this: Array, index: StackAddress) -> OptionalElement,
+            >(&mut vm) {
+                const ELEMENT_SIZE: usize = size_of::<T>();
+                let heap_index = this.index();
+                let data = &vm.heap.item(heap_index).data;
+                let num_elements = data.len() / ELEMENT_SIZE;
+                let idx = index as usize;
+                if idx >= num_elements {
+                    vm.option_none()
+                } else {
+                    let offset = idx * ELEMENT_SIZE;
+                    let last_offset = (num_elements - 1) * ELEMENT_SIZE;
+                    let result: T = vm.heap.read(HeapRef::new(heap_index, offset as StackAddress));
+                    let data = &mut vm.heap.item_mut(heap_index).data;
+                    if idx != num_elements - 1 {
+                        data.copy_within(last_offset .. last_offset + ELEMENT_SIZE, offset);
+                    }
+                    data.truncate(data.len() - ELEMENT_SIZE);
+                    vm.option_some_bytes(&result.to_ne_bytes())
+                }
+            }
+
+            fn array_swap_removex(&mut vm + constructor, this: Array, index: StackAddress) -> OptionalElement {
+                const ELEMENT_SIZE: usize = size_of::<HeapRef>();
+                let heap_index = this.index();
+                let data = &vm.heap.item(heap_index).data;
+                let num_elements = data.len() / ELEMENT_SIZE;
+                let idx = index as usize;
+                if idx >= num_elements {
+                    vm.option_none()
+                } else {
+                    let offset = idx * ELEMENT_SIZE;
+                    let last_offset = (num_elements - 1) * ELEMENT_SIZE;
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(heap_index, offset as StackAddress));
+                    let data = &mut vm.heap.item_mut(heap_index).data;
+                    if idx != num_elements - 1 {
+                        data.copy_within(last_offset .. last_offset + ELEMENT_SIZE, offset);
+                    }
+                    data.truncate(data.len() - ELEMENT_SIZE);
+                    // DecNoFree the payload: the array slot's +1 reference is released here.
+                    // The payload is then embedded into Some at refcount 0.
+                    vm.refcount_value(payload, constructor, HeapRefOp::DecNoFree);
+                    vm.option_some_ref(payload)
                 }
             }
         }
