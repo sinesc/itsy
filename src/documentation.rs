@@ -501,6 +501,38 @@ pub mod traits { }
 /// let scaled = v * Vec2 { x: 2, y: 2 };                   // Vec2 { x: 10, y: 14 }
 /// ```
 ///
+/// # The bitwise and shift operator traits
+///
+/// [`BitAnd`](crate::documentation::intrinsic_traits::BitAnd), [`BitOr`](crate::documentation::intrinsic_traits::BitOr) and
+/// [`BitXor`](crate::documentation::intrinsic_traits::BitXor) overload the bitwise operators `&`, `|` and `^`.
+/// Like the arithmetic traits they share the shape `fn op(self: Self, rhs: Self) -> Self` and each backs
+/// both the binary operator and the compound-assignment form (`&=`, `|=`, `^=`).
+///
+/// [`Shl`](crate::documentation::intrinsic_traits::Shl) and [`Shr`](crate::documentation::intrinsic_traits::Shr) overload the
+/// shift operators `<<` and `>>`. Their right-hand operand is `i64` (the shift amount), so their shape
+/// is `fn op(self: Self, rhs: i64) -> Self`. Each backs both the binary and compound-assignment form
+/// (`<<=`, `>>=`):
+///
+/// ``` ignore
+/// struct BitField { bits: i64 }
+///
+/// impl BitAnd for BitField {
+///     fn bitand(self: Self, rhs: Self) -> Self {
+///         BitField { bits: self.bits & rhs.bits }
+///     }
+/// }
+/// impl Shl for BitField {
+///     fn shl(self: Self, rhs: i64) -> Self {
+///         BitField { bits: self.bits << rhs }
+///     }
+/// }
+///
+/// let a = BitField { bits: 0b1111 };
+/// let b = BitField { bits: 0b1010 };
+/// let c = a & b;                                          // BitField { bits: 0b1010 }
+/// let d = a << 2;                                         // BitField { bits: 0b111100 }
+/// ```
+///
 /// # The equality trait
 ///
 /// [`Eq`](crate::documentation::intrinsic_traits::Eq) overloads the `==` and `!=` operators. Its single method
@@ -582,6 +614,41 @@ pub mod intrinsic_traits {
     pub trait Rem {
         /// Returns the result of `self % rhs`.
         fn rem(self: Self, rhs: Self) -> Self;
+    }
+
+    /// Overloads the `&` and `&=` operators. See [the bitwise and shift operator traits](self#the-bitwise-and-shift-operator-traits)
+    /// for an example.
+    pub trait BitAnd {
+        /// Returns the result of `self & rhs`.
+        fn bitand(self: Self, rhs: Self) -> Self;
+    }
+
+    /// Overloads the `|` and `|=` operators. See [the bitwise and shift operator traits](self#the-bitwise-and-shift-operator-traits)
+    /// for an example.
+    pub trait BitOr {
+        /// Returns the result of `self | rhs`.
+        fn bitor(self: Self, rhs: Self) -> Self;
+    }
+
+    /// Overloads the `^` and `^=` operators. See [the bitwise and shift operator traits](self#the-bitwise-and-shift-operator-traits)
+    /// for an example.
+    pub trait BitXor {
+        /// Returns the result of `self ^ rhs`.
+        fn bitxor(self: Self, rhs: Self) -> Self;
+    }
+
+    /// Overloads the `<<` and `<<=` operators. See [the bitwise and shift operator traits](self#the-bitwise-and-shift-operator-traits)
+    /// for an example.
+    pub trait Shl {
+        /// Returns the result of `self << rhs`.
+        fn shl(self: Self, rhs: i64) -> Self;
+    }
+
+    /// Overloads the `>>` and `>>=` operators. See [the bitwise and shift operator traits](self#the-bitwise-and-shift-operator-traits)
+    /// for an example.
+    pub trait Shr {
+        /// Returns the result of `self >> rhs`.
+        fn shr(self: Self, rhs: i64) -> Self;
     }
 
     /// Overloads the `==` and `!=` operators. See [the equality trait](self#the-equality-trait)

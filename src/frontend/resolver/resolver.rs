@@ -140,9 +140,12 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     let mut intrinsic_ops = UnorderedMap::new();
     for intrinsic in INTRINSIC_OP_TRAITS {
         let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
-        // required method `fn <method>(self: Self, rhs: Self) -> <result>`, where the result is either `Self`
-        // (the arithmetic traits) or a fixed primitive (`Eq::eq -> bool`). Registered exactly as the resolver
-        // would for a source-defined trait method so impl-matching and vtable construction pick it up.
+        // required method `fn <method>(self: Self, rhs: <rhs>) -> <result>`, where rhs defaults to Self
+        // (arithmetic, bitwise, equality) but can be a fixed primitive for shift operators.
+        let rhs_type_id = match &intrinsic.rhs {
+            IntrinsicResult::SelfType => trait_type_id,
+            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+        };
         let result_type_id = match &intrinsic.result {
             IntrinsicResult::SelfType => trait_type_id,
             IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
@@ -150,12 +153,12 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         let constant_id = scopes.insert_function(
             &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
             Some(result_type_id),
-            vec![ Some(trait_type_id), Some(trait_type_id) ],
+            vec![ Some(trait_type_id), Some(rhs_type_id) ],
             Some(FunctionKind::Method(trait_type_id)),
         );
         scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
         intrinsic_trait_names.push(intrinsic.trait_name.to_string());
-        intrinsic_ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, method: intrinsic.method });
+        intrinsic_ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, rhs_type_id, method: intrinsic.method });
     }
 
     // register the built-in `Error` trait so scripts can `impl Error for MyType { ... }`. Required method:
@@ -1965,19 +1968,32 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // reverse) would name the operands the wrong way round for an assignment.
         self.resolve_expression(&mut item.left, None)?;
         let left_type_id = item.left.type_id(self);
-        // classify arithmetic compound assignment once the target type is known. Numeric/string targets
-        // keep their built-in codegen; a custom target (variable, field or index) is dispatched in-place to
-        // the operator-trait method so the target is evaluated only once.
+        // classify compound assignment once the target type is known. Numeric/string targets for arithmetic,
+        // and integer targets for bitwise/shift, keep their built-in codegen; a custom target (variable, field
+        // or index) is dispatched in-place to the operator-trait method so the target is evaluated only once.
         if let (Some(base_op), Some(left_type_id)) = (item.op.arithmetic_assign_base(), left_type_id) {
             let left_type = self.type_by_id(left_type_id);
-            if left_type.is_numeric() || left_type.is_string() {
+            let is_bitwise_shift = matches!(base_op, BitAnd | BitOr | BitXor | Shl | Shr);
+            let is_builtin = if is_bitwise_shift {
+                left_type.is_integer()
+            } else {
+                left_type.is_numeric() || left_type.is_string()
+            };
+            if is_builtin {
                 item.op_dispatch = Some(ast::CompoundDispatch::Builtin);
             } else {
-                self.resolve_expression(&mut item.right, Some(left_type_id))?;
-                if let Some(right_type_id) = item.right.type_id(self) {
-                    self.check_type_accepted_for(item, right_type_id, left_type_id)?; // rhs must be Self
-                }
                 let intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
+                let rhs_expected = if matches!(base_op, Shl | Shr) {
+                    Some(intrinsic.rhs_type_id) // i64
+                } else {
+                    Some(left_type_id) // Self
+                };
+                self.resolve_expression(&mut item.right, rhs_expected)?;
+                if let Some(right_type_id) = item.right.type_id(self) {
+                    if !matches!(base_op, Shl | Shr) {
+                        self.check_type_accepted_for(item, right_type_id, left_type_id)?; // rhs must be Self
+                    }
+                }
                 if let Some(constant_id) = self.intrinsic_op_method_constant(left_type_id, &intrinsic) {
                     item.op_dispatch = Some(ast::CompoundDispatch::Method(constant_id));
                 } else if self.stage.must_resolve() {
@@ -2153,7 +2169,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             },
             BitAnd | BitOr | BitXor => {
-                // both operands share a single integer type, like arithmetic, but floats are rejected
+                // both operands share a single integer type, like arithmetic, but floats are rejected;
+                // custom types dispatch through the corresponding operator trait
                 self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
                 let left_type_id = item.left.type_id(self);
                 self.resolve_expression(item.right.as_expression_mut().ice()?, left_type_id)?;
@@ -2163,32 +2180,66 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     self.set_type_id(item, common_type_id)?;
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
-                }
-                if let Some(common_type_id) = item.type_id(self) {
-                    if !self.type_by_id(common_type_id).is_integer() {
+                    let common_type = self.type_by_id(common_type_id);
+                    let is_builtin = common_type.is_integer();
+                    if is_builtin {
+                        item.op_resolved = true;
+                    } else if common_type.is_primitive() {
+                        // primitive type that is not an integer (e.g. float, bool, string) — reject early
                         return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", item.op)), self.module_path));
+                    } else {
+                        let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;
+                        if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
+                            return self.rewrite_binary_op_to_method(item, intrinsic.method, expected_result);
+                        } else if self.stage.must_resolve() {
+                            let type_name = self.type_name(common_type_id);
+                            let trait_name = self.type_name(intrinsic.trait_type_id);
+                            return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                        }
                     }
                 }
             },
             Shl | Shr => {
                 // result type follows the left operand; the right operand (shift amount) is an
-                // independent integer type (cast to u32 at compile time), so it is not unified with the left
+                // independent integer type (cast to u32 at compile time), so it is not unified with the left;
+                // custom types dispatch through the corresponding operator trait
                 self.resolve_expression(item.left.as_expression_mut().ice()?, expected_result)?;
                 let left_type_id = item.left.type_id(self);
                 let type_id = item.type_id(self);
+                let mut is_builtin = false;
                 if let Some(common_type_id) = type_id.or(left_type_id) {
                     self.set_type_id(item, common_type_id)?;
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
-                }
-                self.resolve_expression(item.right.as_expression_mut().ice()?, None)?;
-                if let Some(left_type_id) = item.type_id(self) {
-                    if !self.type_by_id(left_type_id).is_integer() {
+                    let common_type = self.type_by_id(common_type_id);
+                    is_builtin = common_type.is_integer();
+                    if is_builtin {
+                        item.op_resolved = true;
+                    } else if common_type.is_primitive() {
+                        // primitive type that is not an integer (e.g. float, bool, string) — reject early
                         return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer left operand", item.op)), self.module_path));
+                    } else {
+                        let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;
+                        if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
+                            return self.rewrite_shift_op_to_method(item, intrinsic.method, expected_result);
+                        } else if self.stage.must_resolve() {
+                            let type_name = self.type_name(common_type_id);
+                            let trait_name = self.type_name(intrinsic.trait_type_id);
+                            return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                        }
                     }
                 }
-                if let Some(right_type_id) = item.right.type_id(self) {
-                    if !self.type_by_id(right_type_id).is_integer() {
-                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer shift amount", item.op)), self.module_path));
+                self.resolve_expression(item.right.as_expression_mut().ice()?, None)?;
+                // integer checks only apply to the builtin path; custom types go through trait dispatch
+                if is_builtin {
+                    if let Some(left_type_id) = item.type_id(self) {
+                        if !self.type_by_id(left_type_id).is_integer() {
+                            return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer left operand", item.op)), self.module_path));
+                        }
+                    }
+                    if let Some(right_type_id) = item.right.type_id(self) {
+                        if !self.type_by_id(right_type_id).is_integer() {
+                            return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer shift amount", item.op)), self.module_path));
+                        }
                     }
                 }
             },
@@ -2887,6 +2938,26 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 ast::Expression::BinaryOp(call) => *item = *call,
                 _ => return Self::ice("make_method_call did not produce a binary operation"),
             }
+        }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Rewrites a shift operation `a << b` / `a >> b` on a type implementing the intrinsic `Shl`/`Shr` trait
+    /// into a call of its `shl`/`shr` method. Mirrors `rewrite_binary_op_to_method` (used for the arithmetic
+    /// operator traits) but the shift amount (right operand) is already resolved as an independent integer type.
+    fn rewrite_shift_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        match Self::make_method_call(receiver, method, vec![ rhs ], position) {
+            ast::Expression::BinaryOp(call) => *item = *call,
+            _ => return Self::ice("make_method_call did not produce a binary operation"),
         }
         self.resolve_binary_op(item, expected_result)
     }

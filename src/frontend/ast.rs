@@ -2174,7 +2174,8 @@ impl Resolvable for BinaryOp {
         result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
         // arithmetic operators on a custom type are pending lowering to an operator-trait method call;
         // gate their resolution on that classification (see BinaryOp::op_resolved)
-        if matches!(self.op, BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Mul | BinaryOperator::Div | BinaryOperator::Rem) {
+        if matches!(self.op, BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Mul | BinaryOperator::Div | BinaryOperator::Rem
+            | BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor | BinaryOperator::Shl | BinaryOperator::Shr) {
             result.push(Resolvables::Progress(if self.op_resolved { Progress::new(1, 1) } else { Progress::new(0, 1) }));
         }
         result
@@ -2351,8 +2352,8 @@ impl BinaryOperator {
             _ => false,
         }
     }
-    /// Returns the plain binary operator underlying an arithmetic compound assignment operator
-    /// (e.g. `+=` -> `+`), or `None` for other operators.
+    /// Returns the plain binary operator underlying a compound assignment operator
+    /// (e.g. `+=` -> `+`, `&=` -> `&`), or `None` for other operators.
     pub fn arithmetic_assign_base(self: &Self) -> Option<BinaryOperator> {
         use BinaryOperator as BO;
         match self {
@@ -2361,6 +2362,11 @@ impl BinaryOperator {
             BO::MulAssign => Some(BO::Mul),
             BO::DivAssign => Some(BO::Div),
             BO::RemAssign => Some(BO::Rem),
+            BO::BitAndAssign => Some(BO::BitAnd),
+            BO::BitOrAssign => Some(BO::BitOr),
+            BO::BitXorAssign => Some(BO::BitXor),
+            BO::ShlAssign => Some(BO::Shl),
+            BO::ShrAssign => Some(BO::Shr),
             _ => None,
         }
     }

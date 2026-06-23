@@ -332,3 +332,120 @@ fn numeric_unaffected() {
     assert(&result[1], "abc".to_string());
     assert(&result[2], 15i64);
 }
+
+// --- bitwise/shift operators via operator traits ---
+
+#[test]
+fn bitwise_traits_struct() {
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl BitAnd for N { fn bitand(self: Self, rhs: Self) -> Self { N { v: self.v & rhs.v } } }
+        impl BitOr for N { fn bitor(self: Self, rhs: Self) -> Self { N { v: self.v | rhs.v } } }
+        impl BitXor for N { fn bitxor(self: Self, rhs: Self) -> Self { N { v: self.v ^ rhs.v } } }
+        fn main() {
+            let a = N { v: 12 };
+            let b = N { v: 10 };
+            ret_i64((a & b).v);
+            ret_i64((a | b).v);
+            ret_i64((a ^ b).v);
+        }
+    ));
+    assert_all(&result, &[ 8i64, 14, 6 ]);
+}
+
+#[test]
+fn shift_traits_struct() {
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl Shl for N { fn shl(self: Self, rhs: i64) -> Self { N { v: self.v << rhs } } }
+        impl Shr for N { fn shr(self: Self, rhs: i64) -> Self { N { v: self.v >> rhs } } }
+        fn main() {
+            let a = N { v: 1 };
+            ret_i64((a << 4).v);
+            let b = N { v: 16 };
+            ret_i64((b >> 2).v);
+        }
+    ));
+    assert_all(&result, &[ 16i64, 4 ]);
+}
+
+#[test]
+fn bitwise_compound_assign_variable() {
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl BitAnd for N { fn bitand(self: Self, rhs: Self) -> Self { N { v: self.v & rhs.v } } }
+        impl BitOr for N { fn bitor(self: Self, rhs: Self) -> Self { N { v: self.v | rhs.v } } }
+        impl BitXor for N { fn bitxor(self: Self, rhs: Self) -> Self { N { v: self.v ^ rhs.v } } }
+        fn main() {
+            let mut a = N { v: 15 };
+            a &= N { v: 10 };
+            ret_i64(a.v);
+            a |= N { v: 5 };
+            ret_i64(a.v);
+            a ^= N { v: 12 };
+            ret_i64(a.v);
+        }
+    ));
+    assert_all(&result, &[ 10i64, 15, 3 ]);
+}
+
+#[test]
+fn shift_compound_assign_variable() {
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl Shl for N { fn shl(self: Self, rhs: i64) -> Self { N { v: self.v << rhs } } }
+        impl Shr for N { fn shr(self: Self, rhs: i64) -> Self { N { v: self.v >> rhs } } }
+        fn main() {
+            let mut a = N { v: 1 };
+            a <<= 3;
+            ret_i64(a.v);
+            a >>= 2;
+            ret_i64(a.v);
+        }
+    ));
+    assert_all(&result, &[ 8i64, 2 ]);
+}
+
+#[test]
+fn bitwise_on_builtin_integers() {
+    let result = run(stringify!(
+        fn main() {
+            ret_i64(12 & 10);
+            ret_i64(12 | 10);
+            ret_i64(12 ^ 10);
+            ret_i64(1 << 4);
+            ret_i64(16 >> 2);
+            let mut x: i64 = 15;
+            x &= 10;
+            ret_i64(x);
+            x |= 5;
+            ret_i64(x);
+        }
+    ));
+    assert_all(&result, &[ 8i64, 14, 6, 16, 4, 10, 15 ]);
+}
+
+#[test]
+fn bitwise_trait_missing_error() {
+    let err = build_err(stringify!(
+        struct S { v: i64 }
+        fn main() {
+            let a = S { v: 1 };
+            let b = S { v: 2 };
+            ret_i64((a & b).v);
+        }
+    ));
+    assert!(err.contains("BitAnd"), "unexpected error: {}", err);
+}
+
+#[test]
+fn shift_trait_missing_error() {
+    let err = build_err(stringify!(
+        struct S { v: i64 }
+        fn main() {
+            let a = S { v: 1 };
+            ret_i64((a << 2).v);
+        }
+    ));
+    assert!(err.contains("Shl"), "unexpected error: {}", err);
+}
