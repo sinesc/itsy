@@ -1,8 +1,5 @@
 use crate::util::*;
 
-// Note: the parser currently only supports decimal literals, so bit patterns below are written in decimal
-// with their binary value noted in comments.
-
 #[test]
 fn binary_unsigned() {
     let result = run(stringify!(

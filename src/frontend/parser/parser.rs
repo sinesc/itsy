@@ -786,8 +786,73 @@ fn numeric_literal(i: Input) -> Output<Literal> {
         ))(i)
     }
 
+    /// Matches an optionally-signed binary, octal or hexadecimal integer literal with an optional integer
+    /// type suffix, e.g. `0xffu8` or `-0b1100_1010i16`. Returns whether the literal was negated, its radix,
+    /// the digit string (underscores not yet stripped) and the type suffix (if any).
+    fn radix_numerical(i: Input) -> Output<(bool, u32, Input, Option<Input>)> {
+        let (remaining, (sign, prefix, digits, suffix)) = terminated(
+            tuple((
+                opt(recognize(alt((punct("+"), punct("-"))))),
+                alt((tag("0x"), tag("0o"), tag("0b"))),
+                // first character must be an actual radix digit; underscores may only follow. Digits outside
+                // the prefix's radix (e.g. `0o8`) are caught later when the value fails to parse.
+                recognize(pair(
+                    take_while1(|c: char| c.is_ascii_hexdigit()),
+                    take_while(|c: char| c.is_ascii_hexdigit() || c == '_')
+                )),
+                opt(recognize(tuple((one_of("iu"), alt((tag("8"), tag("16"), tag("32"), tag("64")))))))
+            )),
+            space0
+        )(i)?;
+        let negative = sign.map_or(false, |s| *s == "-");
+        let radix = match *prefix {
+            "0x" => 16,
+            "0o" => 8,
+            _    => 2,
+        };
+        Ok((remaining, (negative, radix, digits, suffix)))
+    }
+
     let position = i.position();
     let j = i.clone();
+
+    // Binary / hexadecimal literals are tried first; the `0x`/`0b` prefix is unambiguous, but a leading `0`
+    // would otherwise be consumed by the decimal parser below, leaving the radix digits behind.
+    if let Ok((remaining, (negative, radix, digits, suffix))) = radix_numerical(i.clone()) {
+        let type_name = suffix.map(|s| *s);
+        if let Ok(magnitude) = u64::from_str_radix(&digits.replace('_', ""), radix) {
+            // Magnitude is evaluated first, then negated, so the range check applies to the final value.
+            if negative {
+                let value = -(magnitude as i128);
+                if value >= i64::MIN as i128 && check_signed_range(value as i64, type_name) {
+                    return Ok((remaining, Literal {
+                        position    : position,
+                        value       : LiteralValue::Numeric(Numeric::Signed(value as i64)),
+                        type_name   : type_name.map(|ty| TypeName::from_str(ty, position)),
+                        type_id     : None,
+                    }));
+                }
+            } else if let Some("i8") | Some("i16") | Some("i32") | Some("i64") = type_name {
+                if magnitude <= i64::MAX as u64 && check_signed_range(magnitude as i64, type_name) {
+                    return Ok((remaining, Literal {
+                        position    : position,
+                        value       : LiteralValue::Numeric(Numeric::Signed(magnitude as i64)),
+                        type_name   : type_name.map(|ty| TypeName::from_str(ty, position)),
+                        type_id     : None,
+                    }));
+                }
+            } else if check_unsigned_range(magnitude, type_name) {
+                return Ok((remaining, Literal {
+                    position    : position,
+                    value       : LiteralValue::Numeric(Numeric::Unsigned(magnitude)),
+                    type_name   : type_name.map(|ty| TypeName::from_str(ty, position)),
+                    type_id     : None,
+                }));
+            }
+        }
+        // Prefix matched but the value was malformed or out of range: fail instead of falling through.
+        return Err(nom::Err::Failure(Failure { input: j, kind: ParseErrorKind::InvalidNumerical }));
+    }
 
     let (remaining, numerical) = terminated(
         recognize(tuple((

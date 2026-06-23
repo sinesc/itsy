@@ -8,6 +8,8 @@ mod operators;
 mod casts;
 #[path="vm/expressions.rs"]
 mod expressions;
+#[path="vm/literals.rs"]
+mod literals;
 #[path="vm/arrays.rs"]
 mod arrays;
 #[path="vm/maps.rs"]
