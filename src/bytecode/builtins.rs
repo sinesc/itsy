@@ -1679,7 +1679,7 @@ impl_builtins! {
     /// # Examples
     ///
     /// ``` ignore
-    /// let scores = Map<String, u64>{};
+    /// let scores = [ => ];
     /// scores.insert("Alice", 100);
     /// scores.insert("Bob", 200);
     ///
@@ -1693,6 +1693,26 @@ impl_builtins! {
             fn map_insert(&mut vm + constructor, this: Map, key: Key, value: Value) {
                 let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
                 vm.map_put(this.index(), key, value, key_ctor, value_ctor, true);
+                vm.refcount_value(this, constructor, HeapRefOp::Free);
+            }
+        }
+
+        /// Merges all entries from `other` into this map, overwriting values on key collision.
+        extend(self: Self, other: Map) {
+            fn map_extend(&mut vm + constructor, this: Map, other: Map) {
+                let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
+                let this_idx = this.index();
+                let other_idx = other.index();
+                // Self-extend is a no-op (every entry would collide with itself); skipping it also
+                // avoids freeing a value box that is still referenced by the entry being rewritten.
+                if this_idx != other_idx {
+                    // The boxed key/value references are shared into this map; map_put increments them
+                    // (retain), so both maps co-own each box and refcounts stay balanced on drop.
+                    for (key, value) in vm.map_live_entries(other_idx) {
+                        vm.map_put(this_idx, key, value, key_ctor, value_ctor, true);
+                    }
+                }
+                vm.refcount_value(other, constructor, HeapRefOp::Free);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
             }
         }

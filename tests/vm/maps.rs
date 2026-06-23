@@ -241,6 +241,88 @@ fn map_clear_string_values_no_leak() {
 }
 
 #[test]
+fn map_extend() {
+    let result = run(stringify!(
+        let a = [ "a" => 1u64, "b" => 2u64 ];
+        let b = [ "b" => 20u64, "c" => 30u64 ]; // "b" collides, "c" is new
+        a.extend(b);
+        ret_u64(a.len());
+        let v = a["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        let v = a["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) }; // overwritten
+        let v = a["c"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(b.len()); // source is unchanged
+    ));
+    assert_all(&result, &[ 3u64, 1, 20, 30, 2 ]);
+}
+
+#[test]
+fn map_extend_empty_source() {
+    let result = run(stringify!(
+        let a = [ "a" => 1u64 ];
+        let b = [ => ];
+        a.extend(b);
+        ret_u64(a.len());
+        let v = a["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+    ));
+    assert_all(&result, &[ 1u64, 1 ]);
+}
+
+#[test]
+fn map_extend_into_empty() {
+    let result = run(stringify!(
+        let a = [ => ];
+        a["seed"] = 0u64; // pins the element types
+        a.remove("seed"); // ...leaving an empty target
+        let b = [ "x" => 5u64, "y" => 6u64 ];
+        a.extend(b);
+        ret_u64(a.len());
+        let v = a["x"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        let v = a["y"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+    ));
+    assert_all(&result, &[ 2u64, 5, 6 ]);
+}
+
+#[test]
+fn map_extend_string_values_no_leak() {
+    // sharing boxed reference values into the target must keep refcounts balanced
+    let result = run(stringify!(
+        let a = [ "a" => "first", "b" => "second" ];
+        let b = [ "b" => "SECOND", "c" => "third" ];
+        a.extend(b);
+        ret_u64(a.len());
+        match a["b"] { Some(v) => ret_str(v), None => ret_str("") };
+        match a["c"] { Some(v) => ret_str(v), None => ret_str("") };
+        ret_u64(b.len());
+    ));
+    assert_all!(&result, [ 3u64, String::from("SECOND"), String::from("third"), 2u64 ]);
+}
+
+#[test]
+fn map_extend_primitive_keys() {
+    let result = run(stringify!(
+        let a = [ 1u64 => "one", 2u64 => "two" ];
+        let b = [ 2u64 => "TWO", 3u64 => "three" ];
+        a.extend(b);
+        ret_u64(a.len());
+        match a[2u64] { Some(v) => ret_str(v), None => ret_str("") };
+        match a[3u64] { Some(v) => ret_str(v), None => ret_str("") };
+    ));
+    assert_all!(&result, [ 3u64, String::from("TWO"), String::from("three") ]);
+}
+
+#[test]
+fn map_extend_self_is_noop() {
+    let result = run(stringify!(
+        let m = [ "a" => "first", "b" => "second" ];
+        m.extend(m);
+        ret_u64(m.len());
+        match m["a"] { Some(v) => ret_str(v), None => ret_str("") };
+        match m["b"] { Some(v) => ret_str(v), None => ret_str("") };
+    ));
+    assert_all!(&result, [ 2u64, String::from("first"), String::from("second") ]);
+}
+
+#[test]
 fn map_keys() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
