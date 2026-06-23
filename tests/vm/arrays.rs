@@ -204,16 +204,16 @@ fn array_ref_elements() {
             a.push(Struct { value: 5 });
             a.push(Struct { value: 6 });
 
-            let b = a.pop(); // 6
-            ret_u8(b.value);
+            let b = a.pop(); // Some(Struct { value: 6 })
+            match b { Some(v) => ret_u8(v.value), None => ret_u8(0) };
 
             a.truncate(4);
 
-            let c = a.pop(); // 4
-            ret_u8(c.value);
+            let c = a.pop(); // Some(Struct { value: 4 })
+            match c { Some(v) => ret_u8(v.value), None => ret_u8(0) };
 
-            let d = a.remove(0); // 1
-            ret_u8(d.value);
+            let d = a.remove(0); // Some(Struct { value: 1 })
+            match d { Some(v) => ret_u8(v.value), None => ret_u8(0) };
 
             for x in a { // 2, 3
                 ret_u8(x.value);

@@ -244,6 +244,42 @@ impl<T, U> VM<T, U> {
         self.state = VMState::Ready;
         self.gen_control.clear();
     }
+
+    // ---- Option<T> construction helpers ----
+    // These build `Some(T)` / `None` heap objects for use by array/map builtins.
+    // Option<T> is a synthesized mixed enum: variant 0 = Some(T), variant 1 = None.
+    // implementor_index = 0 (Option<T> does not implement any traits).
+
+    /// Builds a `Some(primitive)` heap object: `[variant_tag: u16][payload_bytes]`.
+    /// `payload_bytes` are the raw bytes of the primitive value.
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_some_bytes(self: &mut Self, payload_bytes: &[u8]) -> HeapRef {
+        let mut bytes = Vec::with_capacity(2 + payload_bytes.len());
+        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
+        bytes.extend_from_slice(payload_bytes);
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
+    }
+
+    /// Builds a `Some(ref)` heap object: `[variant_tag: u16][HeapRef_bytes]`.
+    /// The payload `HeapRef` is embedded into the object; its refcount is 0
+    /// (DecNoFree was already called by the caller before embedding).
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_some_ref(self: &mut Self, payload: HeapRef) -> HeapRef {
+        let mut bytes = Vec::with_capacity(2 + size_of::<HeapRef>());
+        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
+        bytes.extend_from_slice(&payload.to_ne_bytes());
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
+    }
+
+    /// Builds a `None` heap object: `[variant_tag: u16]` (variant 1 = None).
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_none(self: &mut Self) -> HeapRef {
+        let bytes = (1u16).to_ne_bytes(); // variant 1 = None
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
+    }
 }
 
 /// Internal VM methods.

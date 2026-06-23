@@ -114,28 +114,35 @@ impl_builtins! {
             }
         }
 
-        /// Removes the last element from an array and returns it.
-        pop(self: Self) -> Element {
+        /// Removes the last element from an array and returns it, or `None` if the array is empty.
+        pop(self: Self) -> OptionalElement {
             fn <
-                array_pop8<T: u8>(this: Array) -> u8,
-                array_pop16<T: u16>(this: Array) -> u16,
-                array_pop32<T: u32>(this: Array) -> u32,
-                array_pop64<T: u64>(this: Array) -> u64,
+                array_pop8<T: u8>(this: Array) -> OptionalElement,
+                array_pop16<T: u16>(this: Array) -> OptionalElement,
+                array_pop32<T: u32>(this: Array) -> OptionalElement,
+                array_pop64<T: u64>(this: Array) -> OptionalElement,
             >(&mut vm) {
                 let index = this.index();
-                let offset = vm.heap.item(index).data.len() - size_of::<T>();
-                let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
+                let len = vm.heap.item(index).data.len();
+                if len == 0 { return vm.option_none(); }
+                let offset = len - size_of::<T>();
+                let value: T = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
                 vm.heap.item_mut(index).data.truncate(offset);
-                result
+                vm.option_some_bytes(&value.to_ne_bytes())
             }
 
-            fn array_popx(&mut vm + constructor, this: Array) -> Element { // FIXME: once data enums are usable this needs to return an Option
+            fn array_popx(&mut vm + constructor, this: Array) -> OptionalElement {
                 let index = this.index();
-                let offset = vm.heap.item(index).data.len() - size_of::<HeapRef>();
-                let result = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
-                vm.heap.item_mut(index).data.truncate(offset);
-                vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
-                result
+                let len = vm.heap.item(index).data.len();
+                if len == 0 {
+                    vm.option_none()
+                } else {
+                    let offset = len - size_of::<HeapRef>();
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(index as StackAddress, offset as StackAddress));
+                    vm.heap.item_mut(index).data.truncate(offset);
+                    vm.refcount_value(payload, constructor, HeapRefOp::DecNoFree);
+                    vm.option_some_ref(payload)
+                }
             }
         }
 
@@ -203,33 +210,44 @@ impl_builtins! {
         }
 
         /// Removes and returns the element at position index within the array, shifting all elements after it to the left.
-        remove(self: Self, element: u64 ) -> Element {
+        /// Returns `None` if the index is out of range.
+        remove(self: Self, element: u64 ) -> OptionalElement {
             fn <
-                array_remove8<T: u8>(this: Array, element: StackAddress) -> u8,
-                array_remove16<T: u16>(this: Array, element: StackAddress) -> u16,
-                array_remove32<T: u32>(this: Array, element: StackAddress) -> u32,
-                array_remove64<T: u64>(this: Array, element: StackAddress) -> u64,
+                array_remove8<T: u8>(this: Array, element: StackAddress) -> OptionalElement,
+                array_remove16<T: u16>(this: Array, element: StackAddress) -> OptionalElement,
+                array_remove32<T: u32>(this: Array, element: StackAddress) -> OptionalElement,
+                array_remove64<T: u64>(this: Array, element: StackAddress) -> OptionalElement,
             >(&mut vm) {
                 const ELEMENT_SIZE: usize = size_of::<T>();
                 let offset = element as usize * ELEMENT_SIZE;
                 let index = this.index();
-                let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
-                let data = &mut vm.heap.item_mut(index).data;
-                data.copy_within(offset + ELEMENT_SIZE .., offset);
-                data.truncate(data.len() - ELEMENT_SIZE);
-                result
+                let data = &vm.heap.item(index).data;
+                if offset + ELEMENT_SIZE > data.len() {
+                    vm.option_none()
+                } else {
+                    let result: T = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    let data = &mut vm.heap.item_mut(index).data;
+                    data.copy_within(offset + ELEMENT_SIZE .., offset);
+                    data.truncate(data.len() - ELEMENT_SIZE);
+                    vm.option_some_bytes(&result.to_ne_bytes())
+                }
             }
 
-            fn array_removex(&mut vm + constructor, this: Array, element: StackAddress) -> Element {
+            fn array_removex(&mut vm + constructor, this: Array, element: StackAddress) -> OptionalElement {
                 const ELEMENT_SIZE: usize = size_of::<HeapRef>();
                 let offset = element as usize * ELEMENT_SIZE;
                 let index = this.index();
-                let result: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
-                let data = &mut vm.heap.item_mut(index).data;
-                data.copy_within(offset + ELEMENT_SIZE .., offset);
-                data.truncate(data.len() - ELEMENT_SIZE);
-                vm.refcount_value(result, constructor, HeapRefOp::DecNoFree);
-                result
+                let data = &vm.heap.item(index).data;
+                if offset + ELEMENT_SIZE > data.len() {
+                    vm.option_none()
+                } else {
+                    let payload: HeapRef = vm.heap.read(HeapRef::new(index, offset as StackAddress));
+                    let data = &mut vm.heap.item_mut(index).data;
+                    data.copy_within(offset + ELEMENT_SIZE .., offset);
+                    data.truncate(data.len() - ELEMENT_SIZE);
+                    vm.refcount_value(payload, constructor, HeapRefOp::DecNoFree);
+                    vm.option_some_ref(payload)
+                }
             }
         }
 
@@ -1330,10 +1348,10 @@ impl_builtins! {
             }
         }
 
-        /// Looks up a key and returns its value, trapping if absent.
-        get(self: Self, key: Key) -> Value {
-            fn map_get(&mut vm + constructor, this: Map, key: Key) -> Value {
-                let (key_ctor, _value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
+        /// Looks up a key and returns its value, or `None` if absent.
+        get(self: Self, key: Key) -> OptionalValue {
+            fn map_get(&mut vm + constructor, this: Map, key: Key) -> OptionalValue {
+                let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
                 let idx = this.index();
                 let hr = size_of::<HeapRef>() as StackAddress;
                 let found = vm.map_find(idx, key, key_ctor);
@@ -1343,14 +1361,16 @@ impl_builtins! {
                     Some(e) => {
                         let value_off = vm.map_entries_offset(idx) + e * 2 * hr + hr;
                         let value: HeapRef = vm.heap.read(HeapRef::new(idx, value_off));
-                        vm.heap.ref_item(value.index(), HeapRefOp::Inc);
-                        vm.heap.ref_item(value.index(), HeapRefOp::DecNoFree);
-                        value
+                        if Constructor::is_primitive(&vm.stack, value_ctor) {
+                            // Primitive values are boxed on the heap; unbox into inline bytes for Option<primitive>.
+                            let n = Constructor::primitive_size(&vm.stack, value_ctor);
+                            let bytes = vm.heap.item(value.index()).data[0..n].to_vec();
+                            vm.option_some_bytes(&bytes)
+                        } else {
+                            vm.option_some_ref(value)
+                        }
                     },
-                    None => {
-                        vm.state = VMState::Error(RuntimeErrorKind::KeyNotFound);
-                        HeapRef::new(0, 0)
-                    },
+                    None => vm.option_none(),
                 }
             }
         }
