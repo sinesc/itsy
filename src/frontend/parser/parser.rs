@@ -1379,11 +1379,16 @@ fn pattern(i: Input) -> Output<Pattern> {
         )(i)
     }
     /// A path: multiple segments match a unit variant/constant, a single segment introduces a binding.
+    /// The bare `None` is a special case: it is the unit variant of the built-in `Option<T>` enum and
+    /// must be treated as a `Path` (variant match) rather than a binding.
     fn path_or_binding(i: Input) -> Output<Pattern> {
         let position = i.position();
         let j = i.clone();
         map(path, move |mut p| {
             if p.segments.len() > 1 {
+                Pattern::Path(p)
+            } else if p.segments[0].name == "None" {
+                // bare `None` is the unit variant of `Option<T>` — treat as a variant path, not a binding
                 Pattern::Path(p)
             } else {
                 let ident = p.segments.pop().unwrap();
