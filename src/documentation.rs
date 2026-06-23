@@ -15,6 +15,11 @@
 //! Structs, product of multiple types: `struct { field1: Type1, ... }`.\
 //! Enums, disjoint union (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
 //!
+//! # Built-in container types
+//!
+//! [Result], success-or-error type: `Result<T>` with `Ok(value)` and `Err(error)`.\
+//! [Option], nullable type: `Option<T>` with `Some(value)` and `None`.
+//!
 //! # Traits
 //!
 //! [Intrinsic traits](crate::documentation::traits) are recognized by the compiler. Implementing one for
@@ -58,6 +63,47 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// }
 /// ```
 pub struct Result { }
+
+/// Nullable type, written `Option<T>`.
+///
+/// An `Option<T>` is either `Some(value)` carrying a value of type `T`, or `None` indicating
+/// the absence of a value. This lets functions express that a result may or may not exist
+/// without resorting to sentinel values or errors.
+///
+/// Inspect an option by matching it; both variants are part of the language:
+///
+/// ``` ignore
+/// match find(items, "hello") {
+///     Some(item) => print("found: {item}"),
+///     None => print("not found"),
+/// }
+/// ```
+///
+/// `Some(value)` is written as a call and `None` is written bare (without parentheses). Both
+/// are only valid where an `Option<T>` is expected:
+///
+/// ``` ignore
+/// fn first(items: [i32]) -> Option<i32> {
+///     if items.len() == 0 {
+///         None
+///     } else {
+///         Some(items[0])
+///     }
+/// }
+/// ```
+///
+/// Like `Result`, an `Option<T>` can be used anywhere a type annotation or return type is
+/// accepted. The compiler infers the inner type from context when possible:
+///
+/// ``` ignore
+/// fn double_opt(n: Option<i32>) -> Option<i32> {
+///     match n {
+///         Some(v) => Some(v * 2),
+///         None => None,
+///     }
+/// }
+/// ```
+pub struct Option { }
 
 /// Intrinsic traits recognized by the compiler.
 ///
