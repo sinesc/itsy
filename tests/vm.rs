@@ -1,3 +1,4 @@
+#[macro_use]
 mod util;
 #[path="vm/bitwise.rs"]
 mod bitwise;

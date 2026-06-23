@@ -32,6 +32,35 @@ pub fn assert_all<T>(result: &Context, expected: &[ T ]) where T: PartialEq+Debu
     assert!(result.len() == expected.len(), "Result length {} did not match expected length {}", result.len(), expected.len());
 }
 
+/// Compares the Context element at `index` against an expected value of any supported type. Backs the
+/// [`assert_all!`] macro, which (unlike the [`assert_all`] function) allows the expected values to be of
+/// differing types.
+#[allow(dead_code)]
+pub fn assert_one<T>(result: &Context, index: usize, expected: T) where T: PartialEq+Debug+'static {
+    assert!(index < result.len(), "Result has {} element(s) but expected at least {}", result.len(), index + 1);
+    if let Some(value) = result[index].downcast_ref::<T>() {
+        assert!(value == &expected, "Result <{:?}> did not match expected <{:?}> at index {}", value, &expected, index);
+    } else {
+        panic!("Result-type did not match type of expected value <{:?}> at index {}", &expected, index);
+    }
+}
+
+/// Like the [`assert_all`] function, but accepts a bracketed list of expected values that may be of
+/// differing types, e.g. `assert_all!(&result, [ 255u8, -1i32, String::from("x") ]);`. Useful when a test
+/// pushes results of several types into the Context. 
+#[allow(unused_macros)]
+macro_rules! assert_all {
+    ($result:expr, [ $( $expected:expr ),* $(,)? ]) => {{
+        let result = $result;
+        let mut count = 0usize;
+        $(
+            $crate::util::assert_one(result, count, $expected);
+            count += 1;
+        )*
+        assert!(result.len() == count, "Result length {} did not match expected length {}", result.len(), count);
+    }};
+}
+
 #[allow(dead_code)]
 pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
     match STACK_ADDRESS_TYPE {
