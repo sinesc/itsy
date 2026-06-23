@@ -748,32 +748,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// indexed, so repoint that lookup at `$iter.value()`. Idempotent across resolver passes: only an
     /// index whose receiver is the loop's own generator variable is rewritten, and afterwards it is a
     /// method call (not an index), so a later pass leaves it alone.
-    fn rewrite_generator_value_lookup(self: &mut Self, item: &mut ast::ForLoop) {
-        let gen_binding_id = match &item.expr {
-            ast::Expression::Variable(var) => var.binding_id,
-            _ => return,
-        };
-        let first = match item.block.statements.first_mut() {
-            Some(ast::Statement::LetBinding(let_binding)) => let_binding,
-            _ => return,
-        };
-        let is_target_index = matches!(
-            first.expr.as_ref(),
-            Some(ast::Expression::BinaryOp(bo))
-                if bo.op == ast::BinaryOperator::Index
-                && bo.left.as_expression().and_then(|e| e.as_variable()).map_or(false, |v| v.binding_id == gen_binding_id)
-        );
-        if !is_target_index {
-            return;
-        }
-        if let Some(ast::Expression::BinaryOp(bo)) = first.expr.take() {
-            let ast::BinaryOp { left, position, .. } = *bo;
-            if let ast::BinaryOperand::Expression(receiver) = left {
-                first.expr = Some(Self::make_method_call(receiver, "value", Vec::new(), position));
-            }
-        }
-    }
-
     /// Builds the half-open range `0 .. upper`. The `0` is an unconstrained numeric literal so it unifies
     /// to `upper`'s type during range resolution. Used to lower array index iteration.
     fn make_range(position: ast::Position, upper: ast::Expression) -> ast::Expression {
@@ -1733,37 +1707,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         use ast::{Expression::*, BinaryOperator as Op};
         let parent_scope_id = self.scope_id;
         self.scope_id = item.scope_id;
-        // create binding for the iterator variable
-        self.resolve_let_binding(&mut item.iter)?;
+        // create bindings for the iteration variables present in this loop form
+        if let Some(binding) = item.iter.as_mut() { self.resolve_let_binding(binding)?; }
+        if let Some(binding) = item.iter_key.as_mut() { self.resolve_let_binding(binding)?; }
         match &item.expr { // NOTE: these need to match Compiler::compile_for_loop
             BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
-                let type_id = item.iter.type_id(self);
+                // range iteration: the value sequence is bound into `iter`.
+                let type_id = item.iter.as_ref().and_then(|b| b.type_id(self));
                 self.resolve_expression(&mut item.expr, type_id)?;
-                if let Some(type_id) = item.expr.type_id(self) {
-                    self.set_type_id(&mut item.iter, type_id)?;
+                if let (Some(type_id), Some(binding)) = (item.expr.type_id(self), item.iter.as_mut()) {
+                    self.set_type_id(binding, type_id)?;
                 }
             },
             _ => {
-                // any array-typed expression is iterable. Collections iterated by key/index are lowered to a
-                // one-shot snapshot so the body can freely mutate them without disturbing the iteration: a
-                // map's keys/values to `map.keys()`/`map.values()`, an array's indices to a counting range
-                // `0 .. array.len()`.
                 self.resolve_expression(&mut item.expr, None)?;
                 // generator iteration: the compiler drives next()/value()/key() (see
-                // Compiler::compile_for_loop_generator). Here we only bind the iteration variable's type
-                // and, for `for k, v`, repoint the parser-inserted value lookup at `.value()`. Checked
-                // before the map/array logic so a generator never misroutes to those paths.
+                // Compiler::compile_for_loop_generator). Here we only bind the iteration variables' types.
+                // Checked before the map/array logic so a generator never misroutes to those paths.
                 if let Some((key_type_id, value_type_id)) = item.expr.type_id(self).and_then(|t| self.generator_signature(t)) {
-                    match item.iterate {
-                        ast::ForIterate::Values => {
-                            self.set_type_id(&mut item.iter, value_type_id)?;
-                        },
-                        ast::ForIterate::Keys => {
-                            // `for k, _ in g` / `for k, v in g`: a value-only generator can't be key-iterated.
-                            let key_type_id = key_type_id.usr(Some(&item.expr), ResolveErrorKind::NotKeyValueIterable(self.type_name(value_type_id)))?;
-                            self.set_type_id(&mut item.iter, key_type_id)?;
-                            self.rewrite_generator_value_lookup(item);
-                        },
+                    if let Some(binding) = item.iter.as_mut() {
+                        self.set_type_id(binding, value_type_id)?;
+                    }
+                    if item.iter_key.is_some() {
+                        // a value-only generator can't be key-iterated.
+                        let key_type_id = key_type_id.usr(Some(&item.expr), ResolveErrorKind::NotKeyValueIterable(self.type_name(value_type_id)))?;
+                        if let Some(binding) = item.iter_key.as_mut() {
+                            self.set_type_id(binding, key_type_id)?;
+                        }
                     }
                     self.resolve_block(&mut item.block, Some(self.primitive_type_id(Type::void)?))?;
                     self.scope_id = parent_scope_id;
@@ -1771,46 +1741,56 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
                 let item_is_map = self.item_type(&item.expr).map_or(false, |ty| ty.as_map().is_some());
                 let item_is_array = self.item_type(&item.expr).map_or(false, |ty| ty.as_array().is_some());
-                if item.iterate == ast::ForIterate::Keys && item_is_array {
-                    // index iteration over an array `arr`: lower to `for k in 0 .. arr.len()`. On the next
-                    // pass `item.expr` is a range and routes to the range arm above; any `arr[k]` value
-                    // lookup (from the `for k, v` desugaring) indexes the shared temporary directly.
-                    let position = item.expr.position();
-                    let array_expr = replace(&mut item.expr, ast::Expression::void(position));
-                    let len_call = Self::make_method_call(array_expr, "len", Vec::new(), position);
-                    item.expr = Self::make_range(position, len_call);
-                    // expr is now a range, walked by value like any other range; tidy the mode accordingly.
-                    item.iterate = ast::ForIterate::Values;
-                    let type_id = item.iter.type_id(self);
-                    self.resolve_expression(&mut item.expr, type_id)?;
-                    if let Some(type_id) = item.expr.type_id(self) {
-                        self.set_type_id(&mut item.iter, type_id)?;
+                if item.iter.is_none() && item.iter_key.is_some() {
+                    // key-only iteration (`for k, _`): normalize to plain value iteration with the key binding
+                    // moved into `iter`, over a one-shot snapshot so the body can freely mutate the original.
+                    if item_is_array {
+                        // `for k in 0 .. arr.len()`. On the next pass `item.expr` is a range and routes to the
+                        // range arm above, walked by value into the (now relocated) `iter` binding.
+                        let position = item.expr.position();
+                        let array_expr = replace(&mut item.expr, ast::Expression::void(position));
+                        let len_call = Self::make_method_call(array_expr, "len", Vec::new(), position);
+                        item.expr = Self::make_range(position, len_call);
+                        item.iter = item.iter_key.take();
+                        let type_id = item.iter.as_ref().and_then(|b| b.type_id(self));
+                        self.resolve_expression(&mut item.expr, type_id)?;
+                        if let (Some(type_id), Some(binding)) = (item.expr.type_id(self), item.iter.as_mut()) {
+                            self.set_type_id(binding, type_id)?;
+                        }
+                    } else if item_is_map {
+                        // `for v in map.keys()`: a values-like snapshot of the keys, walked by value into `iter`.
+                        let position = item.expr.position();
+                        let map_expr = replace(&mut item.expr, ast::Expression::void(position));
+                        item.expr = Self::make_method_call(map_expr, "keys", Vec::new(), position);
+                        item.iter = item.iter_key.take();
+                        self.resolve_expression(&mut item.expr, None)?;
+                        if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
+                            if let Some(binding) = item.iter.as_mut() { self.set_type_id(binding, elements_type_id)?; }
+                        }
+                    } else if let Some(type_id) = item.expr.type_id(self) {
+                        // key-only iteration over a non-map, non-array is rejected once its type is known.
+                        let type_name = self.type_name(type_id);
+                        return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotKeyValueIterable(type_name), self.module_path));
+                    }
+                } else if item_is_map {
+                    // map value iteration (`for v`) or key-value iteration (`for k, v`): the map is left in
+                    // place and lowered to map_iter / map_iter_kv by the compiler. Type the bindings off the map.
+                    let (key_type_id, value_type_id) = {
+                        let map = self.item_type(&item.expr).and_then(|ty| ty.as_map());
+                        (map.and_then(|m| m.key_type_id), map.and_then(|m| m.value_type_id))
+                    };
+                    if let (Some(value_type_id), Some(binding)) = (value_type_id, item.iter.as_mut()) {
+                        self.set_type_id(binding, value_type_id)?;
+                    }
+                    if let (Some(key_type_id), Some(binding)) = (key_type_id, item.iter_key.as_mut()) {
+                        self.set_type_id(binding, key_type_id)?;
                     }
                 } else {
-                    // key/index iteration over a non-map, non-array is rejected. Reject any *resolved* such
-                    // type here so the error names it, instead of letting the lowered value lookup fail with a
-                    // reference to the internal temporary the desugaring introduced. Leave unresolved
-                    // expressions for a later pass.
-                    if item.iterate == ast::ForIterate::Keys && !item_is_map {
-                        if let Some(type_id) = item.expr.type_id(self) {
-                            let type_name = self.type_name(type_id);
-                            return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotKeyValueIterable(type_name), self.module_path));
-                        }
-                    }
-                    if item_is_map {
-                        let position = item.expr.position();
-                        let method = if item.iterate == ast::ForIterate::Keys { "keys" } else { "values" };
-                        let map_expr = replace(&mut item.expr, ast::Expression::void(position));
-                        item.expr = Self::make_method_call(map_expr, method, Vec::new(), position);
-                        self.resolve_expression(&mut item.expr, None)?;
-                        // map confirmed and lowered to a `.keys()`/`.values()` array; switch to plain by-value
-                        // iteration so the rejection above doesn't misfire against that array on later passes.
-                        item.iterate = ast::ForIterate::Values;
-                    }
+                    // array iteration: value (`for v`) or index+value (`for k, v`).
                     if let Some(&Type::Array(Array { type_id: Some(elements_type_id) })) = self.item_type(&item.expr) {
                         // infer iter type from array element type
-                        self.set_type_id(&mut item.iter, elements_type_id)?;
-                    } else if let (Some(iter_type_id), Some(array_type_id)) = (item.iter.type_id(self), item.expr.type_id(self)) {
+                        if let Some(binding) = item.iter.as_mut() { self.set_type_id(binding, elements_type_id)?; }
+                    } else if let (Some(iter_type_id), Some(array_type_id)) = (item.iter.as_ref().and_then(|b| b.type_id(self)), item.expr.type_id(self)) {
                         // infer array element type from iter
                         if let Some(array) = self.type_by_id_mut(array_type_id).as_array_mut() {
                             array.type_id = Some(iter_type_id);
@@ -1818,6 +1798,10 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     } else if self.item_type(&item.expr).map_or(false, |expr| expr.as_array().is_none()) {
                         let type_name = self.type_name(item.expr.type_id(self).ice()?);
                         return Err(ResolveError::new(&item.expr, ResolveErrorKind::NotIterable(type_name), self.module_path));
+                    }
+                    // the running index of `for k, v` over an array is StackAddress-typed (like `arr.len()`).
+                    if let Some(binding) = item.iter_key.as_mut() {
+                        self.set_type_id(binding, self.primitive_type_id(STACK_ADDRESS_TYPE)?)?;
                     }
                 }
             },

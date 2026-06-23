@@ -17,10 +17,10 @@
 //! `map_box_eq` so that equal keys always collide.
 
 use crate::prelude::*;
-use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
+use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, FrameAddress};
 use crate::bytecode::{Constructor, HeapRef, HeapRefOp};
 use crate::bytecode::runtime::heap::HeapOp;
-use crate::bytecode::runtime::stack::StackOp;
+use crate::bytecode::runtime::stack::{StackOp, StackRelativeOp};
 use super::vm::VM;
 
 /// Header field count (len, n_entries, n_buckets), each StackAddress sized.
@@ -132,6 +132,48 @@ impl<T, U> VM<T, U> {
     pub(crate) fn map_unbox_push_primitive(self: &mut Self, value: HeapRef, primitive_size: usize) {
         let bytes = self.heap.item(value.index()).data[0..primitive_size].to_vec();
         self.stack.extend_from(&bytes);
+    }
+
+    /// Finds the next live entry of the map at `idx` at or after the cursor byte-offset `cursor`,
+    /// skipping tombstones. Returns the live entry's byte-offset together with the offset to resume
+    /// from on the next call, or `None` once the entries region is exhausted. Used by the `map_iter`
+    /// opcodes: a cursor below the entries region (e.g. the freshly-cloned `HeapRef`'s offset of 0)
+    /// starts at the first entry.
+    pub(crate) fn map_iter_advance(self: &Self, idx: StackAddress, cursor: StackAddress) -> Option<(StackAddress, StackAddress)> {
+        let sa = size_of::<StackAddress>() as StackAddress;
+        let hr = size_of::<HeapRef>() as StackAddress;
+        let base = self.map_entries_offset(idx);
+        let n_entries: StackAddress = self.heap.load(idx, sa);
+        let entries_end = base + n_entries * 2 * hr;
+        let mut off = if cursor < base { base } else { cursor };
+        while off < entries_end {
+            let key: HeapRef = self.heap.read(HeapRef::new(idx, off));
+            if key.index() != MAP_EMPTY {
+                return Some((off, off + 2 * hr));
+            }
+            off += 2 * hr;
+        }
+        None
+    }
+
+    /// Unboxes a boxed map key/value into a frame-local slot at `frame_offset` using the given
+    /// sub-constructor: a primitive is copied as raw bytes, a reference value is stored as its `HeapRef`.
+    /// The boxed entries are kept alive by the retained clone the iteration walks, so the stored value
+    /// is a borrow (no refcount change), mirroring how `arrayiter` binds array elements.
+    pub(crate) fn map_unbox_to_frame(self: &mut Self, boxed: HeapRef, ctor_offset: StackAddress, frame_offset: FrameAddress) {
+        if Constructor::is_primitive(&self.stack, ctor_offset) {
+            let n = Constructor::primitive_size(&self.stack, ctor_offset);
+            let data = &self.heap.item(boxed.index()).data;
+            match n {
+                1 => { let v = data[0]; self.stack.store_fp(frame_offset, v); },
+                2 => { let v = u16::from_ne_bytes(data[0..2].try_into().unwrap()); self.stack.store_fp(frame_offset, v); },
+                4 => { let v = u32::from_ne_bytes(data[0..4].try_into().unwrap()); self.stack.store_fp(frame_offset, v); },
+                8 => { let v = u64::from_ne_bytes(data[0..8].try_into().unwrap()); self.stack.store_fp(frame_offset, v); },
+                _ => panic!("Invalid primitive size {} for map value unboxing.", n),
+            }
+        } else {
+            self.stack.store_fp(frame_offset, boxed);
+        }
     }
 
     // -- Equality / hashing -----------------------------------------------------------------------------

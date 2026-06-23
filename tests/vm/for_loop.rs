@@ -163,6 +163,39 @@ fn for_in_inference() {
 }
 
 #[test]
+fn for_in_array_value_pop_during_iteration() {
+    // Iterating a clone means popping the original during iteration does not cut the loop short: the
+    // full snapshot taken at loop entry is visited, and the shared elements survive being dropped from
+    // the original until the loop releases its clone.
+    let result = run(stringify!(
+        let a = [ "one", "two", "three", "four" ];
+        for v in a {
+            ret_str(v);
+            if a.len() > 0 {
+                a.pop();
+            }
+        }
+        ret_str("len={a.len() as u64}");
+    ));
+    assert_all(&result, &[ "one".to_string(), "two".to_string(), "three".to_string(), "four".to_string(), "len=0".to_string() ]);
+}
+
+#[test]
+fn for_in_array_index_value_pop_during_iteration() {
+    // as above for the two-binding form: index and value both reflect the full entry snapshot
+    let result = run(stringify!(
+        let a = [ "one", "two", "three", "four" ];
+        for k, v in a {
+            ret_str("{k as u64}:{v}");
+            if a.len() > 0 {
+                a.pop();
+            }
+        }
+    ));
+    assert_all(&result, &[ "0:one".to_string(), "1:two".to_string(), "2:three".to_string(), "3:four".to_string() ]);
+}
+
+#[test]
 fn for_range_min_max() {
     let result = run(stringify!(
         let c = 0;

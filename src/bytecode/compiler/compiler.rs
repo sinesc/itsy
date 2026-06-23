@@ -1085,12 +1085,69 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
+    /// Emits the buffer-clone builtin for the collection reference on top of the stack, consuming it and
+    /// pushing an independent shallow clone (the clone shares the original's element/boxed sub-references
+    /// at their current refcount, per the heap-aggregate refcount-0 convention).
+    fn write_collection_clone(self: &mut Self, collection_type_id: TypeId) -> CompileResult {
+        if self.ty(&collection_type_id).as_map().is_some() {
+            let constructor = self.constructor(self.ty(&collection_type_id))?;
+            self.writer.call_builtinx(Builtin::map_clone, 0, constructor);
+        } else {
+            let element_type_id = self.ty(&collection_type_id).as_array().ice()?.type_id.ice()?;
+            let constructor = self.constructor(self.ty(&collection_type_id))?;
+            if self.ty(&element_type_id).is_ref() {
+                let element_constructor = self.constructor(self.ty(&element_type_id))?;
+                self.writer.call_builtinx(Builtin::array_clonex, constructor, element_constructor);
+            } else {
+                match self.ty(&element_type_id).primitive_size() {
+                    8 => self.writer.call_builtinx(Builtin::array_clone64, constructor, 0),
+                    4 => self.writer.call_builtinx(Builtin::array_clone32, constructor, 0),
+                    2 => self.writer.call_builtinx(Builtin::array_clone16, constructor, 0),
+                    1 => self.writer.call_builtinx(Builtin::array_clone8, constructor, 0),
+                    size @ _ => Self::ice(&format!("Unsupported array element size {} for for-loop clone", size))?,
+                };
+            }
+        }
+        Ok(())
+    }
+
+    /// Evaluates the loop's collection expression and leaves two references on the stack: the original
+    /// source `[S]` and an independent shallow clone `[C]` (`[S, C]`, clone on top), both retained
+    /// (recursively reference-counted) for the loop's duration. The loop walks the clone, so the body may
+    /// freely mutate the original; [`compile_for_loop_release`] releases both on exit.
+    ///
+    /// Retaining the source first is what makes cloning a *temporary* (e.g. `for v in [a, b]`) safe: the
+    /// clone builtin internally drops its receiver, which would otherwise free the temporary's
+    /// uniquely-owned sub-references before the clone could retain them. Owning the source beforehand
+    /// turns that internal drop into a no-op, and keeping the source retained alongside the clone keeps
+    /// the shared sub-references alive for the whole loop.
+    fn compile_for_loop_clone(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
+        let collection_type_id = item.expr.type_id(self).ice()?;
+        self.compile_expression(&item.expr)?;                                    // [S]
+        self.write_cnt(self.ty(&collection_type_id), true, HeapRefOp::Inc)?;     // own source + sub-refs
+        self.write_clone(self.ty(&collection_type_id));                          // [S, S]
+        self.write_collection_clone(collection_type_id)?;                        // [S, C]
+        self.write_cnt(self.ty(&collection_type_id), true, HeapRefOp::Inc)?;     // own clone + sub-refs
+        Ok(())
+    }
+
+    /// Releases the source and clone references left on the stack by [`compile_for_loop_clone`].
+    fn compile_for_loop_release(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
+        let collection_type_id = item.expr.type_id(self).ice()?;
+        self.write_cnt(self.ty(&collection_type_id), false, HeapRefOp::Dec)?;    // release clone -> [S]
+        self.write_cnt(self.ty(&collection_type_id), false, HeapRefOp::Dec)?;    // release source -> []
+        Ok(())
+    }
+
+    /// Compiles iteration over an array. The array is cloned at loop entry and the clone is retained for
+    /// the loop's duration (so the body may mutate the original); `arrayiter`/`array_iter_iv` walks the
+    /// clone, binding each element into `element_loc` and (for `for k, v`) the running index into
+    /// `index_loc`.
+    fn compile_for_loop_array(self: &mut Self, item: &ast::ForLoop, index_loc: Option<FrameAddress>, element_loc: FrameAddress, element_type_id: TypeId) -> CompileResult {
         comment!(self, "for in array");
-        // put array reference on top of stack, will be updated by arrayiter
-        self.compile_expression(&item.expr)?;
-        self.write_cnt(self.ty(&item.expr), true, HeapRefOp::Inc)?;
-        let loop_start = self.write_arrayiter(self.ty(&element_type_id), element_loc, 123)?;
+        // clone the array; the clone (top of stack) is walked while the body may mutate the original
+        self.compile_for_loop_clone(item)?;
+        let loop_start = self.write_array_iter(self.ty(&element_type_id), index_loc, element_loc, 123)?;
         // compile inner block
         self.loop_control.push();
         self.compile_block(&item.block)?;
@@ -1098,7 +1155,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // repeat/exit loop, fix exit address
         self.writer.jmp(loop_start);
         let exit_target = self.writer.position();
-        self.writer.overwrite(loop_start, |_| self.write_arrayiter(self.ty(&element_type_id), element_loc, exit_target))?;
+        self.writer.overwrite(loop_start, |_| self.write_array_iter(self.ty(&element_type_id), index_loc, element_loc, exit_target))?;
         // fix break/continue addresses
         for loop_control in &loop_controls {
             match loop_control {
@@ -1106,19 +1163,46 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
             };
         }
-        self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;
+        self.compile_for_loop_release(item)?;
+        Ok(())
+    }
+
+    /// Compiles iteration over a map. The map is cloned at loop entry and the clone is retained for the
+    /// loop's duration (so the body may mutate the original); `map_iter`/`map_iter_kv` walks the clone's
+    /// insertion-ordered entries, binding each value into `value_loc` and (for `for k, v`) the key into
+    /// `key_loc`.
+    fn compile_for_loop_map(self: &mut Self, item: &ast::ForLoop, key_loc: Option<FrameAddress>, value_loc: FrameAddress) -> CompileResult {
+        comment!(self, "for in map");
+        // clone the map; the clone (top of stack) is walked while the body may mutate the original
+        self.compile_for_loop_clone(item)?;
+        let constructor = self.constructor(self.ty(&item.expr))?;
+        let loop_start = self.write_map_iter(key_loc, value_loc, constructor, 123);
+        // compile inner block
+        self.loop_control.push();
+        self.compile_block(&item.block)?;
+        let loop_controls = self.loop_control.pop();
+        // repeat/exit loop, fix exit address
+        self.writer.jmp(loop_start);
+        let exit_target = self.writer.position();
+        self.writer.overwrite(loop_start, |_| self.write_map_iter(key_loc, value_loc, constructor, exit_target));
+        // fix break/continue addresses
+        for loop_control in &loop_controls {
+            match loop_control {
+                &LoopControl::Break(addr) => self.writer.overwrite(addr, |w| w.jmp(exit_target)),
+                &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
+            };
+        }
+        self.compile_for_loop_release(item)?;
         Ok(())
     }
 
     /// Compiles iteration over a generator, desugaring `for v in g { .. }` to the equivalent of
-    /// `while g.next() { let v = g.value(); .. }` (and `for k, v in g` to additionally bind `g.key()`;
-    /// the per-iteration `v` lookup is rewritten to `g.value()` during resolution). The generator
-    /// reference is evaluated once and kept on the stack for the loop's duration, cloned for each
-    /// `gen_next`/`gen_value`/`gen_key` (each borrows the reference; its refcount is owned here).
-    fn compile_for_loop_generator(self: &mut Self, item: &ast::ForLoop, iter_loc: FrameAddress) -> CompileResult {
+    /// `while g.next() { let v = g.value(); .. }` (and `for k, v in g` to additionally bind `g.key()`).
+    /// The generator reference is evaluated once and kept on the stack for the loop's duration, cloned
+    /// for each `gen_next`/`gen_value`/`gen_key` (each borrows the reference; its refcount is owned here).
+    fn compile_for_loop_generator(self: &mut Self, item: &ast::ForLoop, key_loc: Option<FrameAddress>, key_type_id: Option<TypeId>, value_loc: Option<FrameAddress>, value_type_id: Option<TypeId>) -> CompileResult {
         comment!(self, "for in generator");
         let gen_type_id = item.expr.type_id(self).ice()?;
-        let (key_type_id, value_type_id) = self.generator_signature(gen_type_id).ice()?;
         // evaluate the generator once, keep its reference on the stack and inc it for the loop's duration
         self.compile_expression(&item.expr)?;
         self.write_cnt(self.ty(&item.expr), true, HeapRefOp::Inc)?;
@@ -1127,19 +1211,17 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.write_clone(self.ty(&gen_type_id));
         self.writer.gen_next();
         let exit_jump = self.writer.j0(123);
-        // bind the iteration variable from the generator's current key (Keys) or value (Values)
-        self.write_clone(self.ty(&gen_type_id));
-        match item.iterate {
-            ast::ForIterate::Values => {
-                self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
-            },
-            ast::ForIterate::Keys => {
-                let key_type_id = key_type_id.ice()?;
-                self.writer.gen_key(self.ty(&key_type_id).primitive_size() as FrameAddress);
-            },
+        // bind the key (for `for k, _` / `for k, v`) and/or value (for `for v` / `for k, v`)
+        if let (Some(key_loc), Some(key_type_id)) = (key_loc, key_type_id) {
+            self.write_clone(self.ty(&gen_type_id));
+            self.writer.gen_key(self.ty(&key_type_id).primitive_size() as FrameAddress);
+            self.write_store(self.ty(&key_type_id), key_loc, None)?;
         }
-        let iter_type_id = item.iter.type_id(self).ice()?;
-        self.write_store(self.ty(&iter_type_id), iter_loc, None)?;
+        if let (Some(value_loc), Some(value_type_id)) = (value_loc, value_type_id) {
+            self.write_clone(self.ty(&gen_type_id));
+            self.writer.gen_value(self.ty(&value_type_id).primitive_size() as FrameAddress);
+            self.write_store(self.ty(&value_type_id), value_loc, None)?;
+        }
         // compile inner block
         self.loop_control.push();
         self.compile_block(&item.block)?;
@@ -1162,24 +1244,35 @@ impl<T> Compiler<T> where T: VMFunc<T> {
     /// Compiles a for - in loop
     fn compile_for_loop(self: &mut Self, item: &ast::ForLoop) -> CompileResult {
         use ast::{Expression::*, BinaryOperator as Op};
-        // initialize iter variable
-        let binding_id = item.iter.binding_id;
         self.init_state.push(BranchingKind::Single, BranchingScope::Loop);
-        let iter_local = self.locals.lookup(binding_id);
-        self.init_state.initialize(binding_id);
-        let iter_type_id = item.iter.type_id(self).ice()?;
-        // handle ranges, generators or arrays. Maps were lowered to iterating `map.keys()`/`map.values()`
-        // during resolution, so they reach here as an ordinary array-typed expression, walked by value.
+        // resolve frame locations and types of the bindings present in this loop form, marking them
+        // initialized. The value binding (`iter`) holds the array element / map value; the key binding
+        // (`iter_key`) holds the array index / map key for the two-binding forms.
+        if let Some(binding) = &item.iter_key { self.init_state.initialize(binding.binding_id); }
+        if let Some(binding) = &item.iter { self.init_state.initialize(binding.binding_id); }
+        let value_loc = item.iter.as_ref().map(|b| self.locals.lookup(b.binding_id));
+        let value_type_id = match item.iter.as_ref() { Some(b) => Some(b.type_id(self).ice()?), None => None };
+        let key_loc = item.iter_key.as_ref().map(|b| self.locals.lookup(b.binding_id));
+        let key_type_id = match item.iter_key.as_ref() { Some(b) => Some(b.type_id(self).ice()?), None => None };
+        // handle ranges, generators, maps or arrays. Map key-only iteration was normalized to `map.keys()`
+        // (an array) during resolution; array key-only iteration to a counting range.
         // (NOTE: must match Resolver::resolve_for_loop.)
         let is_generator = item.expr.type_id(self).map_or(false, |t| self.generator_signature(t).is_some());
         let result = if is_generator {
-            self.compile_for_loop_generator(item, iter_local)
+            self.compile_for_loop_generator(item, key_loc, key_type_id, value_loc, value_type_id)
         } else {
             match &item.expr {
                 BinaryOp(bo) if bo.op == Op::Range || bo.op == Op::RangeInclusive => {
-                    self.compile_for_loop_range(item, iter_local, iter_type_id)
+                    self.compile_for_loop_range(item, value_loc.ice()?, value_type_id.ice()?)
                 },
-                _ => self.compile_for_loop_array(item, iter_local, iter_type_id),
+                _ => {
+                    let is_map = item.expr.type_id(self).map_or(false, |t| self.ty(&t).as_map().is_some());
+                    if is_map {
+                        self.compile_for_loop_map(item, key_loc, value_loc.ice()?)
+                    } else {
+                        self.compile_for_loop_array(item, key_loc, value_loc.ice()?, value_type_id.ice()?)
+                    }
+                },
             }
         };
         self.init_state.pop();
@@ -1817,8 +1910,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.create_stack_frame_pattern(&let_pattern.pattern, frame);
                 self.create_stack_frame_exp(&let_pattern.expr, frame)?;
             } else if let ast::Statement::ForLoop(for_loop) = statement {
-                frame.insert(for_loop.iter.binding_id, frame.var_pos);
-                frame.var_pos += self.ty(&for_loop.iter).primitive_size() as FrameAddress;
+                for binding in [ for_loop.iter_key.as_ref(), for_loop.iter.as_ref() ].into_iter().flatten() {
+                    frame.insert(binding.binding_id, frame.var_pos);
+                    frame.var_pos += self.ty(binding).primitive_size() as FrameAddress;
+                }
                 self.create_stack_frame_block(&for_loop.block, frame)?;
             } else if let ast::Statement::WhileLoop(while_loop) = statement {
                 self.create_stack_frame_block(&while_loop.block, frame)?;
@@ -2409,6 +2504,28 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         } else {
             select_primitive_size!(self, element_ty, arrayiter, element, exit)
         })
+    }
+
+    /// Writes an array iteration instruction: `arrayiter` for value-only iteration (`index` is `None`),
+    /// or `array_iter_iv` which additionally stores the running index into `index` (`for k, v`).
+    fn write_array_iter(self: &Self, element_ty: &Type, index: Option<FrameAddress>, element: FrameAddress, exit: StackAddress) -> CompileResult<StackAddress> {
+        Ok(match index {
+            None => self.write_arrayiter(element_ty, element, exit)?,
+            Some(index) => if element_ty.is_ref() {
+                self.writer.array_iter_iv64(index, element, exit)
+            } else {
+                select_primitive_size!(self, element_ty, array_iter_iv, index, element, exit)
+            },
+        })
+    }
+
+    /// Writes a map iteration instruction: `map_iter` for value-only iteration (`key` is `None`), or
+    /// `map_iter_kv` which additionally unboxes the current key into `key` (`for k, v`).
+    fn write_map_iter(self: &Self, key: Option<FrameAddress>, value: FrameAddress, constructor: StackAddress, exit: StackAddress) -> StackAddress {
+        match key {
+            None => self.writer.map_iter(value, exit, constructor),
+            Some(key) => self.writer.map_iter_kv(key, value, exit, constructor),
+        }
     }
 
     /// Write subtraction instruction.

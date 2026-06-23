@@ -341,8 +341,8 @@ fn for_in_array_index_value_empty() {
 
 #[test]
 fn for_in_array_index_value_snapshot_len() {
-    // the upper bound `arr.len()` is evaluated once at loop entry, so growing the array during iteration
-    // does not extend the loop; indexing the (reallocated) array each iteration stays correct
+    // iteration walks a clone taken at loop entry, so growing the original during iteration does not
+    // extend the loop; the bound index and value reflect the snapshot
     let result = run(stringify!(
         let a = [ 1u64, 2u64, 3u64 ];
         let mut count = 0u64;

@@ -386,8 +386,8 @@ fn for_in_map_key_value_primitive() {
 
 #[test]
 fn for_in_map_key_value_mutate_during_iteration() {
-    // iterating a key snapshot lets the body mutate the map without disturbing iteration; the value
-    // binding reflects the map state at the point of lookup
+    // iterating a clone lets the body mutate the map without disturbing iteration; the key and value
+    // bindings reflect the snapshot taken at loop entry
     let result = run(stringify!(
         let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64 ];
         for k, v in m {
@@ -396,6 +396,38 @@ fn for_in_map_key_value_mutate_during_iteration() {
         }
     ));
     assert_all(&result, &[ 11u64, 21, 31 ]);
+}
+
+#[test]
+fn for_in_map_value_remove_unvisited_during_iteration() {
+    // Iterating a clone lets the body remove a not-yet-visited entry from the original without
+    // disturbing iteration: the full snapshot is still visited, and the removed entry's references
+    // stay alive (held by the retained clone) until the loop ends.
+    let result = run(stringify!(
+        let m = [ "a" => "A", "b" => "B", "c" => "C", "d" => "D" ];
+        for v in m {
+            ret_str(v);
+            if m.contains_key("c") {
+                m.remove("c");
+            }
+        }
+    ));
+    assert_all(&result, &[ "A".to_string(), "B".to_string(), "C".to_string(), "D".to_string() ]);
+}
+
+#[test]
+fn for_in_map_key_value_remove_unvisited_during_iteration() {
+    // as above for the two-binding form, with reference-typed keys and values
+    let result = run(stringify!(
+        let m = [ "a" => "A", "b" => "B", "c" => "C", "d" => "D" ];
+        for k, v in m {
+            ret_str("{k}={v}");
+            if m.contains_key("c") {
+                m.remove("c");
+            }
+        }
+    ));
+    assert_all(&result, &[ "a=A".to_string(), "b=B".to_string(), "c=C".to_string(), "d=D".to_string() ]);
 }
 
 #[test]

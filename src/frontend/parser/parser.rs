@@ -1562,19 +1562,6 @@ fn var_expr(position: Position, name: &str, binding_id: BindingId) -> Expression
     Expression::Variable(Variable { position, ident: Ident { position, name: name.to_string() }, binding_id })
 }
 
-/// Builds a `receiver[index]` index expression, matching the node shape the expression parser
-/// produces. Used by desugaring code.
-fn index_expr(receiver: Expression, index: Expression, position: Position) -> Expression {
-    Expression::BinaryOp(Box::new(BinaryOp {
-        position,
-        op          : BinaryOperator::Index,
-        left        : BinaryOperand::Expression(receiver),
-        right       : BinaryOperand::Expression(index),
-        type_id     : None,
-        op_resolved : false,
-    }))
-}
-
 /// Desugars the postfix `?` operator on `inner` (a `Result<T>`) into
 /// `match inner { Ok(tmp) => tmp, Err(tmp) => return Err(tmp) }`
 fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Expression {
@@ -1630,24 +1617,17 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
 
 /// Matches a for loop statement.
 ///
-/// Iteration binds either values or keys/indices of the iterated collection, depending on the
-/// binding form (see [`ForIterate`]):
+/// The iteration form is encoded by which binding slots are populated (see [`ForLoop`]):
 ///
-/// - `for v in coll` — bind values ([`Values`](ForIterate::Values)).
-/// - `for k, _ in coll` — bind keys/indices alone ([`Keys`](ForIterate::Keys)).
-/// - `for _, v in coll` — bind values, ignoring keys (equivalent to the single-binding form).
-/// - `for k, v in coll` — bind both. Desugared here into a key loop plus a per-iteration value
-///   lookup, so the rest of the pipeline only ever sees single-binding loops:
+/// - `for v in coll` — value binding only (`iter`).
+/// - `for k, v in coll` — both bindings (`iter` = value, `iter_key` = key/index).
+/// - `for k, _ in coll` — key/index binding only (`iter_key`).
+/// - `for _, v in coll` — value binding only (`iter`); the blank key is dropped.
 ///
-/// ```text
-/// for k, v in <coll> { <body> }
-/// // becomes
-/// { let $iter = <coll>; for k, _ in $iter { let v = $iter[k]; <body> } }
-/// ```
-///
-/// The collection is bound to a hidden temporary so it is evaluated exactly once and both the key
-/// iteration (lowered to `$iter.keys()` for maps / a counting range for arrays by the resolver) and
-/// the per-iteration value lookup share it.
+/// Blank (`_`) bindings map to `None` in their slot. The fully-blank degenerate forms (`for _ in coll`,
+/// `for _, _ in coll`) become value iteration with a throwaway value binding (iterate for side effects).
+/// No desugaring happens here: a single [`ForLoop`] is always emitted and the resolver/compiler model
+/// the key/value forms directly.
 fn for_loop(i: Input) -> Output<Statement> {
     fn loop_range(i: Input) -> Output<Expression> {
         let position = i.position();
@@ -1663,17 +1643,14 @@ fn for_loop(i: Input) -> Output<Statement> {
             }))
         )(i)
     }
-    const MAP_TEMP: &str = "for$iter"; // '$' can't occur in user identifiers, so this never collides
     fn is_blank(decl: &VarDecl) -> bool { decl.ident.name == "_" }
     let position = i.position();
     let nav = i.clone();
-    // Outer scope: hosts the wrapping block and the hidden map temporary in the two-binding case. In
-    // the single-binding case nothing is declared here, leaving the original behaviour unchanged.
+    // The for loop's own scope holds the key and value bindings.
     with_scope(ScopeKind::Block, map(
         preceded(
             check_flags(keyword("for"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalForLoop) }),
-            // Inner scope: the for loop's own scope, holding the key (and value) bindings.
-            with_scope(ScopeKind::Block, {
+            {
                 let nav = nav.clone();
                 map(
                     tuple((
@@ -1684,49 +1661,29 @@ fn for_loop(i: Input) -> Output<Statement> {
                     )),
                     move |(key, value, expr, block)| (key, value, expr, block, nav.scope_id())
                 )
-            })
-        ),
-        move |(key, value, expr, mut block, for_scope_id)| {
-            let let_binding = |decl: &VarDecl| LetBinding {
-                position, binding_id: decl.binding_id, ident: decl.ident.clone(), mutable: true, expr: None, ty: None,
-            };
-            match value {
-                // `for v in expr` — bind values.
-                None => Statement::ForLoop(ForLoop { position, iter: let_binding(&key), expr, block, scope_id: for_scope_id, iterate: ForIterate::Values }),
-                // `for k, _ in expr` — bind keys/indices alone.
-                Some(value) if is_blank(&value) => Statement::ForLoop(ForLoop { position, iter: let_binding(&key), expr, block, scope_id: for_scope_id, iterate: ForIterate::Keys }),
-                // `for _, v in expr` — bind values, ignoring keys; equivalent to the single-binding form (the
-                // key can't be looked up against a `_` binding anyway).
-                Some(value) if is_blank(&key) => Statement::ForLoop(ForLoop { position, iter: let_binding(&value), expr, block, scope_id: for_scope_id, iterate: ForIterate::Values }),
-                // `for k, v in expr` — bind both. Desugar into a key loop plus a per-iteration value lookup.
-                Some(value) => {
-                    // declare the hidden iterable temporary in the outer scope (popped from the inner scope already)
-                    let map_binding_id = if nav.flags().is_dead { BindingId::new(0) } else { nav.add_binding(MAP_TEMP) };
-                    let outer_scope_id = nav.scope_id();
-                    // let v = $iter[k];  (indexing resolves for both maps and arrays; for maps it compiles
-                    // to the same `map_get` opcode that `.get(k)` would)
-                    let value_let = LetBinding {
-                        position, binding_id: value.binding_id, ident: value.ident, mutable: true, ty: None,
-                        expr: Some(index_expr(
-                            var_expr(position, MAP_TEMP, map_binding_id),
-                            var_expr(position, &key.ident.name, key.binding_id),
-                            position,
-                        )),
-                    };
-                    block.statements.insert(0, Statement::LetBinding(value_let));
-                    // for k, _ in $iter { let v = ...; <body> }
-                    let for_loop = ForLoop {
-                        position, iter: let_binding(&key), block, scope_id: for_scope_id, iterate: ForIterate::Keys,
-                        expr: var_expr(position, MAP_TEMP, map_binding_id),
-                    };
-                    // { let $iter = <map>; for k, _ in $iter { .. } }
-                    let map_let = LetBinding {
-                        position, binding_id: map_binding_id, ident: Ident { position, name: MAP_TEMP.to_string() },
-                        mutable: false, ty: None, expr: Some(expr),
-                    };
-                    Statement::Block(Block::new(position, outer_scope_id, vec![ Statement::LetBinding(map_let), Statement::ForLoop(for_loop) ], None))
-                },
             }
+        ),
+        move |(key, value, expr, block, for_scope_id)| {
+            let let_binding = |decl: VarDecl| LetBinding {
+                position, binding_id: decl.binding_id, ident: decl.ident, mutable: true, expr: None, ty: None,
+            };
+            // Map the parsed `for <key>[, <value>]` bindings onto the value/key slots, dropping blanks.
+            let (iter, iter_key) = match value {
+                // `for v in expr` — single binding is the value.
+                None => (Some(let_binding(key)), None),
+                // `for k, v in expr` / `for k, _ in expr` / `for _, v in expr` — two bindings.
+                Some(value) => {
+                    let iter = if is_blank(&value) { None } else { Some(let_binding(value)) };
+                    let iter_key = if is_blank(&key) { None } else { Some(let_binding(key)) };
+                    // `for _, _ in expr` degenerates to side-effect-only value iteration with a throwaway
+                    // value binding (the blank key binding serves as that throwaway).
+                    match (iter, iter_key) {
+                        (None, None) => (Some(let_binding(VarDecl { binding_id: BindingId::new(0), ident: Ident { position, name: "_".to_string() } })), None),
+                        pair => pair,
+                    }
+                },
+            };
+            Statement::ForLoop(ForLoop { position, iter, iter_key, expr, block, scope_id: for_scope_id })
         }
     ))(i)
 }

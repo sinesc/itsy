@@ -169,6 +169,76 @@ impl_opcodes!{
         self.stack.store_fp(element, data);
     }
 
+    /// As `arrayiter`, but additionally stores the running element index (as a `StackAddress`) into
+    /// `index`. Used by `for k, v in array` to bind both the index and the element.
+    fn <
+        array_iter_iv8<T: Data8>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv16<T: Data16>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv32<T: Data32>(index: FrameAddress, element: FrameAddress, exit: StackAddress),
+        array_iter_iv64<T: Data64>(index: FrameAddress, element: FrameAddress, exit: StackAddress)
+    >(&mut self) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        if item.offset() >= self.heap.item(item.index()).data.len() {
+            self.pc = exit;
+            return;
+        }
+        let cur_index = item.offset() / size_of::<T>() as StackAddress;
+        let data: T = self.heap.read(item);
+        item.add_offset(size_of::<T>() as StackOffset);
+        self.stack.store(top_loc, item);
+        self.stack.store_fp(element, data);
+        self.stack.store_fp(index, cur_index);
+    }
+
+    /// Iterates a map's values. Walks the insertion-ordered entries of the map referenced on the stack
+    /// top (skipping tombstones), unboxes the current value into `value`, advances the stored cursor and
+    /// continues; sets the program counter to `exit` (leaving the reference on the stack) once exhausted.
+    fn map_iter(&mut self, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let (_key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
+    }
+
+    /// As `map_iter`, but additionally unboxes the current entry's key into `key`. Used by
+    /// `for k, v in map` to bind both the key and the value.
+    fn map_iter_kv(&mut self, key: FrameAddress, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        use crate::bytecode::runtime::stack::StackOffsetOp;
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let key_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off));
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(key_box, key_ctor, key);
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
+    }
+
     /// Pops value off the stack, pushes 0 for values < 0 and the original value for values >= 0.
     fn <
         zclampf32<T: f32>(),
