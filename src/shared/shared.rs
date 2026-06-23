@@ -102,6 +102,17 @@ pub trait MetaContainer {
         }
         None
     }
+    /// If the given type is a compiler-synthesized `Option<T>` enum, returns the `Some` payload type `T`.
+    fn option_some_type_id(self: &Self, type_id: TypeId) -> Option<TypeId> {
+        if let Type::Enum(Enum { primitive: None, variants, .. }) = self.type_by_id(type_id) {
+            if let [(some_name, EnumVariant::Data(some_fields)), (none_name, EnumVariant::Simple(_))] = &variants[..] {
+                if some_name == "Some" && none_name == "None" && some_fields.len() == 1 {
+                    return some_fields[0];
+                }
+            }
+        }
+        None
+    }
     /// If the given type is a compiler-synthesized `Generator<V>` / `Generator<K, V>` carrier, returns
     /// its `(key, value)` signature (key is `None` for the single-argument form). The carrier is an
     /// anonymous struct with sentinel fields `$value` (and `$key`); the `$` makes the names
@@ -129,6 +140,8 @@ pub trait MetaContainer {
             type_name.to_string()
         } else if let Some(ok_type_id) = self.result_ok_type_id(type_id) {
             format!("Result<{}>", self.type_name(ok_type_id))
+        } else if let Some(some_type_id) = self.option_some_type_id(type_id) {
+            format!("Option<{}>", self.type_name(some_type_id))
         } else if let Some((key_type_id, value_type_id)) = self.generator_signature(type_id) {
             match key_type_id {
                 Some(key_type_id) => format!("Generator<{}, {}>", self.type_name(key_type_id), self.type_name(value_type_id)),

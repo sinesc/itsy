@@ -27,6 +27,8 @@ mod controlflow;
 mod enums;
 #[path="vm/result.rs"]
 mod result;
+#[path="vm/option.rs"]
+mod option;
 #[path="vm/generators.rs"]
 mod generators;
 #[path="vm/closure.rs"]

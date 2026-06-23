@@ -92,3 +92,16 @@ pub(super) struct ResultTypeInfo {
     /// Constructor for the `Err(Error)` variant (`FunctionKind::Variant`, index 1).
     pub(super) err_constructor : ConstantId,
 }
+
+/// Bookkeeping for a synthesized `Option<T>` enum, keyed by its (deduplicated) enum type id. Lets the
+/// resolver recognize a type as an `Option` and bind `Some(x)` calls / bare `None` to its variants.
+#[derive(Copy, Clone)]
+pub(super) struct OptionTypeInfo {
+    /// The `Some` payload type `T`.
+    #[allow(dead_code)]
+    pub(super) some_type_id   : TypeId,
+    /// Constructor function for the `Some(T)` data variant (`FunctionKind::Variant`, index 0).
+    pub(super) some_constructor : ConstantId,
+    /// Unit-variant constant for the `None` simple variant (`ConstantValue::Discriminant`, index 1).
+    pub(super) none_constant  : ConstantId,
+}

@@ -27,6 +27,9 @@ pub enum ResolveErrorKind {
     /// type could not be determined. First field: whether the construct was a desugared `?`. Second field:
     /// the type the surrounding context expects instead (if known).
     ResultOutsideResultContext(bool, Option<String>),
+    /// A `Some`/`None` was used outside an `Option` context so its type could not be determined.
+    /// Field: the expected type if one was known.
+    OptionOutsideOptionContext(Option<String>),
     IncompatibleNumeric(String, Numeric),
     NumberOfArguments(String, ItemIndex, ItemIndex),
     MutabilityEscalation,
@@ -103,6 +106,13 @@ impl Display for ResolveError {
                 } else {
                     write!(f, "`Ok`/`Err` can only be used where a `Result<T>` value is expected{context}")
                 }
+            },
+            ResolveErrorKind::OptionOutsideOptionContext(expected) => {
+                let context = match expected {
+                    Some(ty) => format!(", but the enclosing context expects `{ty}`"),
+                    None => String::new(),
+                };
+                write!(f, "`Some`/`None` can only be used where an `Option<T>` value is expected{context}")
             },
             ResolveErrorKind::IncompatibleNumeric(t, n) => write!(f, "Incompatible numeric `{n}` for expected type `{t}`"),
             ResolveErrorKind::UndefinedIdentifier(v) => write!(f, "Undefined identifier `{v}`"),

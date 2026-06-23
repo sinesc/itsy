@@ -362,7 +362,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, ResultDef, GeneratorDef, CallableDef, TraitBound)
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, ResultDef, OptionDef, GeneratorDef, CallableDef, TraitBound)
     };
     ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
         compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
@@ -810,6 +810,8 @@ pub enum InlineType {
     MapDef(Box<MapDef>),
     /// Result definition, e.g. `Result<T>`
     ResultDef(Box<ResultDef>),
+    /// Option definition, e.g. `Option<T>`
+    OptionDef(Box<OptionDef>),
     /// Generator definition, e.g. `Generator<V>` or `Generator<K, V>`
     GeneratorDef(Box<GeneratorDef>),
     /// Callable definition
@@ -827,6 +829,7 @@ impl Display for InlineType {
             Self::ArrayDef(array_def) => write!(f, "{}", array_def),
             Self::MapDef(map_def) => write!(f, "{}", map_def),
             Self::ResultDef(result_def) => write!(f, "{}", result_def),
+            Self::OptionDef(option_def) => write!(f, "{}", option_def),
             Self::GeneratorDef(generator_def) => write!(f, "{}", generator_def),
             Self::CallableDef(callable_def) => write!(f, "{}", callable_def),
             Self::TraitBound(trait_bound) => write!(f, "{}", trait_bound),
@@ -840,6 +843,7 @@ impl Typeable for InlineType {
             InlineType::ArrayDef(array_def) => array_def.type_id(container),
             InlineType::MapDef(map_def) => map_def.type_id(container),
             InlineType::ResultDef(result_def) => result_def.type_id(container),
+            InlineType::OptionDef(option_def) => option_def.type_id(container),
             InlineType::GeneratorDef(generator_def) => generator_def.type_id(container),
             InlineType::TypeName(type_name) => type_name.type_id(container),
             InlineType::CallableDef(callable_def) => callable_def.type_id(container),
@@ -851,6 +855,7 @@ impl Typeable for InlineType {
             InlineType::ArrayDef(array_def) => array_def.set_type_id(container, type_id),
             InlineType::MapDef(map_def) => map_def.set_type_id(container, type_id),
             InlineType::ResultDef(result_def) => result_def.set_type_id(container, type_id),
+            InlineType::OptionDef(option_def) => option_def.set_type_id(container, type_id),
             InlineType::GeneratorDef(generator_def) => generator_def.set_type_id(container, type_id),
             InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
             InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
@@ -932,6 +937,24 @@ impl_typeable!(ResultDef);
 impl_display!(ResultDef, "Result<{}>", ok_type);
 impl_resolvable!(ResultDef {
     ok_type: Item,
+    type_id: TypeId,
+});
+
+
+/// An option type definition, e.g. `Option<T>`. The inner type is the `Some` payload; `None` is a
+/// nullary unit variant.
+#[derive(Debug)]
+pub struct OptionDef {
+    pub position    : Position,
+    pub some_type   : InlineType,
+    pub type_id     : Option<TypeId>,
+}
+
+impl_positioned!(OptionDef);
+impl_typeable!(OptionDef);
+impl_display!(OptionDef, "Option<{}>", some_type);
+impl_resolvable!(OptionDef {
+    some_type: Item,
     type_id: TypeId,
 });
 

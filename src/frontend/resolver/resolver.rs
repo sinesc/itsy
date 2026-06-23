@@ -20,7 +20,7 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
-use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo};
+use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo, OptionTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -46,6 +46,9 @@ pub(crate) struct Resolver<'ctx> {
     /// Registry of synthesized `Result<T>` enums (keyed by enum type id), persistent across resolution
     /// passes so `Ok`/`Err` calls can be recognized and bound to the right variant constructors.
     result_types    : &'ctx mut UnorderedMap<TypeId, ResultTypeInfo>,
+    /// Registry of synthesized `Option<T>` enums (keyed by enum type id), persistent across resolution
+    /// passes so `Some(x)` calls and bare `None` can be recognized and bound to the right variants.
+    option_types    : &'ctx mut UnorderedMap<TypeId, OptionTypeInfo>,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
@@ -171,6 +174,9 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // registry of synthesized `Result<T>` enums, populated on demand as `Result<T>` annotations and
     // `Ok`/`Err` constructors are resolved. Persistent across passes (the Resolver is rebuilt each pass).
     let mut result_types = UnorderedMap::new();
+    // registry of synthesized `Option<T>` enums, populated on demand as `Option<T>` annotations and
+    // `Some`/`None` constructs are resolved. Persistent across passes (the Resolver is rebuilt each pass).
+    let mut option_types = UnorderedMap::new();
 
     // insert userdefined struct/enum types from derive-macro/itsy_api
     let ns = apinamespace::insert::<T>(&mut scopes, &primitives)?;
@@ -221,6 +227,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             intrinsic_ops   : &intrinsic_ops,
             error_trait_type_id,
             result_types    : &mut result_types,
+            option_types    : &mut option_types,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -619,6 +626,41 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         result_type_id
     }
 
+    /// Returns the type id of the `Option<T>` enum for the given inner type, synthesizing it on first
+    /// use. `Option<T>` is represented as an anonymous mixed enum with variants `Some(T)` (data) and
+    /// `None` (simple/unit); structurally identical options (same `T`) dedupe to a single type id.
+    /// On first synthesis the `Some` constructor function and the `None` unit-variant constant are
+    /// created and recorded in `option_types`.
+    fn synthesize_option_type(self: &mut Self, some_type_id: TypeId) -> TypeId {
+        let variants = vec![
+            ("Some".to_string(), EnumVariant::Data(vec![ Some(some_type_id) ])),
+            ("None".to_string(), EnumVariant::Simple(None)),
+        ];
+        // primitive: None -> data-carrying (heap) enum, since the Some variant carries data
+        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
+        let option_type_id = self.scopes.insert_anonymous_type(true, ty);
+        if !self.option_types.contains_key(&option_type_id) {
+            // mangled, never looked up by name: callers bind to the constant/constructor id directly
+            let raw = option_type_id.into_usize();
+            let some_constructor = self.scopes.insert_function(
+                &format!("Option#{raw}::Some"), Some(option_type_id), vec![ Some(some_type_id) ],
+                Some(FunctionKind::Variant(option_type_id, 0)),
+            );
+            // None is a unit variant: a constant, like a user enum's `VariantKind::Simple`. The numeric is
+            // a placeholder (reference-enum codegen tags by variant index, ignoring it).
+            let none_constant = self.scopes.insert_constant(
+                &format!("Option#{raw}::None"), option_type_id, Some(option_type_id),
+                ConstantValue::Discriminant(Numeric::Unsigned(1)),
+            );
+            self.option_types.insert(option_type_id, OptionTypeInfo {
+                some_type_id,
+                some_constructor,
+                none_constant,
+            });
+        }
+        option_type_id
+    }
+
     /// Returns the type id of the `Generator<V>` / `Generator<K, V>` carrier for the given key/value
     /// types, synthesizing it on first use. The carrier is an anonymous struct with sentinel fields
     /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
@@ -845,6 +887,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             ArrayDef(array) => self.resolve_array_type(array),
             MapDef(map) => self.resolve_map_type(map),
             ResultDef(result) => self.resolve_result_type(result),
+            OptionDef(option) => self.resolve_option_type(option),
             GeneratorDef(generator) => self.resolve_generator_type(generator),
             CallableDef(callable) => self.resolve_callable_type(callable),
             TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
@@ -961,6 +1004,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         if let (None, Some(ok_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.ok_type)?) {
             item.type_id = Some(self.synthesize_result_type(ok_type_id));
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
+    }
+
+    /// Resolves `Option<T>` into its synthesized `Some(T)` / `None` enum.
+    fn resolve_option_type(self: &mut Self, item: &mut ast::OptionDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        if let (None, Some(some_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.some_type)?) {
+            item.type_id = Some(self.synthesize_option_type(some_type_id));
         }
         self.types_resolved(item, None)?;
         Ok(item.type_id)
@@ -1513,13 +1568,28 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 }
             }
             if item.constant_id.is_none() {
+                // bare `None` is the unit variant of a synthesized `Option<T>`; bind it once the expected
+                // Option type is known (`return None`, `let x: Option<_> = None`, match arm bodies, ...)
+                if item.constant_id.is_none() && item.path.segments.len() == 1 && item.path.segments[0].name == "None" {
+                    if let Some(option_type_id) = expected_result.filter(|t| self.option_types.contains_key(t)) {
+                        item.constant_id = Some(self.option_types.get(&option_type_id).ice()?.none_constant);
+                    }
+                }
+            }
+            if item.constant_id.is_none() {
                 // `Ok`/`Err` are bound to a `Result<T>` variant constructor by try_bind_result_constructor
                 // once a `Result` context is known, which can be as late as literal/type inference. Defer
                 // their existence check to must_resolve so a valid `Ok`/`Err` isn't prematurely rejected;
                 // genuine misuse (e.g. `?` in a non-`Result` function) gets a dedicated diagnostic there.
+                // Same for `Some`/`None` — defer so a valid `Some`/`None` isn't prematurely rejected.
                 let is_result_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Ok" | "Err");
-                let must_report = if is_result_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
+                let is_option_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Some" | "None");
+                let must_report = if is_result_ctor || is_option_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
                 if must_report {
+                    if is_option_ctor {
+                        let expected = expected_result.map(|type_id| self.type_name(type_id));
+                        return Err(ResolveError::new(item, ResolveErrorKind::OptionOutsideOptionContext(expected), self.module_path));
+                    }
                     return Err(ResolveError::new(item, ResolveErrorKind::UndefinedIdentifier(item.path.to_string(0)), self.module_path));
                 }
             }
@@ -2245,6 +2315,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // bind a bare `Ok`/`Err` callee to its `Result<T>` variant constructor before generic
                 // resolution (which then handles argument checking and the result type like any other call)
                 self.try_bind_result_constructor(item, expected_result)?;
+                self.try_bind_option_constructor(item, expected_result)?;
                 // resolve function
                 let call_func = item.left.as_expression_mut().ice()?;
                 self.resolve_expression(call_func, None)?;
@@ -2818,6 +2889,38 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 .map_or(false, |var| var.ident.name == "try$err" || var.ident.name == "try$ok");
             let expected = expected_result.map(|type_id| self.type_name(type_id));
             return Err(ResolveError::new(item, ResolveErrorKind::ResultOutsideResultContext(from_try, expected), self.module_path));
+        }
+        Ok(())
+    }
+
+    /// If the call target is a bare, still-unbound `Some`, bind it to the matching `Option<T>` variant
+    /// constructor so the generic call resolution below handles argument checking and the result type.
+    /// `T` comes from the expected result type when available, otherwise is inferred from the argument.
+    /// `None` is a bare constant (not a call) and is handled in `resolve_constant`.
+    fn try_bind_option_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
+        // only `Some(x)` is a call; `None` is a bare unit-variant constant, bound in resolve_constant
+        let is_some = matches!(
+            item.left.as_expression().and_then(|e| e.as_constant()),
+            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 && c.path.segments[0].name == "Some"
+        );
+        if !is_some {
+            return Ok(());
+        }
+        // an expected Option type pins T directly; otherwise infer T from the argument
+        let option_type_id = match expected_result.filter(|t| self.option_types.contains_key(t)) {
+            Some(option_type_id) => Some(option_type_id),
+            None => {
+                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
+                    self.resolve_expression(arg, None)?;
+                    arg.type_id(self).map(|some_type_id| self.synthesize_option_type(some_type_id))
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(option_type_id) = option_type_id {
+            let info = *self.option_types.get(&option_type_id).ice()?;
+            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(info.some_constructor);
         }
         Ok(())
     }

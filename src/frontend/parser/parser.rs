@@ -247,9 +247,10 @@ fn inline_type(i: Input) -> Output<InlineType> {
         )(i)
     }
     alt((
-        // `result_def`/`generator_def` must precede `type_name_or_bound`, otherwise `Result`/`Generator`
-        // is consumed as a plain type name and the `<...>` argument is left dangling.
+        // `result_def`/`option_def`/`generator_def` must precede `type_name_or_bound`, otherwise
+        // `Result`/`Option`/`Generator` is consumed as a plain type name and the `<...>` argument is left dangling.
         map(result_def, |r| InlineType::ResultDef(Box::new(r))),
+        map(option_def, |o| InlineType::OptionDef(Box::new(o))),
         map(generator_def, |g| InlineType::GeneratorDef(Box::new(g))),
         type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
@@ -267,6 +268,20 @@ fn result_def(i: Input) -> Output<ResultDef> {
         move |ok| ResultDef {
             position,
             ok_type: ok,
+            type_id: None,
+        }
+    )(i)
+}
+
+/// Matches an option type definition, e.g. `Option<T>`. The inner type is the `Some` payload;
+/// `None` is a nullary unit variant.
+fn option_def(i: Input) -> Output<OptionDef> {
+    let position = i.position();
+    map(
+        delimited(pair(keyword("Option"), punct("<")), inline_type, punct(">")),
+        move |some| OptionDef {
+            position,
+            some_type: some,
             type_id: None,
         }
     )(i)

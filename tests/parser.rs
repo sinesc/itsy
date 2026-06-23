@@ -161,3 +161,12 @@ fn yield_outside_function_rejected() {
     // `yield` is not legal at module scope
     assert!(parse("yield 1;").is_err());
 }
+
+#[test]
+fn option_type_in_signature() {
+    parse("
+        fn a() -> Option<i32> { }
+        fn b(o: Option<String>) { }
+        fn c() -> Option<[ u8 ]> { }
+    ").unwrap();
+}
