@@ -1899,9 +1899,11 @@ impl_builtins! {
     ///     }
     /// }
     ///
+    /// # fn main() {
     /// for v in count_up(3) {
     ///     print("{v}\n");   // 0, 1, 2
     /// }
+    /// # }
     /// ```
     Generator {
         /// Resumes the generator until its next `yield` and returns `true`, or returns `false` once

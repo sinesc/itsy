@@ -45,10 +45,14 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// Inspect a result by matching it; both variants are part of the language:
 ///
 /// ``` ignore
+/// # fn parse(text: String) -> Result<i32> { Ok(0) }
+/// # fn main() {
+/// # let text = "42";
 /// match parse(text) {
 ///     Ok(value) => print("got {value}"),
 ///     Err(e) => print("failed: {e.description()}"),
 /// }
+/// # }
 /// ```
 ///
 /// # The `?` operator
@@ -58,11 +62,13 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// function that itself returns a `Result`. This makes chaining fallible calls concise:
 ///
 /// ``` ignore
+/// # fn parse(s: String) -> Result<i32> { Ok(0) }
 /// fn total(a: String, b: String) -> Result<i32> {
 ///     let x = parse(a)?;   // returns early if parse fails
 ///     let y = parse(b)?;
 ///     Ok(x + y)
 /// }
+/// # fn main() { }
 /// ```
 pub struct Result { }
 
@@ -75,10 +81,14 @@ pub struct Result { }
 /// Inspect an option by matching it; both variants are part of the language:
 ///
 /// ``` ignore
+/// # fn find(items: [String], key: String) -> Option<String> { None }
+/// # fn main() {
+/// # let items = [ "hello" ];
 /// match find(items, "hello") {
 ///     Some(item) => print("found: {item}"),
 ///     None => print("not found"),
 /// }
+/// # }
 /// ```
 ///
 /// `Some(value)` is written as a call and `None` is written bare (without parentheses). Both
@@ -92,6 +102,7 @@ pub struct Result { }
 ///         Some(items[0])
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// Like `Result`, an `Option<T>` can be used anywhere a type annotation or return type is
@@ -104,6 +115,7 @@ pub struct Result { }
 ///         None => None,
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 pub struct Option { }
 
@@ -120,6 +132,7 @@ pub struct Option { }
 ///     x: i32,
 ///     y: i32,
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Constructing a struct
@@ -127,8 +140,11 @@ pub struct Option { }
 /// Use the struct name followed by a brace-delimited list of `field: value` pairs:
 ///
 /// ``` ignore
+/// # struct Point { x: i32, y: i32 }
+/// # fn main() {
 /// let origin = Point { x: 0, y: 0 };
 /// let p = Point { x: 3, y: 7 };
+/// # }
 /// ```
 ///
 /// Fields can be of any type, including other structs, arrays, strings, or enums. Nested
@@ -144,10 +160,12 @@ pub struct Option { }
 ///     tag: i32,
 /// }
 ///
+/// # fn main() {
 /// let o = Outer {
 ///     inner: Inner { v: 42, label: "hello" },
 ///     tag: 1,
 /// };
+/// # }
 /// ```
 ///
 /// # Accessing fields
@@ -155,11 +173,14 @@ pub struct Option { }
 /// Use dot notation to read fields. For mutable bindings, fields can also be assigned to:
 ///
 /// ``` ignore
+/// # struct Point { x: i32, y: i32 }
+/// # fn main() {
 /// let p = Point { x: 1, y: 2 };
 /// print("{p.x}, {p.y}");   // 1, 2
 ///
 /// let mut p2 = Point { x: 1, y: 2 };
 /// p2.x = 10;
+/// # }
 /// ```
 ///
 /// # Struct methods
@@ -168,6 +189,7 @@ pub struct Option { }
 /// and `self: Self` gives access to the instance:
 ///
 /// ``` ignore
+/// # struct Point { x: i32, y: i32 }
 /// impl Point {
 ///     fn distance(self: Self) -> f64 {
 ///         (self.x as f64 * self.x as f64 + self.y as f64 * self.y as f64).sqrt()
@@ -177,8 +199,10 @@ pub struct Option { }
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let p = Point::new(3, 4);
 /// print("{p.distance()}");  // 5.0
+/// # }
 /// ```
 ///
 /// # Matching structs
@@ -187,10 +211,14 @@ pub struct Option { }
 /// a trailing `..` is used:
 ///
 /// ``` ignore
+/// # struct Point { x: i32, y: i32 }
+/// # fn main() {
+/// # let p = Point { x: 0, y: 0 };
 /// match p {
 ///     Point { x: 0, y: 0 } => print("origin"),
 ///     Point { x, y } => print("({x}, {y})"),  // shorthand binding
 /// }
+/// # }
 /// ```
 ///
 /// The `..` rest pattern ignores unlisted fields:
@@ -198,10 +226,13 @@ pub struct Option { }
 /// ``` ignore
 /// struct Flags { a: bool, b: bool, c: bool }
 ///
+/// # fn main() {
+/// # let f = Flags { a: true, b: false, c: false };
 /// match f {
 ///     Flags { a: true, .. } => print("a is set"),
 ///     Flags { .. } => print("a is not set"),
 /// }
+/// # }
 /// ```
 ///
 /// # Destructuring in `let`
@@ -209,9 +240,13 @@ pub struct Option { }
 /// Struct fields can be extracted directly in a `let` binding:
 ///
 /// ``` ignore
+/// # struct Point { x: i32, y: i32 }
+/// # fn main() {
+/// # let p = Point { x: 1, y: 2 };
 /// let Point { x, y } = p;            // shorthand
 /// let Point { x: px, y: py } = p;    // explicit renaming
 /// let Point { x, .. } = p;           // extract only x
+/// # }
 /// ```
 ///
 /// # Equality
@@ -240,6 +275,7 @@ pub mod structs { }
 ///     South,
 ///     West,
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Data variants
@@ -252,6 +288,7 @@ pub mod structs { }
 ///     Square(i32),
 ///     Rect(i32, i32),
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Constructing enum values
@@ -259,9 +296,13 @@ pub mod structs { }
 /// Use `EnumName::Variant` for unit variants and `EnumName::Variant(value)` for data variants:
 ///
 /// ``` ignore
+/// # enum Direction { North, East, South, West }
+/// # enum Shape { Circle(i32), Square(i32), Rect(i32, i32) }
+/// # fn main() {
 /// let dir = Direction::North;
 /// let circle = Shape::Circle(5);
 /// let rect = Shape::Rect(3, 4);
+/// # }
 /// ```
 ///
 /// # Discriminant values
@@ -276,8 +317,10 @@ pub mod structs { }
 ///     Done,      // 3
 /// }
 ///
+/// # fn main() {
 /// let s = Status::Active;
 /// print("{s as u8}");  // 2
+/// # }
 /// ```
 ///
 /// # Matching enums
@@ -286,21 +329,29 @@ pub mod structs { }
 /// either explicitly or with a wildcard (`_`):
 ///
 /// ``` ignore
+/// # enum Direction { North, East, South, West }
+/// # fn main() {
+/// # let dir = Direction::North;
 /// match dir {
 ///     Direction::North => print("up"),
 ///     Direction::South => print("down"),
 ///     _ => print("sideways"),
 /// }
+/// # }
 /// ```
 ///
 /// Data variant patterns bind the payload to names:
 ///
 /// ``` ignore
+/// # enum Shape { Circle(i32), Square(i32), Rect(i32, i32) }
+/// # fn main() {
+/// # let shape = Shape::Circle(5);
 /// match shape {
 ///     Shape::Circle(r) => print("circle radius {r}"),
 ///     Shape::Square(s) => print("square side {s}"),
 ///     Shape::Rect(w, h) => print("rect {w}x{h}"),
 /// }
+/// # }
 /// ```
 ///
 /// # Equality
@@ -314,6 +365,7 @@ pub mod structs { }
 /// different enum variants:
 ///
 /// ``` ignore
+/// # enum Shape { Circle(i32), Square(i32), Rect(i32, i32) }
 /// trait Describe {
 ///     fn kind(self: Self) -> String;
 /// }
@@ -327,6 +379,7 @@ pub mod structs { }
 ///         }
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Recursion
@@ -353,6 +406,7 @@ pub mod enums { }
 ///         words.to_uppercase() + "!"
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Implementing a trait
@@ -361,6 +415,10 @@ pub mod enums { }
 /// inherited but can be overridden:
 ///
 /// ``` ignore
+/// # trait Speaker {
+/// #     fn speak(self: Self) -> String;
+/// #     fn shout(self: Self) -> String { self.speak().to_uppercase() + "!" }
+/// # }
 /// struct Dog { name: String }
 ///
 /// impl Speaker for Dog {
@@ -369,9 +427,11 @@ pub mod enums { }
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let rex = Dog { name: "Rex" };
 /// print(rex.speak());   // woof, I'm Rex
 /// print(rex.shout());   // WOOF, I'M REX!
+/// # }
 /// ```
 ///
 /// Traits can be implemented on both structs and enums:
@@ -391,6 +451,7 @@ pub mod enums { }
 ///         }
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Trait objects
@@ -400,6 +461,9 @@ pub mod enums { }
 /// type is preserved at runtime so the correct implementation is dispatched dynamically:
 ///
 /// ``` ignore
+/// # trait Speaker { fn speak(self: Self) -> String; }
+/// # struct Dog { name: String }
+/// # impl Speaker for Dog { fn speak(self: Self) -> String { "woof, I'm " + self.name } }
 /// struct Cat { lives: u8 }
 ///
 /// impl Speaker for Cat {
@@ -412,8 +476,10 @@ pub mod enums { }
 ///     print(who.speak());
 /// }
 ///
+/// # fn main() {
 /// make_sound(Dog { name: "Rex" });  // woof, I'm Rex
 /// make_sound(Cat { lives: 9 });     // meow x9
+/// # }
 /// ```
 ///
 /// # Multiple trait bounds
@@ -440,6 +506,7 @@ pub mod enums { }
 /// fn describe(who: Named + Aged) {
 ///     print("{who.name()} is {who.age()} years old");
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Returning concrete types from trait return slots
@@ -448,13 +515,18 @@ pub mod enums { }
 /// is dispatched dynamically:
 ///
 /// ``` ignore
+/// # trait Speaker { fn speak(self: Self) -> String; }
+/// # struct Dog { name: String }
+/// # impl Speaker for Dog { fn speak(self: Self) -> String { self.name } }
+/// # struct Cat { lives: u8 }
+/// # impl Speaker for Cat { fn speak(self: Self) -> String { "meow" } }
 /// fn make_pet(kind: String) -> Speaker {
 ///     if kind == "dog" {
-///         Dog { name: "Spot" }
-///     } else {
-///         Cat { lives: 7 }
+///         return Dog { name: "Spot" };
 ///     }
+///     Cat { lives: 7 }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Intrinsic traits
@@ -496,9 +568,11 @@ pub mod traits { }
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let mut v = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 };  // Vec2 { x: 4, y: 6 }
 /// v += Vec2 { x: 1, y: 1 };                               // Vec2 { x: 5, y: 7 }  (uses Add)
 /// let scaled = v * Vec2 { x: 2, y: 2 };                   // Vec2 { x: 10, y: 14 }
+/// # }
 /// ```
 ///
 /// # The bitwise and shift operator traits
@@ -527,10 +601,12 @@ pub mod traits { }
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let a = BitField { bits: 0b1111 };
 /// let b = BitField { bits: 0b1010 };
 /// let c = a & b;                                          // BitField { bits: 0b1010 }
 /// let d = a << 2;                                         // BitField { bits: 0b111100 }
+/// # }
 /// ```
 ///
 /// # The equality trait
@@ -549,10 +625,12 @@ pub mod traits { }
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let a = Money { cents: 500, note: "rent" };
 /// let b = Money { cents: 500, note: "gift" };
 /// let equal = a == b;   // true
 /// let differ = a != b;  // false
+/// # }
 /// ```
 pub mod intrinsic_traits {
 
@@ -572,9 +650,11 @@ pub mod intrinsic_traits {
     ///     }
     /// }
     ///
+    /// # fn main() {
     /// let p = Point { x: 3, y: 7 };
     /// print(p as String);   // (3, 7)
     /// print("point: {p}");  // point: (3, 7)
+    /// # }
     /// ```
     pub trait ToString {
         /// Returns the string representation of `self`.
@@ -682,6 +762,7 @@ pub mod intrinsic_traits {
     ///     let value = lookup("answer")?;  // returns early with the NotFound error
     ///     Ok(value + 1)
     /// }
+    /// # fn main() { }
     /// ```
     pub trait Error {
         /// Returns a human-readable description of the error.
@@ -711,6 +792,7 @@ pub mod intrinsic_traits {
 ///         i += 1;
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// Each `yield expr` produces one value of type `V` and suspends the function until the next value is
@@ -732,6 +814,7 @@ pub mod intrinsic_traits {
 ///         i += 1;
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// `yield` may only appear directly in a generator function's own body — not inside a helper function
@@ -746,10 +829,11 @@ pub mod intrinsic_traits {
 /// fn enumerate(items: [String]) -> Generator<i32, String> {
 ///     let mut i = 0;
 ///     while i < items.len() {
-///         yield i, items[i];
+///         yield i as i32, items[i];
 ///         i += 1;
 ///     }
 /// }
+/// # fn main() { }
 /// ```
 ///
 /// # Consuming a generator
@@ -758,6 +842,13 @@ pub mod intrinsic_traits {
 /// iteration:
 ///
 /// ``` ignore
+/// # fn squares(n: i32) -> Generator<i32> { let mut i = 1; while i <= n { yield i * i; i += 1; } }
+/// # fn enumerate(items: [String]) -> Generator<i32, String> {
+/// #     let mut i = 0;
+/// #     while i < items.len() { yield i as i32, items[i]; i += 1; }
+/// # }
+/// # fn main() {
+/// # let names = [ "Alice", "Bob" ];
 /// for value in squares(4) {
 ///     print("{value}\n");                 // 1, 4, 9, 16
 /// }
@@ -769,6 +860,7 @@ pub mod intrinsic_traits {
 /// for index, _ in enumerate(names) {
 ///     print("{index}\n");                 // keys only
 /// }
+/// # }
 /// ```
 ///
 /// A generator can also be driven by hand with its methods (see
@@ -789,12 +881,14 @@ pub mod intrinsic_traits {
 ///     }
 /// }
 ///
+/// # fn main() {
 /// let g = fib();
 /// let mut n = 0;
 /// while n < 10 && g.next() {
 ///     print("{g.value()} ");              // 0 1 1 2 3 5 8 13 21 34
 ///     n += 1;
 /// }
+/// # }
 /// ```
 ///
 /// Calling [`value`] or [`key`] before the first [`next`], or after [`next`] has returned `false`, is
