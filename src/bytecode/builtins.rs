@@ -52,6 +52,46 @@ impl_builtins! {
     /// meaning that when an array already bound to one variable is bound to another, both of the
     /// variables will point at the same data.
     ///
+    /// # Construction
+    ///
+    /// Create an empty array with an empty literal. Element type will be inferred from push:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let mut names = [ ];
+    /// names.push("Alice");
+    /// names.push("Bob");
+    /// for name in names {
+    ///     println("{name}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Create an array from a literal:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let greetings = [ "hello", "world" ];
+    /// for g in greetings {
+    ///     println("{g}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Declare an array:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let mut items: [ String ];
+    /// items = [ "first", "second" ];
+    /// for item in items {
+    ///     println("{item}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// # Iteration
+    ///
     /// Iteration mirrors maps:
     ///
     /// - `for value in array` — iterate values.
@@ -60,26 +100,6 @@ impl_builtins! {
     ///
     /// The index range is snapshotted at loop entry, so the body may grow the array without extending
     /// the iteration.
-    ///
-    /// # Examples
-    ///
-    /// ``` ignore
-    /// let greetings = [
-    ///     "Guten Tag!",
-    ///     "Bonjour!",
-    ///     "Добридень!",
-    ///     "¡Hola!",
-    ///     "今日は",
-    /// ];
-    ///
-    /// greetings.push("Hello!");
-    ///
-    /// for greeting in greetings {
-    ///     print("- {greeting} -");
-    /// }
-    /// ```
-    ///
-    /// This prints `- Guten Tag! -- Bonjour! -- Добридень! -- ¡Hola! -- 今日は -- Hello! -`.
     Array {
         /// Returns the length of the array.
         len(self: Self) -> u64 {
@@ -1670,23 +1690,54 @@ impl_builtins! {
     /// Maps store a variable number of key-value pairs. Keys must be unique within a map.
     /// Maps are a reference type. Insertion order is preserved.
     ///
+    /// # Construction
+    ///
+    /// Create an empty map with an empty literal. Key and value types will be inferred from inserts:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let mut scores = [ => ];
+    /// scores.insert("Alice", 100);
+    /// scores.insert("Bob", 200);
+    /// for name, score in scores {
+    ///     println("{name}: {score}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Create a map from a literal:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let ages = [
+    ///     "Alice" => 30,
+    ///     "Bob" => 25,
+    /// ];
+    /// for name, age in ages {
+    ///     println("{name} is {age}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Declare a map:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let mut data: [ String => u64 ];
+    /// data = [ "x" => 10, "y" => 20 ];
+    /// for key, value in data {
+    ///     println("{key}={value}");
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// # Iteration
+    ///
     /// Iteration mirrors arrays:
     ///
     /// - `for value in map` — iterate values.
     /// - `for key, value in map` — iterate keys and values.
     /// - `for key, _ in map` — iterate keys alone.
-    ///
-    /// # Examples
-    ///
-    /// ``` ignore
-    /// let scores = [ => ];
-    /// scores.insert("Alice", 100);
-    /// scores.insert("Bob", 200);
-    ///
-    /// for name, score in scores {
-    ///     println("{name}: {score}");
-    /// }
-    /// ```
     Map {
         /// Inserts a key-value pair into the map. If the key already exists, the value is updated.
         insert(self: Self, key: Key, value: Value) {
