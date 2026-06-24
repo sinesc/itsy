@@ -216,6 +216,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     if let Some(TypeName { type_id, .. }) = impl_block.trt {
                         let trait_type_id = type_id.ice()?;
                         let trt = self.ty(&trait_type_id).as_trait().ice()?;
+                        // intrinsic traits whose method signatures are impl-defined (e.g. `Index`) carry only
+                        // placeholder signatures; their impls vary per type and are never virtually dispatched,
+                        // so there is nothing meaningful to check against.
+                        if trt.impl_defined {
+                            continue;
+                        }
                         let function_id = self.constant_by_id(function.constant_id.ice()?).value.as_function_id().ice()?;
                         let function_name = &function.shared.sig.ident.name;
                         // check if function is defined in trait
@@ -450,6 +456,77 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 self.write_heap_put(ty, false)?;    // stack: --
             },
             _ => {
+                // Custom Index compound assignment: `a[i] += v` -> `a.set(i, a.get(i) OP v)`
+                // with single evaluation of `a` and `i` using temp bindings.
+                if let Some(ast::CompoundDispatch::IndexMethod { get_method, set_method, op_method, recv, idx }) = &item.op_dispatch {
+                    let recv_loc = self.locals.lookup(*recv);
+                    let idx_loc = self.locals.lookup(*idx);
+                    let recv_ty_id = self.binding_by_id(*recv).type_id.ice()?;
+                    let idx_ty_id = self.binding_by_id(*idx).type_id.ice()?;
+
+                    // Store recv and idx once.
+                    comment!(self, "store recv/idx temps");
+                    self.compile_expression(item.left.as_binary_op().ice()?.left.as_expression().ice()?)?;
+                    self.write_store(self.ty(&recv_ty_id), recv_loc, None)?;
+                    self.compile_expression(item.left.as_binary_op().ice()?.right.as_expression().ice()?)?;
+                    self.write_store(self.ty(&idx_ty_id), idx_loc, None)?;
+
+                    // Pre-load recv/idx for set (parked at bottom of stack).
+                    comment!(self, "park set args");
+                    self.write_load(self.ty(&recv_ty_id), recv_loc)?;
+                    self.write_cnt(self.ty(&recv_ty_id), true, HeapRefOp::Inc)?;
+                    self.write_load(self.ty(&idx_ty_id), idx_loc)?;
+                    self.write_cnt(self.ty(&idx_ty_id), true, HeapRefOp::Inc)?;
+
+                    // Load recv/idx again for get.
+                    comment!(self, "load for get");
+                    self.write_load(self.ty(&recv_ty_id), recv_loc)?;
+                    self.write_cnt(self.ty(&recv_ty_id), true, HeapRefOp::Inc)?;
+                    self.write_load(self.ty(&idx_ty_id), idx_loc)?;
+                    self.write_cnt(self.ty(&idx_ty_id), true, HeapRefOp::Inc)?;
+
+                    // Call get: [recv_set idx_set recv_get idx_get] -> [recv_set idx_set V]
+                    // (get decrements its own recv/idx arguments per the method-call convention).
+                    comment!(self, "get");
+                    self.compile_method_dispatch(*get_method)?;
+
+                    // Apply the operator to `V <op> right`, producing V'. Two ref-counting conventions apply:
+                    // a custom operator is a method call (callee decrements both operands, so the caller must
+                    // increment them); a built-in operator (`write_add` etc.) instead drops only *unowned*
+                    // temporaries (`HeapRefOp::Free`), so its operands must NOT be pre-incremented.
+                    comment!(self, "op");
+                    if let Some(op_id) = op_method {
+                        self.write_cnt(self.ty(&item.right), true, HeapRefOp::Inc)?;  // V (self)
+                        self.compile_expression(&item.right)?;
+                        self.write_cnt(self.ty(&item.right), true, HeapRefOp::Inc)?;  // right (rhs)
+                        self.compile_method_dispatch(*op_id)?;
+                    } else {
+                        use crate::frontend::ast::BinaryOperator as BO;
+                        self.compile_expression(&item.right)?;
+                        match item.op {
+                            BO::AddAssign => self.write_add(self.ty(&item.right))?,
+                            BO::SubAssign => self.write_sub(self.ty(&item.right))?,
+                            BO::MulAssign => self.write_mul(self.ty(&item.right))?,
+                            BO::DivAssign => self.write_div(self.ty(&item.right))?,
+                            BO::RemAssign => self.write_rem(self.ty(&item.right))?,
+                            BO::BitAndAssign => self.write_bitand(self.ty(&item.right))?,
+                            BO::BitOrAssign => self.write_bitor(self.ty(&item.right))?,
+                            BO::BitXorAssign => self.write_bitxor(self.ty(&item.right))?,
+                            BO::ShlAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shl(self.ty(&item.right))? },
+                            BO::ShrAssign => { self.write_shift_amount_cast(self.ty(&item.right))?; self.write_shr(self.ty(&item.right))? },
+                            _ => Self::ice_at(item, "Invalid compound assignment operator for Index")?,
+                        };
+                    }
+
+                    // Call set: [recv_set idx_set V'] -> []. set is a method call and decrements all three
+                    // arguments, so V' (the operator result) must be incremented like the parked recv/idx.
+                    comment!(self, "set");
+                    self.write_cnt(self.ty(&item.right), true, HeapRefOp::Inc)?;
+                    self.compile_method_dispatch(*set_method)?;
+                    return Ok(());
+                }
+
+                // Standard compound assignment (field/struct offset).
                 self.compile_expression(&item.left)?;       // stack: &left
                 self.writer.clone(size_of::<HeapAddress>() as FrameAddress);// stack: &left &left
                 self.write_heap_fetch(self.ty(&item.left))?;// stack: &left left
@@ -1840,6 +1917,19 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         if let ast::Expression::Block(block) = expression {
             self.create_stack_frame_block(block, frame)?;
         } else if let ast::Expression::Assignment(assignment) = expression {
+            // For Index compound assignment, slot the temp bindings if they are typed.
+            if let Some(ast::CompoundDispatch::IndexMethod { recv, idx, .. }) = &assignment.op_dispatch {
+                if let Some(recv_type_id) = self.binding_by_id(*recv).type_id {
+                    frame.insert(*recv, frame.var_pos);
+                    frame.var_pos += self.ty(&recv_type_id).primitive_size() as FrameAddress;
+                }
+                if let Some(idx_type_id) = self.binding_by_id(*idx).type_id {
+                    frame.insert(*idx, frame.var_pos);
+                    frame.var_pos += self.ty(&idx_type_id).primitive_size() as FrameAddress;
+                }
+            }
+            // Also walk the left side for nested expressions (e.g. the index receiver).
+            self.create_stack_frame_exp(&assignment.left, frame)?;
             self.create_stack_frame_exp(&assignment.right, frame)?;
         } else if let ast::Expression::BinaryOp(binary_op) = expression {
             if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.left {
@@ -2807,6 +2897,11 @@ impl<T> Compiler<T> {
     fn filter_trait_functions(resolved: &Resolved) -> CompileResult<Vec<(TypeId, &String, FunctionId)>> {
         let mut result = Vec::new();
         for (type_id, trt) in resolved.traits() {
+            // intrinsic traits with impl-defined signatures (e.g. `Index`) are never virtually dispatched and
+            // their placeholder method constants carry no real signature, so they get no vtable slots.
+            if trt.impl_defined {
+                continue;
+            }
             for (function_name, constant_id) in trt.provided.iter() {
                 let constant_id = constant_id.ice_msg("Unresolved trait provided function constant")?;
                 let function_id = resolved.constant(constant_id).value.as_function_id().ice_msg("Trait provided function constant is not a function")?;

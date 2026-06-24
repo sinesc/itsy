@@ -121,3 +121,32 @@ pub(super) struct OptionTypeInfo {
     /// Unit-variant constant for the `None` simple variant (`ConstantValue::Discriminant`, index 1).
     pub(super) none_constant  : ConstantId,
 }
+
+/// Describes the intrinsic `Index` trait that backs overloadable `[]` index access on custom types.
+/// Unlike operator traits (fixed `rhs`/`result`), the index and value types are impl-defined,
+/// so signatures are read from the impl at resolution time.
+pub(super) struct IntrinsicIndexTrait {
+    /// Name of the trait scripts implement.
+    pub(super) trait_name : &'static str,
+    /// Name of the read method (`fn get(self: Self, index: <K>) -> <V>`).
+    pub(super) get_method : &'static str,
+    /// Name of the write method (`fn set(self: Self, index: <K>, value: <V>)`).
+    pub(super) set_method : &'static str,
+}
+
+/// The set of intrinsic index traits known to the compiler. Currently only `Index`.
+pub(super) const INTRINSIC_INDEX_TRAITS: &[IntrinsicIndexTrait] = &[
+    IntrinsicIndexTrait { trait_name: "Index", get_method: "get", set_method: "set" },
+];
+
+/// A resolved intrinsic `Index` trait: the trait type id and the method names. The concrete
+/// signatures (index type, value type) are read from the impl at resolution time.
+#[derive(Copy, Clone)]
+pub(super) struct IntrinsicIndex {
+    /// Type id of the registered trait (`Index`).
+    pub(super) trait_type_id : TypeId,
+    /// Name of the read method.
+    pub(super) get_method    : &'static str,
+    /// Name of the write method.
+    pub(super) set_method    : &'static str,
+}

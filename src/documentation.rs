@@ -820,6 +820,97 @@ pub mod intrinsic_traits {
         /// Returns a human-readable description of the error.
         fn description(self: Self) -> String;
     }
+
+    /// Overloads the `[]` index operator for custom types.
+    ///
+    /// Unlike the operator traits (e.g. `Add`, `Eq`) which have fixed signatures, `Index` lets each
+    /// implementor define its own index and value types. The `get` method defines the read path
+    /// (`a[i]`), and the `set` method defines the write path (`a[i] = v`). The index parameter
+    /// types must match between `get` and `set`, but the read result and write value can differ
+    /// (e.g. `get -> Option<T>` / `set(value: T)`).
+    ///
+    /// The `get` method can return `Option<T>` while `set` accepts bare `T`, allowing
+    /// map-like asymmetry where reads may fail but writes always succeed.
+    /// Compound assignment (`a[i] += v`) requires `get` and `set` to share the same value type,
+    /// since it lowers to `a.set(i, a.get(i) op v)`.
+    ///
+    /// Index access never goes through dynamic dispatch: `a[i]` is rewritten to a direct call of the
+    /// concrete implementor's `get`/`set`, so the receiver, index and value are evaluated exactly once.
+    ///
+    /// # Examples
+    ///
+    /// Indexing an integer-keyed grid:
+    ///
+    /// ``` ignore
+    /// struct Grid { cells: [i64] }
+    /// impl Index for Grid {
+    ///     // read path: grid[i]
+    ///     fn get(self: Self, index: u64) -> i64 {
+    ///         self.cells[index]
+    ///     }
+    ///     // write path: grid[i] = v
+    ///     fn set(self: Self, index: u64, value: i64) {
+    ///         self.cells[index] = value;
+    ///     }
+    /// }
+    ///
+    /// fn main() {
+    ///     let grid = Grid { cells: [ 10, 20, 30 ] };
+    ///     let first = grid[0];    // grid.get(0)
+    ///     grid[1] = 99;           // grid.set(1, 99)
+    ///     grid[2] += 5;           // grid.set(2, grid.get(2) + 5)
+    /// }
+    /// ```
+    ///
+    /// The index type is whatever the impl declares — here a `String` key over a map, with `get`
+    /// returning a bare value (defaulting absent keys) while a separate `set` accepts the value:
+    ///
+    /// ``` ignore
+    /// struct Sparse { cells: [String => i64] }
+    /// impl Index for Sparse {
+    ///     fn get(self: Self, index: String) -> i64 {
+    ///         match self.cells[index] {
+    ///             Some(value) => value,
+    ///             None => 0,
+    ///         }
+    ///     }
+    ///     fn set(self: Self, index: String, value: i64) {
+    ///         self.cells[index] = value;
+    ///     }
+    /// }
+    ///
+    /// fn main() {
+    ///     let sparse = Sparse { cells: [ => ] };
+    ///     sparse["a1"] = 42;          // sparse.set("a1", 42)
+    ///     let here = sparse["a1"];    // sparse.get("a1") -> 42
+    ///     let absent = sparse["z9"];  // sparse.get("z9") -> 0
+    ///     sparse["a1"] += 8;          // sparse.set("a1", sparse.get("a1") + 8)
+    /// }
+    /// ```
+    ///
+    /// The [`IndexType`], [`ResultType`] and [`ValueType`] below are placeholders, not built-in types:
+    /// each implementor substitutes its own concrete types (e.g. `u64`/`i64` or `String`/`i64` as above).
+    /// [`IndexType`] must be the same in `get` and `set`; [`ResultType`] (the read result) and
+    /// [`ValueType`] (the written value) are independent — they may differ (e.g. `Option<i64>` / `i64`).
+    pub trait Index {
+        /// Returns the element at the given index.
+        fn get(self: Self, index: IndexType) -> ResultType;
+        /// Sets the element at the given index to the given value.
+        fn set(self: Self, index: IndexType, value: ValueType);
+    }
+
+    /// Placeholder for the index ("key") type an [`Index`] implementor chooses (e.g. `u64`, `String`).
+    /// Not a built-in type — it must be the same in [`Index::get`] and [`Index::set`].
+    pub struct IndexType { }
+
+    /// Placeholder for the type [`Index::get`] returns. Not a built-in type. May be wrapped (e.g.
+    /// `Option<i64>`) and need not equal [`ValueType`], though compound assignment (`a[i] += v`) requires it to.
+    pub struct ResultType { }
+
+    /// Placeholder for the value type [`Index::set`] accepts. Not a built-in type, and independent of
+    /// [`ResultType`].
+    pub struct ValueType { }
+
 }
 
 /// Generator functions and the `yield` keyword.

@@ -116,6 +116,24 @@ impl ImplTrait {
 pub struct Trait {
     pub provided: Map<String, Option<ConstantId>>,
     pub required: Map<String, Option<ConstantId>>,
+    /// Set for intrinsic traits whose required-method signatures are defined by each implementor rather
+    /// than fixed by the trait (currently only `Index`). Such a trait registers placeholder constants for
+    /// its required methods (so the trait type resolves and impl blocks accept the method names), but those
+    /// placeholders carry no meaningful signature: index access is always lowered to a direct call of the
+    /// concrete impl's method, never virtually dispatched. The compiler therefore excludes these methods
+    /// from the vtable and skips the impl-vs-trait signature compatibility check for them.
+    pub impl_defined: bool,
+}
+
+impl Trait {
+    /// A trait with fixed required/provided method signatures (the common case).
+    pub fn new() -> Self {
+        Self { provided: Map::new(), required: Map::new(), impl_defined: false }
+    }
+    /// An intrinsic trait whose required-method signatures are defined per implementor (see `impl_defined`).
+    pub fn new_impl_defined() -> Self {
+        Self { provided: Map::new(), required: Map::new(), impl_defined: true }
+    }
 }
 
 /// Type-information for a function or closure.

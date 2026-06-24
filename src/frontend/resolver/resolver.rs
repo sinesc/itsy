@@ -20,7 +20,7 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
-use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, ResultTypeInfo, OptionTypeInfo};
+use crate::frontend::resolver::intrinsic::{INTRINSIC_CAST_TRAITS, IntrinsicCast, INTRINSIC_OP_TRAITS, IntrinsicOp, IntrinsicResult, INTRINSIC_INDEX_TRAITS, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -41,6 +41,9 @@ pub(crate) struct Resolver<'ctx> {
     /// the trait method on the operands, provided they implement it. `Eq` is keyed under `Equal` and backs
     /// both `==` and `!=` (`a != b` lowers to the negated `eq` result).
     intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// The intrinsic `Index` trait that backs overloadable `[]` on custom types. The concrete index
+    /// and value types are impl-defined and read at resolution time.
+    intrinsic_index : Option<IntrinsicIndex>,
     /// Type id of the built-in `Error` trait. Fixed `Err` payload type of every synthesized `Result<T>`.
     error_trait_type_id: TypeId,
     /// Registry of synthesized `Result<T>` enums (keyed by enum type id), persistent across resolution
@@ -133,7 +136,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     let mut intrinsic_casts = UnorderedMap::new();
     for intrinsic in INTRINSIC_CAST_TRAITS {
         let target_type_id = *primitives.get(&intrinsic.target).ice()?;
-        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
         // required method `fn <method>(self: Self) -> <target>`, registered exactly as the resolver would
         // for a source-defined trait method so impl-matching and vtable construction pick it up.
         let constant_id = scopes.insert_function(
@@ -176,7 +179,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // INTRINSIC_OP_TRAITS to back a further operator.
     let mut intrinsic_ops = UnorderedMap::new();
     for intrinsic in INTRINSIC_OP_TRAITS {
-        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
         // required method `fn <method>(self: Self, rhs: <rhs>) -> <result>`, where rhs defaults to Self
         // (arithmetic, bitwise, equality) but can be a fixed primitive for shift operators.
         let rhs_type_id = match &intrinsic.rhs {
@@ -203,7 +206,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // register the built-in `Error` trait so scripts can `impl Error for MyType { ... }`. Required method:
     // `fn description(self: Self) -> String`, registered exactly as a source-defined trait method would be.
     let string_type_id = *primitives.get(&Type::String).ice()?;
-    let error_trait_type_id = scopes.insert_type(Some("Error"), Type::Trait(Trait { provided: Map::new(), required: Map::new() }));
+    let error_trait_type_id = scopes.insert_type(Some("Error"), Type::Trait(Trait::new()));
     let error_description_id = scopes.insert_function(
         "Error::description",
         Some(string_type_id),
@@ -212,6 +215,39 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     );
     scopes.type_mut(error_trait_type_id).as_trait_mut().ice()?.required.insert("description".to_string(), Some(error_description_id));
     intrinsic_trait_names.push("Error".to_string());
+
+    // register the intrinsic `Index` trait so scripts can `impl Index for MyType { ... }`.
+    // Unlike operator traits (fixed rhs/result types), Index's `get`/`set` signatures are
+    // impl-defined: the index type and value type vary per implementor, so we cannot bake a fixed
+    // signature into the required methods. We still register each required method with a placeholder
+    // function constant (as `Error::description` and the operator traits do), because a trait whose
+    // `required` entry maps to `None` is treated as forever-unresolved by `check_type_id`, which would
+    // in turn stall every type that implements it. The placeholder is only a vtable-slot identity: it is
+    // never called and never used for type checking. Index access never goes through virtual dispatch;
+    // it is rewritten to a direct call of the concrete impl's `get`/`set` (see `intrinsic_index_methods`),
+    // whose real signatures are read off the impl. The placeholder's own signature is therefore
+    // irrelevant beyond being fully resolved (`fn (self: Self) -> void`).
+    let mut intrinsic_index: Option<IntrinsicIndex> = None;
+    if let Some(intrinsic) = INTRINSIC_INDEX_TRAITS.first() {
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new_impl_defined()));
+        let get_constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.get_method),
+            Some(TypeId::VOID),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        let set_constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.set_method),
+            Some(TypeId::VOID),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        let trt = scopes.type_mut(trait_type_id).as_trait_mut().ice()?;
+        trt.required.insert(intrinsic.get_method.to_string(), Some(get_constant_id));
+        trt.required.insert(intrinsic.set_method.to_string(), Some(set_constant_id));
+        intrinsic_trait_names.push(intrinsic.trait_name.to_string());
+        intrinsic_index = Some(IntrinsicIndex { trait_type_id, get_method: intrinsic.get_method, set_method: intrinsic.set_method });
+    }
 
     // registry of synthesized `Result<T>` enums, populated on demand as `Result<T>` annotations and
     // `Ok`/`Err` constructors are resolved. Persistent across passes (the Resolver is rebuilt each pass).
@@ -267,6 +303,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             primitives      : &primitives,
             intrinsic_casts : &intrinsic_casts,
             intrinsic_ops   : &intrinsic_ops,
+            intrinsic_index,
             error_trait_type_id,
             result_types    : &mut result_types,
             option_types    : &mut option_types,
@@ -836,6 +873,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         None
     }
 
+    /// Looks up the `get` and `set` method constants for the intrinsic `Index` trait on the given
+    /// target type. Returns both constants when the impl is fully resolved.
+    fn intrinsic_index_methods(self: &Self, type_id: TypeId, intrinsic: &IntrinsicIndex) -> Option<(ConstantId, ConstantId)> {
+        if let Some(impl_traits) = self.type_by_id(type_id).impl_traits_map() {
+            if let Some(impl_trait) = impl_traits.get(&intrinsic.trait_type_id) {
+                if let (Some(Some(get_id)), Some(Some(set_id))) = (
+                    impl_trait.functions.get(intrinsic.get_method),
+                    impl_trait.functions.get(intrinsic.set_method),
+                ) {
+                    return Some((*get_id, *set_id));
+                }
+            }
+        }
+        None
+    }
+
     /// Builds an unresolved method-call expression `receiver.method(args...)` for the resolver to lower
     /// intrinsic-trait operations (casts, operators) onto the regular method-call machinery.
     fn make_method_call(receiver: ast::Expression, method: &str, args: Vec<ast::Expression>, position: ast::Position) -> ast::Expression {
@@ -944,7 +997,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Literal(literal) => self.resolve_literal(literal, expected_result),
             Variable(variable) => self.resolve_variable(variable, expected_result),
             Constant(constant) => self.resolve_constant(constant, expected_result),
-            Assignment(assignment) => self.resolve_assignment(assignment, expected_result),
+            Assignment(_) => self.resolve_assignment(item, expected_result),
             BinaryOp(binary_op) => self.resolve_binary_op(binary_op, expected_result),
             UnaryOp(unary_op) => self.resolve_unary_op(unary_op, expected_result),
             Block(block) => self.resolve_block(block, expected_result),
@@ -1334,7 +1387,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.scope_id = item.scope_id;
         // ensure trait exists
         if item.type_id.is_none() {
-            let mut trt = Trait { provided: Map::new(), required: Map::new() };
+            let mut trt = Trait::new();
             for function in &mut item.functions {
                 let name = function.shared.sig.ident.name.clone();
                 match function.shared.block {
@@ -1997,21 +2050,46 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Resolves an assignment expression.
-    fn resolve_assignment(self: &mut Self, item: &mut ast::Assignment, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_assignment(self: &mut Self, item: &mut ast::Expression, expected_result: Option<TypeId>) -> ResolveResult {
+        // Check for custom `Index` trait on index-write targets (`a[i] = v` / `a[i] += v`).
+        // We inspect the assignment before extracting it so we can replace the whole expression
+        // with a method call for plain writes.
+        if let Some(assignment) = item.as_assignment() {
+            if let Some(bin) = assignment.left.as_binary_op() {
+                if bin.op == IndexWrite {
+                    let recv_type_id = bin.left.type_id(self);
+                    if let (Some(recv_type_id), Some(intrinsic)) = (recv_type_id, self.intrinsic_index) {
+                        if self.type_accepted_for(recv_type_id, intrinsic.trait_type_id) {
+                            if assignment.op == Assign {
+                                // Plain write `a[i] = v` -> rewrite to `a.set(i, v)`
+                                return self.rewrite_index_write_to_method(item, intrinsic, expected_result);
+                            } else if assignment.op.arithmetic_assign_base().is_some() {
+                                // Compound assignment `a[i] += v` -> use IndexMethod dispatch
+                                let assignment = item.as_assignment_mut().ice()?;
+                                return self.resolve_index_compound_assign(assignment, recv_type_id, &intrinsic, expected_result);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let assignment = item.as_assignment_mut().ice()?;
         use ast::BinaryOperator::*;
         // shift-assigns take an independent integer shift amount on the right that must not be unified with
         // the target type (mirrors the standalone `<<`/`>>` handling in resolve_binary_op)
-        let shift_assign = matches!(item.op, ShlAssign | ShrAssign);
+        let shift_assign = matches!(assignment.op, ShlAssign | ShrAssign);
         // Resolve the assignment target first *without* imposing the value's type on it, then resolve the
         // value against the target's type. This ordering means a genuine mismatch is reported as
         // "expected <target>, got <value>"; resolving the target against the value's type instead (the
         // reverse) would name the operands the wrong way round for an assignment.
-        self.resolve_expression(&mut item.left, None)?;
-        let left_type_id = item.left.type_id(self);
+        self.resolve_expression(&mut assignment.left, None)?;
+        let left_type_id = assignment.left.type_id(self);
+
         // classify compound assignment once the target type is known. Numeric/string targets for arithmetic,
         // and integer targets for bitwise/shift, keep their built-in codegen; a custom target (variable, field
         // or index) is dispatched in-place to the operator-trait method so the target is evaluated only once.
-        if let (Some(base_op), Some(left_type_id)) = (item.op.arithmetic_assign_base(), left_type_id) {
+        if let (Some(base_op), Some(left_type_id)) = (assignment.op.arithmetic_assign_base(), left_type_id) {
             let left_type = self.type_by_id(left_type_id);
             let is_bitwise_shift = matches!(base_op, BitAnd | BitOr | BitXor | Shl | Shr);
             let is_builtin = if is_bitwise_shift {
@@ -2020,7 +2098,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 left_type.is_numeric() || left_type.is_string()
             };
             if is_builtin {
-                item.op_dispatch = Some(ast::CompoundDispatch::Builtin);
+                assignment.op_dispatch = Some(ast::CompoundDispatch::Builtin);
             } else {
                 let intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
                 let rhs_expected = if matches!(base_op, Shl | Shr) {
@@ -2028,46 +2106,46 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 } else {
                     Some(left_type_id) // Self
                 };
-                self.resolve_expression(&mut item.right, rhs_expected)?;
-                if let Some(right_type_id) = item.right.type_id(self) {
+                self.resolve_expression(&mut assignment.right, rhs_expected)?;
+                if let Some(right_type_id) = assignment.right.type_id(self) {
                     if !matches!(base_op, Shl | Shr) {
-                        self.check_type_accepted_for(item, right_type_id, left_type_id)?; // rhs must be Self
+                        self.check_type_accepted_for(assignment, right_type_id, left_type_id)?; // rhs must be Self
                     }
                 }
                 if let Some(constant_id) = self.intrinsic_op_method_constant(left_type_id, &intrinsic) {
-                    item.op_dispatch = Some(ast::CompoundDispatch::Method(constant_id));
+                    assignment.op_dispatch = Some(ast::CompoundDispatch::Method(constant_id));
                 } else if self.stage.must_resolve() {
                     let type_name = self.type_name(left_type_id);
                     let trait_name = self.type_name(intrinsic.trait_type_id);
-                    return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                    return Err(ResolveError::new(assignment, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
                 }
-                item.type_id = Some(TypeId::VOID);
-                return self.types_resolved(item, expected_result);
+                assignment.type_id = Some(TypeId::VOID);
+                return self.types_resolved(assignment, expected_result);
             }
         }
-        self.resolve_expression(&mut item.right, if shift_assign { None } else { left_type_id })?;
-        let right_type_id = item.right.type_id(self);
+        self.resolve_expression(&mut assignment.right, if shift_assign { None } else { left_type_id })?;
+        let right_type_id = assignment.right.type_id(self);
         // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
         // untyped array's element type, or an uninitialized binding learned from what is assigned to it)
         if left_type_id.is_none() && !shift_assign {
-            self.resolve_expression(&mut item.left, right_type_id)?;
+            self.resolve_expression(&mut assignment.left, right_type_id)?;
         }
         // bitwise/shift compound assigns require integer operands
-        if matches!(item.op, BitAndAssign | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign) {
-            if let Some(left_type_id) = item.left.type_id(self) {
+        if matches!(assignment.op, BitAndAssign | BitOrAssign | BitXorAssign | ShlAssign | ShrAssign) {
+            if let Some(left_type_id) = assignment.left.type_id(self) {
                 if !self.type_by_id(left_type_id).is_integer() {
-                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", item.op)), self.module_path));
+                    return Err(ResolveError::new(assignment, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", assignment.op)), self.module_path));
                 }
             }
-            if let Some(right_type_id) = item.right.type_id(self) {
+            if let Some(right_type_id) = assignment.right.type_id(self) {
                 if !self.type_by_id(right_type_id).is_integer() {
-                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer right operand", item.op)), self.module_path));
+                    return Err(ResolveError::new(assignment, ResolveErrorKind::InvalidOperation(format!("{} requires an integer right operand", assignment.op)), self.module_path));
                 }
             }
         }
         // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
-        item.type_id = Some(TypeId::VOID);
-        self.types_resolved(item, expected_result)
+        assignment.type_id = Some(TypeId::VOID);
+        self.types_resolved(assignment, expected_result)
     }
 
     /// Resolves a type cast. Built-in primitive conversions are validated against the conversion matrix;
@@ -2308,9 +2386,41 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let left_type_id = item.left.type_id(self);
                 let is_map = left_type_id.map_or(false, |id| self.type_by_id(id).as_map().is_some());
                 let is_array = left_type_id.map_or(false, |id| self.type_by_id(id).as_array().is_some());
-                if left_type_id.is_some() && !is_array && !is_map {
-                    return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
+
+                // Check for custom `Index` trait implementation on non-map, non-array types.
+                // For read (`Index`), rewrite to `a.get(i)`. For write (`IndexWrite`), leave as-is
+                // so `resolve_assignment` can handle the plain-write rewrite.
+                if !is_map && !is_array {
+                    if let (Some(left_type_id), Some(intrinsic)) = (left_type_id, self.intrinsic_index) {
+                        if self.type_accepted_for(left_type_id, intrinsic.trait_type_id) {
+                            // Custom Index type detected. For read, rewrite to `a.get(i)`.
+                            if item.op == ast::BinaryOperator::Index {
+                                return self.rewrite_index_read_to_method(item, intrinsic, expected_result);
+                            }
+                            // IndexWrite: resolve the index operand (against the get method's param type)
+                            // so the node is typed enough for resolve_assignment to consume.
+                            if let Some((get_id, _)) = self.intrinsic_index_methods(left_type_id, &intrinsic) {
+                                let function_id = self.scopes.constant_function_id(get_id);
+                                if let Some(function_id) = function_id {
+                                    let func = self.scopes.function_ref(function_id);
+                                    // get's second parameter (index) type
+                                    if let Some(Some(index_type_id)) = func.arg_type_ids(self).get(1) {
+                                        self.resolve_expression(item.right.as_expression_mut().ice()?, Some(*index_type_id))?;
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                            // Methods not yet resolved; defer
+                            self.resolve_expression(item.right.as_expression_mut().ice()?, None)?;
+                            return Ok(());
+                        }
+                    }
+                    // Not a map, array, or custom Index type
+                    if left_type_id.is_some() {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
+                    }
                 }
+
                 if is_map {
                     // map index: the index operand is the key type, the result is the value type
                     let key_type_id = if let Some(&Type::Map(MapType { key_type_id, .. })) = self.item_type(&item.left) { key_type_id } else { None };
@@ -3072,6 +3182,156 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             _ => return Self::ice("make_method_call did not produce a binary operation"),
         }
         self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Rewrites an index read `a[i]` on a type implementing the intrinsic `Index` trait into a call of
+    /// its `get` method: `a.get(i)`. Mirrors `rewrite_binary_op_to_method` but uses the Index trait.
+    fn rewrite_index_read_to_method(self: &mut Self, item: &mut ast::BinaryOp, intrinsic: IntrinsicIndex, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let idx = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        match Self::make_method_call(receiver, intrinsic.get_method, vec![ idx ], position) {
+            ast::Expression::BinaryOp(call) => *item = *call,
+            _ => return Self::ice("make_method_call did not produce a binary operation"),
+        }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Rewrites a plain index-write assignment `a[i] = v` on a type implementing the intrinsic `Index`
+    /// trait into a call of its `set` method: `a.set(i, v)`. The whole `Assignment` expression is
+    /// replaced with the method-call expression.
+    fn rewrite_index_write_to_method(self: &mut Self, item: &mut ast::Expression, intrinsic: IntrinsicIndex, expected_result: Option<TypeId>) -> ResolveResult {
+        let assignment = item.as_assignment_mut().ice()?;
+        let position = assignment.position;
+        // Extract receiver and index from the IndexWrite left side.
+        let bin = assignment.left.as_binary_op_mut().ice()?;
+        let receiver = match std::mem::replace(&mut bin.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("index-write left operand is not an expression"),
+        };
+        let idx = match std::mem::replace(&mut bin.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("index-write right operand is not an expression"),
+        };
+        let value = std::mem::replace(&mut assignment.right, ast::Expression::void(position));
+        // Replace the entire assignment expression with `a.set(i, v)`.
+        *item = Self::make_method_call(receiver, intrinsic.set_method, vec![ idx, value ], position);
+        // Re-resolve the new call expression.
+        self.resolve_expression(item, expected_result)
+    }
+
+    /// Resolves a compound index-assignment `a[i] += v` on a type implementing the intrinsic `Index`
+    /// trait. Sets up `CompoundDispatch::IndexMethod` with the get/set method constants and temp bindings.
+    fn resolve_index_compound_assign(self: &mut Self, item: &mut ast::Assignment, recv_type_id: TypeId, intrinsic: &IntrinsicIndex, expected_result: Option<TypeId>) -> ResolveResult {
+        use ast::BinaryOperator::*;
+        let base_op = item.op.arithmetic_assign_base().ice()?;
+
+        // Look up the get and set methods.
+        let (get_id, set_id) = match self.intrinsic_index_methods(recv_type_id, intrinsic) {
+            Some(pair) => pair,
+            None => {
+                // Methods not yet resolved; defer to a later pass.
+                // Resolve the right side without type constraints.
+                self.resolve_expression(&mut item.right, None)?;
+                item.type_id = Some(TypeId::VOID);
+                return self.types_resolved(item, expected_result);
+            }
+        };
+
+        // Get the get method's return type, index param type, and set method's value param type.
+        // Extract all values before any mutable borrows.
+        let get_function_id = self.scopes.constant_function_id(get_id).ice()?;
+        let get_ret_type_id = self.scopes.function_ref(get_function_id).ret_type_id(self).ice()?;
+        let get_index_type_id = self.scopes.function_ref(get_function_id).arg_type_ids(self).get(1).and_then(|t| *t).ice()?;
+
+        let set_function_id = self.scopes.constant_function_id(set_id).ice()?;
+        // set's value parameter is the third (index 2: self, index, value)
+        let set_value_type_id = self.scopes.function_ref(set_function_id).arg_type_ids(self).get(2).and_then(|t| *t).ice()?;
+
+        // For compound assignment, get's return type must match set's value type.
+        if !self.type_equals(get_ret_type_id, set_value_type_id) {
+            if self.stage.must_resolve() {
+                let type_name = self.type_name(recv_type_id);
+                let get_ret_name = self.type_name(get_ret_type_id);
+                let set_val_name = self.type_name(set_value_type_id);
+                return Err(ResolveError::new(item, ResolveErrorKind::IndexCompoundAssignMismatch(type_name, get_ret_name, set_val_name), self.module_path));
+            }
+            self.resolve_expression(&mut item.right, None)?;
+            item.type_id = Some(TypeId::VOID);
+            return self.types_resolved(item, expected_result);
+        }
+
+        // Resolve the right-hand value expression against the value type.
+        self.resolve_expression(&mut item.right, Some(set_value_type_id))?;
+
+        // Determine the operator dispatch: is the value type a custom type needing trait dispatch,
+        // or a built-in primitive?
+        let value_type = self.type_by_id(set_value_type_id);
+        let is_bitwise_shift = matches!(base_op, BitAnd | BitOr | BitXor | Shl | Shr);
+        let is_builtin_value = if is_bitwise_shift {
+            value_type.is_integer()
+        } else {
+            value_type.is_numeric() || value_type.is_string()
+        };
+        // A built-in value type uses the arithmetic/bitwise opcodes directly; a custom value type must
+        // implement the matching operator trait (e.g. `Add`), dispatched like a standalone `a + b`.
+        let op_method = if is_builtin_value {
+            None
+        } else {
+            let op_intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
+            match self.intrinsic_op_method_constant(set_value_type_id, &op_intrinsic) {
+                Some(constant_id) => Some(constant_id),
+                None if self.stage.must_resolve() => {
+                    let type_name = self.type_name(set_value_type_id);
+                    let trait_name = self.type_name(op_intrinsic.trait_type_id);
+                    return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                },
+                None => {
+                    // operator-trait impl not resolved yet; defer to a later pass.
+                    self.resolve_expression(&mut item.right, None)?;
+                    item.type_id = Some(TypeId::VOID);
+                    return self.types_resolved(item, expected_result);
+                },
+            }
+        };
+
+        // Type the temp bindings (recv and idx).
+        let bin = item.left.as_binary_op_mut().ice()?;
+        // Type the receiver expression.
+        self.set_type_id(bin.left.as_expression_mut().ice()?, recv_type_id)?;
+        // Resolve and type the index expression against get's index parameter.
+        self.resolve_expression(bin.right.as_expression_mut().ice()?, Some(get_index_type_id))?;
+        self.set_type_id(bin.right.as_expression_mut().ice()?, get_index_type_id)?;
+        // Type the `IndexWrite` node itself with the indexed value type (get's return == set's value), so the
+        // assignment's `left` operand counts as resolved (see BinaryOp::resolvables).
+        let bin = item.left.as_binary_op_mut().ice()?;
+        bin.type_id = Some(set_value_type_id);
+
+        // Set the temp binding types.
+        if let Some(recv_binding) = item.temp_recv {
+            self.scopes.binding_mut(recv_binding).type_id = Some(recv_type_id);
+        }
+        if let Some(idx_binding) = item.temp_idx {
+            self.scopes.binding_mut(idx_binding).type_id = Some(get_index_type_id);
+        }
+
+        // Set up the dispatch.
+        item.op_dispatch = Some(ast::CompoundDispatch::IndexMethod {
+            get_method: get_id,
+            set_method: set_id,
+            op_method,
+            recv: item.temp_recv.ice()?,
+            idx: item.temp_idx.ice()?,
+        });
+
+        item.type_id = Some(TypeId::VOID);
+        self.types_resolved(item, expected_result)
     }
 
     /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant

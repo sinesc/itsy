@@ -44,3 +44,5 @@ mod call_function;
 #[cfg(feature="derive")]
 #[path="vm/api_types.rs"]
 mod api_types;
+#[path="vm/index_ops.rs"]
+mod index_ops;

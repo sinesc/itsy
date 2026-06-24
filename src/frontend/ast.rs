@@ -1611,6 +1611,8 @@ impl_as_getter!(Expression {
     pub as_binary_op: BinaryOp -> &BinaryOp,
     pub as_binary_op_mut: BinaryOp -> mut BinaryOp,
     pub as_cast_mut: Cast -> mut Cast,
+    pub as_assignment: Assignment -> &Assignment,
+    pub as_assignment_mut: Assignment -> mut Assignment,
 });
 
 impl Expression {
@@ -2000,6 +2002,21 @@ pub enum CompoundDispatch {
     Builtin,
     /// An operator-trait compound assignment on a custom target; the constant is the trait method to call.
     Method(ConstantId),
+    /// A compound index-assignment (`a[i] += v`) on a custom `Index` type. The compiler emits
+    /// `a.set(i, a.get(i) OP v)` using the stored method constants and temp bindings.
+    IndexMethod {
+        /// The `Index::get` method constant.
+        get_method : ConstantId,
+        /// The `Index::set` method constant.
+        set_method : ConstantId,
+        /// The operator-trait method constant for `<op>` (when value type is custom),
+        /// or `None` when the value type is a built-in primitive.
+        op_method  : Option<ConstantId>,
+        /// Parser-minted temp binding for the receiver expression (single evaluation).
+        recv       : BindingId,
+        /// Parser-minted temp binding for the index expression (single evaluation).
+        idx        : BindingId,
+    },
 }
 
 /// A variable assignment within an expression, e.g. `x = 10`.
@@ -2015,6 +2032,11 @@ pub struct Assignment {
     /// assignment to a custom-typed field/index target is instead dispatched in-place via a trait method
     /// (single evaluation of the target). The node is not considered resolved until this is classified.
     pub op_dispatch : Option<CompoundDispatch>,
+    /// Parser-minted temp bindings for compound index-assignment (`a[i] += v`).
+    /// `$recv` holds the receiver `a`, `$idx` holds the index `i`. Only used when the target is a
+    /// custom `Index` type (set by the resolver); otherwise these are unused.
+    pub temp_recv   : Option<BindingId>,
+    pub temp_idx    : Option<BindingId>,
 }
 
 impl_typeable!(Assignment);
@@ -2026,6 +2048,8 @@ impl Resolvable for Assignment {
         let mut result = self.left.resolvables();
         result.append(&mut self.right.resolvables());
         result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
+        // Temp bindings ($recv, $idx) are only used for custom Index compound assignment.
+        // They are resolved as part of the IndexMethod dispatch, not independently.
         // arithmetic compound assignment to a custom type is pending classification (built-in vs. an
         // operator-trait method call); gate its resolution on that decision (see Assignment::op_dispatch)
         if self.op.arithmetic_assign_base().is_some() {
@@ -2033,6 +2057,15 @@ impl Resolvable for Assignment {
                 None => result.push(Resolvables::Progress(Progress::new(0, 1))),
                 Some(CompoundDispatch::Builtin) => result.push(Resolvables::Progress(Progress::new(1, 1))),
                 Some(CompoundDispatch::Method(constant_id)) => result.push(Resolvables::ConstantId(constant_id)),
+                Some(CompoundDispatch::IndexMethod { get_method, set_method, op_method, recv, idx }) => {
+                    result.push(Resolvables::ConstantId(get_method));
+                    result.push(Resolvables::ConstantId(set_method));
+                    if let Some(op) = op_method {
+                        result.push(Resolvables::ConstantId(op));
+                    }
+                    result.push(Resolvables::BindingId(recv));
+                    result.push(Resolvables::BindingId(idx));
+                }
             }
         }
         result

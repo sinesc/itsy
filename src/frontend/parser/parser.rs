@@ -1581,10 +1581,31 @@ fn assignment(i: Input) -> Output<Assignment> {
         )(i)
     }
     let position = i.position();
+    let input = i.clone();
     map(
         tuple((assignable, assignment_operator, expression)),
         move |m| {
             // TODO: check that left is not a constant
+            // For compound assignment with an index target (`a[i] += v`), mint temp bindings
+            // for receiver and index so the compiler can evaluate each once.
+            let is_compound = m.1.arithmetic_assign_base().is_some();
+            let (temp_recv, temp_idx) = if is_compound {
+                // Check if the left side ends in an IndexWrite (index target)
+                if let Expression::BinaryOp(bin) = &m.0 {
+                    if bin.op == BinaryOperator::IndexWrite {
+                        let is_dead = input.flags().is_dead;
+                        let recv_id = if is_dead { BindingId::new(0) } else { input.add_binding("$recv") };
+                        let idx_id = if is_dead { BindingId::new(0) } else { input.add_binding("$idx") };
+                        (Some(recv_id), Some(idx_id))
+                    } else {
+                        (None, None)
+                    }
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
             Assignment {
                 position    : position,
                 op          : m.1,
@@ -1592,6 +1613,8 @@ fn assignment(i: Input) -> Output<Assignment> {
                 right       : m.2,
                 type_id     : None,
                 op_dispatch : None,
+                temp_recv   : temp_recv,
+                temp_idx    : temp_idx,
             }
         }
     )(i)

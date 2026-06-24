@@ -56,6 +56,9 @@ pub enum ResolveErrorKind {
     NotCallable(String),
     /// A struct or enum contains itself by value (directly or transitively), which would result in an infinitely-sized type.
     RecursiveType(String),
+    /// Compound assignment through `[]` on a custom `Index` type requires `get` and `set` to share
+    /// the same value type, but they differ.
+    IndexCompoundAssignMismatch(String, String, String),
     CannotResolve(String),
     InvalidOperation(String),
     Internal(String),
@@ -136,6 +139,7 @@ impl Display for ResolveError {
             ResolveErrorKind::NotKeyValueIterable(t) => write!(f, "Cannot iterate keys/indices of `{t}`: key/index iteration (`for key, _ in ..` / `for key, value in ..`) requires a map or array"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type `{t}` is not callable"),
             ResolveErrorKind::RecursiveType(name) => write!(f, "Recursive type `{name}` has infinite size. Recursive types are not supported"),
+            ResolveErrorKind::IndexCompoundAssignMismatch(ty, get_ret, set_val) => write!(f, "compound assignment through `[]` on `{ty}` requires `Index::get` to return the same type `Index::set` accepts (got `{get_ret}` vs `{set_val}`)"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve `{b}`"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {o}"),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
