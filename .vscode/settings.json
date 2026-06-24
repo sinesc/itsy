@@ -9,4 +9,5 @@
         "runtime", "compiler", "debugging", "symbols", "call_function"
     ],
     "rust-analyzer.cargo.noDefaultFeatures": true,
+    "markdown.styles": [".vscode/markdown.css"]
 }
