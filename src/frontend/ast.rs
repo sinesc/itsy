@@ -2172,10 +2172,11 @@ impl Resolvable for BinaryOp {
         let mut result = self.left.resolvables();
         result.append(&mut self.right.resolvables());
         result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
-        // arithmetic operators on a custom type are pending lowering to an operator-trait method call;
-        // gate their resolution on that classification (see BinaryOp::op_resolved)
+        // arithmetic, bitwise, shift, and ordering operators on a custom type are pending lowering to an
+        // operator-trait method call; gate their resolution on that classification (see BinaryOp::op_resolved)
         if matches!(self.op, BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Mul | BinaryOperator::Div | BinaryOperator::Rem
-            | BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor | BinaryOperator::Shl | BinaryOperator::Shr) {
+            | BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor | BinaryOperator::Shl | BinaryOperator::Shr
+            | BinaryOperator::Less | BinaryOperator::Greater | BinaryOperator::LessOrEq | BinaryOperator::GreaterOrEq) {
             result.push(Resolvables::Progress(if self.op_resolved { Progress::new(1, 1) } else { Progress::new(0, 1) }));
         }
         result

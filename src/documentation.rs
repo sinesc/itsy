@@ -25,7 +25,7 @@
 //! [Traits](crate::documentation::traits) define shared behavior that structs and enums can implement.\
 //! [Intrinsic traits](crate::documentation::intrinsic_traits) are a special subset recognized by the compiler:
 //! implementing one for a custom type makes the language functionality it backs work on that type
-//! (e.g. `Add` backs `+`, `ToString` backs `as String`).
+//! (e.g. `Add` backs `+`, `Ord` backs `<`, `>`, `<=`, `>=`, `ToString` backs `as String`).
 //!
 //! # Generators
 //!
@@ -632,6 +632,37 @@ pub mod traits { }
 /// let differ = a != b;  // false
 /// # }
 /// ```
+///
+/// # The ordering trait
+///
+/// [`Ord`](crate::documentation::intrinsic_traits::Ord) overloads the `<`, `>`, `<=` and `>=` operators. Its single
+/// method `fn cmp(self: Self, rhs: Self) -> Ordering` returns one of three variants of the
+/// [`Ordering`](crate::documentation::intrinsic_traits::Ordering) enum (`Less`, `Equal`, `Greater`) describing the
+/// relationship between the two values. The four comparison operators are lowered by the compiler to
+/// `cmp` calls compared against the appropriate variant (e.g. `a < b` becomes
+/// `a.cmp(b) == Ordering::Less`):
+///
+/// ``` ignore
+/// struct Point { x: i32, y: i32 }
+///
+/// impl Ord for Point {
+///     fn cmp(self: Self, other: Self) -> Ordering {
+///         if self.x != other.x {
+///             if self.x < other.x { Ordering::Less } else { Ordering::Greater }
+///         } else if self.y != other.y {
+///             if self.y < other.y { Ordering::Less } else { Ordering::Greater }
+///         } else {
+///             Ordering::Equal
+///         }
+///     }
+/// }
+///
+/// # fn main() {
+/// let a = Point { x: 1, y: 2 };
+/// let b = Point { x: 1, y: 3 };
+/// let result = a < b;   // true
+/// # }
+/// ```
 pub mod intrinsic_traits {
 
     /// Converts a value to a [`String`](crate::documentation::String).
@@ -736,6 +767,27 @@ pub mod intrinsic_traits {
     pub trait Eq {
         /// Returns `true` if `self` equals `rhs`. The `!=` operator returns the negation of this.
         fn eq(self: Self, rhs: Self) -> bool;
+    }
+
+    /// Overloads the `<`, `>`, `<=` and `>=` operators. See [the ordering trait](self#the-ordering-trait)
+    /// for an example.
+    pub trait Ord {
+        /// Returns the ordering relationship between `self` and `rhs`.
+        fn cmp(self: Self, rhs: Self) -> Ordering;
+    }
+
+    /// The three-way comparison result used by [`Ord::cmp`].
+    ///
+    /// This is a built-in value-type enum with an `i8` discriminant. It has three variants:
+    /// `Less` (-1), `Equal` (0), and `Greater` (1). It is returned by the `Ord::cmp` method
+    /// and used by the compiler to lower `<`, `>`, `<=` and `>=` on custom types.
+    pub enum Ordering {
+        /// `self` is less than `rhs` (discriminant -1).
+        Less,
+        /// `self` equals `rhs` (discriminant 0).
+        Equal,
+        /// `self` is greater than `rhs` (discriminant 1).
+        Greater,
     }
 
     /// The error type of [`Result`](crate::documentation::Result).

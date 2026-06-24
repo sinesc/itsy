@@ -34,12 +34,15 @@ pub(super) struct IntrinsicCast {
 }
 
 /// Return type of an intrinsic operator trait's required method: either the implementing type itself
-/// (`Self`, e.g. `Add::add(self, rhs) -> Self`) or a fixed primitive type (e.g. `Eq::eq(self, rhs) -> bool`).
+/// (`Self`, e.g. `Add::add(self, rhs) -> Self`), a fixed primitive type (e.g. `Eq::eq(self, rhs) -> bool`),
+/// or the built-in `Ordering` enum (e.g. `Ord::cmp(self, rhs) -> Ordering`).
 pub(super) enum IntrinsicResult {
     /// The method returns `Self` (the implementing type), like the arithmetic operator traits.
     SelfType,
     /// The method returns the given (primitive) type, like `Eq` returning `bool`.
     Type(Type),
+    /// The method returns the built-in `Ordering` enum (marker; resolved to real type id during registration).
+    Ordering,
 }
 
 /// Describes an intrinsic operator trait that backs a binary operator for custom types. Each has a single
@@ -64,6 +67,8 @@ pub(super) struct IntrinsicOpTrait {
 /// The set of intrinsic operator traits known to the compiler. These let custom types implement the
 /// binary operators; an operator applied to a type that has no built-in meaning for it is lowered to a
 /// call of the corresponding trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`).
+/// `Eq` is keyed under `Equal` and backs both `==` and `!=`; `Ord` is keyed under `Less` and backs
+/// `<`, `>`, `<=` and `>=`.
 pub(super) const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
     IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
     IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
@@ -76,6 +81,7 @@ pub(super) const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
     IntrinsicOpTrait { op: ast::BinaryOperator::Shl, trait_name: "Shl", method: "shl", rhs: IntrinsicResult::Type(Type::i64), result: IntrinsicResult::SelfType },
     IntrinsicOpTrait { op: ast::BinaryOperator::Shr, trait_name: "Shr", method: "shr", rhs: IntrinsicResult::Type(Type::i64), result: IntrinsicResult::SelfType },
     IntrinsicOpTrait { op: ast::BinaryOperator::Equal, trait_name: "Eq", method: "eq", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::Type(Type::bool) },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Less, trait_name: "Ord", method: "cmp", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::Ordering },
 ];
 
 /// A resolved intrinsic operator: the trait that backs an operator and the trait method to dispatch to.

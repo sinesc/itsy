@@ -543,3 +543,116 @@ fn multi_trait_bound_return_concrete() {
     assert(&result[1], 41u8);
     assert_eq!(result.len(), 2);
 }
+
+#[test]
+fn ord_trait_basic() {
+    // implement Ord for a struct and use <, >, <=, >= operators
+    let result = run(stringify!(
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+        impl Ord for Point {
+            fn cmp(self: Self, other: Self) -> Ordering {
+                if self.x != other.x {
+                    if self.x < other.x { Ordering::Less } else { Ordering::Greater }
+                } else if self.y != other.y {
+                    if self.y < other.y { Ordering::Less } else { Ordering::Greater }
+                } else {
+                    Ordering::Equal
+                }
+            }
+        }
+        fn main() {
+            let a = Point { x: 1, y: 2 };
+            let b = Point { x: 1, y: 3 };
+            let c = Point { x: 2, y: 0 };
+            let d = Point { x: 1, y: 2 };
+            ret_bool(a < b);   // true: same x, y 2 < 3
+            ret_bool(a > b);   // false
+            ret_bool(a <= b);  // true
+            ret_bool(a >= b);  // false
+            ret_bool(a < c);   // true: x 1 < 2
+            ret_bool(c < a);   // false: x 2 > 1
+            ret_bool(a < d);   // false: equal
+            ret_bool(a <= d);  // true: equal
+            ret_bool(a >= d);  // true: equal
+        }
+    ));
+    assert_all(&result, &[ true, false, true, false, true, false, false, true, true ]);
+}
+
+#[test]
+fn ord_trait_cmp_returns_ordering() {
+    // call cmp directly and check the Ordering result via == comparison
+    let result = run(stringify!(
+        struct Value {
+            n: i32,
+        }
+        impl Ord for Value {
+            fn cmp(self: Self, other: Self) -> Ordering {
+                if self.n < other.n { Ordering::Less }
+                else if self.n > other.n { Ordering::Greater }
+                else { Ordering::Equal }
+            }
+        }
+        fn main() {
+            let a = Value { n: 1 };
+            let b = Value { n: 2 };
+            let c = Value { n: 1 };
+            ret_bool(a.cmp(b) == Ordering::Less);
+            ret_bool(b.cmp(a) == Ordering::Greater);
+            ret_bool(a.cmp(c) == Ordering::Equal);
+        }
+    ));
+    assert_all(&result, &[ true, true, true ]);
+}
+
+#[test]
+fn ord_trait_on_enum() {
+    // implement Ord for an enum using if/else chains
+    let result = run(stringify!(
+        enum Priority {
+            Low,
+            Medium,
+            High,
+        }
+        impl Ord for Priority {
+            fn cmp(self: Self, other: Self) -> Ordering {
+                let sv = self as i32;
+                let ov = other as i32;
+                if sv < ov { Ordering::Less }
+                else if sv > ov { Ordering::Greater }
+                else { Ordering::Equal }
+            }
+        }
+        fn main() {
+            let low = Priority::Low;
+            let med = Priority::Medium;
+            let high = Priority::High;
+            ret_bool(low < med);
+            ret_bool(med < high);
+            ret_bool(low < high);
+            ret_bool(low <= low);
+            ret_bool(high >= high);
+            ret_bool(med >= low);
+        }
+    ));
+    assert_all(&result, &[ true, true, true, true, true, true ]);
+}
+
+#[test]
+#[should_panic(expected = "`MyType` does not implement required trait `Ord`")]
+fn ord_trait_missing_error() {
+    // using < on a custom type without Ord gives a clean error
+    run(stringify!(
+        struct MyType {
+            value: i32,
+        }
+        fn main() {
+            let a = MyType { value: 1 };
+            let b = MyType { value: 2 };
+            let _ = a < b;
+        }
+    ));
+}

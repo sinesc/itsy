@@ -49,10 +49,24 @@ pub(crate) struct Resolver<'ctx> {
     /// Registry of synthesized `Option<T>` enums (keyed by enum type id), persistent across resolution
     /// passes so `Some(x)` calls and bare `None` can be recognized and bound to the right variants.
     option_types    : &'ctx mut UnorderedMap<TypeId, OptionTypeInfo>,
+    /// Built-in `Ordering` enum type id and the constant ids for its three variants (`Less`, `Equal`,
+    /// `Greater`). Used by `rewrite_ord_op_to_method` to build the comparison against the right variant
+    /// when lowering `<`, `>`, `<=`, `>=` on custom types implementing `Ord`.
+    ordering        : OrderingInfo,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
     /// Current module base path.
     module_path     : &'ctx str,
+}
+
+/// Bookkeeping for the built-in `Ordering` enum: its type id and the constant ids for each variant.
+#[derive(Copy, Clone)]
+#[allow(dead_code)]
+struct OrderingInfo {
+    type_id         : TypeId,
+    less_constant   : ConstantId,
+    equal_constant  : ConstantId,
+    greater_constant: ConstantId,
 }
 
 /// Resolves types within the given program AST structure.
@@ -133,6 +147,29 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method });
     }
 
+    // register the built-in `Ordering` enum (value-type, i8 discriminant). This is the return type of
+    // `Ord::cmp` and must exist before the INTRINSIC_OP_TRAITS loop so the `Ord` row can reference it.
+    let i8_type_id = *primitives.get(&Type::i8).ice()?;
+    let ordering_type_id = scopes.insert_type(Some("Ordering"), Type::Enum(Enum {
+        primitive: Some((i8_type_id, Type::i8.primitive_size())),
+        variants: vec![
+            ("Less".to_string(), EnumVariant::Simple(Some(Numeric::Signed(-1)))),
+            ("Equal".to_string(), EnumVariant::Simple(Some(Numeric::Signed(0)))),
+            ("Greater".to_string(), EnumVariant::Simple(Some(Numeric::Signed(1)))),
+        ],
+        impl_traits: Map::new(),
+    }));
+    let ordering_less_constant = scopes.insert_constant("Ordering::Less", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(-1)));
+    let ordering_equal_constant = scopes.insert_constant("Ordering::Equal", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(0)));
+    let ordering_greater_constant = scopes.insert_constant("Ordering::Greater", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(1)));
+    let ordering_info = OrderingInfo {
+        type_id: ordering_type_id,
+        less_constant: ordering_less_constant,
+        equal_constant: ordering_equal_constant,
+        greater_constant: ordering_greater_constant,
+    };
+    intrinsic_trait_names.push("Ordering".to_string());
+
     // register intrinsic operator traits (e.g. `Add`, `Eq`). These are ordinary traits scripts implement via
     // `impl Add for MyType { ... }`; an operator on a type with no built-in meaning for it lowers to a call
     // of the trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`). Add a row to
@@ -145,10 +182,12 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         let rhs_type_id = match &intrinsic.rhs {
             IntrinsicResult::SelfType => trait_type_id,
             IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicResult::Ordering => ordering_type_id,
         };
         let result_type_id = match &intrinsic.result {
             IntrinsicResult::SelfType => trait_type_id,
             IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicResult::Ordering => ordering_type_id,
         };
         let constant_id = scopes.insert_function(
             &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
@@ -231,6 +270,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             error_trait_type_id,
             result_types    : &mut result_types,
             option_types    : &mut option_types,
+            ordering        : ordering_info,
             module_paths    : &module_paths,
             module_path     : "",
         };
@@ -2110,16 +2150,36 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
                     self.set_type_id(item.right.as_expression_mut().ice()?, common_type_id)?;
-                    // operator overloading: `==`/`!=` on a type implementing the intrinsic `Eq` trait are
+                    // operator overloading for `==`/`!=`: types implementing the intrinsic `Eq` trait are
                     // lowered to a call of its `eq` method (overriding the built-in deep comparison). The `Eq`
                     // trait backs both operators and is keyed under `Equal` in `intrinsic_ops`; `!=` negates
                     // the `eq` result. Types that do not implement `Eq` keep the built-in comparison, so a
-                    // missing impl is not an error here. Ordering comparisons (`<`, `>`, ...) never dispatch.
+                    // missing impl is not an error here.
                     if matches!(item.op, Equal | NotEqual) {
                         let intrinsic = self.intrinsic_ops.get(&Equal).copied().ice()?;
                         if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
                             let negate = item.op == NotEqual;
                             return self.rewrite_eq_op_to_method(item, intrinsic.method, negate, expected_result);
+                        }
+                    }
+                    // operator overloading for `<`, `>`, `<=`, `>=`: types implementing the intrinsic `Ord`
+                    // trait are lowered to `self.cmp(other) == Ordering::<variant>` comparisons. The `Ord`
+                    // trait is keyed under `Less` in `intrinsic_ops`. Built-in numeric/string types use
+                    // native comparison opcodes; custom types without `Ord` get a dedicated error.
+                    if matches!(item.op, Less | Greater | LessOrEq | GreaterOrEq) {
+                        let common_type = self.type_by_id(common_type_id);
+                        let is_builtin = common_type.is_numeric() || common_type.is_string();
+                        if is_builtin {
+                            item.op_resolved = true;
+                        } else {
+                            let intrinsic = self.intrinsic_ops.get(&Less).copied().ice()?;
+                            if self.type_accepted_for(common_type_id, intrinsic.trait_type_id) {
+                                return self.rewrite_ord_op_to_method(item, expected_result);
+                            } else if self.stage.must_resolve() {
+                                let type_name = self.type_name(common_type_id);
+                                let trait_name = self.type_name(intrinsic.trait_type_id);
+                                return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                            }
                         }
                     }
                 }
@@ -2943,6 +3003,54 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 _ => return Self::ice("make_method_call did not produce a binary operation"),
             }
         }
+        self.resolve_binary_op(item, expected_result)
+    }
+
+    /// Rewrites an ordering comparison (`<`, `>`, `<=`, `>=`) on a type implementing the intrinsic `Ord`
+    /// trait into `a.cmp(b) <op> Ordering::<variant>`. The lowering is:
+    /// - `a < b`  -> `a.cmp(b) == Ordering::Less`
+    /// - `a > b`  -> `a.cmp(b) == Ordering::Greater`
+    /// - `a <= b` -> `a.cmp(b) != Ordering::Greater`
+    /// - `a >= b` -> `a.cmp(b) != Ordering::Less`
+    /// The `Ordering::Variant` constant is built as an AST Constant with `constant_id` preset (so
+    /// `resolve_constant` short-circuits), then the outer `==`/`!=` is re-resolved as a regular
+    /// comparison against the primitive enum `Ordering`.
+    fn rewrite_ord_op_to_method(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
+        let position = item.position;
+        let receiver = match std::mem::replace(&mut item.left, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator left operand is not an expression"),
+        };
+        let rhs = match std::mem::replace(&mut item.right, ast::BinaryOperand::ArgumentList(ast::ArgumentList { position, args: Vec::new() })) {
+            ast::BinaryOperand::Expression(expr) => expr,
+            _ => return Self::ice("binary operator right operand is not an expression"),
+        };
+        let cmp_call = Self::make_method_call(receiver, "cmp", vec![ rhs ], position);
+        // Determine the target comparison operator and Ordering variant constant based on the original op
+        let (cmp_op, variant_name, constant_id) = match item.op {
+            ast::BinaryOperator::Less => (ast::BinaryOperator::Equal, "Less", self.ordering.less_constant),
+            ast::BinaryOperator::Greater => (ast::BinaryOperator::Equal, "Greater", self.ordering.greater_constant),
+            ast::BinaryOperator::LessOrEq => (ast::BinaryOperator::NotEqual, "Greater", self.ordering.greater_constant),
+            ast::BinaryOperator::GreaterOrEq => (ast::BinaryOperator::NotEqual, "Less", self.ordering.less_constant),
+            _ => return Self::ice("rewrite_ord_op_to_method called with non-ordering operator"),
+        };
+        // Build the Ordering::<variant> constant expression with preset constant_id
+        let ordering_constant = ast::Expression::Constant(ast::Constant {
+            position,
+            path: ast::Path {
+                position,
+                segments: vec![
+                    ast::Ident { position, name: "Ordering".to_string() },
+                    ast::Ident { position, name: variant_name.to_string() },
+                ],
+            },
+            constant_id: Some(constant_id),
+        });
+        item.op = cmp_op;
+        item.left = ast::BinaryOperand::Expression(cmp_call);
+        item.right = ast::BinaryOperand::Expression(ordering_constant);
+        item.type_id = None;
+        item.op_resolved = false;
         self.resolve_binary_op(item, expected_result)
     }
 
