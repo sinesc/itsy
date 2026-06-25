@@ -2426,8 +2426,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         }
                     }
                     // Not a map, array, or custom Index type
-                    if left_type_id.is_some() {
-                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} does not implement index access", &item.left)), self.module_path));
+                    if let Some(left_type_id) = left_type_id {
+                        return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} ({}) does not implement index access", &item.left, self.type_name(left_type_id))), self.module_path));
                     }
                 }
 
@@ -2458,13 +2458,11 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             }
                         }
                     }
-                    // if we know the map value type, set the result type to Option<value_type>
-                    // Only for Index (read), not IndexWrite (assignment result type is the assigned value)
-                    if item.op == ast::BinaryOperator::Index {
-                        if let Some(&Type::Map(MapType { value_type_id: Some(value_type_id), .. })) = self.item_type(&item.left) {
-                            let opt_type_id = self.synthesize_option_type(value_type_id);
-                            self.set_type_id(item, opt_type_id)?;
-                        }
+                    // if we know the map value type, set the result type to that. The index operator
+                    // `map[key]` yields the bare value and traps on a missing key (mirroring array
+                    // indexing); the fallible `map.get(key)` returns an `Option` instead.
+                    if let Some(&Type::Map(MapType { value_type_id: Some(value_type_id), .. })) = self.item_type(&item.left) {
+                        self.set_type_id(item, value_type_id)?;
                     }
                 } else {
                     self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(STACK_ADDRESS_TYPE)?))?;

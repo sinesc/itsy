@@ -11,6 +11,7 @@ pub enum RuntimeErrorKind {
     IntegerOverflow,
     DivisionByZero,
     InvalidArgument,
+    KeyNotFound,
 }
 
 /// An error reported by the runtime.
@@ -50,6 +51,7 @@ impl Display for RuntimeError {
             RuntimeErrorKind::IntegerOverflow => write!(f, "Integer overflow at opcode {opcode}."),
             RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}."),
             RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}."),
+            RuntimeErrorKind::KeyNotFound => write!(f, "Map key not found at opcode {opcode}."),
         }
     }
 }

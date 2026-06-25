@@ -4,9 +4,9 @@ use crate::util::*;
 fn map_literal_string_keys() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["c"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m["c"]);
     ));
     assert_all(&result, &[ 1u64, 2, 3 ]);
 }
@@ -16,8 +16,8 @@ fn map_literal_duplicate_keys_last_wins() {
     // duplicate keys in a literal resolve to the last value (matching Rust), with a single live entry
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64, "a" => 3u64 ];
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
         ret_u64(m.len());
     ));
     assert_all(&result, &[ 3u64, 2, 2 ]);
@@ -28,7 +28,7 @@ fn map_literal_duplicate_string_values_last_wins() {
     // exercises the replaced-value drop path for reference values during literal construction (no leak)
     let result = run(stringify!(
         let m = [ "k" => "first", "k" => "second" ];
-        match m["k"] { Some(val) => ret_string(val), None => ret_string("") };
+        ret_string(m["k"]);
     ));
     assert_all(&result, &[ "second".to_string() ]);
 }
@@ -38,8 +38,8 @@ fn map_index_update_existing() {
     let result = run(stringify!(
         let m = [ "a" => 1u64, "b" => 2u64 ];
         m["a"] = 42u64;
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
     ));
     assert_all(&result, &[ 42u64, 2 ]);
 }
@@ -50,9 +50,9 @@ fn map_index_insert_new() {
         let m = [ "a" => 1u64 ];
         m["b"] = 7u64;
         m["c"] = 8u64;
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["c"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
+        ret_u64(m["c"]);
     ));
     assert_all(&result, &[ 1u64, 7, 8 ]);
 }
@@ -63,8 +63,8 @@ fn map_empty_then_insert() {
         let m = [ => ];
         m["k"] = 5u64;
         m["j"] = 6u64;
-        let v = m["k"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["j"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["k"]);
+        ret_u64(m["j"]);
     ));
     assert_all(&result, &[ 5u64, 6 ]);
 }
@@ -73,9 +73,9 @@ fn map_empty_then_insert() {
 fn map_primitive_keys() {
     let result = run(stringify!(
         let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64 ];
-        let v = m[1u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[2u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[3u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[1u64]);
+        ret_u64(m[2u64]);
+        ret_u64(m[3u64]);
     ));
     assert_all(&result, &[ 10u64, 20, 30 ]);
 }
@@ -84,8 +84,8 @@ fn map_primitive_keys() {
 fn map_string_values() {
     let result = run(stringify!(
         let m = [ 1u64 => "one", 2u64 => "two" ];
-        match m[1u64] { Some(val) => ret_string(val), None => ret_string("") };
-        match m[2u64] { Some(val) => ret_string(val), None => ret_string("") };
+        ret_string(m[1u64]);
+        ret_string(m[2u64]);
     ));
     assert_all(&result, &[ "one".to_string(), "two".to_string() ]);
 }
@@ -96,8 +96,8 @@ fn map_struct_keys() {
         struct Point { x: i32, y: i32 }
         fn main() {
             let m = [ Point { x: 1, y: 2 } => 100u64, Point { x: 3, y: 4 } => 200u64 ];
-            let v = m[Point { x: 1, y: 2 }]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-            let v = m[Point { x: 3, y: 4 }]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+            ret_u64(m[Point { x: 1, y: 2 }]);
+            ret_u64(m[Point { x: 3, y: 4 }]);
         }
     ));
     assert_all(&result, &[ 100u64, 200 ]);
@@ -109,8 +109,8 @@ fn map_struct_values() {
         struct Point { x: i32, y: i32 }
         fn main() {
             let m = [ "origin" => Point { x: 0, y: 0 }, "unit" => Point { x: 1, y: 1 } ];
-            let o = m["origin"]; match o { Some(val) => { ret_i32(val.x); ret_i32(val.y) }, None => { ret_i32(0); ret_i32(0) } };
-            let u = m["unit"]; match u { Some(val) => { ret_i32(val.x); ret_i32(val.y) }, None => { ret_i32(0); ret_i32(0) } };
+            let o = m["origin"]; ret_i32(o.x); ret_i32(o.y);
+            let u = m["unit"]; ret_i32(u.x); ret_i32(u.y);
         }
     ));
     assert_all(&result, &[ 0i32, 0, 1, 1 ]);
@@ -123,19 +123,30 @@ fn map_reassigned_value_releases_old() {
         let m = [ "a" => "first" ];
         m["a"] = "second";
         m["a"] = "third";
-        match m["a"] { Some(val) => ret_string(val), None => ret_string("") };
+        ret_string(m["a"]);
     ));
     assert_all(&result, &[ "third".to_string() ]);
 }
 
 #[test]
-fn map_missing_key_returns_none() {
-    // map indexing now returns Option<V>, so missing keys yield None instead of trapping
+fn map_get_missing_key_returns_none() {
+    // the fallible `.get` returns None for an absent key (whereas indexing traps; see below)
     let result = run(stringify!(
         let m = [ "a" => 1u64 ];
-        let v = m["missing"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        let v = m.get("missing"); match v { Some(val) => ret_u64(val), None => ret_u64(0) };
     ));
     assert_all(&result, &[ 0u64 ]);
+}
+
+#[test]
+#[should_panic(expected = "Map key not found")]
+fn map_index_missing_key_traps() {
+    // indexing a map with an absent key traps (mirroring out-of-bounds array indexing); use `.get` for
+    // a fallible lookup that returns an Option instead
+    run(stringify!(
+        let m = [ "a" => 1u64 ];
+        ret_u64(m["missing"]);
+    ));
 }
 
 #[test]
@@ -195,8 +206,8 @@ fn map_remove() {
         let m = [ "a" => 1u64, "b" => 2u64, "c" => 3u64 ];
         m.remove("b");
         ret_u64(m.len());
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["c"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["c"]);
         m.remove("does-not-exist"); // no-op
         ret_u64(m.len());
     ));
@@ -209,8 +220,8 @@ fn map_remove_then_reinsert() {
         let m = [ "a" => 1u64, "b" => 2u64 ];
         m.remove("a");
         m["a"] = 7u64; // re-insert into a tombstoned slot
-        let v = m["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["a"]);
+        ret_u64(m["b"]);
         ret_u64(m.len());
     ));
     assert_all(&result, &[ 7u64, 2, 2 ]);
@@ -224,7 +235,7 @@ fn map_clear() {
         ret_u64(m.len());
         m["x"] = 9u64; // usable after clear
         ret_u64(m.len());
-        let v = m["x"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["x"]);
     ));
     assert_all(&result, &[ 0u64, 1, 9 ]);
 }
@@ -247,9 +258,9 @@ fn map_extend() {
         let b = [ "b" => 20u64, "c" => 30u64 ]; // "b" collides, "c" is new
         a.extend(b);
         ret_u64(a.len());
-        let v = a["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = a["b"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) }; // overwritten
-        let v = a["c"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(a["a"]);
+        ret_u64(a["b"]); // overwritten
+        ret_u64(a["c"]);
         ret_u64(b.len()); // source is unchanged
     ));
     assert_all(&result, &[ 3u64, 1, 20, 30, 2 ]);
@@ -262,7 +273,7 @@ fn map_extend_empty_source() {
         let b = [ => ];
         a.extend(b);
         ret_u64(a.len());
-        let v = a["a"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(a["a"]);
     ));
     assert_all(&result, &[ 1u64, 1 ]);
 }
@@ -276,8 +287,8 @@ fn map_extend_into_empty() {
         let b = [ "x" => 5u64, "y" => 6u64 ];
         a.extend(b);
         ret_u64(a.len());
-        let v = a["x"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = a["y"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(a["x"]);
+        ret_u64(a["y"]);
     ));
     assert_all(&result, &[ 2u64, 5, 6 ]);
 }
@@ -290,8 +301,8 @@ fn map_extend_string_values_no_leak() {
         let b = [ "b" => "SECOND", "c" => "third" ];
         a.extend(b);
         ret_u64(a.len());
-        match a["b"] { Some(v) => ret_str(v), None => ret_str("") };
-        match a["c"] { Some(v) => ret_str(v), None => ret_str("") };
+        ret_str(a["b"]);
+        ret_str(a["c"]);
         ret_u64(b.len());
     ));
     assert_all!(&result, [ 3u64, String::from("SECOND"), String::from("third"), 2u64 ]);
@@ -304,8 +315,8 @@ fn map_extend_primitive_keys() {
         let b = [ 2u64 => "TWO", 3u64 => "three" ];
         a.extend(b);
         ret_u64(a.len());
-        match a[2u64] { Some(v) => ret_str(v), None => ret_str("") };
-        match a[3u64] { Some(v) => ret_str(v), None => ret_str("") };
+        ret_str(a[2u64]);
+        ret_str(a[3u64]);
     ));
     assert_all!(&result, [ 3u64, String::from("TWO"), String::from("three") ]);
 }
@@ -316,8 +327,8 @@ fn map_extend_self_is_noop() {
         let m = [ "a" => "first", "b" => "second" ];
         m.extend(m);
         ret_u64(m.len());
-        match m["a"] { Some(v) => ret_str(v), None => ret_str("") };
-        match m["b"] { Some(v) => ret_str(v), None => ret_str("") };
+        ret_str(m["a"]);
+        ret_str(m["b"]);
     ));
     assert_all!(&result, [ 2u64, String::from("first"), String::from("second") ]);
 }
@@ -422,7 +433,7 @@ fn for_in_map_lookup_value() {
     let result = run(stringify!(
         let m = [ 1u64 => 100u64, 2u64 => 200u64, 3u64 => 300u64 ];
         for k, _ in m {
-            let v = m[k]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+            ret_u64(m[k]);
         }
     ));
     assert_all(&result, &[ 100u64, 200, 300 ]);
@@ -471,7 +482,7 @@ fn for_in_map_key_value_mutate_during_iteration() {
         let m = [ 1u64 => 10u64, 2u64 => 20u64, 3u64 => 30u64 ];
         for k, v in m {
             m.insert(k, v + 1u64);
-            let v = m[k]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+            ret_u64(m[k]);
         }
     ));
     assert_all(&result, &[ 11u64, 21, 31 ]);
@@ -558,9 +569,9 @@ fn map_grows_many_primitive_keys() {
             m[i] = i * 10u64;
         }
         ret_u64(m.len());
-        let v = m[0u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[42u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[99u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[0u64]);
+        ret_u64(m[42u64]);
+        ret_u64(m[99u64]);
     ));
     assert_all(&result, &[ 100u64, 0, 420, 990 ]);
 }
@@ -573,9 +584,9 @@ fn map_grows_string_keys() {
             m["key{i}"] = i;
         }
         ret_u64(m.len());
-        let v = m["key0"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["key25"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["key49"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["key0"]);
+        ret_u64(m["key25"]);
+        ret_u64(m["key49"]);
     ));
     assert_all(&result, &[ 50u64, 0, 25, 49 ]);
 }
@@ -594,14 +605,14 @@ fn map_insert_remove_churn() {
             }
         }
         ret_u64(m.len());
-        let v = m[1u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[29u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[1u64]);
+        ret_u64(m[29u64]);
         // re-insert some removed keys
         m[0u64] = 1000u64;
         m[2u64] = 2000u64;
         ret_u64(m.len());
-        let v = m[0u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[2u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[0u64]);
+        ret_u64(m[2u64]);
     ));
     assert_all(&result, &[ 15u64, 1, 29, 17, 1000, 2000 ]);
 }
@@ -619,8 +630,8 @@ fn map_compaction_after_many_removes() {
             m.remove(i);
         }
         ret_u64(m.len());
-        let v = m[15u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[19u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[15u64]);
+        ret_u64(m[19u64]);
         for k, _ in m {
             ret_u64(k);
         }
@@ -641,8 +652,8 @@ fn map_compaction_string_keys_no_leak() {
             m.remove("k{i}");
         }
         ret_u64(m.len());
-        let v = m["k15"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m["k19"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["k15"]);
+        ret_u64(m["k19"]);
     ));
     assert_all(&result, &[ 5u64, 15, 19 ]);
 }
@@ -657,7 +668,7 @@ fn map_remove_all_then_reuse() {
         m.remove("c");
         ret_u64(m.len());
         m["x"] = 9u64;
-        let v = m["x"]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m["x"]);
         ret_u64(m.len());
     ));
     assert_all(&result, &[ 0u64, 9, 1 ]);
@@ -687,11 +698,11 @@ fn map_enum_keys() {
         enum Color { Red, Green, Blue }
         fn main() {
             let m = [ Color::Red => 1u64, Color::Green => 2u64, Color::Blue => 3u64 ];
-            let v = m[Color::Red]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-            let v = m[Color::Green]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-            let v = m[Color::Blue]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+            ret_u64(m[Color::Red]);
+            ret_u64(m[Color::Green]);
+            ret_u64(m[Color::Blue]);
             m[Color::Green] = 20u64;
-            let v = m[Color::Green]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+            ret_u64(m[Color::Green]);
             ret_u64(m.len());
         }
     ));
@@ -709,8 +720,8 @@ fn for_in_map_remove_during_iteration() {
             }
         }
         ret_u64(m.len());
-        let v = m[1u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
-        let v = m[3u64]; match v { Some(val) => ret_u64(val), None => ret_u64(0) };
+        ret_u64(m[1u64]);
+        ret_u64(m[3u64]);
     ));
     assert_all(&result, &[ 2u64, 1, 3 ]);
 }

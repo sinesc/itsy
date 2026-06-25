@@ -1666,7 +1666,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // never reaches here, so only the read (Index) is expected.
             let constructor = self.constructor(compare_type)?;
             match item.op {
-                Index => { self.writer.call_builtinx(Builtin::map_get, 0, constructor); },
+                Index => { self.writer.map_index(constructor); },
                 _ => Self::ice_at(item, "unsupported map offset operation")?,
             }
             return Ok(());

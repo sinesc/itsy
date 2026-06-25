@@ -928,7 +928,7 @@ pub mod intrinsic_traits {
     /// struct Sparse { cells: [String => i64] }
     /// impl Index for Sparse {
     ///     fn get(self: Self, index: String) -> i64 {
-    ///         match self.cells[index] {
+    ///         match self.cells.get(index) {
     ///             Some(value) => value,
     ///             None => 0,
     ///         }

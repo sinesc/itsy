@@ -1667,6 +1667,43 @@ impl_opcodes!{
         self.map_put(map.index(), key, value, key_ctor, value_ctor, false);
     }
 
+    /// Looks up `key` in the map and pushes the associated value, trapping with `KeyNotFound` if the
+    /// key is absent. This is the lowering of the map index operator `map[key]` (the fallible `.get`
+    /// returns an `Option` instead). Stack on entry (top first): key, map reference.
+    fn map_index(&mut self, constructor: StackAddress) [ check ] {
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let key = self.map_box_pop(key_ctor);
+        let map: HeapRef = self.stack.pop();
+        let idx = map.index();
+        let hr = size_of::<HeapRef>() as StackAddress;
+        let found = self.map_find(idx, key, key_ctor);
+        self.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+        match found {
+            Some(e) => {
+                let value_off = self.map_entries_offset(idx) + e * 2 * hr + hr;
+                let value: HeapRef = self.heap.read(HeapRef::new(idx, value_off));
+                if Constructor::is_primitive(&self.stack, value_ctor) {
+                    // primitive value: copy the boxed bytes out before releasing the container
+                    let n = Constructor::primitive_size(&self.stack, value_ctor);
+                    let bytes = self.heap.item(value.index()).data[0..n].to_vec();
+                    self.stack.extend_from(&bytes);
+                    self.refcount_value(map, constructor, HeapRefOp::Free);
+                } else {
+                    // reference value: protect it from being dropped while the container is freed (the
+                    // container still owns it), leaving its refcount net-unchanged for the caller.
+                    self.heap.ref_item(value.index(), HeapRefOp::Inc);
+                    self.refcount_value(map, constructor, HeapRefOp::Free);
+                    self.heap.ref_item(value.index(), HeapRefOp::DecNoFree);
+                    self.stack.push(value);
+                }
+            },
+            None => {
+                self.state = VMState::Error(RuntimeErrorKind::KeyNotFound);
+                self.refcount_value(map, constructor, HeapRefOp::Free);
+            },
+        }
+    }
+
     /// Creates a new generator from captured arguments on the stack and pushes a reference to it.
     fn gen_new(&mut self, arg_size: FrameAddress, entry_map: StackAddress) {
         let entry: StackAddress = self.stack.pop();

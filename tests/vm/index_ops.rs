@@ -146,7 +146,7 @@ fn index_string_key() {
         struct Grid { data: [String => i64] }
         impl Index for Grid {
             fn get(self: Self, index: String) -> i64 {
-                match self.data[index] {
+                match self.data.get(index) {
                     Some(v) => v,
                     None => -1,
                 }
@@ -177,7 +177,7 @@ fn index_string_key_and_value() {
         struct Dict { data: [String => String] }
         impl Index for Dict {
             fn get(self: Self, index: String) -> String {
-                match self.data[index] {
+                match self.data.get(index) {
                     Some(v) => v,
                     None => "?",
                 }
