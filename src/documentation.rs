@@ -671,6 +671,34 @@ pub mod traits { }
 /// let result = a < b;   // true
 /// # }
 /// ```
+///
+/// # The unary operator traits
+///
+/// [`Neg`](crate::documentation::intrinsic_traits::Neg) and [`Not`](crate::documentation::intrinsic_traits::Not) overload the
+/// prefix operators `-` and `!`. Unlike the binary operator traits they take no right-hand operand, so
+/// they share the shape `fn op(self: Self) -> Self`, producing a value of the same type. `Neg` backs
+/// unary `-` and `Not` backs `!`:
+///
+/// ``` ignore
+/// struct Vec2 { x: i64, y: i64 }
+///
+/// impl Neg for Vec2 {
+///     fn neg(self: Self) -> Self {
+///         Vec2 { x: -self.x, y: -self.y }
+///     }
+/// }
+/// impl Not for Vec2 {
+///     fn not(self: Self) -> Self {
+///         Vec2 { x: !self.x, y: !self.y }
+///     }
+/// }
+///
+/// # fn main() {
+/// let v = Vec2 { x: 1, y: -2 };
+/// let negated = -v;       // Vec2 { x: -1, y: 2 }
+/// let bitflipped = !v;    // Vec2 { x: -2, y: 1 }
+/// # }
+/// ```
 pub mod intrinsic_traits {
 
     /// Converts a value to a [`String`](crate::documentation::String).
@@ -859,6 +887,20 @@ pub mod intrinsic_traits {
     pub trait Ord {
         /// Returns the ordering relationship between `self` and `rhs`.
         fn cmp(self: Self, rhs: Self) -> Ordering;
+    }
+
+    /// Overloads the unary `-` (negation) operator. See [the unary operator traits](self#the-unary-operator-traits)
+    /// for an example.
+    pub trait Neg {
+        /// Returns the result of `-self`.
+        fn neg(self: Self) -> Self;
+    }
+
+    /// Overloads the unary `!` (not) operator. See [the unary operator traits](self#the-unary-operator-traits)
+    /// for an example.
+    pub trait Not {
+        /// Returns the result of `!self`.
+        fn not(self: Self) -> Self;
     }
 
     /// The three-way comparison result used by [`Ord::cmp`].

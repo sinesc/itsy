@@ -1610,6 +1610,7 @@ impl_as_getter!(Expression {
     pub as_constant_mut: Constant -> mut Constant,
     pub as_binary_op: BinaryOp -> &BinaryOp,
     pub as_binary_op_mut: BinaryOp -> mut BinaryOp,
+    pub as_unary_op_mut: UnaryOp -> mut UnaryOp,
     pub as_cast_mut: Cast -> mut Cast,
     pub as_assignment: Assignment -> &Assignment,
     pub as_assignment_mut: Assignment -> mut Assignment,
@@ -2253,7 +2254,7 @@ impl ControlFlow for UnaryOp {
 
 
 /// A unary operator used in unary expressions.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum UnaryOperator {
     // boolean
     Not,

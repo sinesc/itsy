@@ -449,3 +449,118 @@ fn shift_trait_missing_error() {
     ));
     assert!(err.contains("Shl"), "unexpected error: {}", err);
 }
+
+// --- unary operators via the Neg / Not traits ---
+
+#[test]
+fn neg_struct() {
+    let result = run(stringify!(
+        struct V { x: i64, y: i64 }
+        impl Neg for V {
+            fn neg(self: Self) -> Self {
+                V { x: -self.x, y: -self.y }
+            }
+        }
+        fn main() {
+            let a = V { x: 1, y: -2 };
+            let b = -a;
+            ret_i64(b.x);
+            ret_i64(b.y);
+        }
+    ));
+    assert_all(&result, &[ -1i64, 2 ]);
+}
+
+#[test]
+fn not_struct() {
+    let result = run(stringify!(
+        struct V { x: i64, y: i64 }
+        impl Not for V {
+            fn not(self: Self) -> Self {
+                V { x: !self.x, y: !self.y }
+            }
+        }
+        fn main() {
+            let a = V { x: 0, y: -1 };
+            let b = !a;
+            ret_i64(b.x);
+            ret_i64(b.y);
+        }
+    ));
+    assert_all(&result, &[ -1i64, 0 ]);
+}
+
+#[test]
+fn neg_enum() {
+    let result = run(stringify!(
+        enum E { A(i64), B(i64) }
+        impl Neg for E {
+            fn neg(self: Self) -> Self {
+                match self {
+                    E::A(x) => E::A(-x),
+                    E::B(x) => E::B(-x),
+                }
+            }
+        }
+        fn main() {
+            let r = -E::A(3);
+            match r { E::A(v) => ret_i64(v), E::B(v) => ret_i64(v) }
+        }
+    ));
+    assert_all(&result, &[ -3i64 ]);
+}
+
+#[test]
+fn neg_chained() {
+    // negating a previously negated value dispatches through the trait method each time
+    let result = run(stringify!(
+        struct N { v: i64 }
+        impl Neg for N { fn neg(self: Self) -> Self { N { v: -self.v } } }
+        fn main() {
+            let a = N { v: 5 };
+            let b = -a;
+            ret_i64((-b).v);
+        }
+    ));
+    assert_all(&result, &[ 5i64 ]);
+}
+
+#[test]
+fn neg_forward_impl() {
+    // the unary operator trait is implemented after the expression that uses it
+    let result = run(stringify!(
+        fn main() {
+            let a = N { v: 7 };
+            ret_i64((-a).v);
+        }
+        struct N { v: i64 }
+        impl Neg for N { fn neg(self: Self) -> Self { N { v: -self.v } } }
+    ));
+    assert_all(&result, &[ -7i64 ]);
+}
+
+#[test]
+fn neg_missing_impl() {
+    // a type that does not implement Neg cannot be used with unary `-`
+    let err = build_err(stringify!(
+        struct N { v: i64 }
+        fn main() {
+            let a = N { v: 1 };
+            ret_i64((-a).v);
+        }
+    ));
+    assert!(err.contains("Neg"), "unexpected error: {}", err);
+}
+
+#[test]
+fn not_missing_impl() {
+    // a type that does not implement Not cannot be used with unary `!`
+    let err = build_err(stringify!(
+        struct N { v: i64 }
+        fn main() {
+            let a = N { v: 1 };
+            ret_i64((!a).v);
+        }
+    ));
+    assert!(err.contains("Not"), "unexpected error: {}", err);
+}

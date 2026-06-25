@@ -20,7 +20,7 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
-use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo, OrderingInfo, register_intrinsics};
+use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo, OrderingInfo, register_intrinsics};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -37,6 +37,8 @@ pub(crate) struct Resolver<'ctx> {
     intrinsic_casts : &'ctx UnorderedMap<TypeId, IntrinsicCast>,
     /// Maps a binary operator to the intrinsic operator trait that backs it.
     intrinsic_ops   : &'ctx UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// Maps a unary operator to the intrinsic operator trait that backs it (e.g. `-` -> `Neg`, `!` -> `Not`).
+    intrinsic_unary_ops : &'ctx UnorderedMap<ast::UnaryOperator, IntrinsicUnaryOp>,
     /// The intrinsic `Index` trait that backs overloadable `[]` on custom types. The concrete index
     /// and value types are impl-defined and read at resolution time.
     intrinsic_index : Option<IntrinsicIndex>,
@@ -115,6 +117,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     let intrinsic_trait_names = intrinsic.trait_names;
     let intrinsic_casts = intrinsic.casts;
     let intrinsic_ops = intrinsic.ops;
+    let intrinsic_unary_ops = intrinsic.unary_ops;
     let intrinsic_index = intrinsic.index;
     let error_trait_type_id = intrinsic.error_trait;
     let ordering_info = intrinsic.ordering;
@@ -171,6 +174,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             primitives      : &primitives,
             intrinsic_casts : &intrinsic_casts,
             intrinsic_ops   : &intrinsic_ops,
+            intrinsic_unary_ops : &intrinsic_unary_ops,
             intrinsic_index,
             error_trait_type_id,
             result_types    : &mut result_types,
@@ -867,7 +871,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Constant(constant) => self.resolve_constant(constant, expected_result),
             Assignment(_) => self.resolve_assignment(item, expected_result),
             BinaryOp(binary_op) => self.resolve_binary_op(binary_op, expected_result),
-            UnaryOp(unary_op) => self.resolve_unary_op(unary_op, expected_result),
+            UnaryOp(_) => self.resolve_unary_op(item, expected_result),
             Block(block) => self.resolve_block(block, expected_result),
             IfBlock(if_block) => self.resolve_if_block(if_block, expected_result),
             MatchBlock(match_block) => self.resolve_match_block(match_block, expected_result),
@@ -2599,36 +2603,78 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved(item)
     }
 
-    /// Resolves a unary operation.
-    fn resolve_unary_op(self: &mut Self, item: &mut ast::UnaryOp, expected_type: Option<TypeId>) -> ResolveResult {
+    /// Resolves a unary operation. A prefix operator applied to a custom (non-primitive) type that
+    /// implements the corresponding intrinsic unary operator trait (`Neg` for `-`, `Not` for `!`) is
+    /// lowered to a call of that trait's method (e.g. `-a` -> `a.neg()`, `!a` -> `a.not()`); primitive
+    /// operands keep the built-in behavior.
+    fn resolve_unary_op(self: &mut Self, item: &mut ast::Expression, expected_type: Option<TypeId>) -> ResolveResult {
         use crate::frontend::ast::UnaryOperator::*;
-        self.resolve_expression(&mut item.expr, expected_type)?;
-        match item.op {
+        let unary = item.as_unary_op_mut().ice()?;
+        let op = unary.op;
+        self.resolve_expression(&mut unary.expr, expected_type)?;
+        let operand_type_id = unary.expr.type_id(self);
+        match op {
             Not => {
                 // `!` is logical-not for bool and bitwise-not for integers; the result type matches the
                 // operand. Only commit once the operand type is known, otherwise a premature `bool` here
                 // would conflict with an integer operand inferred in a later pass.
-                match item.expr.type_id(self) {
+                match operand_type_id {
                     Some(operand_type_id) if self.type_by_id(operand_type_id).is_integer() => {
-                        self.set_type_id(item, operand_type_id)?;
+                        self.set_type_id(item.as_unary_op_mut().ice()?, operand_type_id)?;
+                    },
+                    Some(operand_type_id) if !self.type_by_id(operand_type_id).is_primitive() => {
+                        // custom type: dispatch through the `Not` trait, lowering `!a` to `a.not()`
+                        if let Some(()) = self.dispatch_unary_op(item, Not, operand_type_id, expected_type)? {
+                            return Ok(());
+                        }
                     },
                     Some(_) => {
                         if let Some(expected_type_id) = expected_type {
                             self.check_type_accepted_for(item, self.primitive_type_id(Type::bool)?, expected_type_id)?;
                         }
-                        self.set_type_id(item, self.primitive_type_id(Type::bool)?)?;
+                        self.set_type_id(item.as_unary_op_mut().ice()?, self.primitive_type_id(Type::bool)?)?;
                     },
                     None => {},
                 }
             },
-            Plus | Minus => {
-                if let Some(type_id) = item.expr.type_id(self) {
-                    self.set_type_id(item, type_id)?;
+            Minus => {
+                if let Some(operand_type_id) = operand_type_id {
+                    if self.type_by_id(operand_type_id).is_primitive() {
+                        // built-in numeric negation (and the prior no-op behavior for any other primitive)
+                        self.set_type_id(item.as_unary_op_mut().ice()?, operand_type_id)?;
+                    } else if let Some(()) = self.dispatch_unary_op(item, Minus, operand_type_id, expected_type)? {
+                        // custom type: dispatched through the `Neg` trait, lowering `-a` to `a.neg()`
+                        return Ok(());
+                    }
+                }
+            },
+            Plus => {
+                if let Some(operand_type_id) = operand_type_id {
+                    self.set_type_id(item.as_unary_op_mut().ice()?, operand_type_id)?;
                 }
             },
         }
-        self.types_resolved(&item.expr, None)?;
+        let unary = item.as_unary_op_mut().ice()?;
+        self.types_resolved(&unary.expr, None)?;
         self.types_resolved(item, expected_type)
+    }
+
+    /// Attempts to dispatch a unary operator on a custom type through its intrinsic operator trait.
+    /// Returns `Some(())` (after rewriting `item` to the trait-method call) once the operand type is
+    /// known to implement the trait; `None` while the implementation is not yet known (so resolution
+    /// retries on a later pass). In the final `must_resolve` pass a still-missing impl is an error.
+    fn dispatch_unary_op(self: &mut Self, item: &mut ast::Expression, op: ast::UnaryOperator, operand_type_id: TypeId, expected_type: Option<TypeId>) -> ResolveResult<Option<()>> {
+        let intrinsic = self.intrinsic_unary_ops.get(&op).copied().ice()?;
+        if self.type_accepted_for(operand_type_id, intrinsic.trait_type_id) {
+            self.rewrite_unary_op_to_method(item, intrinsic.method, expected_type)?;
+            Ok(Some(()))
+        } else if self.stage.must_resolve() {
+            let type_name = self.type_name(operand_type_id);
+            let trait_name = self.type_name(intrinsic.trait_type_id);
+            Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
@@ -2924,6 +2970,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let cast = item.as_cast_mut().ice()?;
         let position = cast.position;
         let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
+        *item = Self::make_method_call(receiver, method, Vec::new(), position);
+        self.resolve_expression(item, expected_result)
+    }
+
+    /// Rewrites a unary operation `OP expr` into a method call `expr.<method>()` and resolves it. Used to
+    /// dispatch a prefix operator backed by an intrinsic unary operator trait (e.g. `Neg`) through the
+    /// regular method-call machinery, reusing its static and dynamic dispatch. Mirrors
+    /// `rewrite_cast_to_method` (the receiver is the operand and the method takes no arguments).
+    fn rewrite_unary_op_to_method(self: &mut Self, item: &mut ast::Expression, method: &str, expected_result: Option<TypeId>) -> ResolveResult {
+        let unary = item.as_unary_op_mut().ice()?;
+        let position = unary.position;
+        let receiver = std::mem::replace(&mut unary.expr, ast::Expression::void(position));
         *item = Self::make_method_call(receiver, method, Vec::new(), position);
         self.resolve_expression(item, expected_result)
     }

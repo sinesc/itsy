@@ -29,6 +29,8 @@ pub(super) struct IntrinsicRegistration {
     pub(super) casts           : UnorderedMap<TypeId, IntrinsicCast>,
     /// Maps a binary operator to the intrinsic operator trait that backs it.
     pub(super) ops             : UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// Maps a unary operator to the intrinsic operator trait that backs it.
+    pub(super) unary_ops       : UnorderedMap<ast::UnaryOperator, IntrinsicUnaryOp>,
     /// The intrinsic `Index` trait that backs overloadable `[]` on custom types.
     pub(super) index           : Option<IntrinsicIndex>,
     /// Type id of the built-in `Error` trait.
@@ -123,6 +125,22 @@ pub(super) fn register_intrinsics(scopes: &mut Scopes, primitives: &UnorderedMap
         ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, rhs_type_id, method: intrinsic.method });
     }
 
+    // Register intrinsic unary operator traits (`Neg`, `Not`). Each has a single required method
+    // `fn <method>(self: Self) -> Self` (no rhs, result is the implementing type).
+    let mut unary_ops = UnorderedMap::new();
+    for intrinsic in INTRINSIC_UNARY_OP_TRAITS {
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
+        let constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
+            Some(trait_type_id),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
+        trait_names.push(intrinsic.trait_name.to_string());
+        unary_ops.insert(intrinsic.op, IntrinsicUnaryOp { trait_type_id, method: intrinsic.method });
+    }
+
     // Register the built-in `Error` trait.
     let string_type_id = *primitives.get(&Type::String).ice()?;
     let error_trait = scopes.insert_type(Some("Error"), Type::Trait(Trait::new()));
@@ -172,6 +190,7 @@ pub(super) fn register_intrinsics(scopes: &mut Scopes, primitives: &UnorderedMap
         trait_names,
         casts,
         ops,
+        unary_ops,
         index,
         error_trait,
         ordering,
@@ -281,6 +300,36 @@ pub(super) struct IntrinsicOp {
     /// Type id of the right-hand operand (e.g. `Self` for arithmetic, `i64` for shift).
     pub(super) rhs_type_id     : TypeId,
     /// The trait's required method (e.g. `add`).
+    pub(super) method          : &'static str,
+}
+
+/// Describes an intrinsic unary operator trait that backs a prefix operator for custom types. Each has a
+/// single required method `fn <method>(self: Self) -> Self` (no right operand; the result is the
+/// implementing type). See the registration loop in `register_intrinsics` and `Resolver::resolve_unary_op`.
+pub(super) struct IntrinsicUnaryOpTrait {
+    /// The unary operator this trait backs, e.g. `Minus` for `-`.
+    pub(super) op          : ast::UnaryOperator,
+    /// Name of the trait scripts implement, e.g. `Neg`.
+    pub(super) trait_name  : &'static str,
+    /// The trait's single required method, e.g. `neg`.
+    pub(super) method      : &'static str,
+}
+
+/// The set of intrinsic unary operator traits known to the compiler. These let custom types implement the
+/// prefix operators; a unary operator applied to a type that has no built-in meaning for it is lowered to a
+/// call of the corresponding trait method (e.g. `-a` to `a.neg()`, `!a` to `a.not()`).
+pub(super) const INTRINSIC_UNARY_OP_TRAITS: &[IntrinsicUnaryOpTrait] = &[
+    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Minus, trait_name: "Neg", method: "neg" },
+    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Not, trait_name: "Not", method: "not" },
+];
+
+/// A resolved intrinsic unary operator: the trait that backs a prefix operator and the trait method to
+/// dispatch to. Built from [IntrinsicUnaryOpTrait] once the trait has been registered.
+#[derive(Copy, Clone)]
+pub(super) struct IntrinsicUnaryOp {
+    /// Type id of the registered trait (e.g. `Neg`).
+    pub(super) trait_type_id   : TypeId,
+    /// The trait's required method (e.g. `neg`).
     pub(super) method          : &'static str,
 }
 
