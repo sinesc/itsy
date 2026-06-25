@@ -10,34 +10,47 @@ use crate::shared::typed_ids::{TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use super::scopes::Scopes;
 
-/// Bookkeeping for the built-in `Ordering` enum: its type id and the constant ids for each variant.
-#[derive(Copy, Clone)]
-#[allow(dead_code)]
-pub(super) struct OrderingInfo {
-    pub(super) type_id         : TypeId,
-    pub(super) less_constant   : ConstantId,
-    pub(super) equal_constant  : ConstantId,
-    pub(super) greater_constant: ConstantId,
-}
+/// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
+/// a cast (e.g. a future `Display` or `ToFloat` backing some target type).
+pub(super) const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
+    IntrinsicCastTrait { trait_name: "ToString",    method: "to_string",    method_return: Type::String, targets: &[ Type::String ] },
+    IntrinsicCastTrait { trait_name: "ToUnsigned",  method: "to_unsigned",  method_return: Type::u64,    targets: &[ Type::u8, Type::u16, Type::u32, Type::u64 ] },
+    IntrinsicCastTrait { trait_name: "ToSigned",    method: "to_signed",    method_return: Type::i64,    targets: &[ Type::i8, Type::i16, Type::i32, Type::i64 ] },
+    IntrinsicCastTrait { trait_name: "ToFloat",     method: "to_float",     method_return: Type::f64,    targets: &[ Type::f32, Type::f64 ] },
+];
 
-/// All values produced by registering intrinsic traits into the scope repository.
-pub(super) struct IntrinsicRegistration {
-    /// Human-readable names of every intrinsic trait and type registered (e.g. `ToString`, `Add`,
-    /// `Ordering`, `Error`, `Index`). Used to create aliases in each module scope.
-    pub(super) trait_names     : Vec<String>,
-    /// Maps a cast target type id to the intrinsic conversion trait that backs it.
-    pub(super) casts           : UnorderedMap<TypeId, IntrinsicCast>,
-    /// Maps a binary operator to the intrinsic operator trait that backs it.
-    pub(super) ops             : UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
-    /// Maps a unary operator to the intrinsic operator trait that backs it.
-    pub(super) unary_ops       : UnorderedMap<ast::UnaryOperator, IntrinsicUnaryOp>,
-    /// The intrinsic `Index` trait that backs overloadable `[]` on custom types.
-    pub(super) index           : Option<IntrinsicIndex>,
-    /// Type id of the built-in `Error` trait.
-    pub(super) error_trait     : TypeId,
-    /// Type id and variant constants of the built-in `Ordering` enum.
-    pub(super) ordering        : OrderingInfo,
-}
+/// The set of intrinsic operator traits known to the compiler. These let custom types implement the
+/// binary operators; an operator applied to a type that has no built-in meaning for it is lowered to a
+/// call of the corresponding trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`).
+/// `Eq` is keyed under `Equal` and backs both `==` and `!=`; `Ord` is keyed under `Less` and backs
+/// `<`, `>`, `<=` and `>=`.
+pub(super) const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
+    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::BitAnd, trait_name: "BitAnd", method: "bitand", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::BitOr, trait_name: "BitOr", method: "bitor", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::BitXor, trait_name: "BitXor", method: "bitxor", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Shl, trait_name: "Shl", method: "shl", rhs: IntrinsicOpResult::Type(Type::i64), result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Shr, trait_name: "Shr", method: "shr", rhs: IntrinsicOpResult::Type(Type::i64), result: IntrinsicOpResult::SelfType },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Equal, trait_name: "Eq", method: "eq", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::Type(Type::bool) },
+    IntrinsicOpTrait { op: ast::BinaryOperator::Less, trait_name: "Ord", method: "cmp", rhs: IntrinsicOpResult::SelfType, result: IntrinsicOpResult::Ordering },
+];
+
+/// The set of intrinsic unary operator traits known to the compiler. These let custom types implement the
+/// prefix operators; a unary operator applied to a type that has no built-in meaning for it is lowered to a
+/// call of the corresponding trait method (e.g. `-a` to `a.neg()`, `!a` to `a.not()`).
+pub(super) const INTRINSIC_UNARY_OP_TRAITS: &[IntrinsicUnaryOpTrait] = &[
+    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Minus, trait_name: "Neg", method: "neg" },
+    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Not, trait_name: "Not", method: "not" },
+];
+
+/// The set of intrinsic index traits known to the compiler. Currently only `Index`.
+pub(super) const INTRINSIC_INDEX_TRAITS: &[IntrinsicIndexTrait] = &[
+    IntrinsicIndexTrait { trait_name: "Index", get_method: "get", set_method: "set" },
+];
 
 /// Register all intrinsic traits and the `Ordering` enum.
 ///
@@ -105,14 +118,14 @@ pub(super) fn register_intrinsics(scopes: &mut Scopes, primitives: &UnorderedMap
         // required method `fn <method>(self: Self, rhs: <rhs>) -> <result>`, where rhs defaults to Self
         // (arithmetic, bitwise, equality) but can be a fixed primitive for shift operators.
         let rhs_type_id = match &intrinsic.rhs {
-            IntrinsicResult::SelfType => trait_type_id,
-            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
-            IntrinsicResult::Ordering => ordering.type_id,
+            IntrinsicOpResult::SelfType => trait_type_id,
+            IntrinsicOpResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicOpResult::Ordering => ordering.type_id,
         };
         let result_type_id = match &intrinsic.result {
-            IntrinsicResult::SelfType => trait_type_id,
-            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
-            IntrinsicResult::Ordering => ordering.type_id,
+            IntrinsicOpResult::SelfType => trait_type_id,
+            IntrinsicOpResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicOpResult::Ordering => ordering.type_id,
         };
         let constant_id = scopes.insert_function(
             &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
@@ -197,6 +210,35 @@ pub(super) fn register_intrinsics(scopes: &mut Scopes, primitives: &UnorderedMap
     })
 }
 
+/// All values produced by registering intrinsic traits into the scope repository.
+pub(super) struct IntrinsicRegistration {
+    /// Human-readable names of every intrinsic trait and type registered (e.g. `ToString`, `Add`,
+    /// `Ordering`, `Error`, `Index`). Used to create aliases in each module scope.
+    pub(super) trait_names     : Vec<String>,
+    /// Maps a cast target type id to the intrinsic conversion trait that backs it.
+    pub(super) casts           : UnorderedMap<TypeId, IntrinsicCast>,
+    /// Maps a binary operator to the intrinsic operator trait that backs it.
+    pub(super) ops             : UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// Maps a unary operator to the intrinsic operator trait that backs it.
+    pub(super) unary_ops       : UnorderedMap<ast::UnaryOperator, IntrinsicUnaryOp>,
+    /// The intrinsic `Index` trait that backs overloadable `[]` on custom types.
+    pub(super) index           : Option<IntrinsicIndex>,
+    /// Type id of the built-in `Error` trait.
+    pub(super) error_trait     : TypeId,
+    /// Type id and variant constants of the built-in `Ordering` enum.
+    pub(super) ordering        : OrderingInfo,
+}
+
+/// Bookkeeping for the built-in `Ordering` enum: its type id and the constant ids for each variant.
+#[derive(Copy, Clone)]
+#[allow(dead_code)]
+pub(super) struct OrderingInfo {
+    pub(super) type_id         : TypeId,
+    pub(super) less_constant   : ConstantId,
+    pub(super) equal_constant  : ConstantId,
+    pub(super) greater_constant: ConstantId,
+}
+
 /// Describes an intrinsic conversion trait that backs one or more `as` cast targets.
 ///
 /// The trait's required method returns `method_return` (a single, fixed type). When the cast
@@ -218,15 +260,6 @@ pub(super) struct IntrinsicCastTrait {
     pub(super) targets       : &'static [Type],
 }
 
-/// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
-/// a cast (e.g. a future `Display` or `ToFloat` backing some target type).
-pub(super) const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
-    IntrinsicCastTrait { trait_name: "ToString",    method: "to_string",    method_return: Type::String, targets: &[ Type::String ] },
-    IntrinsicCastTrait { trait_name: "ToUnsigned",  method: "to_unsigned",  method_return: Type::u64,    targets: &[ Type::u8, Type::u16, Type::u32, Type::u64 ] },
-    IntrinsicCastTrait { trait_name: "ToSigned",    method: "to_signed",    method_return: Type::i64,    targets: &[ Type::i8, Type::i16, Type::i32, Type::i64 ] },
-    IntrinsicCastTrait { trait_name: "ToFloat",     method: "to_float",     method_return: Type::f64,    targets: &[ Type::f32, Type::f64 ] },
-];
-
 /// A resolved intrinsic cast: the trait that backs a cast to a particular target type, the trait
 /// method to dispatch to, and the return type of that method. Built from [IntrinsicCastTrait] once
 /// the trait has been registered.
@@ -238,18 +271,6 @@ pub(super) struct IntrinsicCast {
     pub(super) method                : &'static str,
     /// Type id of the method's declared return type (e.g. `String`, `i64`, `u64`).
     pub(super) method_return_type_id : TypeId,
-}
-
-/// Return type of an intrinsic operator trait's required method: either the implementing type itself
-/// (`Self`, e.g. `Add::add(self, rhs) -> Self`), a fixed primitive type (e.g. `Eq::eq(self, rhs) -> bool`),
-/// or the built-in `Ordering` enum (e.g. `Ord::cmp(self, rhs) -> Ordering`).
-pub(super) enum IntrinsicResult {
-    /// The method returns `Self` (the implementing type), like the arithmetic operator traits.
-    SelfType,
-    /// The method returns the given (primitive) type, like `Eq` returning `bool`.
-    Type(Type),
-    /// The method returns the built-in `Ordering` enum (marker; resolved to real type id during registration).
-    Ordering,
 }
 
 /// Describes an intrinsic operator trait that backs a binary operator for custom types. Each has a single
@@ -266,30 +287,22 @@ pub(super) struct IntrinsicOpTrait {
     /// The trait's single required method, e.g. `add`.
     pub(super) method      : &'static str,
     /// Type of the right-hand operand (`Self` or a fixed primitive).
-    pub(super) rhs         : IntrinsicResult,
+    pub(super) rhs         : IntrinsicOpResult,
     /// Return type of the required method (`Self` or a fixed primitive).
-    pub(super) result      : IntrinsicResult,
+    pub(super) result      : IntrinsicOpResult,
 }
 
-/// The set of intrinsic operator traits known to the compiler. These let custom types implement the
-/// binary operators; an operator applied to a type that has no built-in meaning for it is lowered to a
-/// call of the corresponding trait method (e.g. `a + b` to `a.add(b)`, `a == b` to `a.eq(b)`).
-/// `Eq` is keyed under `Equal` and backs both `==` and `!=`; `Ord` is keyed under `Less` and backs
-/// `<`, `>`, `<=` and `>=`.
-pub(super) const INTRINSIC_OP_TRAITS: &[IntrinsicOpTrait] = &[
-    IntrinsicOpTrait { op: ast::BinaryOperator::Add, trait_name: "Add", method: "add", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Sub, trait_name: "Sub", method: "sub", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Mul, trait_name: "Mul", method: "mul", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Div, trait_name: "Div", method: "div", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Rem, trait_name: "Rem", method: "rem", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::BitAnd, trait_name: "BitAnd", method: "bitand", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::BitOr, trait_name: "BitOr", method: "bitor", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::BitXor, trait_name: "BitXor", method: "bitxor", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Shl, trait_name: "Shl", method: "shl", rhs: IntrinsicResult::Type(Type::i64), result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Shr, trait_name: "Shr", method: "shr", rhs: IntrinsicResult::Type(Type::i64), result: IntrinsicResult::SelfType },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Equal, trait_name: "Eq", method: "eq", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::Type(Type::bool) },
-    IntrinsicOpTrait { op: ast::BinaryOperator::Less, trait_name: "Ord", method: "cmp", rhs: IntrinsicResult::SelfType, result: IntrinsicResult::Ordering },
-];
+/// Return type of an intrinsic operator trait's required method: either the implementing type itself
+/// (`Self`, e.g. `Add::add(self, rhs) -> Self`), a fixed primitive type (e.g. `Eq::eq(self, rhs) -> bool`),
+/// or the built-in `Ordering` enum (e.g. `Ord::cmp(self, rhs) -> Ordering`).
+pub(super) enum IntrinsicOpResult {
+    /// The method returns `Self` (the implementing type), like the arithmetic operator traits.
+    SelfType,
+    /// The method returns the given (primitive) type, like `Eq` returning `bool`.
+    Type(Type),
+    /// The method returns the built-in `Ordering` enum (marker; resolved to real type id during registration).
+    Ordering,
+}
 
 /// A resolved intrinsic operator: the trait that backs an operator and the trait method to dispatch to.
 /// Built from [IntrinsicOpTrait] once the trait has been registered.
@@ -315,13 +328,6 @@ pub(super) struct IntrinsicUnaryOpTrait {
     pub(super) method      : &'static str,
 }
 
-/// The set of intrinsic unary operator traits known to the compiler. These let custom types implement the
-/// prefix operators; a unary operator applied to a type that has no built-in meaning for it is lowered to a
-/// call of the corresponding trait method (e.g. `-a` to `a.neg()`, `!a` to `a.not()`).
-pub(super) const INTRINSIC_UNARY_OP_TRAITS: &[IntrinsicUnaryOpTrait] = &[
-    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Minus, trait_name: "Neg", method: "neg" },
-    IntrinsicUnaryOpTrait { op: ast::UnaryOperator::Not, trait_name: "Not", method: "not" },
-];
 
 /// A resolved intrinsic unary operator: the trait that backs a prefix operator and the trait method to
 /// dispatch to. Built from [IntrinsicUnaryOpTrait] once the trait has been registered.
@@ -331,6 +337,30 @@ pub(super) struct IntrinsicUnaryOp {
     pub(super) trait_type_id   : TypeId,
     /// The trait's required method (e.g. `neg`).
     pub(super) method          : &'static str,
+}
+
+/// Describes the intrinsic `Index` trait that backs overloadable `[]` index access on custom types.
+/// Unlike operator traits (fixed `rhs`/`result`), the index and value types are impl-defined,
+/// so signatures are read from the impl at resolution time.
+pub(super) struct IntrinsicIndexTrait {
+    /// Name of the trait scripts implement.
+    pub(super) trait_name : &'static str,
+    /// Name of the read method (`fn get(self: Self, index: <K>) -> <V>`).
+    pub(super) get_method : &'static str,
+    /// Name of the write method (`fn set(self: Self, index: <K>, value: <V>)`).
+    pub(super) set_method : &'static str,
+}
+
+/// A resolved intrinsic `Index` trait: the trait type id and the method names. The concrete
+/// signatures (index type, value type) are read from the impl at resolution time.
+#[derive(Copy, Clone)]
+pub(super) struct IntrinsicIndex {
+    /// Type id of the registered trait (`Index`).
+    pub(super) trait_type_id : TypeId,
+    /// Name of the read method.
+    pub(super) get_method    : &'static str,
+    /// Name of the write method.
+    pub(super) set_method    : &'static str,
 }
 
 /// Bookkeeping for a synthesized `Result<T>` data enum, keyed by its (deduplicated) enum type id. Lets
@@ -357,33 +387,4 @@ pub(super) struct OptionTypeInfo {
     pub(super) some_constructor : ConstantId,
     /// Unit-variant constant for the `None` simple variant (`ConstantValue::Discriminant`, index 1).
     pub(super) none_constant  : ConstantId,
-}
-
-/// Describes the intrinsic `Index` trait that backs overloadable `[]` index access on custom types.
-/// Unlike operator traits (fixed `rhs`/`result`), the index and value types are impl-defined,
-/// so signatures are read from the impl at resolution time.
-pub(super) struct IntrinsicIndexTrait {
-    /// Name of the trait scripts implement.
-    pub(super) trait_name : &'static str,
-    /// Name of the read method (`fn get(self: Self, index: <K>) -> <V>`).
-    pub(super) get_method : &'static str,
-    /// Name of the write method (`fn set(self: Self, index: <K>, value: <V>)`).
-    pub(super) set_method : &'static str,
-}
-
-/// The set of intrinsic index traits known to the compiler. Currently only `Index`.
-pub(super) const INTRINSIC_INDEX_TRAITS: &[IntrinsicIndexTrait] = &[
-    IntrinsicIndexTrait { trait_name: "Index", get_method: "get", set_method: "set" },
-];
-
-/// A resolved intrinsic `Index` trait: the trait type id and the method names. The concrete
-/// signatures (index type, value type) are read from the impl at resolution time.
-#[derive(Copy, Clone)]
-pub(super) struct IntrinsicIndex {
-    /// Type id of the registered trait (`Index`).
-    pub(super) trait_type_id : TypeId,
-    /// Name of the read method.
-    pub(super) get_method    : &'static str,
-    /// Name of the write method.
-    pub(super) set_method    : &'static str,
 }
