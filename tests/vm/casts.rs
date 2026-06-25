@@ -565,6 +565,136 @@ fn to_unsigned_missing_impl_unsigned() {
     assert!(err.contains("does not implement required trait `ToUnsigned`"), "unexpected error: {}", err);
 }
 
+// --- cast custom types to float via ToFloat ---
+
+#[test]
+fn to_float_struct_full_width() {
+    // ToFloat returns f64; cast to f64 is the full-width path (no trailing cast)
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        impl ToFloat for Point {
+            fn to_float(self: Self) -> f64 {
+                (self.x as f64 * self.x as f64 + self.y as f64 * self.y as f64).sqrt()
+            }
+        }
+        fn main() {
+            let p = Point { x: 3, y: 4 };
+            ret_f64(p as f64);
+        }
+    ));
+    assert_all(&result, &[ 5.0f64 ]);
+}
+
+#[test]
+fn to_float_struct_truncation() {
+    // Cast to f32: the f64 returned by to_float is cast down to f32 precision
+    let result = run(stringify!(
+        struct Coord { val: i32 }
+        impl ToFloat for Coord {
+            fn to_float(self: Self) -> f64 {
+                self.val as f64 * 1.5
+            }
+        }
+        fn main() {
+            let c = Coord { val: 10 };
+            ret_f32(c as f32);
+            ret_f64(c as f64);
+        }
+    ));
+    assert_all!(&result, [ 15.0f32, 15.0f64 ]);
+}
+
+#[test]
+fn to_float_negative_value() {
+    // Negative values from to_float should work correctly
+    let result = run(stringify!(
+        struct Neg { val: i32 }
+        impl ToFloat for Neg {
+            fn to_float(self: Self) -> f64 {
+                self.val as f64 * -0.5
+            }
+        }
+        fn main() {
+            let n = Neg { val: 10 };
+            ret_f64(n as f64);
+            ret_f32(n as f32);
+        }
+    ));
+    assert_all!(&result, [ -5.0f64, -5.0f32 ]);
+}
+
+#[test]
+fn to_float_enum() {
+    // Data-carrying enum implementing ToFloat
+    let result = run(stringify!(
+        enum Shape { Circle(i32), Square(i32) }
+        impl ToFloat for Shape {
+            fn to_float(self: Self) -> f64 {
+                match self {
+                    Shape::Circle(r) => r as f64 * 3.14159 * 2.0,
+                    Shape::Square(s) => s as f64 * 4.0,
+                }
+            }
+        }
+        fn main() {
+            ret_f64(Shape::Circle(1) as f64);
+            ret_f64(Shape::Square(3) as f64);
+            ret_f32(Shape::Square(2) as f32);
+        }
+    ));
+    assert_all!(&result, [ 6.28318f64, 12.0f64, 8.0f32 ]);
+}
+
+#[test]
+fn to_float_both_traits_dispatch() {
+    // A type implementing both ToSigned and ToFloat; signed targets use ToSigned, float uses ToFloat
+    let result = run(stringify!(
+        struct MyType { val: i32 }
+        impl ToSigned for MyType {
+            fn to_signed(self: Self) -> i64 {
+                self.val as i64 * 10
+            }
+        }
+        impl ToFloat for MyType {
+            fn to_float(self: Self) -> f64 {
+                self.val as f64 * 0.5
+            }
+        }
+        fn main() {
+            let m = MyType { val: 7 };
+            ret_i32(m as i32);
+            ret_f64(m as f64);
+            ret_f32(m as f32);
+        }
+    ));
+    assert_all!(&result, [ 70i32, 3.5f64, 3.5f32 ]);
+}
+
+#[test]
+fn to_float_missing_impl() {
+    // A type that does not implement ToFloat cannot be cast to float
+    let err = build_err(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_f64(p as f64);
+        }
+    ));
+    assert!(err.contains("does not implement required trait `ToFloat`"), "unexpected error: {}", err);
+}
+
+#[test]
+fn to_float_missing_impl_f32() {
+    let err = build_err(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_f32(p as f32);
+        }
+    ));
+    assert!(err.contains("does not implement required trait `ToFloat`"), "unexpected error: {}", err);
+}
+
 // --- regression: existing casts still work ---
 
 #[test]

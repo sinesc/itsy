@@ -128,7 +128,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
-    // register intrinsic conversion traits (e.g. `ToString`, `ToSigned`, `ToUnsigned`) and the cast
+    // register intrinsic conversion traits (e.g. `ToString`, `ToSigned`, `ToUnsigned`, `ToFloat`) and the cast
     // targets they back. These are ordinary traits that scripts implement via `impl ToString for MyType { ... }`;
     // a cast to the trait's target type (e.g. `myValue as String`) that isn't a built-in primitive cast
     // lowers to a call of the trait's method (e.g. `myValue.to_string()`). Add a row to
@@ -2192,7 +2192,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         // method returns exactly the target (e.g. ToString): replace the whole cast
                         self.rewrite_cast_to_method(item, intrinsic.method, expected_result)
                     } else {
-                        // method returns a wider int (ToSigned/ToUnsigned): keep the Cast node as the
+                        // method returns a wider numeric type (ToSigned/ToUnsigned/ToFloat): keep the Cast node as the
                         // trailing primitive cast, lower its operand to the trait method call
                         self.rewrite_cast_via_method(item, intrinsic.method, to_type_id)
                     }
@@ -3065,7 +3065,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     }
 
     /// Lowers `expr as <intN>` for a type whose intrinsic conversion trait returns a wider integer
-    /// (`ToSigned`/`ToUnsigned`). Replaces the cast's operand with the trait method call (`expr.to_signed()`)
+    /// (`ToSigned`/`ToUnsigned`/`ToFloat`). Replaces the cast's operand with the trait method call (`expr.to_signed()`
     /// and reclassifies the surviving `Cast` as a built-in primitive numeric cast from the method's
     /// return type to the requested width. Mirrors `rewrite_cast_to_method` but keeps the cast node.
     fn rewrite_cast_via_method(self: &mut Self, item: &mut ast::Expression, method: &str, to_type_id: TypeId) -> ResolveResult {

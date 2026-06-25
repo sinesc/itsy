@@ -26,7 +26,8 @@
 //! [Intrinsic traits](crate::documentation::intrinsic_traits) are a special subset recognized by the compiler:
 //! implementing one for a custom type makes the language functionality it backs work on that type
 //! (e.g. `Add` backs `+`, `Ord` backs `<`, `>`, `<=`, `>=`, `ToString` backs `as String`,
-//! `ToSigned` backs `as i8 | i16 | i32 | i64`, `ToUnsigned` backs `as u8 | u16 | u32 | u64`).
+//! `ToSigned` backs `as i8 | i16 | i32 | i64`, `ToUnsigned` backs `as u8 | u16 | u32 | u64`,
+//! `ToFloat` backs `as f32 | f64`).
 //!
 //! # Generators
 //!
@@ -749,6 +750,31 @@ pub mod intrinsic_traits {
     pub trait ToUnsigned {
         /// Returns the unsigned integer representation of `self`.
         fn to_unsigned(self: Self) -> u64;
+    }
+
+    /// Converts a value to a floating-point number.
+    ///
+    /// Backs the `as f32` and `as f64` casts for custom types. The method returns `f64` (full-width);
+    /// casting to `f32` truncates the precision, identical to a normal `f64`-to-`f32` primitive cast.
+    ///
+    /// # Examples
+    ///
+    /// ``` ignore
+    /// struct Point { x: i32, y: i32 }
+    /// impl ToFloat for Point {
+    ///     fn to_float(self: Self) -> f64 {
+    ///         (self.x as f64 * self.x as f64 + self.y as f64 * self.y as f64).sqrt()
+    ///     }
+    /// }
+    /// # fn main() {
+    /// let p = Point { x: 3, y: 4 };
+    /// let dist = p as f64;
+    /// print(dist as String);   // 5
+    /// # }
+    /// ```
+    pub trait ToFloat {
+        /// Returns the floating-point representation of `self`.
+        fn to_float(self: Self) -> f64;
     }
 
     /// Overloads the `+` and `+=` operators. See [the operator traits](self#the-arithmetic-operator-traits)

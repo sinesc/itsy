@@ -30,9 +30,10 @@ pub(super) struct IntrinsicCastTrait {
 /// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
 /// a cast (e.g. a future `Display` or `ToFloat` backing some target type).
 pub(super) const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
-    IntrinsicCastTrait { trait_name: "ToString",   method: "to_string",   method_return: Type::String, targets: &[ Type::String ] },
-    IntrinsicCastTrait { trait_name: "ToUnsigned", method: "to_unsigned", method_return: Type::u64,    targets: &[ Type::u8, Type::u16, Type::u32, Type::u64 ] },
-    IntrinsicCastTrait { trait_name: "ToSigned",   method: "to_signed",   method_return: Type::i64,    targets: &[ Type::i8, Type::i16, Type::i32, Type::i64 ] },
+    IntrinsicCastTrait { trait_name: "ToString",    method: "to_string",    method_return: Type::String, targets: &[ Type::String ] },
+    IntrinsicCastTrait { trait_name: "ToUnsigned",  method: "to_unsigned",  method_return: Type::u64,    targets: &[ Type::u8, Type::u16, Type::u32, Type::u64 ] },
+    IntrinsicCastTrait { trait_name: "ToSigned",    method: "to_signed",    method_return: Type::i64,    targets: &[ Type::i8, Type::i16, Type::i32, Type::i64 ] },
+    IntrinsicCastTrait { trait_name: "ToFloat",     method: "to_float",     method_return: Type::f64,    targets: &[ Type::f32, Type::f64 ] },
 ];
 
 /// A resolved intrinsic cast: the trait that backs a cast to a particular target type, the trait
