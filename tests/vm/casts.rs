@@ -394,3 +394,203 @@ fn cast_f32_u16() {
     ));
     assert_all(&result, &[ 3u16, 0, 65535, 65535, 0 ]);
 }
+
+// --- cast custom types to integer via ToUnsigned / ToSigned ---
+
+#[test]
+fn to_unsigned_struct_full_width() {
+    // ToUnsigned returns u64; cast to u64 is the full-width path (no trailing cast)
+    let result = run(stringify!(
+        struct Color { r: u8, g: u8, b: u8 }
+        impl ToUnsigned for Color {
+            fn to_unsigned(self: Self) -> u64 {
+                (self.r as u64 << 16) + (self.g as u64 << 8) + (self.b as u64)
+            }
+        }
+        fn main() {
+            let c = Color { r: 0x12, g: 0x34, b: 0x56 };
+            ret_u64(c as u64);
+        }
+    ));
+    assert_all(&result, &[ 0x123456u64 ]);
+}
+
+#[test]
+fn to_unsigned_struct_truncation() {
+    // Cast to narrower targets: the u64 returned by to_unsigned is cast down to the target width.
+    // The VM saturates (clamps) when the value exceeds the target range.
+    let result = run(stringify!(
+        struct Rgb { r: u8, g: u8, b: u8 }
+        impl ToUnsigned for Rgb {
+            fn to_unsigned(self: Self) -> u64 {
+                (self.r as u64 << 16) + (self.g as u64 << 8) + (self.b as u64)
+            }
+        }
+        fn main() {
+            let c = Rgb { r: 0x00, g: 0x00, b: 0x56 };
+            ret_u32(c as u32);   // 0x56 fits in u32
+            ret_u16(c as u16);   // 0x56 fits in u16
+            ret_u8(c as u8);     // 0x56 fits in u8
+        }
+    ));
+    assert_all!(&result, [ 0x56u32, 0x56u16, 0x56u8 ]);
+}
+
+#[test]
+fn to_signed_struct_full_width() {
+    // ToSigned returns i64; cast to i64 is the full-width path
+    let result = run(stringify!(
+        struct Color { r: u8, g: u8, b: u8 }
+        impl ToSigned for Color {
+            fn to_signed(self: Self) -> i64 {
+                (self.r as i64 << 16) + (self.g as i64 << 8) + (self.b as i64)
+            }
+        }
+        fn main() {
+            let c = Color { r: 0x12, g: 0x34, b: 0x56 };
+            ret_i64(c as i64);
+        }
+    ));
+    assert_all(&result, &[ 0x123456i64 ]);
+}
+
+#[test]
+fn to_signed_struct_truncation() {
+    // Cast to narrower signed targets: the i64 returned by to_signed is cast down to the target width.
+    // The VM saturates (clamps) when the value exceeds the target range.
+    let result = run(stringify!(
+        struct Rgb { r: u8, g: u8, b: u8 }
+        impl ToSigned for Rgb {
+            fn to_signed(self: Self) -> i64 {
+                (self.r as i64 << 16) + (self.g as i64 << 8) + (self.b as i64)
+            }
+        }
+        fn main() {
+            let c = Rgb { r: 0x00, g: 0x00, b: 0x56 };
+            ret_i32(c as i32);   // 0x56 fits in i32
+            ret_i16(c as i16);   // 0x56 fits in i16
+            ret_i8(c as i8);     // 0x56 fits in i8
+        }
+    ));
+    assert_all!(&result, [ 0x56i32, 0x56i16, 0x56i8 ]);
+}
+
+#[test]
+fn to_signed_negative_value() {
+    // Negative values from to_signed should sign-truncate correctly
+    let result = run(stringify!(
+        struct Neg { val: i32 }
+        impl ToSigned for Neg {
+            fn to_signed(self: Self) -> i64 {
+                self.val as i64
+            }
+        }
+        fn main() {
+            let n = Neg { val: -1 };
+            ret_i64(n as i64);
+            ret_i8(n as i8);
+        }
+    ));
+    assert_all!(&result, [ -1i64, -1i8 ]);
+}
+
+#[test]
+fn to_unsigned_enum() {
+    // Data-carrying enum implementing ToUnsigned
+    let result = run(stringify!(
+        enum Shape { Circle(i32), Square(i32) }
+        impl ToUnsigned for Shape {
+            fn to_unsigned(self: Self) -> u64 {
+                match self {
+                    Shape::Circle(r) => r as u64,
+                    Shape::Square(s) => (s as u64) * 2,
+                }
+            }
+        }
+        fn main() {
+            ret_u64(Shape::Circle(5) as u64);
+            ret_u64(Shape::Square(3) as u64);
+            ret_u8(Shape::Circle(255) as u8);
+        }
+    ));
+    assert_all!(&result, [ 5u64, 6u64, 255u8 ]);
+}
+
+#[test]
+fn both_traits_dispatch() {
+    // A type implementing both ToSigned and ToUnsigned; signed targets use ToSigned, unsigned use ToUnsigned
+    let result = run(stringify!(
+        struct MyType { val: i32 }
+        impl ToUnsigned for MyType {
+            fn to_unsigned(self: Self) -> u64 {
+                self.val as u64
+            }
+        }
+        impl ToSigned for MyType {
+            fn to_signed(self: Self) -> i64 {
+                self.val as i64 * 10
+            }
+        }
+        fn main() {
+            let m = MyType { val: 7 };
+            ret_u16(m as u16);
+            ret_i16(m as i16);
+        }
+    ));
+    assert_all!(&result, [ 7u16, 70i16 ]);
+}
+
+#[test]
+fn to_unsigned_missing_impl() {
+    // A type that does not implement ToSigned/ToUnsigned cannot be cast to integer
+    let err = build_err(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_i32(p as i32);
+        }
+    ));
+    assert!(err.contains("does not implement required trait `ToSigned`"), "unexpected error: {}", err);
+}
+
+#[test]
+fn to_unsigned_missing_impl_unsigned() {
+    let err = build_err(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_u32(p as u32);
+        }
+    ));
+    assert!(err.contains("does not implement required trait `ToUnsigned`"), "unexpected error: {}", err);
+}
+
+// --- regression: existing casts still work ---
+
+#[test]
+fn regression_numeric_cast() {
+    // Plain numeric cast still works
+    let result = run(stringify!(
+        ret_u8(5u32 as u8);
+        ret_i8(-280i64 as i8);
+    ));
+    assert_all!(&result, [ 5u8, -128i8 ]);
+}
+
+#[test]
+fn regression_to_string_still_works() {
+    // Existing as String path is unchanged
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        impl ToString for Point {
+            fn to_string(self: Self) -> String {
+                "({self.x}, {self.y})"
+            }
+        }
+        fn main() {
+            let p = Point { x: 3, y: 7 };
+            ret_string(p as String);
+        }
+    ));
+    assert_all(&result, &[ "(3, 7)".to_string() ]);
+}

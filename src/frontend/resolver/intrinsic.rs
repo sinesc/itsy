@@ -6,31 +6,46 @@ use crate::frontend::ast;
 use crate::shared::meta::Type;
 use crate::shared::typed_ids::{TypeId, ConstantId};
 
-/// Describes an intrinsic conversion trait that backs an `as` cast to a particular target type.
-/// See the registration loop in `resolve` and `Resolver::resolve_cast`
+/// Describes an intrinsic conversion trait that backs one or more `as` cast targets.
+///
+/// The trait's required method returns `method_return` (a single, fixed type). When the cast
+/// target matches `method_return` exactly (e.g. `ToString` → `String`), the cast is lowered to
+/// just the method call. When the target is narrower (e.g. `ToUnsigned` returns `u64` but the
+/// cast is `as u8`), the method call is followed by a trailing primitive numeric cast that
+/// truncates the value to the requested width.
+///
+/// See the registration loop in `resolve` and `Resolver::resolve_cast`.
 pub(super) struct IntrinsicCastTrait {
     /// Name of the trait scripts implement, e.g. `ToString`.
     pub(super) trait_name  : &'static str,
     /// The trait's single required method, e.g. `to_string`.
     pub(super) method      : &'static str,
-    /// The cast target type the trait converts to, e.g. `String`.
-    pub(super) target      : Type,
+    /// Declared return type of the required method (e.g. `String`, `i64`, `u64`).
+    pub(super) method_return : Type,
+    /// Cast target types this trait backs. The method result is cast to the requested
+    /// target via an ordinary primitive numeric cast when it differs from `method_return`.
+    pub(super) targets       : &'static [Type],
 }
 
 /// The set of intrinsic conversion traits known to the compiler. Add a row to make a new trait drive
-/// a cast (e.g. a future `Display` backing some target type).
+/// a cast (e.g. a future `Display` or `ToFloat` backing some target type).
 pub(super) const INTRINSIC_CAST_TRAITS: &[IntrinsicCastTrait] = &[
-    IntrinsicCastTrait { trait_name: "ToString", method: "to_string", target: Type::String },
+    IntrinsicCastTrait { trait_name: "ToString",   method: "to_string",   method_return: Type::String, targets: &[ Type::String ] },
+    IntrinsicCastTrait { trait_name: "ToUnsigned", method: "to_unsigned", method_return: Type::u64,    targets: &[ Type::u8, Type::u16, Type::u32, Type::u64 ] },
+    IntrinsicCastTrait { trait_name: "ToSigned",   method: "to_signed",   method_return: Type::i64,    targets: &[ Type::i8, Type::i16, Type::i32, Type::i64 ] },
 ];
 
-/// A resolved intrinsic cast: the trait that backs a cast to a particular target type and the trait
-/// method to dispatch to. Built from [IntrinsicCastTrait] once the trait has been registered.
+/// A resolved intrinsic cast: the trait that backs a cast to a particular target type, the trait
+/// method to dispatch to, and the return type of that method. Built from [IntrinsicCastTrait] once
+/// the trait has been registered.
 #[derive(Copy, Clone)]
 pub(super) struct IntrinsicCast {
     /// Type id of the registered trait (e.g. `ToString`).
-    pub(super) trait_type_id   : TypeId,
+    pub(super) trait_type_id         : TypeId,
     /// The trait's required method (e.g. `to_string`).
-    pub(super) method          : &'static str,
+    pub(super) method                : &'static str,
+    /// Type id of the method's declared return type (e.g. `String`, `i64`, `u64`).
+    pub(super) method_return_type_id : TypeId,
 }
 
 /// Return type of an intrinsic operator trait's required method: either the implementing type itself

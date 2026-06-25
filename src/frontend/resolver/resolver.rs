@@ -128,26 +128,30 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
 
-    // register intrinsic conversion traits (e.g. `ToString`) and the cast targets they back. These are
-    // ordinary traits that scripts implement via `impl ToString for MyType { ... }`; a cast to the trait's
-    // target type (e.g. `myValue as String`) that isn't a built-in primitive cast lowers to a call of the
-    // trait's method (e.g. `myValue.to_string()`). Add a row here to make a future trait drive a cast.
+    // register intrinsic conversion traits (e.g. `ToString`, `ToSigned`, `ToUnsigned`) and the cast
+    // targets they back. These are ordinary traits that scripts implement via `impl ToString for MyType { ... }`;
+    // a cast to the trait's target type (e.g. `myValue as String`) that isn't a built-in primitive cast
+    // lowers to a call of the trait's method (e.g. `myValue.to_string()`). Add a row to
+    // INTRINSIC_CAST_TRAITS to make a future trait drive a cast.
     let mut intrinsic_trait_names = Vec::new();
     let mut intrinsic_casts = UnorderedMap::new();
     for intrinsic in INTRINSIC_CAST_TRAITS {
-        let target_type_id = *primitives.get(&intrinsic.target).ice()?;
+        let return_type_id = *primitives.get(&intrinsic.method_return).ice()?;
         let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
-        // required method `fn <method>(self: Self) -> <target>`, registered exactly as the resolver would
+        // required method `fn <method>(self: Self) -> <method_return>`, registered exactly as the resolver would
         // for a source-defined trait method so impl-matching and vtable construction pick it up.
         let constant_id = scopes.insert_function(
             &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
-            Some(target_type_id),
+            Some(return_type_id),
             vec![ Some(trait_type_id) ],
             Some(FunctionKind::Method(trait_type_id)),
         );
         scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
         intrinsic_trait_names.push(intrinsic.trait_name.to_string());
-        intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method });
+        for target in intrinsic.targets {
+            let target_type_id = *primitives.get(target).ice()?;
+            intrinsic_casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method, method_return_type_id: return_type_id });
+        }
     }
 
     // register the built-in `Ordering` enum (value-type, i8 discriminant). This is the return type of
@@ -2184,8 +2188,14 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         match self.intrinsic_casts.get(&to_type_id).copied() {
             Some(intrinsic) => {
                 if self.type_accepted_for(from_type_id, intrinsic.trait_type_id) {
-                    // operand implements the backing trait: lower to a call of the trait method
-                    self.rewrite_cast_to_method(item, intrinsic.method, expected_result)
+                    if intrinsic.method_return_type_id == to_type_id {
+                        // method returns exactly the target (e.g. ToString): replace the whole cast
+                        self.rewrite_cast_to_method(item, intrinsic.method, expected_result)
+                    } else {
+                        // method returns a wider int (ToSigned/ToUnsigned): keep the Cast node as the
+                        // trailing primitive cast, lower its operand to the trait method call
+                        self.rewrite_cast_via_method(item, intrinsic.method, to_type_id)
+                    }
                 } else if self.stage.must_resolve() {
                     // resolution has stalled: no impl block will make the trait appear, so the operand
                     // genuinely does not implement it
@@ -3054,6 +3064,22 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
         *item = Self::make_method_call(receiver, method, Vec::new(), position);
         self.resolve_expression(item, expected_result)
+    }
+
+    /// Lowers `expr as <intN>` for a type whose intrinsic conversion trait returns a wider integer
+    /// (`ToSigned`/`ToUnsigned`). Replaces the cast's operand with the trait method call (`expr.to_signed()`)
+    /// and reclassifies the surviving `Cast` as a built-in primitive numeric cast from the method's
+    /// return type to the requested width. Mirrors `rewrite_cast_to_method` but keeps the cast node.
+    fn rewrite_cast_via_method(self: &mut Self, item: &mut ast::Expression, method: &str, to_type_id: TypeId) -> ResolveResult {
+        let cast = item.as_cast_mut().ice()?;
+        let position = cast.position;
+        let receiver = std::mem::replace(&mut cast.expr, ast::Expression::void(position));
+        cast.expr = Self::make_method_call(receiver, method, Vec::new(), position);
+        self.resolve_expression(&mut item.as_cast_mut().ice()?.expr, None)?;   // resolves to i64/u64
+        let cast = item.as_cast_mut().ice()?;
+        cast.set_type_id(self, to_type_id);
+        cast.kind = Some(ast::CastKind::Primitive);
+        Ok(())
     }
 
     /// Rewrites an arithmetic binary operation `a OP b` into a method call `a.<method>(b)` and resolves it.

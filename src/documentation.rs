@@ -25,7 +25,8 @@
 //! [Traits](crate::documentation::traits) define shared behavior that structs and enums can implement.\
 //! [Intrinsic traits](crate::documentation::intrinsic_traits) are a special subset recognized by the compiler:
 //! implementing one for a custom type makes the language functionality it backs work on that type
-//! (e.g. `Add` backs `+`, `Ord` backs `<`, `>`, `<=`, `>=`, `ToString` backs `as String`).
+//! (e.g. `Add` backs `+`, `Ord` backs `<`, `>`, `<=`, `>=`, `ToString` backs `as String`,
+//! `ToSigned` backs `as i8 | i16 | i32 | i64`, `ToUnsigned` backs `as u8 | u16 | u32 | u64`).
 //!
 //! # Generators
 //!
@@ -696,6 +697,58 @@ pub mod intrinsic_traits {
     pub trait ToString {
         /// Returns the string representation of `self`.
         fn to_string(self: Self) -> String;
+    }
+
+    /// Converts a value to a signed integer.
+    ///
+    /// Backs the `as i8`, `as i16`, `as i32`, and `as i64` casts for custom types. The method
+    /// returns `i64` (full-width); casting to a narrower target truncates the low bits, identical
+    /// to a normal signed-to-signed or unsigned-to-signed primitive cast.
+    ///
+    /// # Examples
+    ///
+    /// ``` ignore
+    /// struct Color { r: u8, g: u8, b: u8 }
+    /// impl ToSigned for Color {
+    ///     fn to_signed(self: Self) -> i64 {
+    ///         (self.r as i64 << 16) + (self.g as i64 << 8) + (self.b as i64)
+    ///     }
+    /// }
+    /// # fn main() {
+    /// let c = Color { r: 0x12, g: 0x34, b: 0x56 };
+    /// let packed = c as i32;
+    /// print(packed as String);   // 1193046
+    /// # }
+    /// ```
+    pub trait ToSigned {
+        /// Returns the signed integer representation of `self`.
+        fn to_signed(self: Self) -> i64;
+    }
+
+    /// Converts a value to an unsigned integer.
+    ///
+    /// Backs the `as u8`, `as u16`, `as u32`, and `as u64` casts for custom types. The method
+    /// returns `u64` (full-width); casting to a narrower target truncates the low bits, identical
+    /// to a normal unsigned-to-unsigned primitive cast.
+    ///
+    /// # Examples
+    ///
+    /// ``` ignore
+    /// struct Color { r: u8, g: u8, b: u8 }
+    /// impl ToUnsigned for Color {
+    ///     fn to_unsigned(self: Self) -> u64 {
+    ///         (self.r as u64 << 16) + (self.g as u64 << 8) + (self.b as u64)
+    ///     }
+    /// }
+    /// # fn main() {
+    /// let c = Color { r: 0x12, g: 0x34, b: 0x56 };
+    /// let packed = c as u32;
+    /// print(packed as String);   // 1193046
+    /// # }
+    /// ```
+    pub trait ToUnsigned {
+        /// Returns the unsigned integer representation of `self`.
+        fn to_unsigned(self: Self) -> u64;
     }
 
     /// Overloads the `+` and `+=` operators. See [the operator traits](self#the-arithmetic-operator-traits)
