@@ -43,6 +43,36 @@ fn array_subindex() {
 }
 
 #[test]
+#[should_panic(expected = "Index out of bounds")]
+fn array_index_read_out_of_bounds_traps() {
+    // reading past the end traps with a recoverable runtime error rather than panicking the host
+    run(stringify!(
+        let a = [ 10u8, 20, 30 ];
+        ret_u8(a[5]);
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Index out of bounds")]
+fn array_index_read_reference_out_of_bounds_traps() {
+    // same for reference-typed elements (the `heap_fetch_elementx` path)
+    run(stringify!(
+        let a = [ "x", "y" ];
+        ret_str(a[7]);
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Index out of bounds")]
+fn array_index_write_out_of_bounds_traps() {
+    // writing past the end traps as well (the `index` address-computation opcode)
+    run(stringify!(
+        let a = [ 1u8, 2, 3 ];
+        a[9] = 5u8;
+    ));
+}
+
+#[test]
 fn array_inference1() {
     let result = run(stringify!(
         let x = [ [ [ 1, 2, 3, 4 ] ] ];

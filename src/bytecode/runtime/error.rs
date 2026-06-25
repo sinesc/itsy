@@ -12,6 +12,7 @@ pub enum RuntimeErrorKind {
     DivisionByZero,
     InvalidArgument,
     KeyNotFound,
+    IndexOutOfBounds,
 }
 
 /// An error reported by the runtime.
@@ -52,6 +53,7 @@ impl Display for RuntimeError {
             RuntimeErrorKind::DivisionByZero => write!(f, "Divison by zero at opcode {opcode}."),
             RuntimeErrorKind::InvalidArgument => write!(f, "Invalid argument at opcode {opcode}."),
             RuntimeErrorKind::KeyNotFound => write!(f, "Map key not found at opcode {opcode}."),
+            RuntimeErrorKind::IndexOutOfBounds => write!(f, "Index out of bounds at opcode {opcode}."),
         }
     }
 }

@@ -1446,10 +1446,13 @@ impl_opcodes!{
         self.refcount_value(item, constructor, HeapRefOp::Free);
     }
 
-    /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack.
-    fn index(&mut self, element_size: u16) {
+    /// Pop StackAddress sized "index" and heap reference and push the resulting heap reference with offset += index * element_size onto the stack. Traps on out-of-bounds.
+    fn index(&mut self, element_size: u16) [ check ] {
         let element_index: StackAddress = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
+        if !self.check_element_bounds(item, element_index, element_size as StackAddress) {
+            return;
+        }
         item.add_offset(element_index as StackOffset * element_size as StackOffset);
         self.stack.push(item);
     }
@@ -1530,24 +1533,32 @@ impl_opcodes!{
         self.stack.push(data);
     }
 
-    /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references.
+    /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references. Traps on out-of-bounds.
     fn <
-        heap_fetch_element8<T: Data8>(constructor: StackAddress),
-        heap_fetch_element16<T: Data16>(constructor: StackAddress),
-        heap_fetch_element32<T: Data32>(constructor: StackAddress),
-        heap_fetch_element64<T: Data64>(constructor: StackAddress),
+        heap_fetch_element8<T: Data8>(constructor: StackAddress) [ check ],
+        heap_fetch_element16<T: Data16>(constructor: StackAddress) [ check ],
+        heap_fetch_element32<T: Data32>(constructor: StackAddress) [ check ],
+        heap_fetch_element64<T: Data64>(constructor: StackAddress) [ check ],
     >(&mut self) {
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
+        if !self.check_element_bounds(item, element_index, size_of::<T>() as StackAddress) {
+            self.refcount_value(item, constructor, HeapRefOp::Free);
+            return;
+        }
         let data: T = self.heap.read(item.with_offset((size_of::<T>() as StackAddress * element_index) as StackOffset));
         self.refcount_value(item, constructor, HeapRefOp::Free);
         self.stack.push(data);
     }
 
-    /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references.
-    fn heap_fetch_elementx(&mut self, constructor: StackAddress) {
+    /// Pop an element index and heap reference and push the heap value at element index onto the stack. Drops temporary references. Traps on out-of-bounds.
+    fn heap_fetch_elementx(&mut self, constructor: StackAddress) [ check ] {
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
+        if !self.check_element_bounds(item, element_index, size_of::<HeapRef>() as StackAddress) {
+            self.refcount_value(item, constructor, HeapRefOp::Free);
+            return;
+        }
         let data: HeapRef = self.heap.read(item.with_offset((size_of::<HeapRef>() as StackAddress * element_index) as StackOffset));
         self.heap.ref_item(data.index(), HeapRefOp::Inc); // non recursive is fine since we only want to prevent it from being dropped and will reverse the change immediately
         self.refcount_value(item, constructor, HeapRefOp::Free);
