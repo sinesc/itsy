@@ -398,28 +398,28 @@ macro_rules! impl_builtins {
             // documented as such.
             /// Placeholder for an array's element type — the concrete type of the values it stores.
             /// Not a built-in type; each array substitutes its own element type.
-            pub struct Element { }
+            pub type Element = ();
             /// Placeholder for the unsigned-integer counterpart of a signed numeric type (e.g. `u32` for
             /// `i32`), returned by `abs_diff`. Not a built-in type.
-            pub struct UnsignedSelf { }
+            pub type UnsignedSelf = ();
             /// Placeholder for a map's key type. Not a built-in type; each map substitutes its own key type.
-            pub struct Key { }
+            pub type Key = ();
             /// Placeholder for a map's value type. Not a built-in type; each map substitutes its own value type.
-            pub struct Value { }
+            pub type Value = ();
             /// Placeholder for an array of a map's keys (`[Key]`), returned by `keys`. Not a built-in type.
-            pub struct KeyArray { }
+            pub type KeyArray = ();
             /// Placeholder for an array of a map's values (`[Value]`), returned by `values`. Not a built-in type.
-            pub struct ValueArray { }
+            pub type ValueArray = ();
             /// Placeholder for a generator's key (iteration index) type. Not a built-in type.
-            pub struct GenKey { }
+            pub type GenKey = ();
             /// Placeholder for a generator's yielded value type. Not a built-in type.
-            pub struct GenValue { }
+            pub type GenValue = ();
             /// Placeholder for `Option<Element>`: an array element from a fallible lookup (e.g. `pop`,
             /// `get`, `first`), `None` when absent. Not a built-in type.
-            pub struct OptionalElement { }
+            pub type OptionalElement = ();
             /// Placeholder for `Option<Value>`: a map value looked up by key, `None` when the key is
             /// absent. Not a built-in type.
-            pub struct OptionalValue { }
+            pub type OptionalValue = ();
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }

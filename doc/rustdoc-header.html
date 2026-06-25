@@ -6,12 +6,18 @@
 /* main content: section headings + their impl lists */
 #synthetic-implementations,
 #synthetic-implementations-list,
+#dyn-compatibility,
+.dyn-compatibility-info,
+#types,
+#types + dl.item-table,
 #blanket-implementations,
 #blanket-implementations-list,
 
 /* sidebar: the heading and the list of links beneath it */
 .sidebar h3:has(> a[href="#synthetic-implementations"]),
 .sidebar h3:has(> a[href="#synthetic-implementations"]) + ul,
+.sidebar h3:has(> a[href="#dyn-compatibility"]),
+.sidebar h3:has(> a[href="#dyn-compatibility"]) + ul,
 .sidebar h3:has(> a[href="#blanket-implementations"]),
 .sidebar h3:has(> a[href="#blanket-implementations"]) + ul {
     display: none !important;

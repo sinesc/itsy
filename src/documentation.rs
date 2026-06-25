@@ -70,7 +70,11 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// }
 /// # fn main() { }
 /// ```
-pub struct Result { }
+pub enum Result { Ok(ResultType), Err(Error) }  // or: Err(Box<dyn intrinsic_traits::Error>), less readable
+/// Placeholder for a results's Ok type. Not a built-in type.
+pub type ResultType = ();
+/// Placeholder for a results's [Error](crate::documentation::intrinsic_traits::Error)-implementing type. Not a built-in type.
+pub type Error = ();
 
 /// Nullable type, written `Option<T>`.
 ///
@@ -117,7 +121,9 @@ pub struct Result { }
 /// }
 /// # fn main() { }
 /// ```
-pub struct Option { }
+pub enum Option { Some(OptionType), None }
+/// Placeholder for an option's content type. Not a built-in type.
+pub type OptionType = ();
 
 /// Structs: fixed collections of named fields.
 ///
@@ -901,15 +907,15 @@ pub mod intrinsic_traits {
 
     /// Placeholder for the index ("key") type an [`Index`] implementor chooses (e.g. `u64`, `String`).
     /// Not a built-in type — it must be the same in [`Index::get`] and [`Index::set`].
-    pub struct IndexType { }
+    pub type IndexType = ();
 
     /// Placeholder for the type [`Index::get`] returns. Not a built-in type. May be wrapped (e.g.
     /// `Option<i64>`) and need not equal [`ValueType`], though compound assignment (`a[i] += v`) requires it to.
-    pub struct ResultType { }
+    pub type ResultType = ();
 
     /// Placeholder for the value type [`Index::set`] accepts. Not a built-in type, and independent of
     /// [`ResultType`].
-    pub struct ValueType { }
+    pub type ValueType = ();
 
 }
 
