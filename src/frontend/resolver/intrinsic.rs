@@ -2,9 +2,181 @@
 //! `Result<T>` enums. These describe traits the resolver registers and recognizes specially; see the
 //! registration loop in `resolve` and the cast/operator handling in `Resolver`.
 
+use crate::prelude::*;
 use crate::frontend::ast;
-use crate::shared::meta::Type;
+use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult};
+use crate::shared::meta::{Type, Trait, Enum, EnumVariant, FunctionKind, ConstantValue};
 use crate::shared::typed_ids::{TypeId, ConstantId};
+use crate::shared::numeric::Numeric;
+use super::scopes::Scopes;
+
+/// Bookkeeping for the built-in `Ordering` enum: its type id and the constant ids for each variant.
+#[derive(Copy, Clone)]
+#[allow(dead_code)]
+pub(super) struct OrderingInfo {
+    pub(super) type_id         : TypeId,
+    pub(super) less_constant   : ConstantId,
+    pub(super) equal_constant  : ConstantId,
+    pub(super) greater_constant: ConstantId,
+}
+
+/// All values produced by registering intrinsic traits into the scope repository.
+pub(super) struct IntrinsicRegistration {
+    /// Human-readable names of every intrinsic trait and type registered (e.g. `ToString`, `Add`,
+    /// `Ordering`, `Error`, `Index`). Used to create aliases in each module scope.
+    pub(super) trait_names     : Vec<String>,
+    /// Maps a cast target type id to the intrinsic conversion trait that backs it.
+    pub(super) casts           : UnorderedMap<TypeId, IntrinsicCast>,
+    /// Maps a binary operator to the intrinsic operator trait that backs it.
+    pub(super) ops             : UnorderedMap<ast::BinaryOperator, IntrinsicOp>,
+    /// The intrinsic `Index` trait that backs overloadable `[]` on custom types.
+    pub(super) index           : Option<IntrinsicIndex>,
+    /// Type id of the built-in `Error` trait.
+    pub(super) error_trait     : TypeId,
+    /// Type id and variant constants of the built-in `Ordering` enum.
+    pub(super) ordering        : OrderingInfo,
+}
+
+/// Register all intrinsic traits and the `Ordering` enum.
+///
+/// This covers:
+/// - Conversion traits (`ToString`, `ToSigned`, `ToUnsigned`, `ToFloat`) and their cast targets,
+/// - The `Ordering` enum (return type of `Ord::cmp`),
+/// - Operator traits (`Add`, `Sub`, `Mul`, …, `Eq`, `Ord`),
+/// - The `Error` trait,
+/// - The `Index` trait.
+///
+/// All of these are ordinary traits/enums that scripts can implement; the compiler recognizes them
+/// specially to lower casts and operators to trait-method calls.
+pub(super) fn register_intrinsics(scopes: &mut Scopes, primitives: &UnorderedMap<&Type, TypeId>) -> ResolveResult<IntrinsicRegistration> {
+
+    let mut trait_names = Vec::new();
+
+    // Register intrinsic cast traits and the cast targets they back. These are ordinary traits that scripts
+    // implement via `impl ToString for MyType { ... }`.
+    let mut casts = UnorderedMap::new();
+    for intrinsic in INTRINSIC_CAST_TRAITS {
+        let return_type_id = *primitives.get(&intrinsic.method_return).ice()?;
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
+        // required method `fn <method>(self: Self) -> <method_return>`, registered exactly as the resolver would
+        // for a source-defined trait method so impl-matching and vtable construction pick it up.
+        let constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
+            Some(return_type_id),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
+        trait_names.push(intrinsic.trait_name.to_string());
+        for target in intrinsic.targets {
+            let target_type_id = *primitives.get(target).ice()?;
+            casts.insert(target_type_id, IntrinsicCast { trait_type_id, method: intrinsic.method, method_return_type_id: return_type_id });
+        }
+    }
+
+    // Register the built-in `Ordering` enum. This is the return type of `Ord::cmp`.
+    let i8_type_id = *primitives.get(&Type::i8).ice()?;
+    let ordering_type_id = scopes.insert_type(Some("Ordering"), Type::Enum(Enum {
+        primitive: Some((i8_type_id, Type::i8.primitive_size())),
+        variants: vec![
+            ("Less".to_string(), EnumVariant::Simple(Some(Numeric::Signed(-1)))),
+            ("Equal".to_string(), EnumVariant::Simple(Some(Numeric::Signed(0)))),
+            ("Greater".to_string(), EnumVariant::Simple(Some(Numeric::Signed(1)))),
+        ],
+        impl_traits: Map::new(),
+    }));
+    let ordering_less_constant = scopes.insert_constant("Ordering::Less", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(-1)));
+    let ordering_equal_constant = scopes.insert_constant("Ordering::Equal", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(0)));
+    let ordering_greater_constant = scopes.insert_constant("Ordering::Greater", ordering_type_id, Some(ordering_type_id), ConstantValue::Discriminant(Numeric::Signed(1)));
+    let ordering = OrderingInfo {
+        type_id: ordering_type_id,
+        less_constant: ordering_less_constant,
+        equal_constant: ordering_equal_constant,
+        greater_constant: ordering_greater_constant,
+    };
+    trait_names.push("Ordering".to_string());
+
+    // Register intrinsic operator traits (e.g. `Add`, `Eq`).
+    let mut ops = UnorderedMap::new();
+    for intrinsic in INTRINSIC_OP_TRAITS {
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new()));
+        // required method `fn <method>(self: Self, rhs: <rhs>) -> <result>`, where rhs defaults to Self
+        // (arithmetic, bitwise, equality) but can be a fixed primitive for shift operators.
+        let rhs_type_id = match &intrinsic.rhs {
+            IntrinsicResult::SelfType => trait_type_id,
+            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicResult::Ordering => ordering.type_id,
+        };
+        let result_type_id = match &intrinsic.result {
+            IntrinsicResult::SelfType => trait_type_id,
+            IntrinsicResult::Type(ty) => *primitives.get(ty).ice()?,
+            IntrinsicResult::Ordering => ordering.type_id,
+        };
+        let constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.method),
+            Some(result_type_id),
+            vec![ Some(trait_type_id), Some(rhs_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        scopes.type_mut(trait_type_id).as_trait_mut().ice()?.required.insert(intrinsic.method.to_string(), Some(constant_id));
+        trait_names.push(intrinsic.trait_name.to_string());
+        ops.insert(intrinsic.op, IntrinsicOp { trait_type_id, rhs_type_id, method: intrinsic.method });
+    }
+
+    // Register the built-in `Error` trait.
+    let string_type_id = *primitives.get(&Type::String).ice()?;
+    let error_trait = scopes.insert_type(Some("Error"), Type::Trait(Trait::new()));
+    let error_description_id = scopes.insert_function(
+        "Error::description",
+        Some(string_type_id),
+        vec![ Some(error_trait) ],
+        Some(FunctionKind::Method(error_trait)),
+    );
+    scopes.type_mut(error_trait).as_trait_mut().ice()?.required.insert("description".to_string(), Some(error_description_id));
+    trait_names.push("Error".to_string());
+
+    // Register the intrinsic `Index` trait.
+    // Unlike operator traits (fixed rhs/result types), Index's `get`/`set` signatures are
+    // impl-defined: the index type and value type vary per implementor, so we cannot bake a fixed
+    // signature into the required methods. We still register each required method with a placeholder
+    // function constant (as `Error::description` and the operator traits do), because a trait whose
+    // `required` entry maps to `None` is treated as forever-unresolved by `check_type_id`, which would
+    // in turn stall every type that implements it. The placeholder is only a vtable-slot identity: it is
+    // never called and never used for type checking. Index access never goes through virtual dispatch;
+    // it is rewritten to a direct call of the concrete impl's `get`/`set` (see `intrinsic_index_methods`),
+    // whose real signatures are read off the impl. The placeholder's own signature is therefore
+    // irrelevant beyond being fully resolved (`fn (self: Self) -> void`).
+    let mut index: Option<IntrinsicIndex> = None;
+    if let Some(intrinsic) = INTRINSIC_INDEX_TRAITS.first() {
+        let trait_type_id = scopes.insert_type(Some(intrinsic.trait_name), Type::Trait(Trait::new_impl_defined()));
+        let get_constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.get_method),
+            Some(TypeId::VOID),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        let set_constant_id = scopes.insert_function(
+            &format!("{}::{}", intrinsic.trait_name, intrinsic.set_method),
+            Some(TypeId::VOID),
+            vec![ Some(trait_type_id) ],
+            Some(FunctionKind::Method(trait_type_id)),
+        );
+        let trt = scopes.type_mut(trait_type_id).as_trait_mut().ice()?;
+        trt.required.insert(intrinsic.get_method.to_string(), Some(get_constant_id));
+        trt.required.insert(intrinsic.set_method.to_string(), Some(set_constant_id));
+        trait_names.push(intrinsic.trait_name.to_string());
+        index = Some(IntrinsicIndex { trait_type_id, get_method: intrinsic.get_method, set_method: intrinsic.set_method });
+    }
+
+    Ok(IntrinsicRegistration {
+        trait_names,
+        casts,
+        ops,
+        index,
+        error_trait,
+        ordering,
+    })
+}
 
 /// Describes an intrinsic conversion trait that backs one or more `as` cast targets.
 ///
