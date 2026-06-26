@@ -656,3 +656,101 @@ fn ord_trait_missing_error() {
         }
     ));
 }
+
+// A pair of distinct concrete types implementing a common trait, used by the branch-collapse tests
+// below. `tag()` returns a per-type constant so the tests can assert which impl was dispatched.
+const COLLAPSE_PRELUDE: &str = "
+    trait Tagged { fn tag(self: Self) -> i64; }
+    struct A { n: i64 }
+    struct B { x: i64, y: i64 }
+    impl Tagged for A { fn tag(self: Self) -> i64 { 100 + self.n } }
+    impl Tagged for B { fn tag(self: Self) -> i64 { 200 + self.x + self.y } }
+";
+
+#[test]
+fn if_branches_collapse_to_declared_trait() {
+    // an if whose branches have differing concrete types collapses to the declared trait; the method
+    // call on the result dispatches virtually, so each branch reaches its own impl
+    let result = run(&(COLLAPSE_PRELUDE.to_string() + stringify!(
+        fn pick(which: bool) -> Tagged {
+            if which { A { n: 5 } } else { B { x: 3, y: 4 } }
+        }
+        fn main() {
+            ret_i64(pick(true).tag());   // A::tag -> 105
+            ret_i64(pick(false).tag());  // B::tag -> 207
+        }
+    )));
+    assert_all(&result, &[ 105i64, 207i64 ]);
+}
+
+#[test]
+fn match_arms_collapse_to_declared_trait() {
+    // same as above for match arms
+    let result = run(&(COLLAPSE_PRELUDE.to_string() + stringify!(
+        fn pick(n: i64) -> Tagged {
+            match n {
+                0 => A { n: 5 },
+                _ => B { x: 3, y: 4 },
+            }
+        }
+        fn main() {
+            ret_i64(pick(0).tag());  // A::tag -> 105
+            ret_i64(pick(1).tag());  // B::tag -> 207
+        }
+    )));
+    assert_all(&result, &[ 105i64, 207i64 ]);
+}
+
+#[test]
+fn branches_collapse_to_trait_bound() {
+    // a multiple-trait bound accepts the heterogeneous branches and both traits' methods dispatch
+    let result = run(stringify!(
+        trait Tagged { fn tag(self: Self) -> i64; }
+        trait Sized2 { fn dims(self: Self) -> i64; }
+        struct A { n: i64 }
+        struct B { x: i64, y: i64 }
+        impl Tagged for A { fn tag(self: Self) -> i64 { 1 } }
+        impl Sized2 for A { fn dims(self: Self) -> i64 { 1 } }
+        impl Tagged for B { fn tag(self: Self) -> i64 { 2 } }
+        impl Sized2 for B { fn dims(self: Self) -> i64 { 2 } }
+        fn pick(which: bool) -> Tagged + Sized2 {
+            if which { A { n: 0 } } else { B { x: 0, y: 0 } }
+        }
+        fn main() {
+            let t = pick(false);
+            ret_i64(t.tag() * 10 + t.dims());  // B -> 22
+        }
+    ));
+    assert_all(&result, &[ 22i64 ]);
+}
+
+#[test]
+#[should_panic(expected = "Vec2")]
+fn heterogeneous_branches_without_trait_rejected() {
+    // without a declared trait there is no common type to collapse to: heterogeneous branches must error
+    run(stringify!(
+        struct Vec2 { x: i64, y: i64 }
+        struct Vec3 { x: i64, y: i64, z: i64 }
+        fn main() {
+            let _ = if true { Vec2 { x: 1, y: 2 } } else { Vec3 { x: 1, y: 2, z: 3 } };
+        }
+    ));
+}
+
+#[test]
+#[should_panic(expected = "Tagged")]
+fn collapse_rejects_branch_not_implementing_trait() {
+    // a branch whose type does not implement the declared trait is rejected
+    run(stringify!(
+        trait Tagged { fn tag(self: Self) -> i64; }
+        struct A { n: i64 }
+        struct Other { v: i64 }
+        impl Tagged for A { fn tag(self: Self) -> i64 { 1 } }
+        fn pick(which: bool) -> Tagged {
+            if which { A { n: 0 } } else { Other { v: 0 } }
+        }
+        fn main() {
+            ret_i64(pick(false).tag());
+        }
+    ));
+}

@@ -1359,11 +1359,12 @@ fn if_block(i: Input) -> Output<IfBlock> {
         map(
             tuple((expression, block, opt(else_block))),
             move |m| IfBlock {
-                    position    : position,
-                    cond        : m.0,
-                    if_block    : m.1,
-                    else_block  : m.2,
-                    scope_id    : j.scope_id(),
+                    position        : position,
+                    cond            : m.0,
+                    if_block        : m.1,
+                    else_block      : m.2,
+                    scope_id        : j.scope_id(),
+                    coerced_type_id : None,
                 }
             )
     )(i)
@@ -1512,10 +1513,11 @@ fn match_block(i: Input) -> Output<MatchBlock> {
         map(
             pair(expression, delimited(punct("{"), match_list, preceded(opt(punct(",")), punct("}")))),
             move |m| MatchBlock {
-                position    : position,
-                expr        : m.0,
-                branches    : m.1,
-                scope_id    : j.scope_id(),
+                position        : position,
+                expr            : m.0,
+                branches        : m.1,
+                scope_id        : j.scope_id(),
+                coerced_type_id : None,
             }
         )
     )(i)
@@ -1720,6 +1722,7 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
         expr: inner,
         branches: vec![ ok_branch, err_branch ],
         scope_id,
+        coerced_type_id: None,
     }))
 }
 

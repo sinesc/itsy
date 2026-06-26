@@ -1448,6 +1448,11 @@ pub struct MatchBlock {
     pub expr        : Expression,
     pub branches    : Vec<(Pattern, Block)>,
     pub scope_id    : ScopeId,
+    /// When the arms have differing concrete types but an expected trait type accepts all of them,
+    /// the match-expression collapses to that trait: each arm keeps its own concrete type and
+    /// constructs its own value, while the whole expression is typed as the trait so methods on the
+    /// result dispatch virtually. `None` for the usual homogeneous case (type taken from the arms).
+    pub coerced_type_id: Option<TypeId>,
 }
 
 impl_positioned!(MatchBlock);
@@ -1459,7 +1464,8 @@ impl_resolvable!(MatchBlock {
 
 impl Typeable for MatchBlock {
     fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
-        self.branches.first().unwrap().1.type_id(container)
+        // a trait-collapsed match reports the common trait type; otherwise the type comes from the arms
+        self.coerced_type_id.or_else(|| self.branches.first().unwrap().1.type_id(container))
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         self.branches.first_mut().unwrap().1.set_type_id(container, type_id)
@@ -1474,6 +1480,11 @@ pub struct IfBlock {
     pub if_block    : Block,
     pub else_block  : Option<Block>,
     pub scope_id    : ScopeId,
+    /// When the branches have differing concrete types but an expected trait type accepts all of
+    /// them, the if-expression collapses to that trait: each branch keeps its own concrete type and
+    /// constructs its own value, while the whole expression is typed as the trait so methods on the
+    /// result dispatch virtually. `None` for the usual homogeneous case (type taken from the branches).
+    pub coerced_type_id: Option<TypeId>,
 }
 
 impl_positioned!(IfBlock);
@@ -1506,7 +1517,8 @@ impl ControlFlow for IfBlock {
 
 impl Typeable for IfBlock {
     fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
-        self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(container))
+        // a trait-collapsed if reports the common trait type; otherwise the type comes from the branches
+        self.coerced_type_id.or_else(|| self.if_block.result.as_ref().map_or(Some(TypeId::VOID), |e| e.type_id(container)))
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
         if let Some(result) = &mut self.if_block.result {

@@ -410,6 +410,33 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    /// If `expected_result` is a trait (object) type that every one of the given branch types satisfies
+    /// and that is not already their common type, returns it as the type a branching expression (`if` /
+    /// `match`) should collapse to. Returns `None` when there is nothing to collapse to, in which case the
+    /// branches must share a common concrete type the usual way.
+    ///
+    /// Collapsing is what lets branches of differing concrete types be used as a single trait-typed value:
+    /// each branch keeps its own concrete type and constructs its own value, while the whole expression is
+    /// typed as the trait so method calls on the result dispatch virtually. It requires an explicit trait
+    /// type in scope (an annotation, parameter or return type) because there is no principled common type to
+    /// infer otherwise — a concrete type may implement several traits.
+    fn branch_collapse_target(self: &Self, expected_result: Option<TypeId>, branch_type_ids: &[TypeId]) -> Option<TypeId> {
+        let expected = expected_result?;
+        if !self.type_by_id(expected).is_trait_object() {
+            return None;
+        }
+        // homogeneous branches keep their natural (concrete) type even under a trait annotation; the value
+        // coerces to the trait on use just like a plain value does, avoiding needless virtual dispatch
+        if branch_type_ids.iter().all(|&type_id| type_id == branch_type_ids[0]) {
+            return None;
+        }
+        if branch_type_ids.iter().all(|&type_id| self.type_accepted_for(type_id, expected)) {
+            Some(expected)
+        } else {
+            None
+        }
+    }
+
     /// Returns Ok if given types are the same, otherwise a TypeMismatch error.
     fn check_type_equals(self: &Self, item: &impl Positioned, given_type_id: TypeId, expected_type_id: TypeId) -> ResolveResult  {
         if !self.type_equals(given_type_id, expected_type_id) {
@@ -1618,7 +1645,13 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         if let Some(else_block) = &mut item.else_block {
             self.resolve_block(else_block, expected_result)?;
             if let (Some(if_type_id), Some(else_type_id)) = (item.if_block.type_id(self), else_block.type_id(self)) {
-                self.check_type_accepted_for(item, else_type_id, if_type_id)?;
+                // collapse to a declared common trait when the branches differ but both implement it,
+                // otherwise the else branch must be acceptable for the if branch's type
+                if let Some(trait_type_id) = self.branch_collapse_target(expected_result, &[ if_type_id, else_type_id ]) {
+                    item.coerced_type_id = Some(trait_type_id);
+                } else {
+                    self.check_type_accepted_for(item, else_type_id, if_type_id)?;
+                }
             }
         } else if let Some(if_type_id) = item.if_block.type_id(self) {
             // an if without an else produces no value on the path where the condition is false, so it must be
@@ -1644,9 +1677,16 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_pattern(pattern, subject_type_id)?;
             self.resolve_block(block, expected_result)?;
         }
-        // unify arm result types so that partially-resolved compound types (e.g. empty map literal
-        // `[ => ]` with unknown value type) pick up concrete types from sibling arms
-        if item.branches.len() > 1 {
+        // when the arms differ but a declared trait type accepts all of them, collapse the match to that
+        // trait (each arm keeps its concrete type and builds its own value; the match-expression is typed
+        // as the trait so method calls on the result dispatch virtually). otherwise unify the arm result
+        // types so that partially-resolved compound types (e.g. empty map literal `[ => ]` with unknown
+        // value type) pick up concrete types from sibling arms.
+        let branch_type_ids: Option<Vec<TypeId>> = item.branches.iter().map(|(_, block)| block.type_id(self)).collect();
+        let collapse_target = branch_type_ids.as_ref().and_then(|type_ids| self.branch_collapse_target(expected_result, type_ids));
+        if let Some(trait_type_id) = collapse_target {
+            item.coerced_type_id = Some(trait_type_id);
+        } else if item.branches.len() > 1 {
             if let Some(first_type_id) = item.branches[0].1.type_id(self) {
                 for (_, block) in item.branches.iter().skip(1) {
                     if let Some(block_type_id) = block.type_id(self) {
