@@ -1,0 +1,8 @@
+// Repeated string concatenation -- stresses heap allocation and string handling.
+
+fn bench() {
+    let s = "";
+    for i in 0..100 {
+        s += "x";
+    }
+}

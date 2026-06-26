@@ -1,0 +1,8 @@
+// Growing a dynamic array via repeated `push`. Stateless: the array is local to `bench`.
+
+fn bench() {
+    let a: [ i32 ] = [];
+    for i in 0..1000 {
+        a.push(i);
+    }
+}

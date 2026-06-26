@@ -57,6 +57,12 @@ required-features = [ "compiler", "runtime", "debugging" ]
 name = "bench"
 required-features = [ "compiler", "runtime" ]
 
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+harness = false
+required-features = [ "compiler", "runtime", "call_function" ]
+
 [[example]]
 name = "itsyc"
 required-features = [ "compiler" ]

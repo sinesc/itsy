@@ -1,0 +1,8 @@
+// Tight counting loop using `while`.
+
+fn bench() {
+    let i = 0;
+    while i < 1000 {
+        i += 1;
+    }
+}

@@ -1,0 +1,25 @@
+// Stateful benchmark: `setup` builds a custom datatype once, `bench` reads it each iteration.
+//
+// The array of `Point`s is created a single time in `setup` and handed to every `bench` call via
+// the VM's retained stack across the suspend point -- it never crosses the Rust boundary. `bench`
+// only reads `points`, so iterations stay independent (it does not mutate the shared state).
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn setup() -> [ Point ] {
+    let points: [ Point ] = [];
+    for i in 0..500 {
+        points.push(Point { x: i, y: i * 2 });
+    }
+    points
+}
+
+fn bench(points: [ Point ]) {
+    let sum = 0;
+    for p in points {
+        sum += p.x + p.y;
+    }
+}

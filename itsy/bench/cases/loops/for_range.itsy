@@ -1,0 +1,8 @@
+// Summation over a `for` range loop.
+
+fn bench() {
+    let sum = 0;
+    for i in 0..1000 {
+        sum += i;
+    }
+}
