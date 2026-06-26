@@ -153,6 +153,46 @@ fn string_loop_concat() {
 }
 
 #[test]
+fn string_find() {
+    let result = run(stringify!(
+        let s = "Hello World";
+        match s.find("Hello") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+        match s.find("World") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+        match s.find("o") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+        match s.find("xyz") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+    ));
+    assert_all!(&result, [ 0u64, 6u64, 4u64, -1i64 ]);
+}
+
+#[test]
+fn string_find_unicode() {
+    let result = run(stringify!(
+        // character (not byte) indexing: each leading char is multi-byte
+        let s = "äöü-x";
+        match s.find("x") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+        match s.find("ö") { Some(i) => ret_u64(i as u64), None => ret_i64(-1) };
+    ));
+    assert_all(&result, &[ 4u64, 1u64 ]);
+}
+
+#[test]
+fn string_repeat() {
+    let result = run(stringify!(
+        ret_string("ab".repeat(3));
+        ret_string("x".repeat(0));
+    ));
+    assert_all(&result, &[ "ababab".to_string(), "".to_string() ]);
+}
+
+#[test]
+#[should_panic(expected = "Integer overflow")]
+fn string_repeat_overflow_is_runtime_error() {
+    run(stringify!(
+        ret_string("ab".repeat(18000000000000000000u64));
+    ));
+}
+
+#[test]
 fn temporary_string() {
     let result = run(stringify!(
         fn return_new_string(n: i32) -> String {

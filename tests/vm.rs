@@ -46,3 +46,5 @@ mod call_function;
 mod api_types;
 #[path="vm/index_ops.rs"]
 mod index_ops;
+#[path="vm/int_methods.rs"]
+mod int_methods;

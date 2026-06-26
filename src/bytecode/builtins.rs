@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 #[cfg(feature="runtime")]
-use crate::{StackAddress, StackOffset, ItemIndex, bytecode::{HeapRef, HeapRefOp, Constructor, runtime::{vm::VMState, error::RuntimeErrorKind, map::MAP_EMPTY}}};
+use crate::{StackAddress, ItemIndex, bytecode::{HeapRef, HeapRefOp, Constructor, runtime::{vm::VMState, error::RuntimeErrorKind, map::MAP_EMPTY}}};
 use crate::bytecode::macros::impl_builtins;
 #[cfg(feature="runtime")]
 use std::str::Chars;
@@ -794,7 +794,6 @@ impl_builtins! {
                     vm.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
                     0
                 } else {
-                    // todo: split signed/unsigned, use div_euclid for unsigned (can't overflow)
                     let result = T::overflowing_div_euclid(this, other);
                     if result.1 {
                         vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
@@ -825,7 +824,6 @@ impl_builtins! {
                     vm.state = VMState::Error(RuntimeErrorKind::DivisionByZero);
                     0
                 } else {
-                    // todo: split signed/unsigned, use rem_euclid for unsigned (can't overflow)
                     let result = T::overflowing_rem_euclid(this, other);
                     if result.1 {
                         vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
@@ -857,6 +855,137 @@ impl_builtins! {
                     0
                 } else {
                     result.0
+                }
+            }
+        }
+
+        /// Returns the square root of the number, rounded down.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if self is negative. The VM is resumable.
+        isqrt(self: Self) -> Self {
+            fn <
+                int_isqrti8<T: i8>(this: i8) -> i8,
+                int_isqrti16<T: i16>(this: i16) -> i16,
+                int_isqrti32<T: i32>(this: i32) -> i32,
+                int_isqrti64<T: i64>(this: i64) -> i64,
+            >(&mut vm) {
+                if this < 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.isqrt()
+                }
+            }
+            fn <
+                int_isqrtu8<T: u8>(this: u8) -> u8,
+                int_isqrtu16<T: u16>(this: u16) -> u16,
+                int_isqrtu32<T: u32>(this: u32) -> u32,
+                int_isqrtu64<T: u64>(this: u64) -> u64,
+            >(&mut vm) {
+                this.isqrt()
+            }
+        }
+
+        /// Returns the logarithm of the number with respect to an arbitrary base, rounded down.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if self is less than or equal to zero or base is less than 2. The VM is resumable.
+        ilog(self: Self, base: Self) -> u32 {
+            fn <
+                int_ilogi8<T: i8>(this: i8, base: i8) -> u32,
+                int_ilogi16<T: i16>(this: i16, base: i16) -> u32,
+                int_ilogi32<T: i32>(this: i32, base: i32) -> u32,
+                int_ilogi64<T: i64>(this: i64, base: i64) -> u32,
+            >(&mut vm) {
+                if this <= 0 || base < 2 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog(base)
+                }
+            }
+            fn <
+                int_ilogu8<T: u8>(this: u8, base: u8) -> u32,
+                int_ilogu16<T: u16>(this: u16, base: u16) -> u32,
+                int_ilogu32<T: u32>(this: u32, base: u32) -> u32,
+                int_ilogu64<T: u64>(this: u64, base: u64) -> u32,
+            >(&mut vm) {
+                if this == 0 || base < 2 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog(base)
+                }
+            }
+        }
+
+        /// Returns the base 2 logarithm of the number, rounded down.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if self is less than or equal to zero. The VM is resumable.
+        ilog2(self: Self) -> u32 {
+            fn <
+                int_ilog2i8<T: i8>(this: i8) -> u32,
+                int_ilog2i16<T: i16>(this: i16) -> u32,
+                int_ilog2i32<T: i32>(this: i32) -> u32,
+                int_ilog2i64<T: i64>(this: i64) -> u32,
+            >(&mut vm) {
+                if this <= 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog2()
+                }
+            }
+            fn <
+                int_ilog2u8<T: u8>(this: u8) -> u32,
+                int_ilog2u16<T: u16>(this: u16) -> u32,
+                int_ilog2u32<T: u32>(this: u32) -> u32,
+                int_ilog2u64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                if this == 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog2()
+                }
+            }
+        }
+
+        /// Returns the base 10 logarithm of the number, rounded down.
+        ///
+        /// # Error
+        ///
+        /// Returns 0 and halts the VM if self is less than or equal to zero. The VM is resumable.
+        ilog10(self: Self) -> u32 {
+            fn <
+                int_ilog10i8<T: i8>(this: i8) -> u32,
+                int_ilog10i16<T: i16>(this: i16) -> u32,
+                int_ilog10i32<T: i32>(this: i32) -> u32,
+                int_ilog10i64<T: i64>(this: i64) -> u32,
+            >(&mut vm) {
+                if this <= 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog10()
+                }
+            }
+            fn <
+                int_ilog10u8<T: u8>(this: u8) -> u32,
+                int_ilog10u16<T: u16>(this: u16) -> u32,
+                int_ilog10u32<T: u32>(this: u32) -> u32,
+                int_ilog10u64<T: u64>(this: u64) -> u32,
+            >(&mut vm) {
+                if this == 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                    0
+                } else {
+                    this.ilog10()
                 }
             }
         }
@@ -1576,7 +1705,7 @@ impl_builtins! {
         /// Returns a substring of the String, starting at given UTF-8 character position and the given length.
         slice(self: Self, position: u64, len: u64) -> Self {
             fn string_slice(this: &str, position: StackAddress, len: StackAddress) -> String {
-                let mut result = String::with_capacity(len as usize); // todo: probably want to over-allocate here since our len is in chars an capacity in bytes
+                let mut result = String::with_capacity(len as usize);
                 let _ = append(position as usize, if len > 0 { Some(len as usize) } else { None }, &this, &mut result);
                 result
             }
@@ -1646,34 +1775,37 @@ impl_builtins! {
         }
 
         /// Creates a new String by repeating this string n times.
+        ///
+        /// # Error
+        ///
+        /// Returns an empty string and halts the VM if the resulting length would overflow. The VM is resumable.
         repeat(self: Self, n: u64) -> Self {
-            fn string_repeat(this: &str, n: StackAddress) -> String {
+            fn string_repeat(&mut vm, this: String, n: StackAddress) -> String {
                 if this.len().checked_mul(n as usize).is_some() {
                     this.repeat(n as usize)
                 } else {
-                    "".to_string() // FIXME: need error reporting mechanism
+                    vm.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
+                    "".to_string()
                 }
             }
         }
 
-        /// Returns the character index of the first character of this string that matches the given string. TODO: Currently returns -1 if not found, need optional support.
-        find(self: Self, other: String) -> i64 {
-            fn string_find(this: &str, other: &str) -> StackOffset { // Todo: something like Option<StackAddress>
-                let mut this_iter = this.char_indices();
-                let mut index = 0;
-                loop {
-                    if let Some((i, c)) = this_iter.next() {
-                        if this[i..].starts_with(other) {
-                            break;
-                        } else {
-                            index += 1;
-                        }
-                    } else {
-                        index = -1;
+        /// Returns the character index of the first character of this string that matches the given string, or `None` if there is no match.
+        find(self: Self, other: String) -> OptionalIndex {
+            fn string_find(&mut vm, this: String, other: String) -> OptionalIndex {
+                let mut found = None;
+                let mut index: StackAddress = 0;
+                for (i, _c) in this.char_indices() {
+                    if this[i..].starts_with(other.as_str()) {
+                        found = Some(index);
                         break;
                     }
+                    index += 1;
                 }
-                index
+                match found {
+                    Some(index) => vm.option_some_bytes(&index.to_ne_bytes()),
+                    None => vm.option_none(),
+                }
             }
         }
 

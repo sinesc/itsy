@@ -25,6 +25,7 @@ macro_rules! impl_builtins {
     (@handle_ret_value $vm:ident, ValueArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, OptionalElement, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, OptionalValue, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, OptionalIndex, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, $_:tt, $value:ident, $_ctor:ident) => { $vm.stack.push($value);  };
     // VM: Pops an argument and converts some special cases.
     // Note: Map/Key/Value/KeyArray/ValueArray are handled by @load_args_map and will not reach this rule.
@@ -42,6 +43,7 @@ macro_rules! impl_builtins {
     (@handle_param_type ValueArray) => { HeapRef };
     (@handle_param_type OptionalElement) => { HeapRef };
     (@handle_param_type OptionalValue) => { HeapRef };
+    (@handle_param_type OptionalIndex) => { HeapRef };
     (@handle_param_type GenValue) => { HeapRef };
     (@handle_param_type GenKey) => { HeapRef };
     (@handle_param_type $other:ident) => { $other };
@@ -67,6 +69,7 @@ macro_rules! impl_builtins {
     (@map_ref_type ValueArray) => { HeapRef };
     (@map_ref_type OptionalElement) => { HeapRef };
     (@map_ref_type OptionalValue) => { HeapRef };
+    (@map_ref_type OptionalIndex) => { HeapRef };
     (@map_ref_type GenValue) => { HeapRef };
     (@map_ref_type GenKey) => { HeapRef };
     (@map_ref_type $other:ident) => { $other };
@@ -84,9 +87,10 @@ macro_rules! impl_builtins {
     // Generator pseudo-types: refcounting is not needed (opcodes handle it directly).
     (@handle_ref_param_free $vm:ident, GenValue, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, GenKey, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
-    // OptionalElement / OptionalValue are return-only pseudo-types; never appear as parameters.
+    // OptionalElement / OptionalValue / OptionalIndex are return-only pseudo-types; never appear as parameters.
     (@handle_ref_param_free $vm:ident, OptionalElement, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, OptionalValue, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, OptionalIndex, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:ident)*) => {
@@ -155,6 +159,9 @@ macro_rules! impl_builtins {
     };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, OptionalValue) => {
         $resolver.synthesize_option_type($resolver.type_by_id($type_id).as_map().unwrap().value_type_id.unwrap())
+    };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, OptionalIndex) => {
+        $resolver.synthesize_option_type($resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap())
     };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, str) => { $resolver.primitive_type_id(Type::String).unwrap() };
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StackAddress) => { $resolver.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap() };
@@ -420,6 +427,9 @@ macro_rules! impl_builtins {
             /// Placeholder for `Option<Value>`: a map value looked up by key, `None` when the key is
             /// absent. Not a built-in type.
             pub type OptionalValue = ();
+            /// Placeholder for `Option<u64>`: a character index from a fallible string search (e.g.
+            /// `find`), `None` when no match is found. Not a built-in type.
+            pub type OptionalIndex = ();
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }
