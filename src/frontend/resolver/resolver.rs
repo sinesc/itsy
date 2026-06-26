@@ -12,7 +12,7 @@ pub mod resolved;
 use crate::{prelude::*, VariantIndex};
 use crate::{ItemIndex, STACK_ADDRESS_TYPE};
 use crate::frontend::parser::types::ParsedProgram;
-use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable};
+use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable, ControlFlow};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
@@ -434,6 +434,24 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             Some(expected)
         } else {
             None
+        }
+    }
+
+    /// Whether a type id and all of its inner types are fully known (no still-inferring array element,
+    /// map key/value or callable signature type). Used to gate type checks that must not fire over a
+    /// type that is only partially resolved, since a resolution error aborts the whole resolve pass.
+    fn type_id_complete(self: &Self, type_id: TypeId) -> bool {
+        match self.type_by_id(type_id) {
+            Type::Array(Array { type_id: inner, .. }) => inner.map_or(false, |inner| self.type_id_complete(inner)),
+            Type::Map(MapType { key_type_id, value_type_id }) => match (key_type_id, value_type_id) {
+                (Some(key), Some(value)) => self.type_id_complete(*key) && self.type_id_complete(*value),
+                _ => false,
+            },
+            Type::Callable(Callable { arg_type_ids, ret_type_id }) => {
+                ret_type_id.map_or(false, |ret| self.type_id_complete(ret))
+                    && arg_type_ids.iter().all(|arg| arg.map_or(false, |arg| self.type_id_complete(arg)))
+            },
+            _ => true,
         }
     }
 
@@ -1677,20 +1695,37 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_pattern(pattern, subject_type_id)?;
             self.resolve_block(block, expected_result)?;
         }
-        // when the arms differ but a declared trait type accepts all of them, collapse the match to that
-        // trait (each arm keeps its concrete type and builds its own value; the match-expression is typed
-        // as the trait so method calls on the result dispatch virtually). otherwise unify the arm result
-        // types so that partially-resolved compound types (e.g. empty map literal `[ => ]` with unknown
-        // value type) pick up concrete types from sibling arms.
-        let branch_type_ids: Option<Vec<TypeId>> = item.branches.iter().map(|(_, block)| block.type_id(self)).collect();
-        let collapse_target = branch_type_ids.as_ref().and_then(|type_ids| self.branch_collapse_target(expected_result, type_ids));
+        // Determine the result type of the match from its value-producing arms. Arms that diverge via
+        // return/break/continue produce no value (e.g. the `Err(e) => return Err(e)` arm the `?` operator
+        // lowers to) and are excluded from the type computation entirely.
+        //
+        // When the value arms differ but a declared trait type accepts all of them, collapse the match to
+        // that trait (each arm keeps its concrete type and builds its own value; the match-expression is
+        // typed as the trait so method calls on the result dispatch virtually). Otherwise every value arm
+        // must be acceptable for the first one's type (which the match reports as its own); the `unify`
+        // first lets partially-resolved compound types (e.g. empty map literal `[ => ]` with unknown value
+        // type) pick up concrete inner types from sibling arms, and the acceptance check is gated on both
+        // types being fully resolved so that still-inferring arms aren't rejected on an early pass — a
+        // resolution error aborts the whole resolve.
+        let value_arm_type_ids: Option<Vec<TypeId>> = item.branches.iter()
+            .filter(|(_, block)| block.control_flow().is_none())
+            .map(|(_, block)| block.type_id(self))
+            .collect();
+        let collapse_target = value_arm_type_ids.as_ref().and_then(|type_ids| self.branch_collapse_target(expected_result, type_ids));
         if let Some(trait_type_id) = collapse_target {
             item.coerced_type_id = Some(trait_type_id);
-        } else if item.branches.len() > 1 {
-            if let Some(first_type_id) = item.branches[0].1.type_id(self) {
-                for (_, block) in item.branches.iter().skip(1) {
-                    if let Some(block_type_id) = block.type_id(self) {
-                        self.unify_type_ids(first_type_id, block_type_id)?;
+        } else {
+            let mut reference_type_id = None;
+            for (_, block) in item.branches.iter().filter(|(_, block)| block.control_flow().is_none()) {
+                if let Some(block_type_id) = block.type_id(self) {
+                    match reference_type_id {
+                        None => reference_type_id = Some(block_type_id),
+                        Some(reference_type_id) => {
+                            self.unify_type_ids(reference_type_id, block_type_id)?;
+                            if self.type_id_complete(reference_type_id) && self.type_id_complete(block_type_id) {
+                                self.check_type_accepted_for(block, block_type_id, reference_type_id)?;
+                            }
+                        },
                     }
                 }
             }

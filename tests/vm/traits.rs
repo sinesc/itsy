@@ -754,3 +754,40 @@ fn collapse_rejects_branch_not_implementing_trait() {
         }
     ));
 }
+
+#[test]
+#[should_panic(expected = "Vec3")]
+fn match_heterogeneous_arms_without_common_type_rejected() {
+    // a match whose arms have differing concrete types, consumed directly (so no external type pins the
+    // arms), must be rejected: the match reports the first arm's type, but a later arm yields a value of
+    // a different type that would be read through that wrong type
+    run(stringify!(
+        struct Vec2 { x: i64, y: i64 }
+        struct Vec3 { x: i64, y: i64, z: i64 }
+        fn main() {
+            let n = 1;
+            ret_i64((match n { 0 => Vec2 { x: 4, y: 3 }, _ => Vec3 { x: 1, y: 2, z: 3 } }).x);
+        }
+    ));
+}
+
+#[test]
+fn match_collapse_ignores_diverging_arm() {
+    // an arm that diverges (early return) produces no value and does not participate in the result type,
+    // so heterogeneous value arms still collapse to the declared trait
+    let result = run(&(COLLAPSE_PRELUDE.to_string() + stringify!(
+        fn pick(n: i64) -> Tagged {
+            match n {
+                0 => A { n: 5 },
+                1 => B { x: 3, y: 4 },
+                _ => { return A { n: 0 }; },
+            }
+        }
+        fn main() {
+            ret_i64(pick(0).tag());  // A::tag -> 105
+            ret_i64(pick(1).tag());  // B::tag -> 207
+            ret_i64(pick(9).tag());  // diverging arm yields A { n: 0 } -> 100
+        }
+    )));
+    assert_all(&result, &[ 105i64, 207i64, 100i64 ]);
+}
