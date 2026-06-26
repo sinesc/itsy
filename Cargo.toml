@@ -40,6 +40,15 @@ winapi-util = "0.1"
 [lib]
 name = "itsy"
 path = "src/lib.rs"
+# Don't run libtest over the lib target under `cargo bench` (it would reject the bench harness's
+# custom flags like --save/--compare); only the [[bench]] target should run.
+bench = false
+
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+harness = false
+required-features = [ "compiler", "runtime", "call_function" ]
 
 [[example]]
 name = "run"
@@ -52,16 +61,6 @@ required-features = [ "compiler", "runtime", "debugging", "symbols" ]
 [[example]]
 name = "profile-run"
 required-features = [ "compiler", "runtime", "debugging" ]
-
-[[example]]
-name = "bench"
-required-features = [ "compiler", "runtime" ]
-
-[[bench]]
-name = "bench"
-path = "benches/bench.rs"
-harness = false
-required-features = [ "compiler", "runtime", "call_function" ]
 
 [[example]]
 name = "itsyc"

@@ -1,10 +1,12 @@
 use itsy::*;
 use itsy::runtime::VMState;
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    process::Command,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /*
@@ -44,8 +46,24 @@ use std::{
  *
  * Usage (from the project root):
  *
- *   cargo bench                 # run every case
- *   cargo bench -- fib          # run only cases whose "category/name" contains "fib"
+ *   cargo bench                          # run every case
+ *   cargo bench -- fib                   # run only cases whose "category/name" contains "fib"
+ *
+ *   cargo bench -- --save out.txt        # run, print, and save a report to out.txt
+ *   cargo bench -- --save-commit         # run and save a report named after the HEAD commit,
+ *                                        # into itsy/bench/reports/<date>_<hash>_<message>.txt
+ *
+ *   cargo bench -- --compare base.txt        # run, then print results relative (%) to base.txt
+ *   cargo bench -- --compare base.txt new.txt # compare two saved reports (no run); new vs base
+ *
+ * A report is a plain-text file: a `#`-prefixed metadata header (date / commit / message /
+ * samples) followed by one tab-separated row per case holding the raw per-iteration seconds
+ * (mean, median, min, stddev). The format round-trips through `write_report` / `read_report`.
+ *
+ * Flags can be combined with the substring filter and with each other, e.g.
+ *   cargo bench -- fib --compare base.txt --save new.txt
+ * runs only "fib" cases, saves them to new.txt, and prints them relative to base.txt. When using
+ * --compare, put the filter *before* the flag so the filenames parse unambiguously.
  */
 
 /// Host state threaded through API calls. `batch` is the number of `bench` reps the harness wants
@@ -89,7 +107,45 @@ struct Stats {
     stddev: f64,
 }
 
+/// Parsed command line. See the header comment for the flag semantics.
+struct Args {
+    /// Substring filter on the case label (positional argument).
+    filter: Option<String>,
+    /// `--save <file>`: write the run's report here.
+    save: Option<PathBuf>,
+    /// `--save-commit`: write the run's report into the reports dir, named after HEAD.
+    save_commit: bool,
+    /// `--compare a [b]`: one name compares the run against `a`; two names compare `b` against
+    /// `a` without running anything.
+    compare: Vec<PathBuf>,
+}
+
 fn main() {
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(err) => {
+            eprintln!("{err}\n");
+            print_usage();
+            std::process::exit(2);
+        }
+    };
+
+    // Two report names: pure comparison, no benchmarking.
+    if args.compare.len() == 2 {
+        match (read_report(&args.compare[0]), read_report(&args.compare[1])) {
+            (Ok((_, base)), Ok((_, subj))) => print_comparison(
+                &base, &subj,
+                &args.compare[0].display().to_string(),
+                &args.compare[1].display().to_string(),
+            ),
+            (Err(err), _) | (_, Err(err)) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("itsy/bench/cases");
 
     // The directory tree is the registry: every *.itsy file is a case.
@@ -102,14 +158,92 @@ fn main() {
         return;
     }
 
-    // Optional substring filter: first non-flag CLI argument (e.g. `cargo bench -- fib`).
-    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
-
     println!("Itsy micro-benchmarks ({} samples each)\n", SAMPLES);
+    let results = run_all(&cases, args.filter.as_deref());
 
+    // One report name: print the run relative to that baseline.
+    if args.compare.len() == 1 {
+        match read_report(&args.compare[0]) {
+            Ok((_, base)) => print_comparison(&base, &results, &args.compare[0].display().to_string(), "this run"),
+            Err(err) => eprintln!("\n{err}"),
+        }
+    } else {
+        print_table(&results);
+    }
+
+    // Persist the report if requested.
+    let meta = ReportMeta::current();
+    if let Some(path) = &args.save {
+        save_report(path, &results, &meta);
+    }
+    if args.save_commit {
+        match fname_for_commit(&meta) {
+            Ok(path) => save_report(&path, &results, &meta),
+            Err(err) => eprintln!("--save-commit: {err}"),
+        }
+    }
+}
+
+/// Parses the CLI arguments (everything after `cargo bench --`).
+fn parse_args(raw: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut args = Args { filter: None, save: None, save_commit: false, compare: Vec::new() };
+    let mut it = raw.peekable();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            "-o" | "--save" => {
+                let file = it.next().ok_or_else(|| format!("{arg} requires a filename"))?;
+                args.save = Some(PathBuf::from(file));
+            }
+            "--save-commit" => args.save_commit = true,
+            // Cargo appends these to signal bench mode to a libtest harness; we have none, so ignore.
+            "--bench" | "--test" => {}
+            "-c" | "--compare" => {
+                // Greedily consume up to two following non-flag tokens as report names.
+                while args.compare.len() < 2 {
+                    match it.peek() {
+                        Some(next) if !next.starts_with('-') => args.compare.push(PathBuf::from(it.next().unwrap())),
+                        _ => break,
+                    }
+                }
+                if args.compare.is_empty() {
+                    return Err(format!("{arg} requires one or two report filenames"));
+                }
+            }
+            other if other.starts_with('-') => return Err(format!("unknown option: {other}")),
+            other => {
+                if args.filter.is_some() {
+                    return Err(format!("unexpected argument: {other}"));
+                }
+                args.filter = Some(other.to_string());
+            }
+        }
+    }
+    Ok(args)
+}
+
+fn print_usage() {
+    eprintln!(
+        "Usage: cargo bench -- [FILTER] [OPTIONS]\n\
+         \n\
+         \x20 FILTER                 only run cases whose label contains this substring\n\
+         \n\
+         \x20 -o, --save <file>      save this run's report to <file>\n\
+         \x20     --save-commit      save this run's report into itsy/bench/reports/, named after HEAD\n\
+         \x20 -c, --compare <a> [b]  one name: run, then print results as % vs report <a>\n\
+         \x20                        two names: compare report <b> against <a>, without running\n\
+         \x20 -h, --help             show this help"
+    );
+}
+
+/// Runs every case (optionally filtered) and returns one `Stats` per successful case.
+fn run_all(cases: &[(String, PathBuf)], filter: Option<&str>) -> Vec<Stats> {
     let mut results = Vec::new();
-    for (label, path) in &cases {
-        if let Some(filter) = &filter {
+    for (label, path) in cases {
+        if let Some(filter) = filter {
             if !label.contains(filter) {
                 continue;
             }
@@ -124,8 +258,15 @@ fn main() {
             Err(err) => eprintln!("FAILED\n    {err}"),
         }
     }
+    results
+}
 
-    print_table(&results);
+/// Writes a report, reporting success/failure to stderr.
+fn save_report(path: &Path, results: &[Stats], meta: &ReportMeta) {
+    match write_report(path, results, meta) {
+        Ok(()) => eprintln!("\nreport saved to {}", path.display()),
+        Err(err) => eprintln!("\nfailed to save report to {}: {err}", path.display()),
+    }
 }
 
 /// Recursively collects `(label, path)` pairs for every `.itsy` file under `dir`. The label is the
@@ -278,6 +419,189 @@ fn print_table(results: &[Stats]) {
             width = name_width
         );
     }
+}
+
+/// Metadata stored in a report header.
+struct ReportMeta {
+    date: String,
+    /// Short commit hash of HEAD, empty if git is unavailable.
+    commit: String,
+    /// Commit subject line, empty if git is unavailable.
+    message: String,
+    samples: usize,
+}
+
+impl ReportMeta {
+    /// Gathers metadata for a report produced right now. Date and commit come from `git` when
+    /// available; otherwise the date falls back to the local clock and commit/message are empty.
+    fn current() -> ReportMeta {
+        match git_head_info() {
+            Some((commit, date, message)) => ReportMeta { date, commit, message, samples: SAMPLES },
+            None => ReportMeta { date: today(), commit: String::new(), message: String::new(), samples: SAMPLES },
+        }
+    }
+}
+
+/// Returns `(short_hash, date, subject)` for HEAD, or `None` if `git` cannot be queried (e.g. not
+/// a repository or no commits yet). Date is `YYYY-MM-DD` from the committer date.
+fn git_head_info() -> Option<(String, String, String)> {
+    let output = Command::new("git")
+        .args(["log", "-1", "--format=%h%n%cI%n%s"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines = text.lines();
+    let hash = lines.next()?.trim().to_string();
+    let date = lines.next()?.trim().chars().take(10).collect::<String>(); // first 10 of ISO 8601
+    let subject = lines.next().unwrap_or("").trim().to_string();
+    if hash.is_empty() { None } else { Some((hash, date, subject)) }
+}
+
+/// Builds the `itsy/bench/reports/<date>_<hash>_<message40>.txt` path for `--save-commit`.
+fn fname_for_commit(meta: &ReportMeta) -> Result<PathBuf, String> {
+    if meta.commit.is_empty() {
+        return Err("could not read commit info from git (not a repository, or no commits yet)".into());
+    }
+    let slug = sanitize(&meta.message);
+    let name = format!("{}_{}_{}.txt", meta.date, meta.commit, slug);
+    Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("itsy/bench/reports").join(name))
+}
+
+/// Lowercases the first 40 characters of `s` into a filesystem-safe `[a-z0-9-]` slug.
+fn sanitize(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in s.chars().take(40) {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Serializes a report: `#`-prefixed metadata header, then one tab-separated row per case holding
+/// the raw per-iteration seconds. Creates parent directories as needed.
+fn write_report(path: &Path, results: &[Stats], meta: &ReportMeta) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
+        }
+    }
+    let mut out = String::new();
+    out.push_str("# itsy-bench-report v1\n");
+    out.push_str(&format!("# date: {}\n", meta.date));
+    out.push_str(&format!("# commit: {}\n", meta.commit));
+    out.push_str(&format!("# message: {}\n", meta.message));
+    out.push_str(&format!("# samples: {}\n", meta.samples));
+    out.push_str("# label\tmean\tmedian\tmin\tstddev\n");
+    for s in results {
+        out.push_str(&format!("{}\t{:e}\t{:e}\t{:e}\t{:e}\n", s.label, s.mean, s.median, s.min, s.stddev));
+    }
+    fs::write(path, out).map_err(|e| format!("write: {e}"))
+}
+
+/// Parses a report file back into its metadata and per-case stats.
+fn read_report(path: &Path) -> Result<(ReportMeta, Vec<Stats>), String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("cannot read report {}: {e}", path.display()))?;
+    let mut meta = ReportMeta { date: String::new(), commit: String::new(), message: String::new(), samples: 0 };
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix('#') {
+            let rest = rest.trim();
+            if let Some(v) = rest.strip_prefix("date:") { meta.date = v.trim().to_string(); }
+            else if let Some(v) = rest.strip_prefix("commit:") { meta.commit = v.trim().to_string(); }
+            else if let Some(v) = rest.strip_prefix("message:") { meta.message = v.trim().to_string(); }
+            else if let Some(v) = rest.strip_prefix("samples:") { meta.samples = v.trim().parse().unwrap_or(0); }
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut cols = line.split('\t');
+        let label = cols.next().ok_or_else(|| format!("malformed row in {}: {line:?}", path.display()))?;
+        let parse = |c: Option<&str>| -> Result<f64, String> {
+            c.ok_or_else(|| format!("malformed row in {}: {line:?}", path.display()))?
+                .trim().parse::<f64>().map_err(|e| format!("bad number in {}: {e}", path.display()))
+        };
+        let mean = parse(cols.next())?;
+        let median = parse(cols.next())?;
+        let min = parse(cols.next())?;
+        let stddev = parse(cols.next())?;
+        rows.push(Stats { label: label.to_string(), mean, median, min, stddev });
+    }
+    Ok((meta, rows))
+}
+
+/// Prints `subj` relative to `base`, matching by label. The `change` column is the signed percent
+/// change in mean (`(subj/base - 1) * 100`); positive means `subj` is slower. Labels present on
+/// only one side render `n/a`.
+fn print_comparison(base: &[Stats], subj: &[Stats], base_name: &str, subj_name: &str) {
+    let base_by_label: HashMap<&str, &Stats> = base.iter().map(|s| (s.label.as_str(), s)).collect();
+    let subj_by_label: HashMap<&str, &Stats> = subj.iter().map(|s| (s.label.as_str(), s)).collect();
+
+    // Union of labels, preserving subj order first, then base-only labels.
+    let mut labels: Vec<&str> = subj.iter().map(|s| s.label.as_str()).collect();
+    for s in base {
+        if !subj_by_label.contains_key(s.label.as_str()) {
+            labels.push(s.label.as_str());
+        }
+    }
+
+    let name_width = labels.iter().map(|l| l.len()).max().unwrap_or(0).max("benchmark".len());
+    println!("\nbaseline: {base_name}\ncurrent:  {subj_name}\n");
+    println!(
+        "{:<width$}  {:>11}  {:>11}  {:>9}",
+        "benchmark", "current", "baseline", "change",
+        width = name_width
+    );
+    for label in labels {
+        let cur = subj_by_label.get(label);
+        let bas = base_by_label.get(label);
+        let cur_s = cur.map_or("n/a".to_string(), |s| fmt_secs(s.mean));
+        let bas_s = bas.map_or("n/a".to_string(), |s| fmt_secs(s.mean));
+        let change = match (cur, bas) {
+            (Some(c), Some(b)) if b.mean > 0.0 => fmt_percent((c.mean / b.mean - 1.0) * 100.0),
+            _ => "n/a".to_string(),
+        };
+        println!("{:<width$}  {:>11}  {:>11}  {:>9}", label, cur_s, bas_s, change, width = name_width);
+    }
+}
+
+/// Formats a signed percentage, e.g. `+5.0%` (slower) or `-8.0%` (faster).
+fn fmt_percent(p: f64) -> String {
+    format!("{:+.1}%", p)
+}
+
+/// Current local date as `YYYY-MM-DD`, derived from the system clock without external crates.
+fn today() -> String {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    let (y, m, d) = civil_from_days(days);
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// Converts a count of days since the Unix epoch to a `(year, month, day)` civil date. This is
+/// Howard Hinnant's well-known `civil_from_days` algorithm (valid for the proleptic Gregorian
+/// calendar over the range we care about).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// Formats a duration in seconds using an appropriate unit (ns/µs/ms/s).

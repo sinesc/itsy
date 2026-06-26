@@ -1,0 +1,14 @@
+#!/bin/sh
+# Itsy post-commit hook: capture a benchmark report for the commit just created.
+#
+# Installed (copied) into .git/hooks/post-commit by scripts/install-bench-hook.sh.
+# This runs a FULL benchmark, which takes a while — that is why the hook is opt-in.
+#
+# The report is written to itsy/bench/reports/<date>_<hash>_<message>.txt by --save-commit.
+
+echo "post-commit: running benchmarks (this takes a while) ..."
+cargo bench --quiet -- --save-commit
+
+# Prefer not to block your commits? Run it in the background instead by replacing the line
+# above with:
+#   cargo bench --quiet -- --save-commit >/tmp/itsy-bench.log 2>&1 &

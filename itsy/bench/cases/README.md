@@ -69,3 +69,17 @@ pushing to will grow without bound and skew timings. Treat `state` as read-mostl
 cargo bench                 # run every case
 cargo bench -- fib          # run only cases whose label contains "fib"
 ```
+
+## Saving and comparing reports
+
+Runs can be saved and compared (see `../reports/README.md` for the file format):
+
+```bash
+cargo bench -- --save out.txt          # run, print, and save a report
+cargo bench -- --save-commit           # save a report named after the current HEAD commit
+cargo bench -- --compare base.txt      # run, then print results as % change vs base.txt
+cargo bench -- --compare a.txt b.txt   # compare two saved reports (no run); b vs a
+```
+
+`bash scripts/install-bench-hook.sh` installs an opt-in git hook that runs `--save-commit` after
+each commit.
