@@ -1,0 +1,10 @@
+// Benchmark: marshalling a data-carrying enum across the boundary.
+// Each iteration constructs a Circle variant in Rust and computes its area.
+
+use BenchAPI::{make_circle, shape_area};
+use BenchAPI::Shape;
+
+fn bench() {
+    let s = make_circle(5.0);
+    let _area = shape_area(s);
+}

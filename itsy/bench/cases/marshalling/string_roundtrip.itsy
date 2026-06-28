@@ -1,0 +1,8 @@
+// Benchmark: marshalling a String across the Itsy <-> Rust boundary.
+// Each iteration passes a string literal to Rust and gets it back.
+
+use BenchAPI::echo_string;
+
+fn bench() {
+    let s = echo_string("hello, world");
+}

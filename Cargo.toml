@@ -48,7 +48,7 @@ bench = false
 name = "bench"
 path = "benches/bench.rs"
 harness = false
-required-features = [ "compiler", "runtime", "call_function" ]
+required-features = [ "compiler", "runtime", "call_function", "derive" ]
 
 [[example]]
 name = "run"

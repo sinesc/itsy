@@ -1,0 +1,9 @@
+// Benchmark: marshalling an array of Strings across the boundary.
+// Each iteration gets [String] from Rust (20 elements) and passes it back for joining.
+
+use BenchAPI::{make_string_array, join_strings};
+
+fn bench() {
+    let arr = make_string_array(20);
+    let _joined = join_strings(arr);
+}

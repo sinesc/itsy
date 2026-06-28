@@ -1,0 +1,9 @@
+// Benchmark: marshalling an array of i32 across the boundary.
+// Each iteration gets a [i32] from Rust (100 elements) and passes it back for summing.
+
+use BenchAPI::{make_i32_array, sum_i32};
+
+fn bench() {
+    let arr = make_i32_array(100);
+    let _sum = sum_i32(arr);
+}

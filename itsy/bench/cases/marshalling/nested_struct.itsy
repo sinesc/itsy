@@ -1,0 +1,11 @@
+// Benchmark: marshalling a nested struct (Nested: Point, String, u32).
+// Point itself contains two i32s. Each iteration constructs the nested struct in Rust
+// and reads a leaf field back through the boundary.
+
+use BenchAPI::{make_nested, nested_score};
+use BenchAPI::Nested;
+
+fn bench() {
+    let n = make_nested(10, 20, "nested", 42);
+    let _score = nested_score(n);
+}

@@ -1,4 +1,4 @@
-use itsy::*;
+use itsy::{itsy_api, build_str, runtime};
 use itsy::runtime::VMState;
 use std::{
     collections::HashMap,
@@ -8,6 +8,10 @@ use std::{
     process::Command,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[path = "marshalling/mod.rs"]
+mod marshalling;
+use marshalling::*;
 
 /*
  * Itsy micro-benchmark harness
@@ -84,6 +88,73 @@ itsy_api! {
         /// Number of `bench` repetitions the harness wants for the upcoming batch.
         fn bench_iterations(&mut context) -> u64 {
             context.batch
+        }
+
+        // --- Primitive marshalling ---
+        fn echo_i32(&mut context, v: i32) -> i32 { v }
+        fn echo_u64(&mut context, v: u64) -> u64 { v }
+        fn echo_f64(&mut context, v: f64) -> f64 { v }
+        fn echo_bool(&mut context, v: bool) -> bool { v }
+        fn echo_string(&mut context, v: String) -> String { v }
+
+        // --- Struct marshalling ---
+        fn make_point(&mut context, x: i32, y: i32) -> Point {
+            Point { x, y }
+        }
+        fn point_sum(&mut context, p: Point) -> i32 {
+            p.x + p.y
+        }
+        fn make_record(&mut context, id: u32, name: String, value: f64) -> Record {
+            Record { id, name, value }
+        }
+        fn record_value(&mut context, r: Record) -> f64 {
+            r.value
+        }
+        fn make_nested(&mut context, x: i32, y: i32, label: String, score: u32) -> Nested {
+            Nested { pos: Point { x, y }, label, score }
+        }
+        fn nested_score(&mut context, n: Nested) -> u32 {
+            n.score
+        }
+
+        // --- Enum marshalling ---
+        fn opposite_status(&mut context, s: Status) -> Status {
+            match s {
+                Status::Ok => Status::Error,
+                Status::Error => Status::Ok,
+                Status::Pending => Status::Pending,
+            }
+        }
+        fn shape_area(&mut context, s: Shape) -> f64 {
+            match s {
+                Shape::Circle(r) => 3.14159 * r * r,
+                Shape::Rect(w, h) => w * h,
+                Shape::Named(_) => -1.0,
+                Shape::Empty => 0.0,
+            }
+        }
+        fn make_circle(&mut context, r: f64) -> Shape {
+            Shape::Circle(r)
+        }
+
+        // --- Array marshalling ---
+        fn make_i32_array(&mut context, n: u32) -> [ i32 ] {
+            (0..n as i32).collect()
+        }
+        fn sum_i32(&mut context, values: [ i32 ]) -> i32 {
+            values.iter().sum()
+        }
+        fn make_string_array(&mut context, n: u32) -> [ String ] {
+            (0..n).map(|i| format!("item_{}", i)).collect()
+        }
+        fn join_strings(&mut context, parts: [ String ]) -> String {
+            parts.join("-")
+        }
+        fn make_points(&mut context, n: u32) -> [ Point ] {
+            (0..n as i32).map(|i| Point { x: i, y: i * 2 }).collect()
+        }
+        fn points_sum(&mut context, ps: [ Point ]) -> i32 {
+            ps.iter().map(|p| p.x + p.y).sum()
         }
     }
 }
@@ -293,7 +364,8 @@ fn collect_cases(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
 }
 
 /// Wraps a case's source with the generated `main` that drives setup/suspend/bench. `has_setup`
-/// selects the stateful (`bench(state)`) or stateless (`bench()`) shape.
+/// selects the stateful (`bench(state)`) or stateless (`bench()`) shape. The `use BenchAPI::` line
+/// imports `bench_iterations`; cases import any additional API functions/types they need.
 fn assemble_source(case_source: &str, has_setup: bool) -> String {
     let (setup_line, bench_call) = if has_setup {
         ("    let state = setup();\n", "bench(state);")

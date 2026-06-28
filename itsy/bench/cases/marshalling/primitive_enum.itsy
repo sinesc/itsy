@@ -1,0 +1,9 @@
+// Benchmark: marshalling a primitive (C-like) enum across the boundary.
+// Each iteration passes a Status enum to Rust and gets the opposite back.
+
+use BenchAPI::opposite_status;
+use BenchAPI::Status;
+
+fn bench() {
+    let s = opposite_status(Status::Ok);
+}

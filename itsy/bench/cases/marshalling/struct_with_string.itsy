@@ -1,0 +1,10 @@
+// Benchmark: marshalling a struct containing a String field (Record: u32, String, f64).
+// Each iteration constructs the struct in Rust and reads a field back.
+
+use BenchAPI::{make_record, record_value};
+use BenchAPI::Record;
+
+fn bench() {
+    let r = make_record(1, "benchmark", 3.14);
+    let _v = record_value(r);
+}

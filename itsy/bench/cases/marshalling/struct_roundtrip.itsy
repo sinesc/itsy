@@ -1,0 +1,10 @@
+// Benchmark: marshalling a simple struct (Point: i32, i32) across the boundary.
+// Each iteration constructs a Point in Rust, passes it back to Rust for processing.
+
+use BenchAPI::{make_point, point_sum};
+use BenchAPI::Point;
+
+fn bench() {
+    let p = make_point(3, 4);
+    let _sum = point_sum(p);
+}

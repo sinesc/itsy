@@ -1,0 +1,8 @@
+// Benchmark: marshalling a single i32 across the Itsy <-> Rust boundary.
+// Each iteration calls a Rust function that receives and returns an i32.
+
+use BenchAPI::echo_i32;
+
+fn bench() {
+    let v = echo_i32(42);
+}
