@@ -92,6 +92,7 @@ itsy_api! {
 
 /// Enable virtual terminal sequences on operating systems that,
 /// don't enable this by default. Does nothing if enabling is not required.
+#[allow(dead_code)]
 pub fn enable_virtual_terminal_processing() {
     #[cfg(windows)]
     win_enable_virtual_terminal_processing();

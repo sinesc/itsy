@@ -69,3 +69,7 @@ required-features = [ "compiler" ]
 [[example]]
 name = "itsyvm"
 required-features = [ "runtime" ]
+
+[[example]]
+name = "dis"
+required-features = [ "compiler", "runtime", "debugging", "symbols" ]
