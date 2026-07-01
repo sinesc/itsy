@@ -16,6 +16,7 @@ use std::io::Write;
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols" -- itsy/examples/helloworld.itsy
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols,comments" -- itsy/examples/helloworld.itsy
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols" -- itsy/examples/helloworld.itsy -o out.txt
+ *   cargo run --example dis --features="compiler,runtime,debugging,symbols,comments" -- itsy/examples/helloworld.itsy --raw-offsets
  */
 
 mod shared;
@@ -25,22 +26,23 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     if args.is_empty() {
-        eprintln!("usage: dis <filename.itsy> [-o <output-file>]");
+        eprintln!("usage: dis <filename.itsy> [--raw-offsets] [-o <output-file>]");
         std::process::exit(1);
     }
 
     let source_file = &args[0];
-    let output_file: Option<&str> = if args.len() >= 3 && args[1] == "-o" {
-        Some(&args[2])
-    } else {
-        None
-    };
+    let raw_offsets = args.iter().any(|a| a == "--raw-offsets");
+    let output_file: Option<&str> = args
+        .iter()
+        .position(|a| a == "-o")
+        .and_then(|pos| args.get(pos + 1))
+        .map(|s| s.as_str());
 
     match build::<MyAPI, _>(source_file) {
         Ok(program) => {
             let vm = runtime::VM::new(program);
             let raw = vm.format_program();
-            let disassembly = format_disassembly(&raw);
+            let disassembly = format_disassembly(&raw, raw_offsets);
 
             match output_file {
                 Some(path) => {
@@ -75,7 +77,10 @@ const JUMP_OPS_TAIL: &[&str] = &[
 
 /// Reformat raw disassembly (from `VM::format_program`) into a readable
 /// version that only shows offset labels at jump targets.
-fn format_disassembly(raw: &str) -> String {
+///
+/// When `raw_offsets` is `true`, all jump targets are shown as absolute
+/// bytecode offsets regardless of whether function names are available.
+fn format_disassembly(raw: &str, raw_offsets: bool) -> String {
     let lines: Vec<&str> = raw.lines().collect();
 
     // Pass 1: collect all jump targets and function-name mappings.
@@ -112,7 +117,7 @@ fn format_disassembly(raw: &str) -> String {
         if let Some((position, opcode, args)) = parse_instruction_line(line) {
             // Print offset label if this position is a jump target.
             if targets.contains(&position) {
-                let label = format_offset(position, &fn_names);
+                let label = format_offset(position, &fn_names, raw_offsets);
                 out.push_str(&format!("{}:\n", label));
             }
             if args.is_empty() {
@@ -120,13 +125,13 @@ fn format_disassembly(raw: &str) -> String {
             } else {
                 // Replace call/jump target addresses with function names.
                 let arg_list: Vec<&str> = args.split_whitespace().collect();
-                let formatted_args = replace_jump_target_args(opcode, arg_list, &fn_names);
+                let formatted_args = replace_jump_target_args(opcode, arg_list, &fn_names, raw_offsets);
                 out.push_str(&format!("    {} {}\n", opcode, formatted_args));
             }
         } else if let Some((position, comment_text)) = parse_comment_line_with_pos(line) {
             // Print offset label if this comment position is a jump target.
             if targets.contains(&position) {
-                let label = format_offset(position, &fn_names);
+                let label = format_offset(position, &fn_names, raw_offsets);
                 out.push_str(&format!("{}:\n", label));
             }
             out.push_str(&format!("    ;{}\n", comment_text));
@@ -142,7 +147,11 @@ fn format_disassembly(raw: &str) -> String {
 /// If the offset is inside a function, returns `name+offset` relative to
 /// the containing function start.  Falls back to the raw offset if no
 /// containing function is known (e.g. comments feature disabled).
-fn format_offset(offset: usize, fn_names: &HashMap<usize, String>) -> String {
+/// If `raw_offsets` is `true`, always returns the raw absolute offset.
+fn format_offset(offset: usize, fn_names: &HashMap<usize, String>, raw_offsets: bool) -> String {
+    if raw_offsets {
+        return format!("{}", offset);
+    }
     // If this offset IS a function entry, return the function name.
     if let Some(name) = fn_names.get(&offset) {
         return name.clone();
@@ -178,7 +187,8 @@ fn format_offset(offset: usize, fn_names: &HashMap<usize, String>) -> String {
 /// Replace jump/call target addresses in instruction arguments with
 /// formatted labels.  For `JUMP_OPS` the first argument is the target;
 /// for `JUMP_OPS_TAIL` the last argument is the target.
-fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<usize, String>) -> String {
+/// When `raw_offsets` is `true`, target addresses are left as raw offsets.
+fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<usize, String>, raw_offsets: bool) -> String {
     if JUMP_OPS.contains(&opcode) {
         // First argument is the target address.
         let mut new_args: Vec<String> = Vec::with_capacity(args.len());
@@ -187,7 +197,7 @@ fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<us
             if first {
                 first = false;
                 if let Ok(addr) = arg.parse::<usize>() {
-                    new_args.push(format_offset(addr, fn_names));
+                    new_args.push(format_offset(addr, fn_names, raw_offsets));
                     continue;
                 }
             }
@@ -199,7 +209,7 @@ fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<us
         let mut new_args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         if let Some(last) = new_args.last_mut() {
             if let Ok(addr) = last.parse::<usize>() {
-                *last = format_offset(addr, fn_names);
+                *last = format_offset(addr, fn_names, raw_offsets);
             }
         }
         new_args.join(" ")
