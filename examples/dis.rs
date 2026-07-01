@@ -112,7 +112,7 @@ fn format_disassembly(raw: &str) -> String {
         if let Some((position, opcode, args)) = parse_instruction_line(line) {
             // Print offset label if this position is a jump target.
             if targets.contains(&position) {
-                let label = fn_names.get(&position).cloned().unwrap_or_else(|| format!("{}", position));
+                let label = format_offset(position, &fn_names);
                 out.push_str(&format!("{}:\n", label));
             }
             if args.is_empty() {
@@ -126,7 +126,7 @@ fn format_disassembly(raw: &str) -> String {
         } else if let Some((position, comment_text)) = parse_comment_line_with_pos(line) {
             // Print offset label if this comment position is a jump target.
             if targets.contains(&position) {
-                let label = fn_names.get(&position).cloned().unwrap_or_else(|| format!("{}", position));
+                let label = format_offset(position, &fn_names);
                 out.push_str(&format!("{}:\n", label));
             }
             out.push_str(&format!("    ;{}\n", comment_text));
@@ -136,9 +136,48 @@ fn format_disassembly(raw: &str) -> String {
     out
 }
 
+/// Format a bytecode offset for display.
+///
+/// If the offset is a function entry point, returns the function name.
+/// If the offset is inside a function, returns `name+offset` relative to
+/// the containing function start.  Falls back to the raw offset if no
+/// containing function is known (e.g. comments feature disabled).
+fn format_offset(offset: usize, fn_names: &HashMap<usize, String>) -> String {
+    // If this offset IS a function entry, return the function name.
+    if let Some(name) = fn_names.get(&offset) {
+        return name.clone();
+    }
+
+    // Find the containing function (largest start position <= offset).
+    let mut containing_start: Option<usize> = None;
+    let mut containing_name: Option<String> = None;
+    for (&start, name) in fn_names {
+        if start <= offset {
+            match containing_start {
+                None => {
+                    containing_start = Some(start);
+                    containing_name = Some(name.clone());
+                }
+                Some(current) if start > current => {
+                    containing_start = Some(start);
+                    containing_name = Some(name.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let (Some(start), Some(name)) = (containing_start, containing_name) {
+        let rel = offset - start;
+        format!("{}+{}", name, rel)
+    } else {
+        format!("{}", offset)
+    }
+}
+
 /// Replace jump/call target addresses in instruction arguments with
-/// function names when available.  For `JUMP_OPS` the first argument is
-/// the target; for `JUMP_OPS_TAIL` the last argument is the target.
+/// formatted labels.  For `JUMP_OPS` the first argument is the target;
+/// for `JUMP_OPS_TAIL` the last argument is the target.
 fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<usize, String>) -> String {
     if JUMP_OPS.contains(&opcode) {
         // First argument is the target address.
@@ -148,10 +187,8 @@ fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<us
             if first {
                 first = false;
                 if let Ok(addr) = arg.parse::<usize>() {
-                    if let Some(name) = fn_names.get(&addr) {
-                        new_args.push(name.clone());
-                        continue;
-                    }
+                    new_args.push(format_offset(addr, fn_names));
+                    continue;
                 }
             }
             new_args.push(arg.to_string());
@@ -162,9 +199,7 @@ fn replace_jump_target_args(opcode: &str, args: Vec<&str>, fn_names: &HashMap<us
         let mut new_args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         if let Some(last) = new_args.last_mut() {
             if let Ok(addr) = last.parse::<usize>() {
-                if let Some(name) = fn_names.get(&addr) {
-                    *last = name.clone();
-                }
+                *last = format_offset(addr, fn_names);
             }
         }
         new_args.join(" ")
