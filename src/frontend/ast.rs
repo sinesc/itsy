@@ -1754,6 +1754,26 @@ impl LiteralValue {
             _ => true,
         }
     }
+    /// Returns whether this literal can be serialized as raw bytes in the const pool
+    /// and loaded by `upload_const`. Includes primitives and structs/arrays that solely
+    /// consist of primitives.
+    pub fn is_const_serializable(self: &Self) -> bool {
+        match self {
+            LiteralValue::Numeric(_) | LiteralValue::Bool(_) | LiteralValue::Void => true,
+            LiteralValue::String(_) => false,
+            LiteralValue::Map(_) => false,
+            LiteralValue::Array(v) => v.elements.iter().all(|e|
+                e.as_literal().map(|l| matches!(
+                    l.value,
+                    LiteralValue::Numeric(_) | LiteralValue::Bool(_) | LiteralValue::Void
+                )).unwrap_or(false)),
+            LiteralValue::Struct(v) => v.fields.iter().all(|(_, e)|
+                e.as_literal().map(|l| matches!(
+                    l.value,
+                    LiteralValue::Numeric(_) | LiteralValue::Bool(_) | LiteralValue::Void
+                )).unwrap_or(false)),
+        }
+    }
     pub fn as_string(self: &Self) -> Option<&str> {
         match self {
             LiteralValue::String(v) => Some(v),

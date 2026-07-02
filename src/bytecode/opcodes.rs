@@ -1325,9 +1325,9 @@ impl_opcodes!{
     }
 
     /// Loads primitive data from the const pool directly onto the heap, pushing the new heap reference to the stack.
-    fn upload_const(&mut self, const_offset: StackAddress) {
+    fn upload_const(&mut self, const_offset: StackAddress, implementor_index: ItemIndex) {
         let num_bytes: StackAddress = self.stack.load(const_offset);
-        let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, ItemIndex::MAX), 0);
+        let heap_ref = HeapRef::new(self.heap.alloc(num_bytes, implementor_index), 0);
         self.stack.push(heap_ref);
         let data_offset = const_offset as usize + size_of_val(&num_bytes);
         let src = self.stack.data();

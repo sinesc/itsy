@@ -1519,22 +1519,31 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 };
             },
             LiteralValue::String(string_literal) => {
-                // store string on const pool and write instruction to load it from const pool directly onto th heap
+                // store string on const pool and write instruction to load it from const pool directly onto the heap
                 // note: we get the offset from current const_len() and not the store_const() result as that points to
-                // the start of the string  while the we neeed to point at the meta data it writes before the string (the length)
+                // the start of the string while the we neeed to point at the meta data it writes before the string (the length)
                 let string_const = self.writer.const_len();
                 self.writer.store_const(string_literal.as_str());
-                self.writer.upload_const(string_const);
+                self.writer.upload_const(string_const, ItemIndex::MAX);
             }
             LiteralValue::Array(array_literal) => {
-                // write instructions to construct the array on the stack and once complete, upload it to the heap
-                for element in &array_literal.elements {
-                    self.compile_expression(element)?;
+                if item.value.is_const_serializable() {
+                    // all elements are primitive literals - hoist to const pool
+                    let const_offset = self.store_const_primitive_array(&array_literal.elements, item)?;
+                    // emit upload_const — const_offset points to the size on the stack
+                    let type_id = item.type_id(self).ice()?;
+                    let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
+                    self.writer.upload_const(const_offset, implementor_index);
+                } else {
+                    // at least one element is non-primitive - use existing push-then-upload path
+                    for element in &array_literal.elements {
+                        self.compile_expression(element)?;
+                    }
+                    let array_ty = self.ty(item).as_array().ice_msg("Expected array type, got something else")?;
+                    let size = array_literal.elements.len() as StackAddress * self.ty(&array_ty.type_id).primitive_size() as StackAddress;
+                    let type_id = item.type_id(self).ice()?;
+                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                 }
-                let array_ty = self.ty(item).as_array().ice_msg("Expected array type, got something else")?;
-                let size = array_literal.elements.len() as StackAddress * self.ty(&array_ty.type_id).primitive_size() as StackAddress;
-                let type_id = item.type_id(self).ice()?;
-                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
             LiteralValue::Map(map_literal) => {
                 // allocate an empty map, then populate it entry by entry. The map reference is duplicated
@@ -1549,17 +1558,27 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 }
             },
             LiteralValue::Struct(struct_literal) => {
-                // write instructions to construct the struct on the stack and once complete, upload it to the heap
                 let struct_def = ty.as_struct().ice_msg("Expected struct, got something else")?;
                 // collect fields first to avoid borrow checker
                 let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
-                for field in fields {
-                    self.compile_expression(field)?;
+
+                if item.value.is_const_serializable() {
+                    // all fields are primitive - hoist to const pool
+                    let const_offset = self.store_const_primitive_struct(&fields, item)?;
+                    // emit upload_const - const_offset points to the size on the stack
+                    let type_id = item.type_id(self).ice()?;
+                    let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
+                    self.writer.upload_const(const_offset, implementor_index);
+                } else {
+                    // at least one field is non-constant - use existing push-then-upload path
+                    for field in &fields {
+                        self.compile_expression(field)?;
+                    }
+                    let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type, got something else")?;
+                    let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.ty(f.1).primitive_size() as StackAddress);
+                    let type_id = item.type_id(self).ice()?;
+                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                 }
-                let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type, got something else")?;
-                let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.ty(f.1).primitive_size() as StackAddress);
-                let type_id = item.type_id(self).ice()?;
-                self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
             },
         }
         Ok(())
@@ -2174,6 +2193,90 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             ty @ _ => Self::ice(&format!("Unsupported type {:?} in constructor serialization", ty))?,
         }
         Ok(position)
+    }
+
+    /// Serializes a struct literal with only primitive fields into the const pool and emits one `upload_const`.
+    fn store_const_primitive_struct(self: &mut Self, fields: &[&ast::Expression], item: &ast::Literal) -> CompileResult<StackAddress> {
+        // get struct type and compute total byte size
+        let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type")?;
+        let total_size: StackAddress = struct_ty.fields.iter().fold(0, |acc, (_, type_id_opt)| {
+            let type_id = type_id_opt.expect("Unresolved struct field type");
+            acc + self.type_by_id(type_id).primitive_size() as StackAddress
+        });
+        // record const pool position BEFORE writing (this is where the size will be)
+        let const_offset = self.writer.const_len();
+        // write size prefix into const pool
+        self.writer.store_const(total_size);
+        // write raw field bytes into const pool
+        let mut program = self.writer.program();
+        program.const_descriptors.push(crate::bytecode::ConstDescriptor { size: total_size });
+        let consts = &mut program.consts;
+        for (field_expr, (_, type_id_opt)) in fields.iter().zip(struct_ty.fields.iter()) {
+            let type_id = type_id_opt.expect("Unresolved struct field type");
+            let field_type = self.type_by_id(type_id);
+            self.serialize_literal_bytes(field_expr, field_type, consts)?;
+        }
+        Ok(const_offset)
+    }
+
+    /// Serializes an array literal with primitive elements into the const pool and emits one `upload_const`.
+    fn store_const_primitive_array(self: &mut Self, elements: &[ast::Expression], item: &ast::Literal) -> CompileResult<StackAddress> {
+        let array_ty = self.ty(item).as_array().ice_msg("Expected array type")?;
+        let element_type_id = array_ty.type_id.expect("Unresolved array element type");
+        let element_type = self.type_by_id(element_type_id);
+        let element_size = element_type.primitive_size() as StackAddress;
+        let total_size: StackAddress = elements.len() as StackAddress * element_size;
+        // record const pool position BEFORE writing (this is where the size will be)
+        let const_offset = self.writer.const_len();
+        // write size prefix into const pool
+        self.writer.store_const(total_size);
+        // write raw element bytes into const pool
+        let mut program = self.writer.program();
+        program.const_descriptors.push(crate::bytecode::ConstDescriptor { size: total_size });
+        let consts = &mut program.consts;
+        for element in elements {
+            self.serialize_literal_bytes(element, element_type, consts)?;
+        }
+        Ok(const_offset)
+    }
+
+    /// Appends the raw bytes of a const-serializable literal to the given buffer.
+    fn serialize_literal_bytes(self: &Self, expr: &ast::Expression, field_type: &Type, buf: &mut Vec<u8>) -> CompileResult {
+        let literal = expr.as_literal().ice_msg("Expected literal expression for const aggregate")?;
+        match &literal.value {
+            crate::frontend::ast::LiteralValue::Numeric(numeric) => {
+                match numeric {
+                    Numeric::Signed(v) => match field_type {
+                        Type::i8  => buf.extend_from_slice(&(*v as i8).to_ne_bytes()),
+                        Type::i16 => buf.extend_from_slice(&(*v as i16).to_ne_bytes()),
+                        Type::i32 => buf.extend_from_slice(&(*v as i32).to_ne_bytes()),
+                        Type::i64 => buf.extend_from_slice(&(*v as i64).to_ne_bytes()),
+                        _ => Self::ice("Unexpected signed type in const aggregate")?,
+                    },
+                    Numeric::Unsigned(v) => match field_type {
+                        Type::u8 | Type::i8  => buf.extend_from_slice(&(*v as u8).to_ne_bytes()),
+                        Type::u16 | Type::i16 => buf.extend_from_slice(&(*v as u16).to_ne_bytes()),
+                        Type::u32 | Type::i32 => buf.extend_from_slice(&(*v as u32).to_ne_bytes()),
+                        Type::u64 | Type::i64 => buf.extend_from_slice(&(*v as u64).to_ne_bytes()),
+                        _ => Self::ice("Unexpected unsigned type in const aggregate")?,
+                    },
+                    Numeric::Float(v) => match field_type {
+                        Type::f32 => buf.extend_from_slice(&(*v as f32).to_ne_bytes()),
+                        Type::f64 => buf.extend_from_slice(&v.to_ne_bytes()),
+                        _ => Self::ice("Unexpected float type in const aggregate")?,
+                    },
+                };
+            }
+            crate::frontend::ast::LiteralValue::Bool(v) => {
+                buf.push(*v as u8);
+            }
+            crate::frontend::ast::LiteralValue::Void => {
+                // Zero bytes — nothing to write
+            }
+            // Nested structs/arrays/strings/maps are not const-serializable
+            _ => Self::ice("Non-serializable literal in const aggregate")?,
+        }
+        Ok(())
     }
 }
 
