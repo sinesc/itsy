@@ -1454,7 +1454,7 @@ fn pattern(i: Input) -> Output<Pattern> {
             if p.segments.len() > 1 {
                 Pattern::Path(p)
             } else if p.segments[0].name == "None" {
-                // bare `None` is the unit variant of `Option<T>` — treat as a variant path, not a binding
+                // bare `None` is the unit variant of `Option<T>` - treat as a variant path, not a binding
                 Pattern::Path(p)
             } else {
                 let ident = p.segments.pop().unwrap();
@@ -1730,10 +1730,10 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
 ///
 /// The iteration form is encoded by which binding slots are populated (see [`ForLoop`]):
 ///
-/// - `for v in coll` — value binding only (`iter`).
-/// - `for k, v in coll` — both bindings (`iter` = value, `iter_key` = key/index).
-/// - `for k, _ in coll` — key/index binding only (`iter_key`).
-/// - `for _, v in coll` — value binding only (`iter`); the blank key is dropped.
+/// - `for v in coll` - value binding only (`iter`).
+/// - `for k, v in coll` - both bindings (`iter` = value, `iter_key` = key/index).
+/// - `for k, _ in coll` - key/index binding only (`iter_key`).
+/// - `for _, v in coll` - value binding only (`iter`); the blank key is dropped.
 ///
 /// Blank (`_`) bindings map to `None` in their slot. The fully-blank degenerate forms (`for _ in coll`,
 /// `for _, _ in coll`) become value iteration with a throwaway value binding (iterate for side effects).
@@ -1780,9 +1780,9 @@ fn for_loop(i: Input) -> Output<Statement> {
             };
             // Map the parsed `for <key>[, <value>]` bindings onto the value/key slots, dropping blanks.
             let (iter, iter_key) = match value {
-                // `for v in expr` — single binding is the value.
+                // `for v in expr` - single binding is the value.
                 None => (Some(let_binding(key)), None),
-                // `for k, v in expr` / `for k, _ in expr` / `for _, v in expr` — two bindings.
+                // `for k, v in expr` / `for k, _ in expr` / `for _, v in expr` - two bindings.
                 Some(value) => {
                     let iter = if is_blank(&value) { None } else { Some(let_binding(value)) };
                     let iter_key = if is_blank(&key) { None } else { Some(let_binding(key)) };

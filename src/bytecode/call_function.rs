@@ -33,7 +33,7 @@ use std::any::Any;
 #[repr(u8)]
 pub enum ValueKind {
     void, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, bool, String,
-    /// A reference type other than String (array/struct/enum/etc.) — not yet marshallable by
+    /// A reference type other than String (array/struct/enum/etc.) - not yet marshallable by
     /// [`VM::call_function`](crate::runtime::VM::call_function).
     Unsupported,
 }
@@ -129,7 +129,7 @@ pub(crate) fn build_function_table<T>(compiler: &Compiler<T>, modules: &[ParsedM
         for statement in module.statements() {
             if let ast::Statement::Function(function) = statement {
                 let function_id = compiler.constant_by_id(function.constant_id.ice()?).value.as_function_id().ice()?;
-                let addr = compiler.function_address(function_id).ice_msg("Missing function address")?;
+                let addr = compiler.functions.get(function_id).ice_msg("Missing function address")?;
                 let func = compiler.function_by_id(function_id);
                 let arg_size = func.arg_size(compiler);
                 let arg_type_ids = func.arg_type_ids(compiler).clone();

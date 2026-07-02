@@ -419,7 +419,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// each branch keeps its own concrete type and constructs its own value, while the whole expression is
     /// typed as the trait so method calls on the result dispatch virtually. It requires an explicit trait
     /// type in scope (an annotation, parameter or return type) because there is no principled common type to
-    /// infer otherwise — a concrete type may implement several traits.
+    /// infer otherwise - a concrete type may implement several traits.
     fn branch_collapse_target(self: &Self, expected_result: Option<TypeId>, branch_type_ids: &[TypeId]) -> Option<TypeId> {
         let expected = expected_result?;
         if !self.type_by_id(expected).is_trait_object() {
@@ -697,7 +697,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
     /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
     /// code, so the structural `generator_signature` check can identify it. Structurally identical
     /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
-    /// carrier will hold at runtime is *not* modelled as typed fields here — that stays opaque bytes.
+    /// carrier will hold at runtime is *not* modelled as typed fields here - that stays opaque bytes.
     fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
         let mut fields = Map::new();
         fields.insert("$value".to_string(), Some(value_type_id));
@@ -1628,7 +1628,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 // once a `Result` context is known, which can be as late as literal/type inference. Defer
                 // their existence check to must_resolve so a valid `Ok`/`Err` isn't prematurely rejected;
                 // genuine misuse (e.g. `?` in a non-`Result` function) gets a dedicated diagnostic there.
-                // Same for `Some`/`None` — defer so a valid `Some`/`None` isn't prematurely rejected.
+                // Same for `Some`/`None` - defer so a valid `Some`/`None` isn't prematurely rejected.
                 let is_result_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Ok" | "Err");
                 let is_option_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Some" | "None");
                 let must_report = if is_result_ctor || is_option_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
@@ -1705,7 +1705,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         // must be acceptable for the first one's type (which the match reports as its own); the `unify`
         // first lets partially-resolved compound types (e.g. empty map literal `[ => ]` with unknown value
         // type) pick up concrete inner types from sibling arms, and the acceptance check is gated on both
-        // types being fully resolved so that still-inferring arms aren't rejected on an early pass — a
+        // types being fully resolved so that still-inferring arms aren't rejected on an early pass - a
         // resolution error aborts the whole resolve.
         let value_arm_type_ids: Option<Vec<TypeId>> = item.branches.iter()
             .filter(|(_, block)| block.control_flow().is_none())
@@ -2276,7 +2276,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if is_builtin {
                         item.op_resolved = true;
                     } else if common_type.is_primitive() {
-                        // primitive type that is not an integer (e.g. float, bool, string) — reject early
+                        // primitive type that is not an integer (e.g. float, bool, string) - reject early
                         return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires integer operands", item.op)), self.module_path));
                     } else {
                         let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;
@@ -2306,7 +2306,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     if is_builtin {
                         item.op_resolved = true;
                     } else if common_type.is_primitive() {
-                        // primitive type that is not an integer (e.g. float, bool, string) — reject early
+                        // primitive type that is not an integer (e.g. float, bool, string) - reject early
                         return Err(ResolveError::new(item, ResolveErrorKind::InvalidOperation(format!("{} requires an integer left operand", item.op)), self.module_path));
                     } else {
                         let intrinsic = self.intrinsic_ops.get(&item.op).copied().ice()?;

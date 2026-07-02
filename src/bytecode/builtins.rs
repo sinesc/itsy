@@ -94,9 +94,9 @@ impl_builtins! {
     ///
     /// Iteration mirrors maps:
     ///
-    /// - `for value in array` — iterate values.
-    /// - `for index, value in array` — iterate indices and values.
-    /// - `for index, _ in array` — iterate indices alone.
+    /// - `for value in array` - iterate values.
+    /// - `for index, value in array` - iterate indices and values.
+    /// - `for index, _ in array` - iterate indices alone.
     ///
     /// The index range is snapshotted at loop entry, so the body may grow the array without extending
     /// the iteration.
@@ -1867,9 +1867,9 @@ impl_builtins! {
     ///
     /// Iteration mirrors arrays:
     ///
-    /// - `for value in map` — iterate values.
-    /// - `for key, value in map` — iterate keys and values.
-    /// - `for key, _ in map` — iterate keys alone.
+    /// - `for value in map` - iterate values.
+    /// - `for key, value in map` - iterate keys and values.
+    /// - `for key, _ in map` - iterate keys alone.
     Map {
         /// Inserts a key-value pair into the map. If the key already exists, the value is updated.
         insert(self: Self, key: Key, value: Value) {
@@ -2060,7 +2060,7 @@ impl_builtins! {
 
     /// A lazily-produced sequence of values, written `Generator<V>` or `Generator<K, V>`.
     ///
-    /// A generator is what you get by calling a generator function — any `fn` whose body uses
+    /// A generator is what you get by calling a generator function - any `fn` whose body uses
     /// `yield`. Calling such a function does **not** run its body; it returns a `Generator` whose
     /// execution is advanced on demand. Each `yield` in the body hands a value (form
     /// `Generator<V>`) or a key/value pair (form `Generator<K, V>`) back to whoever is driving the

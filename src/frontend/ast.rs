@@ -1313,7 +1313,7 @@ impl_display!(Suspend, "suspend");
 /// A deconstruction pattern, e.g. `_`, `123`, `name` or `Enum::Variant(123, inner)`.
 #[derive(Debug)]
 pub enum Pattern {
-    /// `_` — matches anything, binds nothing.
+    /// `_` - matches anything, binds nothing.
     Wildcard(Position),
     /// A single identifier introducing a new binding, e.g. `name`.
     Binding(BindingPattern),

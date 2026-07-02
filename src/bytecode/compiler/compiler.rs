@@ -31,7 +31,7 @@ pub(crate) struct Compiler<T> {
     /// Non-primitive type constructors.
     constructors: UnorderedMap<TypeId, StackAddress>,
     /// Tracks call and function addresses so that calls made before the function address was known can be fixed.
-    functions: Functions,
+    pub(crate) functions: Functions,
     /// Tracks variable initialization state.
     init_state: InitState,
     /// Tracks loop break/continue exit jump targets.
@@ -191,14 +191,6 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
 
 /// Methods for compiling individual code structures.
 impl<T> Compiler<T> where T: VMFunc<T> {
-
-    /// Returns the bytecode address of the given function, if it has already been registered. Used by
-    /// [`build_function_table`](crate::bytecode::call_function::build_function_table) to fill the
-    /// host-callable function table.
-    #[cfg(feature="call_function")]
-    pub(crate) fn function_address(self: &Self, function_id: FunctionId) -> Option<StackAddress> {
-        self.functions.get(function_id)
-    }
 
     /// Compiles the given statement.
     fn compile_statement(self: &mut Self, item: &ast::Statement) -> CompileResult {
@@ -816,41 +808,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
     }
 
-    /// Computes the byte offset of a data-variant field within its heap object (past the leading variant index).
-    fn variant_field_offset(self: &Self, field_type_ids: &[Option<TypeId>], index: usize) -> CompileResult<StackAddress> {
-        let mut offset = size_of::<VariantIndex>() as StackAddress;
-        for field_type_id in &field_type_ids[..index] {
-            offset += self.ty(&field_type_id.ice()?).primitive_size() as StackAddress;
-        }
-        Ok(offset)
-    }
-
-    /// Returns the cloned field type-ids of the named data variant of the given enum type.
-    fn variant_data_fields(self: &Self, subject_type_id: TypeId, variant_name: &str) -> CompileResult<Vec<Option<TypeId>>> {
-        let enum_ = self.ty(&subject_type_id).as_enum().ice()?;
-        let variant = enum_.variants.iter().find(|(name, _)| name == variant_name).ice()?;
-        Ok(variant.1.as_data().ice()?.clone())
-    }
-
-    /// The type of the value a pattern matches against, given the access path to it. The empty path refers
-    /// to the match subject itself; otherwise the type of the last navigation step is the value's type.
-    fn pattern_value_type(self: &Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> TypeId {
-        access.last().map(|&(_, type_id)| type_id).unwrap_or(subject_type_id)
-    }
-
-    /// Emits code that pushes a borrowed copy of the value selected by `access` onto the stack, starting from
-    /// the match subject which is expected on top of the stack. Each step offsets into the current heap object
-    /// and fetches the field there, dereferencing across heap boundaries for nested (reference) values. No
-    /// refcounts are touched, so the result is a borrow the caller must consume (compare) or store (which incs).
-    fn emit_pattern_value_load(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> CompileResult {
-        self.write_clone(self.ty(&subject_type_id));
-        for &(offset, field_type_id) in access {
-            self.writer.offsetx_16(offset as FrameAddress);
-            self.write_heap_fetch(self.ty(&field_type_id))?;
-        }
-        Ok(())
-    }
-
     /// Emits code that tests whether the value selected by `access` matches the variant named by `path`, without
     /// consuming the subject. On mismatch a `j0` is emitted and collected in `fail_jumps`.
     fn compile_variant_tag_test(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], path: &ast::Path, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
@@ -872,7 +829,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // reference enum: the variant index is the first field of the heap object
             let variant_index = variant_index.ice()?;
             let index_type = Type::unsigned(size_of::<VariantIndex>());
-            self.emit_pattern_value_load(subject_type_id, access)?;
+            self.write_pattern_value_load(subject_type_id, access)?;
             self.write_heap_fetch(&index_type)?;
             self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
             self.write_ceq(&index_type)?;
@@ -891,7 +848,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             // a literal is matched by comparing the selected value against it
             ast::Pattern::Literal(literal) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
-                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_value_load(subject_type_id, access)?;
                 self.compile_literal(literal)?;
                 self.write_ceq(self.ty(&value_type_id))?;
                 fail_jumps.push(self.writer.j0(123));
@@ -900,12 +857,12 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             ast::Pattern::Range(range) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 // lower bound: value >= lo
-                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_value_load(subject_type_id, access)?;
                 self.compile_literal(&range.lo)?;
                 self.write_cgte(self.ty(&value_type_id))?;
                 fail_jumps.push(self.writer.j0(123));
                 // upper bound: value <= hi (inclusive) or value < hi (exclusive)
-                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_value_load(subject_type_id, access)?;
                 self.compile_literal(&range.hi)?;
                 if range.inclusive {
                     self.write_clte(self.ty(&value_type_id))?;
@@ -986,7 +943,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 self.init_state.declare(binding.binding_id);
                 let slot = self.locals.lookup(binding.binding_id);
-                self.emit_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_value_load(subject_type_id, access)?;
                 self.write_store(self.ty(&value_type_id), slot, Some(binding.binding_id))?;
                 self.init_state.initialize(binding.binding_id);
             },
@@ -1159,32 +1116,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         // discard counter
         comment!(self, "discard upper bound");
         self.write_discard(iter_ty)?;
-        Ok(())
-    }
-
-    /// Emits the buffer-clone builtin for the collection reference on top of the stack, consuming it and
-    /// pushing an independent shallow clone (the clone shares the original's element/boxed sub-references
-    /// at their current refcount, per the heap-aggregate refcount-0 convention).
-    fn write_collection_clone(self: &mut Self, collection_type_id: TypeId) -> CompileResult {
-        if self.ty(&collection_type_id).as_map().is_some() {
-            let constructor = self.constructor(self.ty(&collection_type_id))?;
-            self.writer.call_builtinx(Builtin::map_clone, 0, constructor);
-        } else {
-            let element_type_id = self.ty(&collection_type_id).as_array().ice()?.type_id.ice()?;
-            let constructor = self.constructor(self.ty(&collection_type_id))?;
-            if self.ty(&element_type_id).is_ref() {
-                let element_constructor = self.constructor(self.ty(&element_type_id))?;
-                self.writer.call_builtinx(Builtin::array_clonex, constructor, element_constructor);
-            } else {
-                match self.ty(&element_type_id).primitive_size() {
-                    8 => self.writer.call_builtinx(Builtin::array_clone64, constructor, 0),
-                    4 => self.writer.call_builtinx(Builtin::array_clone32, constructor, 0),
-                    2 => self.writer.call_builtinx(Builtin::array_clone16, constructor, 0),
-                    1 => self.writer.call_builtinx(Builtin::array_clone8, constructor, 0),
-                    size @ _ => Self::ice(&format!("Unsupported array element size {} for for-loop clone", size))?,
-                };
-            }
-        }
         Ok(())
     }
 
@@ -1530,7 +1461,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 if item.value.is_const_serializable() {
                     // all elements are primitive literals - hoist to const pool
                     let const_offset = self.store_const_primitive_array(&array_literal.elements, item)?;
-                    // emit upload_const — const_offset points to the size on the stack
+                    // emit upload_const - const_offset points to the size on the stack
                     let type_id = item.type_id(self).ice()?;
                     let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
                     self.writer.upload_const(const_offset, implementor_index);
@@ -2271,12 +2202,54 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 buf.push(*v as u8);
             }
             crate::frontend::ast::LiteralValue::Void => {
-                // Zero bytes — nothing to write
+                // Zero bytes - nothing to write
             }
             // Nested structs/arrays/strings/maps are not const-serializable
             _ => Self::ice("Non-serializable literal in const aggregate")?,
         }
         Ok(())
+    }
+
+    /// Collects the ref-typed frame slots that are live (in scope and initialized) at the current
+    /// position within a generator body. Each entry is `(frame_offset, constructor_offset)`; on a
+    /// mid-flight drop the VM uses these to release the frozen frame's heap references. `MaybeInitialized`
+    /// slots are included - at runtime a null reference (heap index 0) marks them as actually uninitialized
+    /// and is skipped.
+    fn collect_generator_live_refs(self: &Self) -> CompileResult<Vec<(StackAddress, StackAddress)>> {
+        let frame = self.locals.current();
+        let mut entries = Vec::new();
+        for (&binding_id, &local) in frame.map.iter() {
+            if self.init_state.in_scope(binding_id) && self.init_state.initialized(binding_id) != BranchingState::Uninitialized {
+                let type_id = self.binding_by_id(binding_id).type_id.ice()?;
+                let ty = self.ty(&type_id);
+                if ty.is_ref() {
+                    entries.push((local as StackAddress, self.constructor(ty)?));
+                }
+            }
+        }
+        Ok(entries)
+    }
+
+    /// Computes the byte offset of a data-variant field within its heap object (past the leading variant index).
+    fn variant_field_offset(self: &Self, field_type_ids: &[Option<TypeId>], index: usize) -> CompileResult<StackAddress> {
+        let mut offset = size_of::<VariantIndex>() as StackAddress;
+        for field_type_id in &field_type_ids[..index] {
+            offset += self.ty(&field_type_id.ice()?).primitive_size() as StackAddress;
+        }
+        Ok(offset)
+    }
+
+    /// Returns the cloned field type-ids of the named data variant of the given enum type.
+    fn variant_data_fields(self: &Self, subject_type_id: TypeId, variant_name: &str) -> CompileResult<Vec<Option<TypeId>>> {
+        let enum_ = self.ty(&subject_type_id).as_enum().ice()?;
+        let variant = enum_.variants.iter().find(|(name, _)| name == variant_name).ice()?;
+        Ok(variant.1.as_data().ice()?.clone())
+    }
+
+    /// The type of the value a pattern matches against, given the access path to it. The empty path refers
+    /// to the match subject itself; otherwise the type of the last navigation step is the value's type.
+    fn pattern_value_type(self: &Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> TypeId {
+        access.last().map(|&(_, type_id)| type_id).unwrap_or(subject_type_id)
     }
 }
 
@@ -2368,27 +2341,6 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             size @ _ => Self::ice(&format!("Invalid stack address size: {:?}", size))?,
         })
     }
-
-    /// Collects the ref-typed frame slots that are live (in scope and initialized) at the current
-    /// position within a generator body. Each entry is `(frame_offset, constructor_offset)`; on a
-    /// mid-flight drop the VM uses these to release the frozen frame's heap references. `MaybeInitialized`
-    /// slots are included — at runtime a null reference (heap index 0) marks them as actually uninitialized
-    /// and is skipped.
-    fn collect_generator_live_refs(self: &Self) -> CompileResult<Vec<(StackAddress, StackAddress)>> {
-        let frame = self.locals.current();
-        let mut entries = Vec::new();
-        for (&binding_id, &local) in frame.map.iter() {
-            if self.init_state.in_scope(binding_id) && self.init_state.initialized(binding_id) != BranchingState::Uninitialized {
-                let type_id = self.binding_by_id(binding_id).type_id.ice()?;
-                let ty = self.ty(&type_id);
-                if ty.is_ref() {
-                    entries.push((local as StackAddress, self.constructor(ty)?));
-                }
-            }
-        }
-        Ok(entries)
-    }
-
     /// Builds the generator entry live-ref-map: the ref-typed arguments captured into a not-yet-started
     /// generator's frame, released if it is dropped before the first `next()`. Arguments occupy the start
     /// of the frame in declaration order, so their frame offsets are the cumulative argument sizes.
@@ -2417,6 +2369,45 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.writer.store_const(constructor_offset);
         }
         position
+    }
+
+    /// Emits code that pushes a borrowed copy of the value selected by `access` onto the stack, starting from
+    /// the match subject which is expected on top of the stack. Each step offsets into the current heap object
+    /// and fetches the field there, dereferencing across heap boundaries for nested (reference) values. No
+    /// refcounts are touched, so the result is a borrow the caller must consume (compare) or store (which incs).
+    fn write_pattern_value_load(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> CompileResult {
+        self.write_clone(self.ty(&subject_type_id));
+        for &(offset, field_type_id) in access {
+            self.writer.offsetx_16(offset as FrameAddress);
+            self.write_heap_fetch(self.ty(&field_type_id))?;
+        }
+        Ok(())
+    }
+
+    /// Emits the buffer-clone builtin for the collection reference on top of the stack, consuming it and
+    /// pushing an independent shallow clone (the clone shares the original's element/boxed sub-references
+    /// at their current refcount, per the heap-aggregate refcount-0 convention).
+    fn write_collection_clone(self: &mut Self, collection_type_id: TypeId) -> CompileResult {
+        if self.ty(&collection_type_id).as_map().is_some() {
+            let constructor = self.constructor(self.ty(&collection_type_id))?;
+            self.writer.call_builtinx(Builtin::map_clone, 0, constructor);
+        } else {
+            let element_type_id = self.ty(&collection_type_id).as_array().ice()?.type_id.ice()?;
+            let constructor = self.constructor(self.ty(&collection_type_id))?;
+            if self.ty(&element_type_id).is_ref() {
+                let element_constructor = self.constructor(self.ty(&element_type_id))?;
+                self.writer.call_builtinx(Builtin::array_clonex, constructor, element_constructor);
+            } else {
+                match self.ty(&element_type_id).primitive_size() {
+                    8 => self.writer.call_builtinx(Builtin::array_clone64, constructor, 0),
+                    4 => self.writer.call_builtinx(Builtin::array_clone32, constructor, 0),
+                    2 => self.writer.call_builtinx(Builtin::array_clone16, constructor, 0),
+                    1 => self.writer.call_builtinx(Builtin::array_clone8, constructor, 0),
+                    size @ _ => Self::ice(&format!("Unsupported array element size {} for for-loop clone", size))?,
+                };
+            }
+        }
+        Ok(())
     }
 
     /// Writes a primitive cast.

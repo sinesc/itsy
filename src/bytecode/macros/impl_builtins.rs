@@ -403,7 +403,7 @@ macro_rules! impl_builtins {
             // Placeholder types referenced by generated method signatures. They stand in for the
             // concrete types a value's element/key/value resolves to (which vary per instance) and are
             // documented as such.
-            /// Placeholder for an array's element type — the concrete type of the values it stores.
+            /// Placeholder for an array's element type - the concrete type of the values it stores.
             /// Not a built-in type; each array substitutes its own element type.
             pub type Element = ();
             /// Placeholder for the unsigned-integer counterpart of a signed numeric type (e.g. `u32` for

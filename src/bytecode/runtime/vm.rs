@@ -420,7 +420,7 @@ impl<T, U> VM<T, U> {
                 Constructor::Generator => {
                     // A generator carrier's frozen frame (ref-typed args/locals) and its yielded value/key
                     // slots hold heap references owned exclusively by the carrier, so they are released
-                    // exactly once, when the carrier itself is freed — never touched as its refcount
+                    // exactly once, when the carrier itself is freed - never touched as its refcount
                     // otherwise rises and falls (so Inc/DecNoFree skip them). The Generator constructor
                     // carries the value/key constructor offsets; the frame refs come from the live-ref-map
                     // recorded in the carrier's header.

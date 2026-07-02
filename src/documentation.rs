@@ -399,7 +399,7 @@ pub mod enums { }
 /// User-defined traits: shared behavior for structs and enums.
 ///
 /// A trait declares a set of methods that any type can implement. Once a type implements a trait,
-/// it can be used anywhere that trait is expected — no `dyn` or `impl` keywords are needed.
+/// it can be used anywhere that trait is expected - no `dyn` or `impl` keywords are needed.
 ///
 /// # Defining a trait
 ///
@@ -465,7 +465,7 @@ pub mod enums { }
 /// # Trait objects
 ///
 /// A trait name can be used as a type in function parameters, struct fields, and arrays. When a
-/// concrete value is passed to a trait-typed slot, it is stored as a *trait object* — the concrete
+/// concrete value is passed to a trait-typed slot, it is stored as a *trait object* - the concrete
 /// type is preserved at runtime so the correct implementation is dispatched dynamically:
 ///
 /// ``` ignore
@@ -557,7 +557,7 @@ pub mod traits { }
 ///
 /// [`Add`](crate::documentation::intrinsic_traits::Add), [`Sub`](crate::documentation::intrinsic_traits::Sub), [`Mul`](crate::documentation::intrinsic_traits::Mul), [`Div`](crate::documentation::intrinsic_traits::Div) and
 /// [`Rem`](crate::documentation::intrinsic_traits::Rem) overload the binary arithmetic operators. They all
-/// share one shape — `fn op(self: Self, rhs: Self) -> Self` — taking a right-hand operand of the same
+/// share one shape - `fn op(self: Self, rhs: Self) -> Self` - taking a right-hand operand of the same
 /// type and producing a value of that type. Each one backs both its binary operator *and* the matching
 /// compound-assignment form (`Add` backs `+` and `+=`, `Sub` backs `-` and `-=`, and so on); there is
 /// no separate trait for the compound form. A type may implement any combination of them:
@@ -989,7 +989,7 @@ pub mod intrinsic_traits {
     /// }
     /// ```
     ///
-    /// The index type is whatever the impl declares — here a `String` key over a map, with `get`
+    /// The index type is whatever the impl declares - here a `String` key over a map, with `get`
     /// returning a bare value (defaulting absent keys) while a separate `set` accepts the value:
     ///
     /// ``` ignore
@@ -1018,7 +1018,7 @@ pub mod intrinsic_traits {
     /// The [`IndexType`], [`ResultType`] and [`ValueType`] below are placeholders, not built-in types:
     /// each implementor substitutes its own concrete types (e.g. `u64`/`i64` or `String`/`i64` as above).
     /// [`IndexType`] must be the same in `get` and `set`; [`ResultType`] (the read result) and
-    /// [`ValueType`] (the written value) are independent — they may differ (e.g. `Option<i64>` / `i64`).
+    /// [`ValueType`] (the written value) are independent - they may differ (e.g. `Option<i64>` / `i64`).
     pub trait Index {
         /// Returns the element at the given index.
         fn get(self: Self, index: IndexType) -> ResultType;
@@ -1027,7 +1027,7 @@ pub mod intrinsic_traits {
     }
 
     /// Placeholder for the index ("key") type an [`Index`] implementor chooses (e.g. `u64`, `String`).
-    /// Not a built-in type — it must be the same in [`Index::get`] and [`Index::set`].
+    /// Not a built-in type - it must be the same in [`Index::get`] and [`Index::set`].
     pub type IndexType = ();
 
     /// Placeholder for the type [`Index::get`] returns. Not a built-in type. May be wrapped (e.g.
@@ -1046,7 +1046,7 @@ pub mod intrinsic_traits {
 /// each. Any `fn` whose body contains a `yield` is a generator function; calling it returns a
 /// [`Generator`] value rather than running the body.
 /// The body only runs as the generator is driven, and it picks up exactly where it left off after
-/// each `yield`. This lets a function describe a long — or unbounded — sequence lazily, computing
+/// each `yield`. This lets a function describe a long - or unbounded - sequence lazily, computing
 /// each element only when it is asked for.
 ///
 /// # Writing a generator function
@@ -1067,7 +1067,7 @@ pub mod intrinsic_traits {
 ///
 /// Each `yield expr` produces one value of type `V` and suspends the function until the next value is
 /// requested. Execution resumes on the statement following the `yield`, with all local variables
-/// intact. The function ends — and the generator becomes exhausted — when control falls off the end
+/// intact. The function ends - and the generator becomes exhausted - when control falls off the end
 /// of the body.
 ///
 /// A bare `return;` stops the generator early. Because a generator yields its values rather than
@@ -1087,7 +1087,7 @@ pub mod intrinsic_traits {
 /// # fn main() { }
 /// ```
 ///
-/// `yield` may only appear directly in a generator function's own body — not inside a helper function
+/// `yield` may only appear directly in a generator function's own body - not inside a helper function
 /// it calls.
 ///
 /// # Key/value generators
@@ -1137,7 +1137,7 @@ pub mod intrinsic_traits {
 /// [`Generator`]): [`next`] advances to the following
 /// `yield` and reports whether a value was produced, [`value`] returns that value, and [`key`]
 /// returns the key of a `Generator<K, V>`. This is what makes consuming an unbounded generator
-/// possible — you decide when to stop:
+/// possible - you decide when to stop:
 ///
 /// ``` ignore
 /// fn fib() -> Generator<u64> {
