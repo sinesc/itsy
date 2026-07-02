@@ -78,14 +78,14 @@ pub struct FunctionMeta {
 /// Appends the host-call return address and callable function table to `result`. Companion to
 /// [`deserialize_function_table`]; called from [`Program::to_bytes`](crate::bytecode::Program::to_bytes).
 pub(crate) fn serialize_function_table(host_return_addr: StackAddress, functions: &Map<String, FunctionMeta>, result: &mut Vec<u8>) {
-    result.extend_from_slice(&host_return_addr.to_le_bytes()[..]);
-    result.extend_from_slice(&functions.len().to_le_bytes()[..]);
+    result.extend_from_slice(&host_return_addr.to_ne_bytes()[..]);
+    result.extend_from_slice(&functions.len().to_ne_bytes()[..]);
     for (name, meta) in functions {
-        result.extend_from_slice(&name.len().to_le_bytes()[..]);
+        result.extend_from_slice(&name.len().to_ne_bytes()[..]);
         result.extend_from_slice(name.as_bytes());
-        result.extend_from_slice(&meta.addr.to_le_bytes()[..]);
-        result.extend_from_slice(&meta.arg_size.to_le_bytes()[..]);
-        result.extend_from_slice(&meta.args.len().to_le_bytes()[..]);
+        result.extend_from_slice(&meta.addr.to_ne_bytes()[..]);
+        result.extend_from_slice(&meta.arg_size.to_ne_bytes()[..]);
+        result.extend_from_slice(&meta.args.len().to_ne_bytes()[..]);
         for arg in &meta.args {
             result.push(*arg as u8);
         }
@@ -100,15 +100,15 @@ pub(crate) fn deserialize_function_table(program: &mut &[ u8 ]) -> Option<(Stack
     const USIZE: usize = size_of::<usize>();
     const SA: usize = size_of::<StackAddress>();
     const FA: usize = size_of::<FrameAddress>();
-    let host_return_addr = StackAddress::from_le_bytes(read(program, SA)?.try_into().ok()?);
-    let functions_count: usize = usize::from_le_bytes(read(program, USIZE)?.try_into().ok()?);
+    let host_return_addr = StackAddress::from_ne_bytes(read(program, SA)?.try_into().ok()?);
+    let functions_count: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
     let mut functions: Map<String, FunctionMeta> = Map::new();
     for _ in 0..functions_count {
-        let name_len: usize = usize::from_le_bytes(read(program, USIZE)?.try_into().ok()?);
+        let name_len: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
         let name = String::from_utf8(read(program, name_len)?.to_vec()).ok()?;
-        let addr = StackAddress::from_le_bytes(read(program, SA)?.try_into().ok()?);
-        let arg_size = FrameAddress::from_le_bytes(read(program, FA)?.try_into().ok()?);
-        let args_count: usize = usize::from_le_bytes(read(program, USIZE)?.try_into().ok()?);
+        let addr = StackAddress::from_ne_bytes(read(program, SA)?.try_into().ok()?);
+        let arg_size = FrameAddress::from_ne_bytes(read(program, FA)?.try_into().ok()?);
+        let args_count: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
         let mut args: Vec<ValueKind> = Vec::with_capacity(args_count);
         for _ in 0..args_count {
             args.push(ValueKind::from_u8(read(program, 1)?[0])?);

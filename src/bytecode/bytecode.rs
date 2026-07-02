@@ -103,13 +103,13 @@ impl<T> Program<T> where T: VMFunc<T> {
         let mut result = Vec::new();
         result.extend_from_slice("itsy".as_bytes());
         // save instructions
-        result.extend_from_slice(&self.instructions.len().to_le_bytes()[..]);
+        result.extend_from_slice(&self.instructions.len().to_ne_bytes()[..]);
         result.extend_from_slice(&self.instructions[..]);
         // save constants
-        result.extend_from_slice(&self.consts.len().to_le_bytes()[..]);
+        result.extend_from_slice(&self.consts.len().to_ne_bytes()[..]);
         result.extend_from_slice(&self.consts[..]);
         // save constant descriptors
-        result.extend_from_slice(&self.const_descriptors.len().to_le_bytes()[..]);
+        result.extend_from_slice(&self.const_descriptors.len().to_ne_bytes()[..]);
         for descriptor in &self.const_descriptors {
             result.extend_from_slice(&descriptor.to_bytes()[..]);
         }
@@ -126,13 +126,13 @@ impl<T> Program<T> where T: VMFunc<T> {
             return None;
         }
         // read instructions
-        let instructions_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let instructions_size: usize = usize::from_ne_bytes(read(&mut program, USIZE)?.try_into().ok()?);
         let instructions: Vec<u8> = read(&mut program, instructions_size)?.into();
         // read constants
-        let consts_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let consts_size: usize = usize::from_ne_bytes(read(&mut program, USIZE)?.try_into().ok()?);
         let consts: Vec<u8> = read(&mut program, consts_size)?.into();
         // read descriptors
-        let const_descriptors_size: usize = usize::from_le_bytes(read(&mut program, USIZE)?.try_into().ok()?);
+        let const_descriptors_size: usize = usize::from_ne_bytes(read(&mut program, USIZE)?.try_into().ok()?);
         let mut const_descriptors: Vec<ConstDescriptor> = Vec::new();
         for _ in 0..const_descriptors_size {
             const_descriptors.push(ConstDescriptor::from_bytes(read(&mut program, ConstDescriptor::SERIALIZED_SIZE)?)?);
@@ -181,54 +181,22 @@ impl HeapRefOp {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(u8)]
-#[allow(dead_code)]
-pub(crate) enum ConstEndianness {
-    None    = 0,
-    Integer = 1,
-    // architectures may use differing endianesses for floats and integers, so we have to differentiate here
-    Float   = 2,
-}
-
-impl ConstEndianness {
-    pub(crate) fn from_u8(index: u8) -> Option<Self> {
-        match index {
-            x if x == Self::None as u8 => Some(Self::None),
-            x if x == Self::Integer as u8 => Some(Self::Integer),
-            x if x == Self::Float as u8 => Some(Self::Float),
-            _ => None
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct ConstDescriptor {
-    pub(crate) size        : StackAddress,
-    pub(crate) endianness  : ConstEndianness,
+    pub(crate) size: StackAddress,
 }
 
 impl ConstDescriptor {
     // Descriptors describe consecutive blocks of the const pool in write order, so each block's
     // position is the running sum of all preceding sizes and does not need to be stored.
-    const SERIALIZED_SIZE: usize = 5;
+    const SERIALIZED_SIZE: usize = 4;
     fn to_bytes(self: &Self) -> [ u8; Self::SERIALIZED_SIZE ] {
-        let mut result = [ 0u8; Self::SERIALIZED_SIZE ];
-        let size = (self.size as u32).to_le_bytes();
-        // whoa clunky, can't copy to specific position into an array?
-        let size_slice = &mut result[0..4];
-        size_slice.copy_from_slice(&size);
-        result[4] = self.endianness as u8;
-        result
+        (self.size as u32).to_ne_bytes()
     }
     fn from_bytes(mut descriptor: &[ u8 ]) -> Option<Self> {
         const U32: usize = size_of::<u32>();
-        let size = u32::from_le_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
-        let endianness = ConstEndianness::from_u8(read(&mut descriptor, 1)?[0])?;
-        Some(Self {
-            size,
-            endianness,
-        })
+        let size = u32::from_ne_bytes(read(&mut descriptor, U32)?.try_into().ok()?) as StackAddress;
+        Some(Self { size })
     }
 }
 

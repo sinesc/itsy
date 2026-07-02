@@ -86,6 +86,31 @@ fn call_function_table_survives_serialization() {
     assert_eq!(*vm.call_function(&mut context, "greet", &[ &name ]).unwrap().downcast::<String>().unwrap(), "Hi there".to_string());
 }
 
+/// Verify float constants serialization.
+#[test]
+fn float_constants_survive_serialization() {
+    let input = format!("{} {}", PRELUDE, "
+        fn double_f32(x: f32) -> f32 { x * 2.0 }
+        fn double_f64(x: f64) -> f64 { x * 2.0 }
+        fn pi_f32() -> f32 { 3.14159 }
+        fn pi_f64() -> f64 { 3.141592653589793 }
+        fn main() { }
+    ");
+    let program = build_str::<TestFns>(&input).unwrap();
+    let bytes = program.to_bytes();
+    let restored = Program::<TestFns>::from_bytes(&bytes).expect("failed to deserialize program");
+    let mut vm = VM::new(restored);
+    let mut context = Vec::new();
+
+    // Test f32 round-trip
+    assert_eq!(*vm.call_function(&mut context, "double_f32", &[ &21.0f32 ]).unwrap().downcast::<f32>().unwrap(), 42.0f32);
+    assert_eq!(*vm.call_function(&mut context, "pi_f32", &[]).unwrap().downcast::<f32>().unwrap(), 3.14159f32);
+
+    // Test f64 round-trip
+    assert_eq!(*vm.call_function(&mut context, "double_f64", &[ &21.0f64 ]).unwrap().downcast::<f64>().unwrap(), 42.0f64);
+    assert_eq!(*vm.call_function(&mut context, "pi_f64", &[]).unwrap().downcast::<f64>().unwrap(), 3.141592653589793f64);
+}
+
 #[test]
 fn call_function_not_found() {
     let mut vm = build_vm("fn main() { }");

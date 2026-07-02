@@ -10,7 +10,7 @@ macro_rules! impl_opcodes {
         let (int_bytes, rest) = $from.split_at(std::mem::size_of::<$ty>());
         *$from = rest;
         $( impl_opcodes!(@inc_pc $ty, $counter); )?
-        $ty::from_le_bytes(int_bytes.try_into().unwrap())
+        $ty::from_ne_bytes(int_bytes.try_into().unwrap())
     });
     // Read opcode arguments
     (@read_arg String, $from:ident, $counter:ident) => ( {
@@ -28,14 +28,14 @@ macro_rules! impl_opcodes {
     (@map_reader_type RustFn) => ( T );
     (@map_reader_type $ty:tt) => ( $ty );
     // Write opcode arguments
-    (@write_arg RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_le_bytes()[..]) );
-    (@write_arg Builtin, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_le_bytes()[..]) );
+    (@write_arg RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_ne_bytes()[..]) );
+    (@write_arg Builtin, $value:expr, $to:ident) => ( $to.write(&$value.to_index().to_ne_bytes()[..]) );
     (@write_arg HeapRefOp, $value:expr, $to:ident) => ( $to.write(&[ $value as u8 ]) );
     (@write_arg String, $value:expr, $to:ident) => (
-        $to.write(&($value.len() as StackAddress).to_le_bytes()[..]);
+        $to.write(&($value.len() as StackAddress).to_ne_bytes()[..]);
         $to.write(&$value.as_bytes()[..]);
     );
-    (@write_arg $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_le_bytes()[..]) );
+    (@write_arg $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_ne_bytes()[..]) );
     // Map parameter type names to writer types
     (@map_writer_type RustFn) => ( T );
     (@map_writer_type String) => ( &str );

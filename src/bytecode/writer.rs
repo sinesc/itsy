@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, INSTRUCTION_ALIGNMENT};
-use crate::bytecode::{VMFunc, Program, ConstEndianness, ConstDescriptor, Constructor};
+use crate::bytecode::{VMFunc, Program, ConstDescriptor, Constructor};
 use std::cell::{Cell, RefCell, RefMut};
 
 /// Bytecode buffer and writer.
@@ -81,15 +81,15 @@ impl<T> Writer<T> where T: VMFunc<T> {
     }
     /// Reserves space for a `StackAddress` array of `size` bytes on the const pool (filled in later
     /// via `update_const`) and returns its base address. The space is reserved as individual
-    /// `StackAddress` slots tagged `Integer` so that `init_consts` performs the little-endian ->
-    /// native conversion the values written via `update_const` require.
+    /// `StackAddress` slots so that `init_consts` performs the native-endianness conversion the
+    /// values written via `update_const` require.
     pub fn reserve_const_data(self: &Self, size: StackAddress) -> StackAddress {
         let slot_size = size_of::<StackAddress>() as StackAddress;
         debug_assert!(size % slot_size == 0, "reserved const data must be a multiple of StackAddress size");
         let position = self.program().consts.len() as StackAddress;
         let mut program = self.program();
         for _ in 0..(size / slot_size) {
-            program.const_descriptors.push(ConstDescriptor { size: slot_size, endianness: ConstEndianness::Integer });
+            program.const_descriptors.push(ConstDescriptor { size: slot_size });
         }
         let pool_size = program.consts.len();
         program.consts.resize(pool_size + size as usize, 0);
@@ -100,20 +100,20 @@ impl<T> Writer<T> where T: VMFunc<T> {
 /// Implements const pool write traits
 #[allow(unused_macros)]
 macro_rules! impl_store_const {
-    ($type:tt, $endianess:path) => {
+    ($type:tt) => {
         impl<P> StoreConst<$type> for Writer<P> where P: VMFunc<P> {
             fn store_const(self: &Self, value: $type) -> StackAddress {
                 let position = self.program().consts.len() as StackAddress;
                 let size = size_of::<$type>() as StackAddress;
                 let mut program = self.program();
-                program.const_descriptors.push(ConstDescriptor { size, endianness: $endianess });
-                program.consts.extend_from_slice(&value.to_le_bytes());
+                program.const_descriptors.push(ConstDescriptor { size });
+                program.consts.extend_from_slice(&value.to_ne_bytes());
                 position
             }
             fn update_const(self: &Self, position: StackAddress, value: $type) {
                 let mut program = self.program();
                 let position = position as usize;
-                for (index, &byte) in value.to_le_bytes().iter().enumerate() {
+                for (index, &byte) in value.to_ne_bytes().iter().enumerate() {
                     program.consts[position + index] = byte;
                 }
             }
@@ -129,18 +129,18 @@ pub trait StoreConst<T> {
     fn update_const(self: &Self, position: StackAddress, value: T);
 }
 
-impl_store_const!(u8, ConstEndianness::None);
-impl_store_const!(i8, ConstEndianness::None);
-impl_store_const!(u16, ConstEndianness::Integer);
-impl_store_const!(i16, ConstEndianness::Integer);
-impl_store_const!(u32, ConstEndianness::Integer);
-impl_store_const!(i32, ConstEndianness::Integer);
-impl_store_const!(f32, ConstEndianness::Float);
-impl_store_const!(u64, ConstEndianness::Integer);
-impl_store_const!(i64, ConstEndianness::Integer);
-impl_store_const!(f64, ConstEndianness::Float);
-impl_store_const!(usize, ConstEndianness::Integer);
-impl_store_const!(isize, ConstEndianness::Integer);
+impl_store_const!(u8);
+impl_store_const!(i8);
+impl_store_const!(u16);
+impl_store_const!(i16);
+impl_store_const!(u32);
+impl_store_const!(i32);
+impl_store_const!(f32);
+impl_store_const!(u64);
+impl_store_const!(i64);
+impl_store_const!(f64);
+impl_store_const!(usize);
+impl_store_const!(isize);
 
 impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
     fn store_const(self: &Self, value: &str) -> StackAddress {
@@ -151,7 +151,7 @@ impl<P> StoreConst<&str> for Writer<P> where P: VMFunc<P> {
         // string data
         let position = self.program().consts.len() as StackAddress;
         let mut program = self.program();
-        program.const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
+        program.const_descriptors.push(ConstDescriptor { size });
         program.consts.extend_from_slice(raw_bytes);
         position
     }
@@ -166,7 +166,7 @@ impl<P> StoreConst<Constructor> for Writer<P> where P: VMFunc<P> {
         let position = self.program().consts.len() as StackAddress;
         let size = size_of::<Constructor>() as StackAddress;
         let mut program = self.program();
-        program.const_descriptors.push(ConstDescriptor { size, endianness: ConstEndianness::None });
+        program.const_descriptors.push(ConstDescriptor { size });
         program.consts.push(value.to_u8());
         position
     }

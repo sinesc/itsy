@@ -2225,7 +2225,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Writes given numeric as an immediate value. // FIXME: this will cause endianess issues when compiled/run on different endianess
+    /// Writes given numeric as an immediate value.
     fn write_immediate(self: &Self, ty: &Type, numeric: Numeric) -> CompileResult<StackAddress> {
         Ok(match numeric {
             Numeric::Signed(v) => {
