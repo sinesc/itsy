@@ -1,0 +1,19 @@
+// Struct (heap) equality comparisons.
+// Exercises: heap_ceq_16, heap_cneq_16
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..1000 {
+        let p1 = Point { x: 1, y: 2 };
+        let p2 = Point { x: 1, y: 2 };
+        let p3 = Point { x: 3, y: 4 };
+        if p1 == p2 { count += 1; }
+        if p1 != p3 { count += 1; }
+    }
+    let _ = count;
+}

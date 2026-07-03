@@ -1,0 +1,69 @@
+// Ordering comparisons across all numeric types.
+// Exercises: clt*, clte*, cgt*, cgte* (all numeric types)
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..10000 {
+        let a: i8 = 1;
+        let b: i8 = 2;
+        if a < b { count += 1; }
+        if a <= a { count += 1; }
+        if b > a { count += 1; }
+        if b >= b { count += 1; }
+        let c: i16 = 1;
+        let d: i16 = 2;
+        if c < d { count += 1; }
+        if c <= c { count += 1; }
+        if d > c { count += 1; }
+        if d >= d { count += 1; }
+        let e: i32 = 1;
+        let f: i32 = 2;
+        if e < f { count += 1; }
+        if e <= e { count += 1; }
+        if f > e { count += 1; }
+        if f >= f { count += 1; }
+        let g: i64 = 1;
+        let h: i64 = 2;
+        if g < h { count += 1; }
+        if g <= g { count += 1; }
+        if h > g { count += 1; }
+        if h >= h { count += 1; }
+        let i: u8 = 1;
+        let j: u8 = 2;
+        if i < j { count += 1; }
+        if i <= i { count += 1; }
+        if j > i { count += 1; }
+        if j >= j { count += 1; }
+        let k: u16 = 1;
+        let l: u16 = 2;
+        if k < l { count += 1; }
+        if k <= k { count += 1; }
+        if l > k { count += 1; }
+        if l >= l { count += 1; }
+        let m: u32 = 1;
+        let n: u32 = 2;
+        if m < n { count += 1; }
+        if m <= m { count += 1; }
+        if n > m { count += 1; }
+        if n >= n { count += 1; }
+        let o: u64 = 1;
+        let p: u64 = 2;
+        if o < p { count += 1; }
+        if o <= o { count += 1; }
+        if p > o { count += 1; }
+        if p >= p { count += 1; }
+        let q: f32 = 1.0;
+        let r: f32 = 2.0;
+        if q < r { count += 1; }
+        if q <= q { count += 1; }
+        if r > q { count += 1; }
+        if r >= r { count += 1; }
+        let s: f64 = 1.0;
+        let t: f64 = 2.0;
+        if s < t { count += 1; }
+        if s <= s { count += 1; }
+        if t > s { count += 1; }
+        if t >= t { count += 1; }
+    }
+    let _ = count;
+}

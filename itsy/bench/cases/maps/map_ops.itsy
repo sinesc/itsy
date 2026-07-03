@@ -1,0 +1,20 @@
+// Map operations: creation, insertion, indexing, and iteration.
+// Exercises: map_new, map_append, map_index, map_iter, map_iter_kv
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..100 {
+        let m = [ "a" => 1i32, "b" => 2i32, "c" => 3i32 ];
+        count += m["a"];
+        count += m["b"];
+        count += m["c"];
+        for v in m {
+            count += v;
+        }
+        for k, v in m {
+            count += v;
+            let _ = k;
+        }
+    }
+    let _ = count;
+}

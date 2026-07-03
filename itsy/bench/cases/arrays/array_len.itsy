@@ -1,0 +1,18 @@
+// Array length operations.
+// Exercises: heap_size
+
+fn setup() -> [ i32 ] {
+    let arr: [ i32 ] = [];
+    for i in 0..1000 {
+        arr.push(i);
+    }
+    arr
+}
+
+fn bench(arr: [ i32 ]) {
+    let mut total = 0;
+    for _ in 0..10000 {
+        total += arr.len();
+    }
+    let _ = total;
+}

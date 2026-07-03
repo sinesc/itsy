@@ -1,0 +1,17 @@
+// Unary negate on signed integer types.
+// Exercises: negs8, negs16, negs32, negs64
+
+fn bench() {
+    let mut acc: i64 = 0;
+    for _ in 0..10000 {
+        let a: i8 = 1;
+        let b: i16 = 1;
+        let c: i32 = 1;
+        let d: i64 = 1;
+        acc += (-a) as i64;
+        acc += (-b) as i64;
+        acc += (-c) as i64;
+        acc += -d;
+    }
+    let _ = acc;
+}

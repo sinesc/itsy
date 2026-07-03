@@ -1,0 +1,41 @@
+// Shift operations across all integer types.
+// Exercises: shls*, shlu*, shrs*, shru*
+
+fn bench() {
+    let mut acc: u64 = 0;
+    for _ in 0..10000 {
+        let a: i8 = 1;
+        let b: i8 = 4;
+        acc += ((a << b) as u8) as u64;
+        acc += ((127i8 >> b) as u8) as u64;
+        let c: i16 = 1;
+        let d: i16 = 4;
+        acc += ((c << d) as u16) as u64;
+        acc += ((255i16 >> d) as u16) as u64;
+        let e: i32 = 1;
+        let f: i32 = 4;
+        acc += ((e << f) as u32) as u64;
+        acc += ((255i32 >> f) as u32) as u64;
+        let g: i64 = 1;
+        let h: i64 = 4;
+        acc += (g << h) as u64;
+        acc += (255i64 >> h) as u64;
+        let i: u8 = 1;
+        let j: u8 = 4;
+        acc += (i << j) as u64;
+        acc += (255u8 >> j) as u64;
+        let k: u16 = 1;
+        let l: u16 = 4;
+        acc += (k << l) as u64;
+        acc += (255u16 >> l) as u64;
+        let m: u32 = 1;
+        let n: u32 = 4;
+        acc += (m << n) as u64;
+        acc += (255u32 >> n) as u64;
+        let o: u64 = 1;
+        let p: u64 = 4;
+        acc += o << p;
+        acc += 255u64 >> p;
+    }
+    let _ = acc;
+}

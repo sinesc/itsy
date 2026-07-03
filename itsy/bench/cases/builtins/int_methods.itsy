@@ -1,0 +1,15 @@
+// Integer builtin methods.
+// Exercises: call_builtin (Integer variants)
+
+fn bench() {
+    let mut acc: i64 = 0;
+    for _ in 0..10000 {
+        acc += (-5i32).abs() as i64;
+        acc += (3i32).pow(2) as i64;
+        acc += (16i32).isqrt() as i64;
+        acc += (8i32).ilog2() as i64;
+        acc += (1000i32).ilog10() as i64;
+        acc += (10i64).abs_diff(3) as i64;
+    }
+    let _ = acc;
+}

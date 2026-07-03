@@ -1,0 +1,18 @@
+// Array iteration over i32 elements.
+// Exercises: array_iter32, heap_fetch_element32
+
+fn setup() -> [ i32 ] {
+    let arr: [ i32 ] = [];
+    for i in 0..1000 {
+        arr.push(i);
+    }
+    arr
+}
+
+fn bench(arr: [ i32 ]) {
+    let mut sum = 0;
+    for v in arr {
+        sum += v;
+    }
+    let _ = sum;
+}

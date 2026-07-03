@@ -1,0 +1,23 @@
+// Float arithmetic operations: f32 and f64.
+// Exercises: addf32, addf64, subf32, subf64, mulf32, mulf64, divf32, divf64, remf32, remf64
+
+fn bench() {
+    let mut acc: f64 = 0.0;
+    for _ in 0..10000 {
+        let a: f32 = 1.5;
+        let b: f32 = 2.5;
+        acc += (a + b) as f64;
+        acc += (a - b) as f64;
+        acc += (a * b) as f64;
+        acc += (a / b) as f64;
+        acc += (a % b) as f64;
+        let c: f64 = 1.5;
+        let d: f64 = 2.5;
+        acc += c + d;
+        acc += c - d;
+        acc += c * d;
+        acc += c / d;
+        acc += c % d;
+    }
+    let _ = acc;
+}

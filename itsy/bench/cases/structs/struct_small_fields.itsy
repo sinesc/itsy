@@ -1,0 +1,24 @@
+// Structs with small integer fields (u8, u16).
+// Exercises: heap_fetch_member8, heap_fetch_member16
+
+struct Small {
+    a: u8,
+    b: u16,
+}
+
+fn setup() -> [ Small ] {
+    let arr: [ Small ] = [];
+    for i in 0..500 {
+        arr.push(Small { a: (i % 256) as u8, b: i as u16 });
+    }
+    arr
+}
+
+fn bench(arr: [ Small ]) {
+    let mut sum = 0;
+    for s in arr {
+        sum += s.a as i32;
+        sum += s.b as i32;
+    }
+    let _ = sum;
+}

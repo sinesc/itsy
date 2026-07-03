@@ -1,0 +1,26 @@
+// Structs with heap-reference fields (String).
+// Exercises: heap_fetch_memberx, heap_putx_new, heap_putx_replace
+
+struct HasString {
+    s: String,
+}
+
+fn setup() -> [ HasString ] {
+    let arr: [ HasString ] = [];
+    for i in 0..100 {
+        arr.push(HasString { s: i as String });
+    }
+    arr
+}
+
+fn bench(arr: [ HasString ]) {
+    let mut count = 0;
+    for item in arr {
+        if item.s == "42" { count += 1; }
+    }
+    // Exercise heap_putx_replace by mutating a field
+    let mut hs = HasString { s: "hello" };
+    hs.s = "world";
+    let _ = hs.s;
+    let _ = count;
+}

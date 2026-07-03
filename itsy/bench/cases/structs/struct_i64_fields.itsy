@@ -1,0 +1,24 @@
+// Structs with i64 fields.
+// Exercises: heap_fetch_member64, ret64
+
+struct Big {
+    x: i64,
+    y: i64,
+}
+
+fn setup() -> [ Big ] {
+    let arr: [ Big ] = [];
+    for i in 0..500 {
+        arr.push(Big { x: i as i64, y: (i * 2) as i64 });
+    }
+    arr
+}
+
+fn bench(arr: [ Big ]) {
+    let mut sum: i64 = 0;
+    for s in arr {
+        sum += s.x;
+        sum += s.y;
+    }
+    let _ = sum;
+}

@@ -1,0 +1,10 @@
+// Loop over u8 range.
+// Exercises: loopu8, loops8
+
+fn bench() {
+    let mut sum = 0;
+    for i in 0u8..255 {
+        sum += i as i32;
+    }
+    let _ = sum;
+}

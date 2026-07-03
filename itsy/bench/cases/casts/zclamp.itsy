@@ -1,0 +1,35 @@
+// Zero-clamp conversions: signed to unsigned casts that clamp negative values to zero.
+// Exercises: zclampi8, zclampi16, zclampi32, zclampi64, zclampf32, zclampf64
+
+fn bench() {
+    let mut acc: u64 = 0;
+    for _ in 0..10000 {
+        let a: i8 = -1;
+        let b: i16 = -1;
+        let c: i32 = -1;
+        let d: i64 = -1;
+        let e: f32 = -1.0;
+        let f: f64 = -1.0;
+        // Use negative values to trigger the zclamp path
+        acc += (a as u8) as u64;
+        acc += (b as u16) as u64;
+        acc += (c as u32) as u64;
+        acc += d as u64;
+        acc += (e as u32) as u64;
+        acc += (f as u64);
+        // Also exercise the non-clamped path with positive values
+        let a2: i8 = 1;
+        let b2: i16 = 1;
+        let c2: i32 = 1;
+        let d2: i64 = 1;
+        let e2: f32 = 1.0;
+        let f2: f64 = 1.0;
+        acc += (a2 as u8) as u64;
+        acc += (b2 as u16) as u64;
+        acc += (c2 as u32) as u64;
+        acc += d2 as u64;
+        acc += (e2 as u32) as u64;
+        acc += (f2 as u64);
+    }
+    let _ = acc;
+}

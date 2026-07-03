@@ -1,0 +1,18 @@
+// Boolean logic: &&, ||, ! with short-circuit evaluation.
+// Exercises: and, or, not, j0_nc, jn0_nc, jn0sa_nc
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..10000 {
+        let a = true;
+        let b = true;
+        let c = false;
+        if a && b { count += 1; }
+        if a && c { count += 1; }
+        if c || a { count += 1; }
+        if c || c { count += 1; }
+        if !c { count += 1; }
+        if !a { count += 1; }
+    }
+    let _ = count;
+}

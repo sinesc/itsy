@@ -1,0 +1,30 @@
+// Narrowing (trim) and widening (extend) conversions between integer sizes.
+// Exercises: trimu16, trimu32, trimu64, trims16, trims32, trims64,
+//            extendu8, extendu16, extendu32, extends8, extends16, extends32
+
+fn bench() {
+    let mut acc: i64 = 0;
+    for i in 0..10000 {
+        let a: u64 = i as u64;
+        let b: i64 = i as i64;
+        let c: u8 = (i % 256) as u8;
+        let d: u16 = (i % 65536) as u16;
+        let e: u32 = i as u32;
+        let f: i8 = (i % 128) as i8;
+        let g: i16 = (i % 32768) as i16;
+        let h: i32 = i as i32;
+        acc += (a as u16) as i64;
+        acc += (a as u32) as i64;
+        acc += (a as u8) as i64;
+        acc += (b as i16) as i64;
+        acc += (b as i32) as i64;
+        acc += (b as i8) as i64;
+        acc += (c as u64) as i64;
+        acc += (d as u64) as i64;
+        acc += (e as u64) as i64;
+        acc += (f as i64);
+        acc += (g as i64);
+        acc += (h as i64);
+    }
+    let _ = acc;
+}

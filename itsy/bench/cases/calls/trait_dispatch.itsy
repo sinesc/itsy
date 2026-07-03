@@ -1,0 +1,43 @@
+// Trait dispatch: virtual and dynamic calls.
+// Exercises: call_virtual, call_dynamic
+
+struct TypeA {
+    value: i32,
+}
+
+struct TypeB {
+    value: i32,
+}
+
+trait Describable {
+    fn describe(self: Self) -> i32;
+}
+
+impl Describable for TypeA {
+    fn describe(self: Self) -> i32 {
+        self.value + 1
+    }
+}
+
+impl Describable for TypeB {
+    fn describe(self: Self) -> i32 {
+        self.value * 2
+    }
+}
+
+fn call_describe(item: Describable) -> i32 {
+    item.describe()
+}
+
+fn bench() {
+    let mut acc = 0;
+    for _ in 0..1000 {
+        let a = TypeA { value: 10 };
+        let b = TypeB { value: 20 };
+        acc += call_describe(a);
+        acc += call_describe(b);
+        acc += a.describe();
+        acc += b.describe();
+    }
+    let _ = acc;
+}

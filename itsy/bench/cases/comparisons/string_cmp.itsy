@@ -1,0 +1,20 @@
+// String comparison operations.
+// Exercises: string_ceq, string_cneq, string_clt, string_clte, string_cgt, string_cgte
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..1000 {
+        let a = "hello";
+        let b = "hello";
+        let c = "world";
+        let d = "abc";
+        let e = "def";
+        if a == b { count += 1; }
+        if a != c { count += 1; }
+        if d < e { count += 1; }
+        if d <= d { count += 1; }
+        if e > d { count += 1; }
+        if e >= e { count += 1; }
+    }
+    let _ = count;
+}

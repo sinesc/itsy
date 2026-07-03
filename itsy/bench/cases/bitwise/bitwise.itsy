@@ -1,0 +1,58 @@
+// Bitwise operations across all integer types.
+// Exercises: bitands*, bitandu*, bitors*, bitoru*, bitxors*, bitxoru*, bitnots*, bitnotu*
+
+fn bench() {
+    let mut acc: u64 = 0;
+    for _ in 0..10000 {
+        let a: i8 = 0x7F;
+        let b: i8 = 0x0F;
+        acc += ((a & b) as u8) as u64;
+        acc += ((a | b) as u8) as u64;
+        acc += ((a ^ b) as u8) as u64;
+        acc += ((!a) as u8) as u64;
+        let c: i16 = 0xFF;
+        let d: i16 = 0x0F;
+        acc += ((c & d) as u16) as u64;
+        acc += ((c | d) as u16) as u64;
+        acc += ((c ^ d) as u16) as u64;
+        acc += ((!c) as u16) as u64;
+        let e: i32 = 0xFF;
+        let f: i32 = 0x0F;
+        acc += ((e & f) as u32) as u64;
+        acc += ((e | f) as u32) as u64;
+        acc += ((e ^ f) as u32) as u64;
+        acc += ((!e) as u32) as u64;
+        let g: i64 = 0xFF;
+        let h: i64 = 0x0F;
+        acc += (g & h) as u64;
+        acc += (g | h) as u64;
+        acc += (g ^ h) as u64;
+        acc += (!g) as u64;
+        let i: u8 = 0xFF;
+        let j: u8 = 0x0F;
+        acc += (i & j) as u64;
+        acc += (i | j) as u64;
+        acc += (i ^ j) as u64;
+        acc += (!i) as u64;
+        let k: u16 = 0xFF;
+        let l: u16 = 0x0F;
+        acc += (k & l) as u64;
+        acc += (k | l) as u64;
+        acc += (k ^ l) as u64;
+        acc += (!k) as u64;
+        let m: u32 = 0xFF;
+        let n: u32 = 0x0F;
+        acc += (m & n) as u64;
+        acc += (m | n) as u64;
+        acc += (m ^ n) as u64;
+        acc += (!m) as u64;
+        let o: u64 = 0xFF;
+        let p: u64 = 0x0F;
+        let not_o: u32 = (!o) as u32;
+        acc += o & p;
+        acc += o | p;
+        acc += o ^ p;
+        acc += not_o as u64;
+    }
+    let _ = acc;
+}

@@ -1,0 +1,17 @@
+// Converting numeric types to strings.
+// Exercises: i64_to_string, u64_to_string, f32_to_string, f64_to_string
+
+fn bench() {
+    let mut s = "";
+    for i in 0..1000 {
+        let a: i64 = i as i64;
+        let b: u64 = i as u64;
+        let c: f32 = i as f32;
+        let d: f64 = i as f64;
+        s = a as String;
+        s = b as String;
+        s = c as String;
+        s = d as String;
+    }
+    let _ = s;
+}

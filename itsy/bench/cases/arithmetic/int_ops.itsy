@@ -1,0 +1,51 @@
+// Integer arithmetic operations across all integer sizes.
+// Exercises: add*, sub*, mul*, div*, rem* (all integer sizes)
+
+fn bench() {
+    let mut acc: i64 = 0;
+    for _ in 0..10000 {
+        let a: i8 = 10;
+        let b: i8 = 3;
+        acc += (a + b) as i64;
+        acc += (a - b) as i64;
+        acc += (a * b) as i64;
+        acc += (a / b) as i64;
+        acc += (a % b) as i64;
+        let c: i16 = 10;
+        let d: i16 = 3;
+        acc += (c + d) as i64;
+        acc += (c - d) as i64;
+        acc += (c * d) as i64;
+        acc += (c / d) as i64;
+        acc += (c % d) as i64;
+        let e: i64 = 10;
+        let f: i64 = 3;
+        acc += e + f;
+        acc += e - f;
+        acc += e * f;
+        acc += e / f;
+        acc += e % f;
+        let g: u8 = 10;
+        let h: u8 = 3;
+        acc += (g + h) as i64;
+        acc += (g - h) as i64;
+        acc += (g * h) as i64;
+        acc += (g / h) as i64;
+        acc += (g % h) as i64;
+        let i: u16 = 10;
+        let j: u16 = 3;
+        acc += (i + j) as i64;
+        acc += (i - j) as i64;
+        acc += (i * j) as i64;
+        acc += (i / j) as i64;
+        acc += (i % j) as i64;
+        let k: u32 = 10;
+        let l: u32 = 3;
+        acc += (k + l) as i64;
+        acc += (k - l) as i64;
+        acc += (k * l) as i64;
+        acc += (k / l) as i64;
+        acc += (k % l) as i64;
+    }
+    let _ = acc;
+}

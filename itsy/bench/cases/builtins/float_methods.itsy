@@ -1,0 +1,19 @@
+// Float builtin methods.
+// Exercises: call_builtin (Float variants)
+
+fn bench() {
+    let mut acc: f64 = 0.0;
+    for _ in 0..10000 {
+        acc += (-3.14f64).abs();
+        acc += (3.5f64).floor();
+        acc += (3.5f64).ceil();
+        acc += (3.7f64).round();
+        acc += (2.0f64).sqrt();
+        acc += (8.0f64).cbrt();
+        acc += (2.0f64).powf(3.0);
+        acc += (0.693f64).exp();
+        acc += (2.0f64).log2();
+        acc += (100.0f64).log10();
+    }
+    let _ = acc;
+}

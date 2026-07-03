@@ -1,0 +1,18 @@
+// Array iteration with index-value pairs over i64 elements.
+// Exercises: array_iter_iv64, heap_fetch_element64
+
+fn setup() -> [ i64 ] {
+    let arr: [ i64 ] = [];
+    for i in 0..1000 {
+        arr.push(i as i64);
+    }
+    arr
+}
+
+fn bench(arr: [ i64 ]) {
+    let mut sum = 0;
+    for i, v in arr {
+        sum += v + i as i64;
+    }
+    let _ = sum;
+}

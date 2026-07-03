@@ -1,0 +1,23 @@
+// String builtin methods.
+// Exercises: call_builtin (String variants)
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..1000 {
+        count += "hello world".len();
+        let s = "hello world".slice(0, 5);
+        if s == "hello" { count += 1; }
+        if "hello world".contains("world") { count += 1; }
+        if "hello".starts_with("he") { count += 1; }
+        if "hello".ends_with("lo") { count += 1; }
+        let trimmed = "  hello  ".trim();
+        if trimmed == "hello" { count += 1; }
+        let upper = "hello".to_uppercase();
+        if upper == "HELLO" { count += 1; }
+        let lower = "HELLO".to_lowercase();
+        if lower == "hello" { count += 1; }
+        let replaced = "hello world".replace("world", "there");
+        if replaced == "hello there" { count += 1; }
+    }
+    let _ = count;
+}

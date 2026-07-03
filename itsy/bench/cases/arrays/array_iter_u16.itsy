@@ -1,0 +1,18 @@
+// Array iteration over u16 elements.
+// Exercises: array_iter16, heap_fetch_element16
+
+fn setup() -> [ u16 ] {
+    let arr: [ u16 ] = [];
+    for i in 0..1000 {
+        arr.push(i as u16);
+    }
+    arr
+}
+
+fn bench(arr: [ u16 ]) {
+    let mut sum = 0;
+    for v in arr {
+        sum += v as i32;
+    }
+    let _ = sum;
+}

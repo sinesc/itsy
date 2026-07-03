@@ -1,0 +1,18 @@
+// Functions returning small types (u8, u16).
+// Exercises: ret8, ret16, load8, load16, store8, store16
+
+fn get_u8() -> u8 { 42 }
+fn get_u16() -> u16 { 1000 }
+fn add_u8(a: u8, b: u8) -> u8 { a + b }
+fn add_u16(a: u16, b: u16) -> u16 { a + b }
+
+fn bench() {
+    let mut acc: u64 = 0;
+    for _ in 0..10000 {
+        acc += get_u8() as u64;
+        acc += get_u16() as u64;
+        acc += add_u8(1, 2) as u64;
+        acc += add_u16(10, 20) as u64;
+    }
+    let _ = acc;
+}

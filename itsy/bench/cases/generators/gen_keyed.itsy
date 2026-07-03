@@ -1,0 +1,22 @@
+// Generator (coroutine) key-value iteration.
+// Exercises: gen_yield_kv, gen_key
+
+fn pairs(start: i32, end: i32) -> Generator<u64, i32> {
+    let mut i = start;
+    while i < end {
+        yield i as u64, i;
+        i += 1;
+    }
+}
+
+fn bench() {
+    let mut sum = 0;
+    for _ in 0..100 {
+        let g = pairs(0, 1000);
+        while g.next() {
+            let _ = g.key();
+            sum += g.value();
+        }
+    }
+    let _ = sum;
+}

@@ -1,0 +1,51 @@
+// Equality and inequality comparisons across all numeric types and bool.
+// Exercises: ceq8, ceq16, ceq32, ceq64, cneq8, cneq16, cneq32, cneq64 (and float variants)
+
+fn bench() {
+    let mut count = 0;
+    for _ in 0..10000 {
+        let a: i8 = 1;
+        let b: i8 = 2;
+        if a == a { count += 1; }
+        if a != b { count += 1; }
+        let c: i16 = 1;
+        let d: i16 = 2;
+        if c == c { count += 1; }
+        if c != d { count += 1; }
+        let e: i32 = 1;
+        let f: i32 = 2;
+        if e == e { count += 1; }
+        if e != f { count += 1; }
+        let g: i64 = 1;
+        let h: i64 = 2;
+        if g == g { count += 1; }
+        if g != h { count += 1; }
+        let i: u8 = 1;
+        let j: u8 = 2;
+        if i == i { count += 1; }
+        if i != j { count += 1; }
+        let k: u16 = 1;
+        let l: u16 = 2;
+        if k == k { count += 1; }
+        if k != l { count += 1; }
+        let m: u32 = 1;
+        let n: u32 = 2;
+        if m == m { count += 1; }
+        if m != n { count += 1; }
+        let o: u64 = 1;
+        let p: u64 = 2;
+        if o == o { count += 1; }
+        if o != p { count += 1; }
+        let q: f32 = 1.0;
+        let r: f32 = 2.0;
+        if q == q { count += 1; }
+        if q != r { count += 1; }
+        let s: f64 = 1.0;
+        let t: f64 = 2.0;
+        if s == s { count += 1; }
+        if s != t { count += 1; }
+        if true == true { count += 1; }
+        if true != false { count += 1; }
+    }
+    let _ = count;
+}

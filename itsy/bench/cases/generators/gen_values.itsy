@@ -1,0 +1,21 @@
+// Generator (coroutine) value iteration.
+// Exercises: gen_new, gen_next, gen_yield, gen_return, gen_value
+
+fn count_up(start: i32, end: i32) -> Generator<i32> {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i += 1;
+    }
+}
+
+fn bench() {
+    let mut sum = 0;
+    for _ in 0..100 {
+        let g = count_up(0, 1000);
+        while g.next() {
+            sum += g.value();
+        }
+    }
+    let _ = sum;
+}
