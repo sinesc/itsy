@@ -4,6 +4,8 @@
 use BenchAPI::{make_string_array, join_strings};
 
 fn bench() {
-    let arr = make_string_array(20);
-    let _joined = join_strings(arr);
+    for _ in 0..380 {
+        let arr = make_string_array(20);
+        let _joined = join_strings(arr);
+    }
 }

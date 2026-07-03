@@ -31,7 +31,7 @@ fn call_describe(item: Describable) -> i32 {
 
 fn bench() {
     let mut acc = 0;
-    for _ in 0..1000 {
+    for _ in 0..1800 {
         let a = TypeA { value: 10 };
         let b = TypeB { value: 20 };
         acc += call_describe(a);

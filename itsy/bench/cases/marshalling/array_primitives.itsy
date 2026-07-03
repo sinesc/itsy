@@ -4,6 +4,8 @@
 use BenchAPI::{make_i32_array, sum_i32};
 
 fn bench() {
-    let arr = make_i32_array(100);
-    let _sum = sum_i32(arr);
+    for _ in 0..1300 {
+        let arr = make_i32_array(100);
+        let _sum = sum_i32(arr);
+    }
 }

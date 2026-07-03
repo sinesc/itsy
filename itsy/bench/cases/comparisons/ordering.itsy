@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut count = 0;
-    for _ in 0..10000 {
+    for _ in 0..1500 {
         let a: i8 = 1;
         let b: i8 = 2;
         if a < b { count += 1; }

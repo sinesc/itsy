@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut acc: u64 = 0;
-    for _ in 0..10000 {
+    for _ in 0..1100 {
         let a: i8 = 0x7F;
         let b: i8 = 0x0F;
         acc += ((a & b) as u8) as u64;

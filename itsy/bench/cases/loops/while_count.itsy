@@ -2,7 +2,7 @@
 
 fn bench() {
     let i = 0;
-    while i < 1000 {
+    while i < 72000 {
         i += 1;
     }
 }

@@ -11,8 +11,10 @@ fn setup() -> [ String ] {
 
 fn bench(arr: [ String ]) {
     let mut count = 0;
-    for s in arr {
-        if s == "42" { count += 1; }
+    for _ in 0..150 {
+        for s in arr {
+            if s == "42" { count += 1; }
+        }
     }
     let _ = count;
 }

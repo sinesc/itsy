@@ -5,5 +5,7 @@ use BenchAPI::opposite_status;
 use BenchAPI::Status;
 
 fn bench() {
-    let s = opposite_status(Status::Ok);
+    for _ in 0..68000 {
+        let s = opposite_status(Status::Ok);
+    }
 }

@@ -8,7 +8,7 @@ struct Big {
 
 fn setup() -> [ Big ] {
     let arr: [ Big ] = [];
-    for i in 0..500 {
+    for i in 0..11500 {
         arr.push(Big { x: i as i64, y: (i * 2) as i64 });
     }
     arr

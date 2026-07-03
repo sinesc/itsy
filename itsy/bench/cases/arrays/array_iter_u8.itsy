@@ -11,8 +11,10 @@ fn setup() -> [ u8 ] {
 
 fn bench(arr: [ u8 ]) {
     let mut sum = 0;
-    for v in arr {
-        sum += v as i32;
+    for _ in 0..175 {
+        for v in arr {
+            sum += v as i32;
+        }
     }
     let _ = sum;
 }

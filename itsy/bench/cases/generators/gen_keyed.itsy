@@ -11,8 +11,8 @@ fn pairs(start: i32, end: i32) -> Generator<u64, i32> {
 
 fn bench() {
     let mut sum = 0;
-    for _ in 0..100 {
-        let g = pairs(0, 1000);
+    for _ in 0..6 {
+        let g = pairs(0, 900);
         while g.next() {
             let _ = g.key();
             sum += g.value();

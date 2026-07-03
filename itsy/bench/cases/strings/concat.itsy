@@ -2,7 +2,7 @@
 
 fn bench() {
     let s = "";
-    for i in 0..100 {
+    for i in 0..7800 {
         s += "x";
     }
 }

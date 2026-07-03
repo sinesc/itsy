@@ -3,7 +3,7 @@
 
 fn setup() -> [ u16 ] {
     let arr: [ u16 ] = [];
-    for i in 0..1000 {
+    for i in 0..40000 {
         arr.push(i as u16);
     }
     arr

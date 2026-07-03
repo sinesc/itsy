@@ -3,7 +3,7 @@
 
 fn setup() -> [ i32 ] {
     let arr: [ i32 ] = [];
-    for i in 0..1000 {
+    for i in 0..2300 {
         arr.push(i);
     }
     arr
@@ -11,7 +11,7 @@ fn setup() -> [ i32 ] {
 
 fn bench(arr: [ i32 ]) {
     let mut total = 0;
-    for _ in 0..10000 {
+    for _ in 0..28500 {
         total += arr.len();
     }
     let _ = total;

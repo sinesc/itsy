@@ -4,5 +4,7 @@
 use BenchAPI::echo_string;
 
 fn bench() {
-    let s = echo_string("hello, world");
+    for _ in 0..12000 {
+        let s = echo_string("hello, world");
+    }
 }

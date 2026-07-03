@@ -8,7 +8,7 @@ struct Small {
 
 fn setup() -> [ Small ] {
     let arr: [ Small ] = [];
-    for i in 0..500 {
+    for i in 0..11000 {
         arr.push(Small { a: (i % 256) as u8, b: i as u16 });
     }
     arr

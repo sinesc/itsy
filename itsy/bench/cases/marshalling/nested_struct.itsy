@@ -6,6 +6,8 @@ use BenchAPI::{make_nested, nested_score};
 use BenchAPI::Nested;
 
 fn bench() {
-    let n = make_nested(10, 20, "nested", 42);
-    let _score = nested_score(n);
+    for _ in 0..2800 {
+        let n = make_nested(10, 20, "nested", 42);
+        let _score = nested_score(n);
+    }
 }

@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut count = 0;
-    for _ in 0..1000 {
+    for _ in 0..1900 {
         let a = "hello";
         let b = "hello";
         let c = "world";

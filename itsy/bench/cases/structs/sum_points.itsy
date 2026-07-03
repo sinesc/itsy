@@ -11,7 +11,7 @@ struct Point {
 
 fn setup() -> [ Point ] {
     let points: [ Point ] = [];
-    for i in 0..500 {
+    for i in 0..12500 {
         points.push(Point { x: i, y: i * 2 });
     }
     points

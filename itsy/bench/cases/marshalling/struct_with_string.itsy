@@ -5,6 +5,8 @@ use BenchAPI::{make_record, record_value};
 use BenchAPI::Record;
 
 fn bench() {
-    let r = make_record(1, "benchmark", 3.14);
-    let _v = record_value(r);
+    for _ in 0..3700 {
+        let r = make_record(1, "benchmark", 3.14);
+        let _v = record_value(r);
+    }
 }

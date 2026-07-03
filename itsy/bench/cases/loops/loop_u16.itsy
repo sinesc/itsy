@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut sum = 0;
-    for i in 0u16..10000 {
+    for i in 0u16..50000 {
         sum += i as i32;
     }
     let _ = sum;

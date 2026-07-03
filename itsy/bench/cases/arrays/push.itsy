@@ -2,7 +2,7 @@
 
 fn bench() {
     let a: [ i32 ] = [];
-    for i in 0..1000 {
+    for i in 0..32000 {
         a.push(i);
     }
 }

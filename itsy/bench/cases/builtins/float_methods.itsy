@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut acc: f64 = 0.0;
-    for _ in 0..10000 {
+    for _ in 0..3500 {
         acc += (-3.14f64).abs();
         acc += (3.5f64).floor();
         acc += (3.5f64).ceil();

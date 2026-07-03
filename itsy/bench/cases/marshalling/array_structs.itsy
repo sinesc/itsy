@@ -5,6 +5,8 @@ use BenchAPI::{make_points, points_sum};
 use BenchAPI::Point;
 
 fn bench() {
-    let arr = make_points(50);
-    let _sum = points_sum(arr);
+    for _ in 0..240 {
+        let arr = make_points(50);
+        let _sum = points_sum(arr);
+    }
 }

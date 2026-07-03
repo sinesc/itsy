@@ -4,7 +4,7 @@
 
 fn bench() {
     let mut acc: i64 = 0;
-    for _ in 0..10000 {
+    for _ in 0..4300 {
         let a: i64 = 42;
         let b: u64 = 42;
         let c: f64 = 3.14;

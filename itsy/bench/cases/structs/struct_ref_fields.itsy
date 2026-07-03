@@ -7,7 +7,7 @@ struct HasString {
 
 fn setup() -> [ HasString ] {
     let arr: [ HasString ] = [];
-    for i in 0..100 {
+    for i in 0..11500 {
         arr.push(HasString { s: i as String });
     }
     arr

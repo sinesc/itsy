@@ -3,7 +3,7 @@
 
 fn setup() -> [ i32 ] {
     let arr: [ i32 ] = [];
-    for i in 0..1000 {
+    for i in 0..42000 {
         arr.push(i);
     }
     arr

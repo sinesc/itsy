@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut count = 0;
-    for _ in 0..100 {
+    for _ in 0..425 {
         let m = [ "a" => 1i32, "b" => 2i32, "c" => 3i32 ];
         count += m["a"];
         count += m["b"];

@@ -4,5 +4,7 @@
 use BenchAPI::echo_i32;
 
 fn bench() {
-    let v = echo_i32(42);
+    for _ in 0..67000 {
+        let v = echo_i32(42);
+    }
 }

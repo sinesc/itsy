@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut acc: i64 = 0;
-    for _ in 0..10000 {
+    for _ in 0..6000 {
         acc += (-5i32).abs() as i64;
         acc += (3i32).pow(2) as i64;
         acc += (16i32).isqrt() as i64;

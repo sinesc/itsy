@@ -3,7 +3,7 @@
 
 fn bench() {
     let mut s = "";
-    for i in 0..1000 {
+    for i in 0..2400 {
         let a: i64 = i as i64;
         let b: u64 = i as u64;
         let c: f32 = i as f32;
