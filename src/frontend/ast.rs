@@ -772,7 +772,7 @@ pub struct TypeName {
 }
 
 impl_typeable!(TypeName);
-impl_display!(TypeName, "{:?}", path);
+impl_display!(TypeName, "{}", path);
 impl_resolvable!(TypeName {
     type_id: TypeId,
 });
