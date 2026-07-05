@@ -17,46 +17,100 @@ use std::io::Write;
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols,comments" -- itsy/examples/helloworld.itsy
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols" -- itsy/examples/helloworld.itsy -o out.txt
  *   cargo run --example dis --features="compiler,runtime,debugging,symbols,comments" -- itsy/examples/helloworld.itsy --raw-offsets
+ *   cargo run --example dis --features="compiler,runtime,debugging,symbols" -- itsy/examples/helloworld.itsy --test
  */
 
 mod shared;
 use shared::MyAPI;
 
+/// Prelude inserted when `--test` is enabled, mirroring the test infrastructure.
+const TEST_PRELUDE: &str = "use MyAPI::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str};";
+
+/// Wrap source code the same way the test harness does: prepend the prelude
+/// and, if there is no `main()` function, wrap the body in one.
+fn wrap_test_prelude(source: &str) -> String {
+    if source.find("main()").is_some() {
+        format!("{} {}", TEST_PRELUDE, source)
+    } else {
+        format!("{} fn main() {{ {} }}", TEST_PRELUDE, source)
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     if args.is_empty() {
-        eprintln!("usage: dis <filename.itsy> [--raw-offsets] [-o <output-file>]");
+        eprintln!("usage: dis <filename.itsy> [--raw-offsets] [--test] [-o <output-file>]");
         std::process::exit(1);
     }
 
-    let source_file = &args[0];
-    let raw_offsets = args.iter().any(|a| a == "--raw-offsets");
-    let output_file: Option<&str> = args
-        .iter()
-        .position(|a| a == "-o")
-        .and_then(|pos| args.get(pos + 1))
-        .map(|s| s.as_str());
+    let mut source_file: Option<&str> = None;
+    let mut raw_offsets = false;
+    let mut test_mode = false;
+    let mut output_file: Option<&str> = None;
 
-    match build::<MyAPI, _>(source_file) {
-        Ok(program) => {
-            let vm = runtime::VM::new(program);
-            let raw = vm.format_program();
-            let disassembly = format_disassembly(&raw, raw_offsets);
-
-            match output_file {
-                Some(path) => {
-                    let mut file = std::fs::File::create(path).expect("could not create output file");
-                    file.write_all(disassembly.as_bytes()).expect("could not write output file");
-                }
-                None => {
-                    print!("{}", disassembly);
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--raw-offsets" => raw_offsets = true,
+            "--test" => test_mode = true,
+            "-o" => {
+                output_file = args.get(i + 1).map(|s| s.as_str());
+                i += 1; // skip the value
+            }
+            val if val.starts_with('-') => {
+                eprintln!("unknown option: {}", val);
+                eprintln!("usage: dis <filename.itsy> [--raw-offsets] [--test] [-o <output-file>]");
+                std::process::exit(1);
+            }
+            val => {
+                if source_file.is_none() {
+                    source_file = Some(val);
+                } else {
+                    eprintln!("unexpected argument: {}", val);
+                    eprintln!("usage: dis <filename.itsy> [--raw-offsets] [--test] [-o <output-file>]");
+                    std::process::exit(1);
                 }
             }
         }
-        Err(err) => {
+        i += 1;
+    }
+
+    let source_file = match source_file {
+        Some(path) => path,
+        None => {
+            eprintln!("no source file specified");
+            eprintln!("usage: dis <filename.itsy> [--raw-offsets] [--test] [-o <output-file>]");
+            std::process::exit(1);
+        }
+    };
+
+    let program = if test_mode {
+        let source = std::fs::read_to_string(source_file)
+            .unwrap_or_else(|e| { eprintln!("could not read {}: {}", source_file, e); std::process::exit(1); });
+        let wrapped = wrap_test_prelude(&source);
+        build_str::<MyAPI>(&wrapped).unwrap_or_else(|err| {
             eprintln!("{}", err);
             std::process::exit(1);
+        })
+    } else {
+        build::<MyAPI, _>(source_file).unwrap_or_else(|err| {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        })
+    };
+
+    let vm = runtime::VM::new(program);
+    let raw = vm.format_program();
+    let disassembly = format_disassembly(&raw, raw_offsets);
+
+    match output_file {
+        Some(path) => {
+            let mut file = std::fs::File::create(path).expect("could not create output file");
+            file.write_all(disassembly.as_bytes()).expect("could not write output file");
+        }
+        None => {
+            print!("{}", disassembly);
         }
     }
 }
@@ -115,8 +169,8 @@ fn format_disassembly(raw: &str, raw_offsets: bool) -> String {
     let mut out = String::new();
     for line in &lines {
         if let Some((position, opcode, args)) = parse_instruction_line(line) {
-            // Print offset label if this position is a jump target.
-            if targets.contains(&position) {
+            // Print offset label if this position is a jump target or a function entry.
+            if targets.contains(&position) || fn_names.contains_key(&position) {
                 let label = format_offset(position, &fn_names, raw_offsets);
                 out.push_str(&format!("{}:\n", label));
             }
@@ -129,12 +183,18 @@ fn format_disassembly(raw: &str, raw_offsets: bool) -> String {
                 out.push_str(&format!("    {} {}\n", opcode, formatted_args));
             }
         } else if let Some((position, comment_text)) = parse_comment_line_with_pos(line) {
-            // Print offset label if this comment position is a jump target.
-            if targets.contains(&position) {
+            // Print offset label if this position is a jump target or a function entry.
+            if targets.contains(&position) || fn_names.contains_key(&position) {
                 let label = format_offset(position, &fn_names, raw_offsets);
                 out.push_str(&format!("{}:\n", label));
             }
-            out.push_str(&format!("    ;{}\n", comment_text));
+            // For function declarations, append the absolute offset.
+            let annotated = if comment_text.starts_with("fn ") {
+                format!("{}@{}", comment_text, position)
+            } else {
+                comment_text.to_string()
+            };
+            out.push_str(&format!("    ;{}\n", annotated));
         }
     }
 

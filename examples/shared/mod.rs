@@ -87,6 +87,33 @@ itsy_api! {
             }
             n
         }
+        // -- ret_* functions mirroring the test infrastructure (TestFns) --
+        /// Returns the given value unchanged.
+        fn ret_u8(&mut context, value: u8) -> u8 { value }
+        /// Returns the given value unchanged.
+        fn ret_u16(&mut context, value: u16) -> u16 { value }
+        /// Returns the given value unchanged.
+        fn ret_u32(&mut context, value: u32) -> u32 { value }
+        /// Returns the given value unchanged.
+        fn ret_u64(&mut context, value: u64) -> u64 { value }
+        /// Returns the given value unchanged.
+        fn ret_i8(&mut context, value: i8) -> i8 { value }
+        /// Returns the given value unchanged.
+        fn ret_i16(&mut context, value: i16) -> i16 { value }
+        /// Returns the given value unchanged.
+        fn ret_i32(&mut context, value: i32) -> i32 { value }
+        /// Returns the given value unchanged.
+        fn ret_i64(&mut context, value: i64) -> i64 { value }
+        /// Returns the given value unchanged.
+        fn ret_f32(&mut context, value: f32) -> f32 { value }
+        /// Returns the given value unchanged.
+        fn ret_f64(&mut context, value: f64) -> f64 { value }
+        /// Returns the given value unchanged.
+        fn ret_bool(&mut context, value: bool) -> bool { value }
+        /// Returns the given value unchanged.
+        fn ret_string(&mut context, value: String) -> String { value }
+        /// Returns the given value as a String.
+        fn ret_str(&mut context, value: str) -> String { value.to_string() }
     }
 }
 
