@@ -1,0 +1,434 @@
+/*
+ * Retro bricks — terminal demo
+ *
+ * Paddle: ← → arrows (use kitty-compatible terminal to avoid keyboard repeat delay)
+ * Launch ball: SPACE
+ * Quit: Ctrl+C
+ */
+use MyAPI::{print, println, flush, wait_frame, enable_raw_mode, disable_raw_mode,
+             update_input, is_key_down, exit, terminal_width, terminal_height, KeyCode};
+
+struct Brick {
+    col: u32,
+    row: u32,
+    alive: bool,
+}
+
+struct LevelConfig {
+    brick_rows: u32,
+    brick_cols: u32,
+    ball_speed: f64,
+}
+
+struct Paddle {
+    x: u32,
+    width: u32,
+    speed: u32,
+    row: u32,
+}
+
+impl Paddle {
+    fn new(term_w: u32, term_h: u32) -> Paddle {
+        let pw_raw = term_w / 8;
+        let width = pw_raw.max(8).min(20);
+        let ps_raw = term_w / 40;
+        let speed = ps_raw.max(2).min(4);
+        let row = term_h - 4;
+        let x = (term_w - width) / 2;
+        return Paddle { x: x, width: width, speed: speed, row: row };
+    }
+
+    fn center(self: Paddle) -> f64 {
+        return (self.x + self.width / 2) as f64;
+    }
+}
+
+struct Ball {
+    x: f64,
+    y: f64,
+    dx: f64,
+    dy: f64,
+    launched: bool,
+}
+
+impl Ball {
+    fn new(paddle: Paddle) -> Ball {
+        return Ball {
+            x: paddle.center(),
+            y: (paddle.row - 1) as f64,
+            dx: 0.0,
+            dy: 0.0,
+            launched: false,
+        };
+    }
+
+    fn reset(self: Ball, paddle: Paddle) {
+        self.x = paddle.center();
+        self.y = (paddle.row - 1) as f64;
+        self.dx = 0.0;
+        self.dy = 0.0;
+        self.launched = false;
+    }
+
+    fn launch(self: Ball, speed: f64) {
+        self.dx = speed * 0.8;
+        self.dy = -(speed);
+        self.launched = true;
+    }
+}
+
+struct Game {
+    term_w: u32,
+    term_h: u32,
+    area_rows: u32,
+    score: u32,
+    lives: u32,
+    level: u32,
+    paddle: Paddle,
+    ball: Ball,
+    bricks: [ Brick ],
+    // pre-computed ANSI escape sequences
+    clear: String,
+    home: String,
+    color_reset: String,
+    paddle_color: String,
+    brick_colors: [ String ],
+}
+
+impl Game {
+    fn new(term_w: u32, term_h: u32) -> Game {
+        let area_rows = term_h - 2;
+        let esc = String::from_ascii(27);
+        let paddle = Paddle::new(term_w, term_h);
+        let ball = Ball::new(paddle);
+
+        return Game {
+            term_w: term_w,
+            term_h: term_h,
+            area_rows: area_rows,
+            score: 0,
+            lives: 3,
+            level: 1,
+            paddle: paddle,
+            ball: ball,
+            bricks: [],
+            clear: esc + "[2J" + esc + "[1;1H",
+            home: esc + "[1;1H",
+            color_reset: esc + "[0m",
+            paddle_color: esc + "[97m",
+            brick_colors: [esc + "[91m", esc + "[93m", esc + "[92m", esc + "[96m", esc + "[94m", esc + "[95m", esc + "[97m", esc + "[90m"],
+        };
+    }
+
+    fn full_clear(self: Self) {
+        print(self.clear);
+        flush();
+    }
+
+    fn level_config(self: Self, level: u32) -> LevelConfig {
+        match level {
+            1 => LevelConfig { brick_rows: 3, brick_cols: 10, ball_speed: 0.4 },
+            2 => LevelConfig { brick_rows: 5, brick_cols: 12, ball_speed: 0.6 },
+            _ => LevelConfig { brick_rows: 7, brick_cols: 14, ball_speed: 0.8 },
+        }
+    }
+
+    // Bricks are 2x2 with 1-cell gaps between them.
+    fn spawn_bricks(self: Self, num_rows: u32, num_cols: u32) -> [ Brick ] {
+        let bricks: [ Brick ] = [];
+        let brick_w = 2;
+        let brick_h = 2;
+        let h_gap = 1;
+        let v_gap = 1;
+        let total_w = num_cols * brick_w + (num_cols - 1) * h_gap;
+        let start_col = (self.term_w - total_w) / 2;
+        let brick_row_start = 2;
+
+        for row in 0..num_rows {
+            for col in 0..num_cols {
+                bricks.push(Brick {
+                    col: start_col + col * (brick_w + h_gap),
+                    row: brick_row_start + row * (brick_h + v_gap),
+                    alive: true,
+                });
+            }
+        }
+        return bricks;
+    }
+
+    fn bricks_alive(self: Self) -> u32 {
+        let count = 0;
+        for brick in self.bricks {
+            if brick.alive {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    fn print_art(self: Self, vcenter: bool, art_lines: [ String ]) {
+        let longest = 0;
+        for line in art_lines {
+            longest = line.len().max(longest);
+        }
+        let pad = ((self.term_w as i32) - (longest as i32)) / 2;
+        let padding = if pad > 0 { " ".repeat(pad as u64) } else { "" };
+        let lead = if vcenter && art_lines.len() < self.term_h as u64 { (self.term_h as u64 / 2) - (art_lines.len() / 2) } else { 0 };
+        print("\r\n".repeat(lead));
+        for line in art_lines {
+            print(padding + line + "\r\n");
+        }
+    }
+
+    fn wait_for_key(key: KeyCode) -> bool {
+        while update_input() {
+            wait_frame(100);
+            if is_key_down(key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn show_start_screen(self: Self) -> bool {
+        self.full_clear();
+        self.print_art(true, [
+            "██████╗ ███████╗████████╗██████╗  ██████╗",
+            "██╔══██╗██╔════╝╚══██╔══╝██╔══██╗██╔═══██╗",
+            "██████╔╝█████╗     ██║   ██████╔╝██║   ██║",
+            "██╔══██╗██╔══╝     ██║   ██╔══██╗██║   ██║",
+            "██║  ██║███████╗   ██║   ██║  ██║╚██████╔╝",
+            "╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝",
+            "                        ██████╗ ██████╗ ██╗ ██████╗██╗  ██╗███████╗██╗",
+            "                        ██╔══██╗██╔══██╗██║██╔════╝██║ ██╔╝██╔════╝██║",
+            "                        ██████╔╝██████╔╝██║██║     █████╔╝ ███████╗██║",
+            "                        ██╔══██╗██╔══██╗██║██║     ██╔═██╗ ╚════██║╚═╝",
+            "                        ██████╔╝██║  ██║██║╚██████╗██║  ██╗███████║██╗",
+            "                        ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝",
+            "                   PRESS SPACE TO START",
+        ]);
+        Self::wait_for_key(KeyCode::Space)
+    }
+
+    fn show_end_screen(self: Self, won: bool, score: u32) {
+        let art_lines = if won { [
+            ":::   :::  ::::::::  :::    :::     :::       ::: ::::::::::: ::::    ::: :::",
+            ":+:   :+: :+:    :+: :+:    :+:     :+:       :+:     :+:     :+:+:   :+: :+:",
+            " +:+ +:+  +:+    +:+ +:+    +:+     +:+       +:+     +:+     :+:+:+  +:+ +:+",
+            "  +#++:   +#+    +:+ +#+    +:+     +#+  +:+  +#+     +#+     +#+ +:+ +#+ +#+",
+            "   +#+    +#+    +#+ +#+    +#+     +#+ +#+#+ +#+     +#+     +#+  +#+#+# +#+",
+            "   #+#    #+#    #+# #+#    #+#      #+#+# #+#+#      #+#     #+#   #+#+#",
+            "   ###     ########   ########        ###   ###   ########### ###    #### ###",
+        ] } else { [
+            "  ▄████  ▄▄▄       ███▄ ▄███▓▓█████",
+            " ██▒ ▀█▒▒████▄    ▓██▒▀█▀ ██▒▓█   ▀",
+            "▒██░▄▄▄░▒██  ▀█▄  ▓██    ▓██░▒███",
+            "░▓█  ██▓░██▄▄▄▄██ ▒██    ▒██ ▒▓█  ▄",
+            "░▒▓███▀▒ ▓█   ▓██▒▒██▒   ░██▒░▒████▒",
+            " ░▒   ▒  ▒▒   ▓▒█░░ ▒░   ░  ░░░ ▒░ ░",
+            "  ░   ░   ▒   ▒▒ ░░  ░      ░ ░ ░  ░",
+            "░ ░   ░   ░   ▒   ░      ░      ░",
+            "      ░       ░  ░       ░      ░  ░",
+            "",
+            "                   ▒█████   ██▒   █▓▓█████  ██▀███   ▐██▌",
+            "                  ▒██▒  ██▒▓██░   █▒▓█   ▀ ▓██ ▒ ██▒ ▐██▌",
+            "                  ▒██░  ██▒ ▓██  █▒░▒███   ▓██ ░▄█ ▒ ▐██▌",
+            "                  ▒██   ██░  ▒██ █░░▒▓█  ▄ ▒██▀▀█▄   ▓██▒",
+            "                  ░ ████▓▒░   ▒▀█░  ░▒████▒░██▓ ▒██▒ ▒▄▄",
+            "                  ░ ▒░▒░▒░    ░ ▐░  ░░ ▒░ ░░ ▒▓ ░▒▓░ ░▀▀▒",
+            "                    ░ ▒ ▒░    ░ ░░   ░ ░  ░  ░▒ ░ ▒░ ░  ░",
+            "                  ░ ░ ░ ▒       ░░     ░     ░░   ░     ░",
+            "                      ░ ░        ░     ░  ░   ░      ░",
+            "                                ░",
+        ] };
+
+        let score_line = "Final score: {score}";
+        let quit_line = "Press space to quit";
+        let padding = " ".repeat(10);
+
+        art_lines.push("");
+        art_lines.push(padding + score_line);
+        art_lines.push(padding + quit_line);
+
+        self.full_clear();
+        self.print_art(true, art_lines);
+        flush();
+
+        Self::wait_for_key(KeyCode::Space);
+    }
+
+    fn render(self: Self) {
+        // HUD
+        let lives_str = "●".repeat(self.lives as u64);
+        let hud = "Score: {self.score}    Lives: {lives_str}    Level: {self.level}   ";
+
+        // game area — row by row
+        let mut frame = hud + "\r\n";
+        for row in 0..self.area_rows {
+            for col in 0..self.term_w {
+                if self.ball.launched && (self.ball.x as u32) == col && (self.ball.y as u32) == row {
+                    frame += "{self.color_reset}●";
+                } else if row == self.paddle.row && col >= self.paddle.x && col < self.paddle.x + self.paddle.width {
+                    frame += "{self.paddle_color}▀";
+                } else {
+                    let on_brick = false;
+                    for brick in self.bricks {
+                        if brick.alive && col >= brick.col && col < brick.col + 2 && row >= brick.row && row < brick.row + 2 {
+                            let _ci = (brick.row % 8) as u64;
+                            let _bc = self.brick_colors[_ci];
+                            let _ch = _bc + "█";
+                            frame += _ch;
+                            on_brick = true;
+                            break;
+                        }
+                    }
+                    if !on_brick {
+                        frame += "{self.color_reset} ";
+                    }
+                }
+            }
+            frame += "{self.color_reset}\r\n";
+        }
+
+        print(self.home + frame);
+        flush();
+    }
+
+    fn handle_input(self: Self) {
+        if is_key_down(KeyCode::Left) {
+            let new_x = (self.paddle.x as i32) - (self.paddle.speed as i32);
+            self.paddle.x = if new_x < 0 { 0 } else { new_x as u32 };
+        }
+        if is_key_down(KeyCode::Right) {
+            let new_x = (self.paddle.x as i32) + (self.paddle.speed as i32);
+            let max_x = (self.term_w - self.paddle.width) as i32;
+            self.paddle.x = if new_x > max_x { max_x as u32 } else { new_x as u32 };
+        }
+    }
+
+    fn update_ball(self: Self, ball_speed: f64) {
+        // ball sits on paddle when not launched
+        if !self.ball.launched {
+            self.ball.x = self.paddle.center();
+            self.ball.y = (self.paddle.row - 1) as f64;
+            return;
+        }
+
+        self.ball.x += self.ball.dx;
+        self.ball.y += self.ball.dy;
+
+        // wall bounce (left/right)
+        if self.ball.x <= 0.0 {
+            self.ball.x = 0.0;
+            self.ball.dx = self.ball.dx.abs();
+        }
+        if self.ball.x >= (self.term_w - 1) as f64 {
+            self.ball.x = (self.term_w - 1) as f64;
+            self.ball.dx = -(self.ball.dx.abs());
+        }
+
+        // wall bounce (top)
+        if self.ball.y <= 0.0 {
+            self.ball.y = 0.0;
+            self.ball.dy = self.ball.dy.abs();
+        }
+
+        // paddle bounce
+        if self.ball.dy > 0.0 && self.ball.y >= (self.paddle.row - 1) as f64 && self.ball.y <= (self.paddle.row + 1) as f64 {
+            let bx = self.ball.x as u32;
+            if bx >= self.paddle.x && bx < self.paddle.x + self.paddle.width {
+                self.ball.dy = -(self.ball.dy.abs());
+                let hit_offset = (bx as f64 - self.paddle.center()) / (self.paddle.width as f64 / 2.0);
+                self.ball.dx = hit_offset * ball_speed * 1.5;
+            }
+        }
+
+        // brick collision
+        let bx = self.ball.x as u32;
+        let by = self.ball.y as u32;
+        for i in 0..self.bricks.len() {
+            if self.bricks[i].alive && bx >= self.bricks[i].col && bx < self.bricks[i].col + 2 && by >= self.bricks[i].row && by < self.bricks[i].row + 2 {
+                self.bricks[i].alive = false;
+                self.ball.dy = -(self.ball.dy.abs());
+                self.score += 10;
+                break;
+            }
+        }
+
+        // life lost
+        if self.ball.y >= self.area_rows as f64 {
+            self.lives -= 1;
+            if self.lives > 0 {
+                self.ball.reset(self.paddle);
+            }
+        }
+    }
+
+    fn run(self: Self) {
+        if !self.show_start_screen() {
+            return;
+        }
+        self.full_clear();
+
+        // main game loop
+        while self.lives > 0 && self.level <= 3 {
+            let cfg = self.level_config(self.level);
+            self.bricks = self.spawn_bricks(cfg.brick_rows, cfg.brick_cols);
+
+            self.ball.reset(self.paddle);
+
+            // first level auto-launchs, rest wait for space
+            if self.level == 1 {
+                self.ball.launch(cfg.ball_speed);
+            }
+
+            // level play loop
+            while self.bricks_alive() > 0 && self.lives > 0 {
+                // check for Ctrl+C
+                if !update_input() {
+                    return;
+                }
+
+                self.handle_input();
+
+                // launch ball with space
+                if !self.ball.launched && is_key_down(KeyCode::Space) {
+                    self.ball.launch(cfg.ball_speed);
+                }
+
+                self.update_ball(cfg.ball_speed);
+                self.render();
+                wait_frame(16);
+            }
+
+            // level complete
+            if self.bricks_alive() == 0 && self.lives > 0 {
+                self.level += 1;
+            }
+        }
+
+        self.show_end_screen(self.level > 3, self.score);
+    }
+}
+
+fn main() {
+    if !enable_raw_mode() {
+        println("Failed to enable raw mode");
+        exit(1);
+        return;
+    }
+
+    let term_w = terminal_width() as u32;
+    let term_h = terminal_height() as u32;
+
+    if term_w < 30 || term_h < 12 {
+        println("Terminal too small! Need at least 30x12, got {term_w}x{term_h}");
+        disable_raw_mode();
+        exit(1);
+        return;
+    }
+
+    let game = Game::new(term_w, term_h);
+    game.run();
+    disable_raw_mode();
+}
