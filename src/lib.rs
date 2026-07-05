@@ -18,6 +18,9 @@ mod bytecode;
 mod interface;
 mod prelude;
 mod config;
+#[cfg(all(feature="compiler", feature="optimizer"))]
+#[path="bytecode/optimizer/optimizer.rs"]
+pub mod optimizer;
 #[cfg(doc)]
 pub mod documentation;
 
@@ -382,7 +385,10 @@ pub fn build_str<F>(source: &str) -> Result<Program<F>, Error> where F: bytecode
     program.add_module(parsed);
     program.set_link_state(state);
     let resolved = resolver::resolve::<F>(program, "main")?;
-    Ok(compiler::compile(resolved)?)
+    let compiled = compiler::compile(resolved)?;
+    #[cfg(feature = "optimizer")]
+    let compiled = optimizer::optimize(compiled);
+    Ok(compiled)
 }
 
 /// Parses, resolves and compiles given Itsy source file.
@@ -417,7 +423,10 @@ fn build_inner<F>(source_file: &std::path::Path, files: &mut std::collections::H
         module
     })?;
     let resolved = resolver::resolve::<F>(parsed, "main")?;
-    Ok(compiler::compile(resolved)?)
+    let compiled = compiler::compile(resolved)?;
+    #[cfg(feature = "optimizer")]
+    let compiled = optimizer::optimize(compiled);
+    Ok(compiled)
 }
 
 /// Runs the given compiled program.

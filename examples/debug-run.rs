@@ -99,7 +99,10 @@ fn build<P: AsRef<std::path::Path>>(source_file: P, files: &mut HashMap<String, 
                 log("logs/ast.c", false, &format!("{:?}", resolved.modules));
                 log("logs/resolved.c", false, &format!("{:#?}", resolved.resolved));
             }
-            Ok(compiler::compile(resolved)?)
+            let compiled = compiler::compile(resolved)?;
+            #[cfg(feature = "optimizer")]
+            let compiled = optimizer::optimize(compiled);
+            Ok(compiled)
         },
         Err(err) => {
             Err(err.into())

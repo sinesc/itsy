@@ -24,6 +24,11 @@ macro_rules! impl_opcodes {
     (@read_arg Builtin, $from:ident $(, $counter:ident )?) => ( Builtin::from_index(impl_opcodes!(@read_bytes BuiltinIndex, $from $(, $counter )?)) );
     (@read_arg HeapRefOp, $from:ident $(, $counter:ident )?) => ( HeapRefOp::from_u8(impl_opcodes!(@read_bytes u8, $from $(, $counter )?)) );
     (@read_arg $ty:ident, $from:ident $(, $counter:ident )?) => ( impl_opcodes!(@read_bytes $ty, $from $(, $counter )?) );
+    // Optimizer read: reads raw types without VM-specific conversions
+    (@read_optimizer_arg RustFn, $from:ident, $counter:ident) => ( impl_opcodes!(@read_bytes u16, $from, $counter) );
+    (@read_optimizer_arg Builtin, $from:ident, $counter:ident) => ( impl_opcodes!(@read_bytes u16, $from, $counter) );
+    (@read_optimizer_arg HeapRefOp, $from:ident, $counter:ident) => ( impl_opcodes!(@read_bytes u8, $from, $counter) );
+    (@read_optimizer_arg $ty:ident, $from:ident, $counter:ident) => ( impl_opcodes!(@read_arg $ty, $from, $counter) );
     // Map parameter type names to reader types
     (@map_reader_type RustFn) => ( T );
     (@map_reader_type $ty:tt) => ( $ty );
@@ -36,10 +41,49 @@ macro_rules! impl_opcodes {
         $to.write(&$value.as_bytes()[..]);
     );
     (@write_arg $ty:tt, $value:expr, $to:ident) => ( $to.write(&$value.to_ne_bytes()[..]) );
+    // Optimizer write: writes raw types directly into a byte slice
+    (@write_slice_arg RustFn, $value:expr, $to:ident, $pos:ident) => {{
+        let bytes = ($value as u16).to_ne_bytes();
+        $to[$pos..$pos + bytes.len()].copy_from_slice(&bytes);
+        $pos += bytes.len();
+    }};
+    (@write_slice_arg Builtin, $value:expr, $to:ident, $pos:ident) => {{
+        let bytes = ($value as u16).to_ne_bytes();
+        $to[$pos..$pos + bytes.len()].copy_from_slice(&bytes);
+        $pos += bytes.len();
+    }};
+    (@write_slice_arg HeapRefOp, $value:expr, $to:ident, $pos:ident) => {{
+        $to[$pos] = $value;
+        $pos += 1;
+    }};
+    (@write_slice_arg String, $value:expr, $to:ident, $pos:ident) => {{
+        let len = $value.len() as StackAddress;
+        let len_bytes = len.to_ne_bytes();
+        $to[$pos..$pos + len_bytes.len()].copy_from_slice(&len_bytes);
+        $pos += len_bytes.len();
+        let str_bytes = $value.as_bytes();
+        $to[$pos..$pos + str_bytes.len()].copy_from_slice(str_bytes);
+        $pos += str_bytes.len();
+    }};
+    (@write_slice_arg $ty:tt, $value:expr, $to:ident, $pos:ident) => {{
+        let bytes = ($value as $ty).to_ne_bytes();
+        $to[$pos..$pos + bytes.len()].copy_from_slice(&bytes);
+        $pos += bytes.len();
+    }};
+    // Optimizer write: writes raw types without VM-specific conversions
+    (@write_optimizer_arg RustFn, $value:expr, $to:ident) => ( $to.write(&$value.to_ne_bytes()[..]) );
+    (@write_optimizer_arg Builtin, $value:expr, $to:ident) => ( $to.write(&$value.to_ne_bytes()[..]) );
+    (@write_optimizer_arg HeapRefOp, $value:expr, $to:ident) => ( $to.write(&[ $value ]) );
+    (@write_optimizer_arg $ty:tt, $value:expr, $to:ident) => ( impl_opcodes!(@write_arg $ty, $value, $to) );
     // Map parameter type names to writer types
     (@map_writer_type RustFn) => ( T );
     (@map_writer_type String) => ( &str );
     (@map_writer_type $ty:tt) => ( $ty );
+    // Map parameter type names to concrete types for OpCodeData enum
+    (@map_optimizer_type RustFn) => ( u16 );
+    (@map_optimizer_type Builtin) => ( u16 );
+    (@map_optimizer_type HeapRefOp) => ( u8 );
+    (@map_optimizer_type $ty:tt) => ( $ty );
     // Handle opcode flag setup (before running the opcode)
     (@setup_flag $self:ident, $prev_pc:ident, check) => {
         #[cfg(feature="debugging")]
@@ -444,6 +488,102 @@ macro_rules! impl_opcodes {
                     )+
                 )?
             )+
+        }
+
+        // ---------------------------------------------------------------------
+        // Optimizer: OpCodeData enum + read/write helpers
+        // ---------------------------------------------------------------------
+        #[cfg(feature = "optimizer")]
+        #[allow(non_camel_case_types)]
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum OpCodeData {
+            $(
+                $( #[ $attr ] )*
+                // single opcode
+                $(
+                    $name ( $( impl_opcodes!(@map_optimizer_type $arg_type) ),* ),
+                )?
+                // opcode variants
+                $(
+                    $(
+                        $( #[$vattr] )*
+                        $vname ( $( impl_opcodes!(@map_optimizer_type $vtype_name) ),* ),
+                    )+
+                )?
+            )+
+        }
+
+        #[cfg(feature = "optimizer")]
+        #[allow(unused_doc_comments)]
+        pub fn read_opcode_data(instructions: &[u8], pc: StackAddress) -> Option<(OpCodeData, StackAddress)> {
+            use crate::INSTRUCTION_ALIGNMENT;
+            const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
+            if pc >= instructions.len() as StackAddress {
+                return None;
+            }
+            let slice = &mut &instructions[pc as usize..];
+            let opcode_idx: OpCodeIndex = impl_opcodes!(@read_arg OpCodeIndex, slice);
+            let start = pc;
+            let mut size: usize = 0;
+            let data: OpCodeData = match opcode_idx {
+                $(
+                    $( #[ $attr ] )*
+                    // single opcode
+                    $(
+                        x if x == OpCode::$name as OpCodeIndex => {
+                            $( let $arg_name: impl_opcodes!(@map_optimizer_type $arg_type) = impl_opcodes!(@read_optimizer_arg $arg_type, slice, size); )*
+                            impl_opcodes!(@inc_pc OpCodeIndex, size);
+                            OpCodeData::$name ( $( $arg_name ),* )
+                        }
+                    )?
+                    // opcode variants
+                    $(
+                        $(
+                            $( #[$vattr] )*
+                            x if x == OpCode::$vname as OpCodeIndex => {
+                                $( let $varg_name: impl_opcodes!(@map_optimizer_type $vtype_name) = impl_opcodes!(@read_optimizer_arg $vtype_name, slice, size); )*
+                                impl_opcodes!(@inc_pc OpCodeIndex, size);
+                                OpCodeData::$vname ( $( $varg_name ),* )
+                            }
+                        )+
+                    )?
+                )+
+                _ => panic!("Invalid opcode {} at pc {}.", opcode_idx, pc),
+            };
+            size = (size + ADD_MASK) & !ADD_MASK;
+            Some((data, start + size as StackAddress))
+        }
+
+        #[cfg(feature = "optimizer")]
+        #[allow(unused_doc_comments)]
+        pub fn write_opcode_data(buf: &mut [u8], pc: StackAddress, data: OpCodeData) -> usize {
+            use crate::INSTRUCTION_ALIGNMENT;
+            const ADD_MASK: usize = INSTRUCTION_ALIGNMENT - 1;
+            let slice = &mut buf[pc as usize..];
+            let mut pos: usize = 0;
+            match data {
+                $(
+                    $( #[ $attr ] )*
+                    // single opcode
+                    $(
+                        OpCodeData::$name ( $( $arg_name ),* ) => {
+                            impl_opcodes!(@write_slice_arg OpCodeIndex, OpCode::$name as OpCodeIndex, slice, pos);
+                            $( impl_opcodes!(@write_slice_arg $arg_type, $arg_name, slice, pos); )*
+                        }
+                    )?
+                    // opcode variants
+                    $(
+                        $(
+                            $( #[$vattr] )*
+                            OpCodeData::$vname ( $( $varg_name ),* ) => {
+                                impl_opcodes!(@write_slice_arg OpCodeIndex, OpCode::$vname as OpCodeIndex, slice, pos);
+                                $( impl_opcodes!(@write_slice_arg $vtype_name, $varg_name, slice, pos); )*
+                            }
+                        )+
+                    )?
+                )+
+            }
+            (pos + ADD_MASK) & !ADD_MASK
         }
     }
 }

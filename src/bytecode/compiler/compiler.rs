@@ -186,6 +186,19 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         program.functions = functions;
         program.host_return_addr = host_return_addr;
     }
+    #[cfg(feature = "optimizer")]
+    {
+        let vtable_size = compiler.trait_function_indices.len()
+            * compiler.trait_implementor_indices.len()
+            * size_of::<StackAddress>();
+        if vtable_size > 0 {
+            use crate::bytecode::VtableRegion;
+            program.vtable_region = Some(VtableRegion {
+                base: compiler.trait_vtable_base,
+                size: vtable_size as StackAddress,
+            });
+        }
+    }
     Ok(program)
 }
 
@@ -655,7 +668,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     let entry_map = self.write_generator_entry_map(function_id)?;
                     // push the entry address (forward-reference safe) above the args, then construct
                     let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
-                    self.write_immediate_sa(function_addr)?;
+                    self.write_target(function_addr)?;
                     self.writer.gen_new(arg_size, entry_map);
                 } else {
                     comment!(self, "call {}()", constant.path);
@@ -719,9 +732,9 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             ConstantValue::Function(function_id) => {
                 // load function address
                 comment!(self, "\npush @{}", item.path);
-                // register call: may capture writer position for placeholder, must directly preceede write_immediate_sa
+                // register call: may capture writer position for placeholder, must directly preceede write_target
                 let function_addr = self.functions.register_call(function_id, self.writer.position(), true);
-                self.write_immediate_sa(function_addr)?;
+                self.write_target(function_addr)?;
                 // load constructor (none)
                 self.write_immediate_sa(0)?;
                 // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
@@ -1298,7 +1311,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         self.writer.overwrite(function_skip_jump, |w| w.jmp(function_done_jump));
         // load function address
         comment!(self, "\npush @{}", item.shared.sig.ident.name);
-        self.write_immediate_sa(function_addr)?;
+        self.write_target(function_addr)?;
         // load constructor (none)
         self.write_immediate_sa(0)?;
         // upload both into heap object (this is for compatibility with closures and unfortunate overkill for anonymous functions)
@@ -1326,7 +1339,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             self.write_load(ty, loc)?;
         }
         // load function address
-        self.write_immediate_sa(function_addr)?;
+        self.write_target(function_addr)?;
         size += size_of::<StackAddress>();
         // load constructor
         let constructor = self.constructor(self.ty(&item.struct_type_id))?;
@@ -1396,7 +1409,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             for &(call_address, load_only) in calls.iter() {
                 self.writer.set_position(call_address);
                 if load_only {
-                    self.write_immediate_sa(position)?;
+                    self.write_target(position)?;
                 } else {
                     self.writer.call(position, arg_size);
                 }
@@ -2341,6 +2354,14 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             size @ _ => Self::ice(&format!("Invalid stack address size: {:?}", size))?,
         })
     }
+
+    /// Emits a `target` instruction that pushes a bytecode address onto the
+    /// stack.  Unlike `write_immediate_sa`, the optimizer knows this value
+    /// is a code address and will remap it when instructions are removed.
+    fn write_target(self: &Self, addr: StackAddress) -> CompileResult<StackAddress> {
+        Ok(self.writer.target(addr as u32))
+    }
+    
     /// Builds the generator entry live-ref-map: the ref-typed arguments captured into a not-yet-started
     /// generator's frame, released if it is dropped before the first `next()`. Arguments occupy the start
     /// of the frame in declaration order, so their frame offsets are the cumulative argument sizes.

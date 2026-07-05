@@ -28,6 +28,7 @@ symbols = [ ]
 comments = [ ]
 ice_panics = [ ]
 derive = [ "itsy-derive" ]
+optimizer = [ ]
 
 [dependencies]
 nom = { version = "7.1.1", default-features = false, features = [ "alloc" ], optional = true }

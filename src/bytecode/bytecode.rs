@@ -56,6 +56,16 @@ pub trait VMData<T: VMFunc<T>, U> {
     fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
 }
 
+/// Const-pool region describing the trait vtable.
+/// `base` is the const-pool offset where vtable entries start.
+/// `size` is the total vtable size in bytes (always a multiple of `sizeof(StackAddress)`).
+#[cfg(feature = "optimizer")]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VtableRegion {
+    pub(crate) base: StackAddress,
+    pub(crate) size: StackAddress,
+}
+
 /// An Itsy bytecode program. Programs can be created using the [compile](compiler::compile) function or the bytecode [Writer] and can
 /// be executed by [run](crate::run) or [VM::run](crate::runtime::VM::run).
 #[derive(Clone, Debug)]
@@ -70,6 +80,10 @@ pub struct Program<T> {
     /// Address of a halt instruction used as the return target for host-initiated function calls.
     #[cfg(feature="call_function")]
     pub(crate) host_return_addr : StackAddress,
+    /// Const-pool region of the trait vtable. `None` means the program has no trait objects.
+    /// Used by the optimizer to remap stale function addresses after instruction compaction.
+    #[cfg(feature = "optimizer")]
+    pub(crate) vtable_region: Option<VtableRegion>,
 }
 
 /// Consume bytes from the front of a slice and return them.
@@ -96,6 +110,8 @@ impl<T> Program<T> where T: VMFunc<T> {
             functions           : Map::new(),
             #[cfg(feature="call_function")]
             host_return_addr    : 0,
+            #[cfg(feature = "optimizer")]
+            vtable_region       : None,
         }
     }
     /// Serializes the program to a byte vector, e.g. to be saved to a file.
@@ -149,6 +165,8 @@ impl<T> Program<T> where T: VMFunc<T> {
             functions,
             #[cfg(feature="call_function")]
             host_return_addr,
+            #[cfg(feature = "optimizer")]
+            vtable_region: None,
         })
     }
 }

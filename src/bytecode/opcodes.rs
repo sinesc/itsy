@@ -78,6 +78,12 @@ impl_opcodes!{
         self.stack.push(value);
     }
 
+    /// Pushes a bytecode target address onto the stack. Signals to the optimizer that the
+    /// value is a bytecode address any must be updated if the target is relocated.
+    fn target(&mut self, addr: Data32) {
+        self.stack.push(addr as StackAddress);
+    }
+
     /// Loads data from stack at given stackframe-offset and pushes it onto the stack.
     fn <
         load8<T: Data8>(loc: FrameAddress),
@@ -868,13 +874,7 @@ impl_opcodes!{
             self.state = VMState::Error(RuntimeErrorKind::IntegerOverflow);
         }
     }
-/*
-    /// Pops stack address sized value, shifts it by given number of bits and pushes it.
-    fn shrsa(&mut self, num: u8) {
-        let value: StackAddress = self.stack.pop();
-        self.stack.push(value >> num);
-    }
-*/
+
     /// Pops two values and pushes a 1 if the first value equals the second, otherwise a 0.
     fn <
         ceq8<T: Data8>(),
@@ -1173,7 +1173,7 @@ impl_opcodes!{
         }
         self.stack.store(iter_loc, T::wrapping_add(current, 1 as T));
     }
-    
+
     /// Jumps unconditionally to the given address.
     fn jmp(&mut self, addr: StackAddress) {
         self.pc = addr;
