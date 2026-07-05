@@ -4,7 +4,7 @@
 
 mod rewrite;
 mod passes {
-    //pub mod const_fold;
+    pub mod const_fold;
     pub mod cnt_cancel;
     //pub mod jump_norm;
     //pub mod store_forward;
@@ -95,7 +95,7 @@ fn collect_jump_targets(instructions: &[u8]) -> HashSet<StackAddress> {
 /// instruction in the original stream. `None` means remove, `Some` means keep.
 fn run_passes(instructions: &[u8], jump_targets: &HashSet<StackAddress>) -> Vec<(StackAddress, StackAddress, Option<OpCodeData>)> {
     let mut output = enumerate_instructions(instructions);
-    //passes::const_fold::fold_constants(&mut output, jump_targets); // TODO: needs work
+    passes::const_fold::fold_constants(&mut output, jump_targets);
     //passes::store_forward::forward_stores(&mut output, jump_targets); // TODO: fix or remove, pass is ineffective (no changes)
     //passes::jump_norm::normalize_jumps(&mut output, jump_targets); // TODO: fix or remove, pass is ineffective (no changes)
     passes::cnt_cancel::cancel_refcounts(&mut output, jump_targets);
