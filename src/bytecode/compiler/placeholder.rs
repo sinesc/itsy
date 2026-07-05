@@ -3,7 +3,7 @@
 
 use crate::prelude::*;
 use crate::StackAddress;
-use crate::shared::typed_ids::FunctionId;
+use crate::shared::{typed_ids::FunctionId, typed_ids::TypeId};
 
 /// Tracks call and function addresses so that calls made before the function address was known can be fixed.
 pub struct Functions {
@@ -72,5 +72,53 @@ impl LoopControlStack {
     /// Register a loop control instruction placceholder.
     pub fn add_jump(self: &mut Self, item: LoopControl) {
         self.stack.last_mut().unwrap().push(item);
+    }
+}
+
+/// Cleanup required when exiting a for-loop early (via `return`).
+///
+/// Array and map loops clone the collection at entry and must Dec the clone
+/// and the source on exit. Generator loops hold one reference that must be Dec'd.
+/// Range loops leave the upper bound on the stack during the body; it must be discarded.
+#[derive(Clone, Copy)]
+pub(crate) enum ForLoopCleanup {
+    /// Array or map loop: two Dec operations (clone + source).
+    Collection(TypeId),
+    /// Generator loop: one Dec operation (generator reference).
+    Generator(TypeId),
+    /// Range loop: discard the upper bound (primitive) left on the stack.
+    Range(StackAddress), // size in bytes to discard
+}
+
+/// Stack of active for-loop cleanup requirements.
+///
+/// Used so that `return` inside a for-loop can emit the necessary refcount
+/// decrements before exiting the function.
+pub(crate) struct ForLoopStack {
+    stack: Vec<ForLoopCleanup>,
+}
+
+impl ForLoopStack {
+    /// Creates a new empty for-loop stack.
+    pub fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+        }
+    }
+    /// Push cleanup info for a new for-loop.
+    pub fn push(self: &mut Self, cleanup: ForLoopCleanup) {
+        self.stack.push(cleanup);
+    }
+    /// Pop cleanup info when a for-loop finishes normally.
+    pub fn pop(self: &mut Self) {
+        self.stack.pop();
+    }
+    /// Iterate all active for-loop cleanups (innermost first).
+    pub fn iter(&self) -> std::slice::Iter<'_, ForLoopCleanup> {
+        self.stack.iter()
+    }
+    /// Returns `true` if there are no active for-loops.
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
     }
 }

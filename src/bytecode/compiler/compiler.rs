@@ -16,7 +16,7 @@ use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Progr
 use crate::bytecode::call_function::build_function_table;
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
-use placeholder::{LoopControlStack, LoopControl, Functions};
+use placeholder::{LoopControlStack, LoopControl, Functions, ForLoopStack, ForLoopCleanup};
 use init_state::{InitState, BranchingKind, BranchingPath, BranchingScope, BranchingState};
 use macros::{comment, select_integer_type, select_numeric_type, select_numeric_cast_type, select_primitive_size};
 
@@ -36,6 +36,8 @@ pub(crate) struct Compiler<T> {
     init_state: InitState,
     /// Tracks loop break/continue exit jump targets.
     loop_control: LoopControlStack,
+    /// Stack of active for-loop cleanup requirements (for `return` handling).
+    for_loop_cleanup: ForLoopStack,
     /// Module base path. For error reporting only.
     module_path: String,
     /// Contiguous trait function enumeration/mapping.
@@ -100,6 +102,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
         constructors                : UnorderedMap::new(),
         init_state                  : InitState::new(),
         loop_control                : LoopControlStack::new(),
+        for_loop_cleanup            : ForLoopStack::new(),
         module_path                 : "".to_string(),
         trait_vtable_base           : (trait_implementors.len() * size_of::<StackAddress>()) as StackAddress, // offset vtable by size of mapping from constructor => implementor-index
         trait_function_indices      : Compiler::<T>::enumerate_trait_function_indices(&trait_functions),
@@ -336,6 +339,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     // complete the generator instead of performing a normal value return. The value/key
                     // constructors release any reference still held in the header value/key slots.
                     comment!(self, "generator returning");
+                    self.write_for_loop_cleanup()?;
                     self.write_scope_destructor(BranchingScope::Function)?;
                     let (value_ctor, key_ctor) = self.locals.generator_slot_ctors();
                     self.writer.gen_return(value_ctor, key_ctor);
@@ -344,6 +348,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                     self.compile_expression(expr)?;
                     // inc result, then dec everything
                     self.write_cnt(self.ty(expr), true, HeapRefOp::Inc)?;
+                    self.write_for_loop_cleanup()?;
                     self.write_scope_destructor(BranchingScope::Function)?;
                     self.write_cnt(self.ty(expr), true, HeapRefOp::DecNoFree)?;
                     self.write_ret()?;
@@ -1110,12 +1115,13 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         };
         // compile inner block
         let start_target = self.writer.position(); // stack: upper
+        let range_size = self.ty(&iter_type_id).primitive_size() as StackAddress;
         self.loop_control.push();
+        self.for_loop_cleanup.push(ForLoopCleanup::Range(range_size));
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
         // loop instruction will check iter and either do nothing or increment and jump back to start
-        let iter_ty = self.ty(&iter_type_id);
-        let increment_target = self.write_loop(iter_ty, iter_loc, start_target)?; // stack: upper
+        let increment_target = self.write_loop(self.ty(&iter_type_id), iter_loc, start_target)?; // stack: upper
         // get exit location, fix skip_jump location to point here
         let exit_target = self.writer.position();
         self.writer.overwrite(skip_jump, |w| w.jn0(exit_target));
@@ -1126,9 +1132,10 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(increment_target)),
             };
         }
+        self.for_loop_cleanup.pop();
         // discard counter
         comment!(self, "discard upper bound");
-        self.write_discard(iter_ty)?;
+        self.write_discard(self.ty(&iter_type_id))?;
         Ok(())
     }
 
@@ -1168,6 +1175,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "for in array");
         // clone the array; the clone (top of stack) is walked while the body may mutate the original
         self.compile_for_loop_clone(item)?;
+        let collection_type_id = item.expr.type_id(self).ice()?;
+        self.for_loop_cleanup.push(ForLoopCleanup::Collection(collection_type_id));
         let loop_start = self.write_array_iter_iv(self.ty(&element_type_id), index_loc, element_loc, 123)?;
         // compile inner block
         self.loop_control.push();
@@ -1184,6 +1193,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
             };
         }
+        self.for_loop_cleanup.pop();
         self.compile_for_loop_release(item)?;
         Ok(())
     }
@@ -1196,6 +1206,8 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         comment!(self, "for in map");
         // clone the map; the clone (top of stack) is walked while the body may mutate the original
         self.compile_for_loop_clone(item)?;
+        let collection_type_id = item.expr.type_id(self).ice()?;
+        self.for_loop_cleanup.push(ForLoopCleanup::Collection(collection_type_id));
         let constructor = self.constructor(self.ty(&item.expr))?;
         let loop_start = self.write_map_iter(key_loc, value_loc, constructor, 123);
         // compile inner block
@@ -1213,6 +1225,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
             };
         }
+        self.for_loop_cleanup.pop();
         self.compile_for_loop_release(item)?;
         Ok(())
     }
@@ -1245,6 +1258,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
         }
         // compile inner block
         self.loop_control.push();
+        self.for_loop_cleanup.push(ForLoopCleanup::Generator(gen_type_id));
         self.compile_block(&item.block)?;
         let loop_controls = self.loop_control.pop();
         self.writer.jmp(loop_start);
@@ -1257,6 +1271,7 @@ impl<T> Compiler<T> where T: VMFunc<T> {
                 &LoopControl::Continue(addr) => self.writer.overwrite(addr, |w| w.jmp(loop_start)),
             };
         }
+        self.for_loop_cleanup.pop();
         // release the generator reference held across the loop (cnt pops it off the stack)
         self.write_cnt(self.ty(&item.expr), false, HeapRefOp::Dec)?;
         Ok(())
@@ -2280,6 +2295,36 @@ impl<T> Compiler<T> where T: VMFunc<T> {
             8 => self.writer.ret64(arg_size),
             _ => Self::ice(&format!("Unsupported arg_size {:?} for ret instruction", arg_size))?,
         })
+    }
+
+    /// Writes refcount cleanup for all active for-loops when exiting early via `return`.
+    ///
+    /// Array/map loops hold two references (clone + source) that must be Dec'd.
+    /// Generator loops hold one reference (generator) that must be Dec'd.
+    /// Range loops leave the upper bound on the stack; it must be discarded.
+    fn write_for_loop_cleanup(self: &mut Self) -> CompileResult {
+        // Iterate in reverse (outermost first) so that inner-loop stack artifacts
+        // are discarded before outer-loop refs are popped.
+        for cleanup in self.for_loop_cleanup.iter().rev() {
+            match cleanup {
+                ForLoopCleanup::Collection(type_id) => {
+                    let ty = self.ty(type_id);
+                    comment!(self, "for-loop collection cleanup (return)");
+                    self.write_cnt(ty, false, HeapRefOp::Dec)?;    // release clone
+                    self.write_cnt(ty, false, HeapRefOp::Dec)?;    // release source
+                }
+                ForLoopCleanup::Generator(type_id) => {
+                    let ty = self.ty(type_id);
+                    comment!(self, "for-loop generator cleanup (return)");
+                    self.write_cnt(ty, false, HeapRefOp::Dec)?;    // release generator reference
+                }
+                ForLoopCleanup::Range(size) => {
+                    comment!(self, "for-loop range cleanup (return)");
+                    self.writer.discard(*size as FrameAddress);    // discard upper bound
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Writes instructions to decreases reference counts for block locals.

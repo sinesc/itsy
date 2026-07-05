@@ -218,3 +218,147 @@ fn for_range_min_max() {
     }
     assert_all(&result, &expected);
 }
+
+// ---------------------------------------------------------------------------
+// Regression: return inside for-loops must clean up loop artifacts
+// ---------------------------------------------------------------------------
+
+#[test]
+fn return_in_for_in_array() {
+    let result = run(stringify!(
+        for i in [1u8, 2, 3] {
+            ret_u8(42);
+            return;
+        }
+        ret_u8(99); // dead code
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_for_in_map() {
+    let result = run(stringify!(
+        let m = [ 1i64 => 2i64, 3i64 => 4i64 ];
+        for v in m {
+            ret_u8(42);
+            return;
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_for_in_range() {
+    let result = run(stringify!(
+        for i in 0..10 {
+            ret_u8(42);
+            return;
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_for_in_range_inclusive() {
+    let result = run(stringify!(
+        for i in 0..=10 {
+            ret_u8(42);
+            return;
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_nested_for_array_range() {
+    // array loop outer, range loop inner
+    let result = run(stringify!(
+        for i in [1u8, 2] {
+            for j in 0..5 {
+                ret_u8(42);
+                return;
+            }
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_nested_for_range_array() {
+    // range loop outer, array loop inner
+    let result = run(stringify!(
+        for i in 0..5 {
+            for j in [1u8, 2] {
+                ret_u8(42);
+                return;
+            }
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_triple_nested_for() {
+    let result = run(stringify!(
+        for i in [1u8] {
+            for j in 0..2 {
+                for k in [1u8, 2] {
+                    ret_u8(42);
+                    return;
+                }
+            }
+        }
+        ret_u8(99);
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_while_with_for() {
+    let result = run(stringify!(
+        let data = [1u8, 2];
+        let cond = true;
+        while true {
+            for item in data {
+                if cond {
+                    ret_u8(42);
+                    return;
+                }
+            }
+        }
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_for_in_struct_array() {
+    let result = run(stringify!(
+        struct S { x: i32 }
+        fn main() {
+            let arr = [ S { x: 1 }, S { x: 2 } ];
+            for s in arr {
+                ret_u8(42);
+                return;
+            }
+        }
+    ));
+    assert_all(&result, &[ 42u8 ]);
+}
+
+#[test]
+fn return_in_for_in_string_array() {
+    let result = run(stringify!(
+        let arr = [ "hello", "world" ];
+        for s in arr {
+            ret_string(s);
+            return;
+        }
+        ret_string("dead");
+    ));
+    assert_all(&result, &[ "hello".to_string() ]);
+}
