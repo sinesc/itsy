@@ -1,6 +1,104 @@
-use itsy::itsy_api;
+use itsy::{itsy_api, VMValue};
 #[allow(unused_imports)]
 use std::{thread, time::{Instant, Duration}, io::{self, Write}};
+use std::collections::HashSet;
+
+/// Key codes exposed to Itsy scripts.
+#[derive(VMValue, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum KeyCode {
+    Backspace,
+    Enter,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Tab,
+    Delete,
+    Insert,
+    Escape,
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
+    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
+    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+    Space,
+    Minus, Equal,
+    LeftBracket, RightBracket,
+    Backslash,
+    Semicolon, Quote,
+    Comma, Dot, Slash,
+    GraveAccent,
+}
+
+/// Modifier keys exposed to Itsy scripts.
+#[derive(VMValue, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ModifierKey {
+    Shift,
+    Ctrl,
+    Alt,
+}
+
+impl KeyCode {
+    /// Maps a crossterm KeyCode to our KeyCode, or None if unmapped.
+    fn from_crossterm(code: crossterm::event::KeyCode) -> Option<Self> {
+        Some(match code {
+            crossterm::event::KeyCode::Backspace => Self::Backspace,
+            crossterm::event::KeyCode::Enter => Self::Enter,
+            crossterm::event::KeyCode::Left => Self::Left,
+            crossterm::event::KeyCode::Right => Self::Right,
+            crossterm::event::KeyCode::Up => Self::Up,
+            crossterm::event::KeyCode::Down => Self::Down,
+            crossterm::event::KeyCode::Home => Self::Home,
+            crossterm::event::KeyCode::End => Self::End,
+            crossterm::event::KeyCode::PageUp => Self::PageUp,
+            crossterm::event::KeyCode::PageDown => Self::PageDown,
+            crossterm::event::KeyCode::Tab => Self::Tab,
+            crossterm::event::KeyCode::Delete => Self::Delete,
+            crossterm::event::KeyCode::Insert => Self::Insert,
+            crossterm::event::KeyCode::Esc => Self::Escape,
+            crossterm::event::KeyCode::F(n) => match n {
+                1 => Self::F1, 2 => Self::F2, 3 => Self::F3, 4 => Self::F4,
+                5 => Self::F5, 6 => Self::F6, 7 => Self::F7, 8 => Self::F8,
+                9 => Self::F9, 10 => Self::F10, 11 => Self::F11, 12 => Self::F12,
+                _ => return None,
+            },
+            crossterm::event::KeyCode::Char(c) => match c {
+                'A' ..= 'Z' | 'a' ..= 'z' => {
+                    let upper = c.to_ascii_uppercase();
+                    match upper as u8 - b'A' {
+                        0 => Self::KeyA, 1 => Self::KeyB, 2 => Self::KeyC,
+                        3 => Self::KeyD, 4 => Self::KeyE, 5 => Self::KeyF,
+                        6 => Self::KeyG, 7 => Self::KeyH, 8 => Self::KeyI,
+                        9 => Self::KeyJ, 10 => Self::KeyK, 11 => Self::KeyL,
+                        12 => Self::KeyM, 13 => Self::KeyN, 14 => Self::KeyO,
+                        15 => Self::KeyP, 16 => Self::KeyQ, 17 => Self::KeyR,
+                        18 => Self::KeyS, 19 => Self::KeyT, 20 => Self::KeyU,
+                        21 => Self::KeyV, 22 => Self::KeyW, 23 => Self::KeyX,
+                        24 => Self::KeyY, 25 => Self::KeyZ,
+                        _ => unreachable!(),
+                    }
+                }
+                '0' => Self::Digit0, '1' => Self::Digit1, '2' => Self::Digit2,
+                '3' => Self::Digit3, '4' => Self::Digit4, '5' => Self::Digit5,
+                '6' => Self::Digit6, '7' => Self::Digit7, '8' => Self::Digit8,
+                '9' => Self::Digit9,
+                ' ' => Self::Space,
+                '-' => Self::Minus, '=' => Self::Equal,
+                '[' => Self::LeftBracket, ']' => Self::RightBracket,
+                '\\' => Self::Backslash,
+                ';' => Self::Semicolon, '\'' => Self::Quote,
+                ',' => Self::Comma, '.' => Self::Dot, '/' => Self::Slash,
+                '`' => Self::GraveAccent,
+                _ => return None,
+            },
+            _ => return None,
+        })
+    }
+}
 
 /// Demo context data.
 #[allow(dead_code)]
@@ -9,6 +107,9 @@ pub struct Context {
     pub started: Instant,
     pub last_frame: Instant,
     pub args: Vec<String>,
+    pub keys_down: HashSet<KeyCode>,
+    pub modifiers_down: HashSet<ModifierKey>,
+    pub raw_mode: bool,
 }
 
 #[allow(dead_code)]
@@ -19,6 +120,17 @@ impl Context {
             started: Instant::now(),
             last_frame: Instant::now(),
             args: args.to_vec(),
+            keys_down: HashSet::new(),
+            modifiers_down: HashSet::new(),
+            raw_mode: false,
+        }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        if self.raw_mode {
+            let _ = crossterm::terminal::disable_raw_mode();
         }
     }
 }
@@ -86,6 +198,77 @@ itsy_api! {
                 n += 1;
             }
             n
+        }
+        /// Puts the terminal into raw mode for keyboard input. Returns false if already enabled or on error.
+        fn enable_raw_mode(&mut context) -> bool {
+            !context.raw_mode && match crossterm::terminal::enable_raw_mode() {
+                Ok(()) => { context.raw_mode = true; true }
+                Err(_) => false,
+            }
+        }
+        /// Restores the terminal to normal (canonical) mode.
+        fn disable_raw_mode(&mut context) {
+            if context.raw_mode {
+                let _ = crossterm::terminal::disable_raw_mode();
+                context.raw_mode = false;
+            }
+        }
+        /// Polls for pending keyboard events and updates internal key state. Call once per frame.
+        /// Returns false if Ctrl+C was pressed (signal to quit).
+        fn update_input(&mut context) -> bool {
+            context.keys_down.clear();
+            context.modifiers_down.clear();
+            let mut ctrl_c = false;
+            use crossterm::event::{poll, read, Event, KeyEventKind, KeyModifiers};
+            while poll(Duration::ZERO).unwrap_or(false) {
+                let event = match read() {
+                    Ok(e) => e,
+                    Err(_) => break,
+                };
+                if let Event::Key(key) = event {
+                    // Ctrl+C => signal to quit
+                    if matches!(key.code, crossterm::event::KeyCode::Char('c'))
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        ctrl_c = true;
+                        break;
+                    }
+                    match key.kind {
+                        KeyEventKind::Press | KeyEventKind::Repeat => {
+                            if let Some(kc) = KeyCode::from_crossterm(key.code) {
+                                context.keys_down.insert(kc);
+                            }
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                context.modifiers_down.insert(ModifierKey::Shift);
+                            }
+                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                context.modifiers_down.insert(ModifierKey::Ctrl);
+                            }
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                context.modifiers_down.insert(ModifierKey::Alt);
+                            }
+                        }
+                        KeyEventKind::Release => { /* state cleared each frame */ }
+                    }
+                }
+            }
+            !ctrl_c
+        }
+        /// Returns true if the key is currently held down.
+        fn is_key_down(&mut context, keycode: KeyCode) -> bool {
+            context.keys_down.contains(&keycode)
+        }
+        /// Returns true if the key is not currently held down.
+        fn is_key_up(&mut context, keycode: KeyCode) -> bool {
+            !context.keys_down.contains(&keycode)
+        }
+        /// Returns true if the modifier key is currently held down.
+        fn is_modifier_down(&mut context, modifier: ModifierKey) -> bool {
+            context.modifiers_down.contains(&modifier)
+        }
+        /// Returns true if the modifier key is not currently held down.
+        fn is_modifier_up(&mut context, modifier: ModifierKey) -> bool {
+            !context.modifiers_down.contains(&modifier)
         }
         // -- ret_* functions mirroring the test infrastructure (TestFns) --
         /// Returns the given value unchanged.
