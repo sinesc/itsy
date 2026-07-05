@@ -14,10 +14,13 @@ use crate::StackAddress;
 use std::collections::HashSet;
 
 /// Fold constant arithmetic where both operands are immediates.
-pub fn fold_constants(output: &mut Vec<(StackAddress, StackAddress, Option<OpCodeData>)>, jump_targets: &HashSet<StackAddress>) {
+/// Returns `true` if any instructions were folded.
+pub fn fold_constants(output: &mut Vec<(StackAddress, StackAddress, Option<OpCodeData>)>, jump_targets: &HashSet<StackAddress>) -> bool {
     if output.len() < 3 {
-        return;
+        return false;
     }
+
+    let mut changed = false;
 
     // Scan for binary-op patterns: immediate(A) + immediate(B) + op
     // Use logical adjacency: skip over comment instructions.
@@ -42,6 +45,7 @@ pub fn fold_constants(output: &mut Vec<(StackAddress, StackAddress, Option<OpCod
             output[idx_a].2 = Some(folded);
             output[idx_b].2 = None;
             output[idx_op].2 = None;
+            changed = true;
         }
         i = idx_a + 1;
     }
@@ -63,9 +67,11 @@ pub fn fold_constants(output: &mut Vec<(StackAddress, StackAddress, Option<OpCod
         if let Some(folded) = try_fold_unary(data_a, data_op) {
             output[idx_a].2 = Some(folded);
             output[idx_op].2 = None;
+            changed = true;
         }
         i = idx_a + 1;
     }
+    changed
 }
 
 // ---------------------------------------------------------------------------

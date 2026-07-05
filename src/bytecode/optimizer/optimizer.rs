@@ -6,6 +6,7 @@ mod rewrite;
 mod passes {
     pub mod const_fold;
     pub mod cnt_cancel;
+    pub mod redundant_ls;
     //pub mod jump_norm;
     //pub mod store_forward;
 }
@@ -20,15 +21,24 @@ use std::mem::size_of;
 ///
 /// Returns the optimized program. The optimizer is re-entrant: calling it
 /// multiple times is safe (subsequent calls are no-ops on already-optimized code).
+///
+/// Passes run repeatedly in a fixpoint loop: each round re-enumerates the
+/// compacted bytecode, recomputes jump targets, and runs all passes. The
+/// loop stops when a full round produces no changes.
 pub fn optimize<T: VMFunc<T>>(program: Program<T>) -> Program<T> {
-    let instructions = program.instructions.clone();
-    let jump_targets = collect_jump_targets(&instructions);
+    let mut instructions = program.instructions.clone();
 
-    // Run all passes
-    let output = run_passes(&instructions, &jump_targets);
-
-    // Build the compacted instruction stream
-    let (optimized, addr_map, optimized_size) = build_optimized(&instructions, &output);
+    // Fixpoint loop: run passes until no more changes.
+    let (optimized, addr_map, optimized_size) = loop {
+        let jump_targets = collect_jump_targets(&instructions);
+        let output = run_passes(&instructions, &jump_targets);
+        let has_removals = output.iter().any(|(_, _, d)| d.is_none());
+        let (compact, am, os) = build_optimized(&instructions, &output);
+        if !has_removals {
+            break (compact, am, os); // fixpoint reached
+        }
+        instructions = compact;
+    };
 
     let mut program = program;
     program.instructions = optimized;
@@ -96,6 +106,7 @@ fn collect_jump_targets(instructions: &[u8]) -> HashSet<StackAddress> {
 fn run_passes(instructions: &[u8], jump_targets: &HashSet<StackAddress>) -> Vec<(StackAddress, StackAddress, Option<OpCodeData>)> {
     let mut output = enumerate_instructions(instructions);
     passes::const_fold::fold_constants(&mut output, jump_targets);
+    passes::redundant_ls::eliminate_redundant_ls(&mut output, jump_targets);
     //passes::store_forward::forward_stores(&mut output, jump_targets); // TODO: fix or remove, pass is ineffective (no changes)
     //passes::jump_norm::normalize_jumps(&mut output, jump_targets); // TODO: fix or remove, pass is ineffective (no changes)
     passes::cnt_cancel::cancel_refcounts(&mut output, jump_targets);

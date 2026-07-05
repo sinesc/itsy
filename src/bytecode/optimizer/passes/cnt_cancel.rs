@@ -28,7 +28,10 @@ const OP_DEC_NO_FREE: u8 = HeapRefOp::DecNoFree as u8;
 /// Both `cnt_16_nc` and `cnt_sa_nc` variants are handled.  The pair must
 /// use the same variant (both 16-bit or both stack-address) so that the
 /// serialized form is compatible.
-pub fn cancel_refcounts(output: &mut Vec<(StackAddress, StackAddress, Option<OpCodeData>)>, jump_targets: &HashSet<StackAddress>) {
+///
+/// Returns `true` if any instructions were removed.
+pub fn cancel_refcounts(output: &mut Vec<(StackAddress, StackAddress, Option<OpCodeData>)>, jump_targets: &HashSet<StackAddress>) -> bool {
+    let mut changed = false;
     let mut i = 0usize;
     loop {
         let Some(idx_a) = next_real(output, i) else { break };
@@ -54,10 +57,12 @@ pub fn cancel_refcounts(output: &mut Vec<(StackAddress, StackAddress, Option<OpC
         if is_cancel_pair(data_a, data_b) {
             output[idx_a].2 = None;
             output[idx_b].2 = None;
+            changed = true;
         }
 
         i = idx_a + 1;
     }
+    changed
 }
 
 /// Check if an opcode is a non-consuming refcount instruction.
