@@ -316,7 +316,10 @@ itsy_api! {
         fn terminal_height(&mut context) -> u16 {
             crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24)
         }
-
+        /// Returns whether the terminal has kitty support (requires a key press first)
+        fn is_kitty(&mut context) -> bool {
+            context.kitty
+        }
         // Benchmark compatibility methods.
         /// Returns the given value unchanged.
         fn ret_u8(&mut context, value: u8) -> u8 { value }

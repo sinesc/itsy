@@ -6,7 +6,7 @@
  * Quit: Ctrl+C
  */
 use MyAPI::{print, println, flush, wait_frame, enable_raw_mode, disable_raw_mode,
-             update_input, is_key_down, exit, terminal_width, terminal_height, KeyCode};
+             update_input, is_key_down, exit, terminal_width, terminal_height, KeyCode, is_kitty};
 
 struct Brick {
     col: u32,
@@ -31,8 +31,8 @@ impl Paddle {
     fn new(term_w: u32, term_h: u32) -> Paddle {
         let pw_raw = term_w / 8;
         let width = pw_raw.max(8).min(20);
-        let ps_raw = term_w / 40;
-        let speed = ps_raw.max(2).min(4);
+        let ps_raw = term_w / 80;
+        let speed = ps_raw.max(1).min(4);
         let row = term_h - 4;
         let x = (term_w - width) / 2;
         return Paddle { x: x, width: width, speed: speed, row: row };
@@ -260,7 +260,11 @@ impl Game {
     fn render(self: Self) {
         // HUD
         let lives_str = "●".repeat(self.lives as u64);
-        let hud = "Score: {self.score}    Lives: {lives_str}    Level: {self.level}   ";
+        let hud = "Score: {self.score}    Lives: {lives_str}    Level: {self.level}";
+        if !is_kitty() {
+            hud += " - Terminal does not support kitty input - expect poor paddle controls";
+        }
+        hud = hud.pad_end(" ", self.term_w as u64);
 
         // game area — row by row
         let mut frame = hud + "\r\n";
@@ -421,8 +425,8 @@ fn main() {
     let term_w = terminal_width() as u32;
     let term_h = terminal_height() as u32;
 
-    if term_w < 30 || term_h < 12 {
-        println("Terminal too small! Need at least 30x12, got {term_w}x{term_h}");
+    if term_w < 80 || term_h < 12 {
+        println("Terminal too small! Need at least 80x12, got {term_w}x{term_h}");
         disable_raw_mode();
         exit(1);
         return;

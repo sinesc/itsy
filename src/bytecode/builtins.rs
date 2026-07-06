@@ -1809,6 +1809,52 @@ impl_builtins! {
             }
         }
 
+        /// Pads the string on the left with the given padding string to reach the target length.
+        /// The padding string is repeated as needed and truncated to fit exactly.
+        /// If the string is already at or longer than the target length, it is returned unchanged.
+        pad_start(self: Self, padding: Self, length: u64) -> Self {
+            fn string_pad_start(this: &str, padding: &str, length: StackAddress) -> String {
+                let this_len = this.chars().count();
+                let target = length as usize;
+                if this_len >= target {
+                    this.to_string()
+                } else {
+                    let chars_needed = target - this_len;
+                    let mut result = String::with_capacity(this.len() + padding.len());
+                    let pad_chars: Vec<char> = padding.chars().collect();
+                    let pad_len = pad_chars.len();
+                    for i in 0..chars_needed {
+                        result.push(pad_chars[i % pad_len]);
+                    }
+                    result.push_str(this);
+                    result
+                }
+            }
+        }
+
+        /// Pads the string on the right with the given padding string to reach the target length.
+        /// The padding string is repeated as needed and truncated to fit exactly.
+        /// If the string is already at or longer than the target length, it is returned unchanged.
+        pad_end(self: Self, padding: Self, length: u64) -> Self {
+            fn string_pad_end(this: &str, padding: &str, length: StackAddress) -> String {
+                let this_len = this.chars().count();
+                let target = length as usize;
+                if this_len >= target {
+                    this.to_string()
+                } else {
+                    let chars_needed = target - this_len;
+                    let mut result = String::with_capacity(this.len() + padding.len());
+                    result.push_str(this);
+                    let pad_chars: Vec<char> = padding.chars().collect();
+                    let pad_len = pad_chars.len();
+                    for i in 0..chars_needed {
+                        result.push(pad_chars[i % pad_len]);
+                    }
+                    result
+                }
+            }
+        }
+
         /// Returns the string representation of given ASCII code.
         from_ascii(char_code: u8) -> Self {
             fn string_from_ascii(char_code: u8) -> String {
