@@ -185,6 +185,9 @@ pub(crate) trait Resolvable: Display {
                 ConstantValue::Discriminant(_) => {
                     Progress::zero()
                 }
+                ConstantValue::UserConst(_) => {
+                    Progress::zero()
+                }
             };
             progress
         } else {
@@ -356,7 +359,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction, Cast)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Yield, Break, Continue, Suspend, Expression, Module, UseDecl, EnumDef)
+        impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, ConstDef, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Yield, Break, Continue, Suspend, Expression, Module, UseDecl, EnumDef)
     };
     ($self:ident, BinaryOperand, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
@@ -458,6 +461,7 @@ impl Display for Path {
 pub enum Statement {
     LetBinding(LetBinding),
     LetPattern(LetPattern),
+    ConstDef(ConstDef),
     Function(Function),
     StructDef(StructDef),
     ImplBlock(ImplBlock),
@@ -619,6 +623,45 @@ impl_resolvable!(LetPattern {
 impl Display for LetPattern {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "let {} = {}", self.pattern, self.expr)
+    }
+}
+
+/// A const declaration, e.g. `const NAME: Type = expr;`. The expression must be a static expression
+/// (literals and references to previously-defined consts only).
+#[derive(Debug)]
+pub struct ConstDef {
+    pub position    : Position,
+    pub ident       : Ident,
+    pub ty          : Option<InlineType>,
+    pub expr        : Expression,
+    pub constant_id : Option<ConstantId>,
+}
+
+impl_positioned!(ConstDef);
+impl_resolvable!(ConstDef {
+    ty: OptionalItem,
+    expr: Item,
+    constant_id: ConstantId,
+});
+
+impl Display for ConstDef {
+    fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "const {} = {}", self.ident, self.expr)
+    }
+}
+
+impl Typeable for ConstDef {
+    fn type_id(self: &Self, container: &impl MetaContainer) -> Option<TypeId> {
+        match self.constant_id {
+            Some(constant_id) => container.constant_by_id(constant_id).type_id,
+            None => None,
+        }
+    }
+    fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
+        match self.constant_id {
+            Some(constant_id) => container.constant_by_id_mut(constant_id).type_id = Some(type_id),
+            None => { /* not resolved to constant yet */ },
+        }
     }
 }
 
@@ -1121,6 +1164,7 @@ impl Display for StructDef {
 pub struct ImplBlock {
     pub position    : Position,
     pub functions   : Vec<Function>,
+    pub consts      : Vec<ConstDef>,
     pub scope_id    : ScopeId,
     pub ty          : InlineType,
     pub trt         : Option<TypeName>,
@@ -1129,6 +1173,7 @@ pub struct ImplBlock {
 impl_positioned!(ImplBlock);
 impl_resolvable!(ImplBlock {
     functions: ItemList,
+    consts: ItemList,
     ty: Item,
     trt: OptionalItem,
 });
@@ -1745,12 +1790,16 @@ pub enum LiteralValue {
 
 impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
+        // Helper: check if an expression is a literal with const value or a const reference
+        fn expr_is_const(e: &Expression) -> bool {
+            e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)
+            || e.as_constant().is_some()  // const reference is always static
+        }
         match self {
-            LiteralValue::Array(v) => v.elements.iter().all(|e| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
+            LiteralValue::Array(v) => v.elements.iter().all(|e| expr_is_const(e)),
             LiteralValue::Map(v) => v.entries.iter().all(|(k, val)|
-                k.as_literal().map(|l| l.value.is_const()).unwrap_or(false)
-                && val.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
-            LiteralValue::Struct(v) => v.fields.iter().all(|(_, e)| e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)),
+                expr_is_const(k) && expr_is_const(val)),
+            LiteralValue::Struct(v) => v.fields.iter().all(|(_, e)| expr_is_const(e)),
             _ => true,
         }
     }

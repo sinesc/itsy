@@ -1,7 +1,7 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use crate::prelude::*;
-use crate::{FrameAddress, StackAddress, ItemIndex};
+use crate::{FrameAddress, StackAddress, ItemIndex, HeapAddress};
 use crate::bytecode::{HeapRefOp, builtins::Builtin, macros::impl_opcodes};
 #[cfg(feature="runtime")]
 use crate::{
@@ -104,6 +104,20 @@ impl_opcodes!{
     >(&mut self) {
         let local: T = self.stack.pop();
         self.stack.store_fp(loc, local);
+    }
+
+    /// Loads a HeapAddress from the const pool at the given absolute address and pushes it onto the stack.
+    /// Used to access reference-type const values that are stored in the const pool.
+    fn load_pool(&mut self, addr: StackAddress) {
+        let value: HeapAddress = self.stack.load(addr);
+        self.stack.push(value);
+    }
+
+    /// Pops a HeapAddress off the stack and stores it at the given absolute address in the const pool.
+    /// Used to store the heap address of a reference-type const value.
+    fn store_pool(&mut self, addr: StackAddress) {
+        let value: HeapAddress = self.stack.pop();
+        self.stack.store(addr, value);
     }
 
     /// Pops HeapRef off the stack and stores it at the given stackframe-offset.

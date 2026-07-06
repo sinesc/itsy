@@ -48,3 +48,5 @@ mod api_types;
 mod index_ops;
 #[path="vm/int_methods.rs"]
 mod int_methods;
+#[path="vm/consts.rs"]
+mod consts;

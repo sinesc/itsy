@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex};
+use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex, StackAddress};
 use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
 
@@ -10,10 +10,24 @@ pub struct Binding {
     pub type_id: Option<TypeId>,
 }
 
+/// Value of a user-defined `const` declaration.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum UserConstValue {
+    /// Reference-type constant: const pool offset of the reserved heap address slot.
+    HeapRef(StackAddress),
+    /// Value-type constant: void.
+    Void,
+    /// Value-type constant: boolean.
+    Bool(bool),
+    /// Value-type constant: numeric (covers integers and floats).
+    Numeric(Numeric),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConstantValue {
     Function(FunctionId),
     Discriminant(Numeric),
+    UserConst(UserConstValue),
 }
 
 impl_as_getter!(ConstantValue {

@@ -470,20 +470,38 @@ fn map_def(i: Input) -> Output<MapDef> {
 }
 
 /// Matches an impl block, e.g. `impl MyStruct { ... }`
+/// Internal enum for parsing impl block contents (functions and consts).
+enum ImplItem {
+    Function(Function),
+    Const(ConstDef),
+}
+
+/// Parses a single item inside an impl block (either a function or a const).
+fn impl_item(i: Input) -> Output<ImplItem> {
+    alt((
+        map(function, |f| ImplItem::Function(f)),
+        map(const_def, |c| ImplItem::Const(c)),
+    ))(i)
+}
+
 fn impl_block(i: Input) -> Output<ImplBlock> {
     let position = i.position();
     let j = i.clone();
     with_scope(ScopeKind::Module, map(
         preceded(
             check_flags(keyword("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
-            pair(inline_type, delimited(punct("{"), many0(function), punct("}")))
+            pair(inline_type, delimited(punct("{"), many0(impl_item), punct("}")))
         ),
-        move |tuple| ImplBlock {
-            position    : position,
-            functions   : tuple.1,
-            scope_id    : j.scope_id(),
-            ty          : tuple.0,
-            trt         : None,
+        move |tuple| {
+            let (functions, consts): (Vec<_>, Vec<_>) = tuple.1.into_iter().partition(|item| matches!(item, ImplItem::Function(_)));
+            ImplBlock {
+                position    : position,
+                functions   : functions.into_iter().filter_map(|item| if let ImplItem::Function(f) = item { Some(f) } else { None }).collect(),
+                consts      : consts.into_iter().filter_map(|item| if let ImplItem::Const(c) = item { Some(c) } else { None }).collect(),
+                scope_id    : j.scope_id(),
+                ty          : tuple.0,
+                trt         : None,
+            }
         }
     ))(i)
 }
@@ -497,15 +515,19 @@ fn trait_impl_block(i: Input) -> Output<ImplBlock> {
             check_flags(keyword("impl"), |s| if s.in_function { Some(ParseErrorKind::IllegalImplBlock) } else { None }),
             pair(
                 pair(terminated(path, keyword("for")), inline_type),
-                delimited(punct("{"), many0(function), punct("}"))
+                delimited(punct("{"), many0(impl_item), punct("}"))
             )
         ),
-        move |tuple| ImplBlock {
-            position    : position,
-            functions   : tuple.1,
-            scope_id    : j.scope_id(),
-            ty          : tuple.0.1,
-            trt         : Some(TypeName::from_path(tuple.0.0)),
+        move |tuple| {
+            let (functions, consts): (Vec<_>, Vec<_>) = tuple.1.into_iter().partition(|item| matches!(item, ImplItem::Function(_)));
+            ImplBlock {
+                position    : position,
+                functions   : functions.into_iter().filter_map(|item| if let ImplItem::Function(f) = item { Some(f) } else { None }).collect(),
+                consts      : consts.into_iter().filter_map(|item| if let ImplItem::Const(c) = item { Some(c) } else { None }).collect(),
+                scope_id    : j.scope_id(),
+                ty          : tuple.0.1,
+                trt         : Some(TypeName::from_path(tuple.0.0)),
+            }
         }
     ))(i)
 }
@@ -1665,6 +1687,28 @@ fn let_pattern(i: Input) -> Output<LetPattern> {
     )(i)
 }
 
+/// Matches a const declaration, e.g. `const NAME: Type = expr;`.
+fn const_def(i: Input) -> Output<ConstDef> {
+    let position = i.position();
+    map(
+        tuple((
+            keyword("const"),
+            ident,
+            opt(preceded(punct(":"), inline_type)),
+            punct("="),
+            expression,
+            punct(";"),
+        )),
+        move |m| ConstDef {
+            position,
+            ident: m.1,
+            ty: m.2,
+            expr: m.4,
+            constant_id: None,
+        }
+    )(i)
+}
+
 /// Builds a variable-reference expression for an already-declared binding. Used by desugaring code
 /// that synthesizes references to bindings it created itself (the binding id is known, so no name
 /// lookup is required).
@@ -1853,6 +1897,31 @@ fn suspend_statement(i: Input) -> Output<Suspend> {
     )(i)
 }
 
+/// Matches a const declaration within a function body, e.g. `const NAME: Type = expr;`.
+fn const_def_function(i: Input) -> Output<ConstDef> {
+    let position = i.position();
+    map(
+        check_flags(
+            tuple((
+                keyword("const"),
+                ident,
+                opt(preceded(punct(":"), inline_type)),
+                punct("="),
+                expression,
+                punct(";"),
+            )),
+            |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }
+        ),
+        move |m| ConstDef {
+            position,
+            ident: m.1,
+            ty: m.2,
+            expr: m.4,
+            constant_id: None,
+        }
+    )(i)
+}
+
 /// Matches a statement.
 fn statement(i: Input) -> Output<Statement> {
     let j = i.clone();
@@ -1860,6 +1929,7 @@ fn statement(i: Input) -> Output<Statement> {
         map(use_decl, |m| Statement::UseDecl(m)),
         map(snap(let_pattern), |m| Statement::LetPattern(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
+        map(const_def_function, |m| Statement::ConstDef(m)),
         map(if_block, |m| Statement::IfBlock(m)),
         for_loop,
         map(while_loop, |m| Statement::WhileLoop(m)),
@@ -1890,6 +1960,7 @@ fn root_items(i: Input) -> Output<Statement> {
         map(trait_impl_block,|m| Statement::ImplBlock(m)),
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
+        map(const_def, |m| Statement::ConstDef(m)),
     ))(i)
 }
 

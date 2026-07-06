@@ -94,4 +94,8 @@ impl Resolved {
     pub fn constant(self: &Self, constant_id: ConstantId) -> &Constant {
         &self.constant_map[Into::<usize>::into(constant_id)]
     }
+    /// Returns mutable constant information for given constant id.
+    pub fn constant_mut(self: &mut Self, constant_id: ConstantId) -> &mut Constant {
+        &mut self.constant_map[Into::<usize>::into(constant_id)]
+    }
 }

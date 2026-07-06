@@ -870,6 +870,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             TraitDef(trait_def) => self.resolve_trait_type(trait_def),
             LetBinding(binding) => self.resolve_let_binding(binding),
             LetPattern(let_pattern) => self.resolve_let_pattern(let_pattern),
+            ConstDef(const_def) => self.resolve_const_def(const_def),
             IfBlock(if_block) => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             ForLoop(for_loop) => self.resolve_for_loop(for_loop),
             WhileLoop(while_loop) => self.resolve_while_loop(while_loop),
@@ -1293,9 +1294,103 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             }
+            // Resolve const declarations inside the impl block
+            for const_def in &mut item.consts {
+                self.resolve_const_def(const_def)?;
+            }
         }
         self.scope_id = parent_scope_id;
         self.resolved(item)
+    }
+
+    /// Returns whether a const expression is valid: every sub-expression is a literal or a const reference.
+    fn is_const_expr(self: &Self, expr: &ast::Expression) -> bool {
+        match expr {
+            ast::Expression::Literal(l) => l.value.is_const(),
+            ast::Expression::Constant(_) => true,  // resolved const reference — always static
+            _ => false,
+        }
+    }
+
+    /// Resolves a const declaration.
+    fn resolve_const_def(self: &mut Self, item: &mut ast::ConstDef) -> ResolveResult {
+        // Resolve the expression first (this also resolves any const references inside it)
+        self.resolve_expression(&mut item.expr, item.ty.as_ref().and_then(|t| t.type_id(self)))?;
+
+        // Validate: expression must be static (literals + const references only)
+        if !self.is_const_expr(&item.expr) {
+            return Err(ResolveError::new(item,
+                ResolveErrorKind::InvalidOperation("const expression must be a literal or a reference to another const".into()),
+                self.module_path));
+        }
+
+        // Determine the type
+        let type_id = if let Some(ty) = &mut item.ty {
+            self.resolve_inline_type(ty)?;
+            ty.type_id(self)
+        } else {
+            item.expr.type_id(self)
+        };
+
+        // Determine the owning type id (root scope = VOID, impl block = the impl target type)
+        let owning_type_id = self.get_owning_type_id();
+
+        // Build the user const value
+        let user_const_value = if let Some(type_id) = type_id {
+            let ty = self.type_by_id(type_id);
+            if ty.is_ref() {
+                // Reference type: placeholder, updated during compilation
+                crate::shared::meta::UserConstValue::HeapRef(0)
+            } else {
+                // Value type: extract the literal value
+                match &item.expr {
+                    ast::Expression::Literal(literal) => match &literal.value {
+                        ast::LiteralValue::Void => crate::shared::meta::UserConstValue::Void,
+                        ast::LiteralValue::Bool(b) => crate::shared::meta::UserConstValue::Bool(*b),
+                        ast::LiteralValue::Numeric(n) => crate::shared::meta::UserConstValue::Numeric(*n),
+                        _ => unreachable!("Non-ref, non-primitive literal"),
+                    },
+                    ast::Expression::Constant(c) => {
+                        // const Y = X where X is a value-type const: inline X's value
+                        let ref_const = self.scopes.constant_ref(c.constant_id.ice()?);
+                        match &ref_const.value {
+                            ConstantValue::UserConst(uv) => uv.clone(),
+                            ConstantValue::Discriminant(n) => crate::shared::meta::UserConstValue::Numeric(*n),
+                            _ => unreachable!("Expected user const value or discriminant"),
+                        }
+                    },
+                    _ => unreachable!("is_const_expr already validated"),
+                }
+            }
+        } else {
+            // Type not yet resolved — use a placeholder that will be set once the type is known
+            crate::shared::meta::UserConstValue::Void
+        };
+
+        // Insert constant into scope (or update if already inserted)
+        if item.constant_id.is_none() {
+            let name = self.make_path(&[&item.ident.name]);
+            item.constant_id = Some(self.scopes.insert_constant(
+                &name, owning_type_id, type_id,
+                ConstantValue::UserConst(user_const_value),
+            ));
+        } else {
+            // Update the constant value and type_id in later resolution passes.
+            // In early passes the type might not be resolved yet (placeholder Void),
+            // but later passes fill in the actual value.
+            let constant_id = item.constant_id.ice()?;
+            let constant = self.scopes.constant_mut(constant_id);
+            constant.type_id = type_id;
+            constant.value = ConstantValue::UserConst(user_const_value);
+        }
+
+        self.resolved(item)
+    }
+
+    /// Returns the owning type id for the current scope.
+    /// For module-level declarations this is TypeId::VOID; for impl block declarations it is the impl target type.
+    fn get_owning_type_id(self: &Self) -> TypeId {
+        TypeId::VOID
     }
 
     /// Resolves a trait definition block.
