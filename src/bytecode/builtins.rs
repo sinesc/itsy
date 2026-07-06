@@ -1809,6 +1809,32 @@ impl_builtins! {
             }
         }
 
+        /// Splits the string into chunks of the given length (in characters).
+        /// The last chunk may be shorter if the string length is not evenly divisible.
+        ///
+        /// # Error
+        ///
+        /// Returns an empty array and halts the VM if `len` is 0. The VM is resumable.
+        split(self: Self, len: u64) -> StringArray {
+            fn string_split(&mut vm, this: String, len: StackAddress) -> StringArray {
+                if len == 0 {
+                    vm.state = VMState::Error(RuntimeErrorKind::InvalidArgument);
+                }
+                let array_index = vm.heap.alloc_copy(&[], 0);
+                if len > 0 {
+                    let len = len as usize;
+                    let chars: Vec<char> = this.chars().collect();
+                    for chunk in chars.chunks(len) {
+                        let chunk_str: String = chunk.iter().collect();
+                        let string_index = vm.heap.alloc_copy(chunk_str.as_bytes(), ItemIndex::MAX);
+                        let hr = HeapRef::new(string_index, 0);
+                        vm.heap.item_mut(array_index).data.extend_from_slice(&hr.to_ne_bytes());
+                    }
+                }
+                HeapRef::new(array_index, 0)
+            }
+        }
+
         /// Pads the string on the left with the given padding string to reach the target length.
         /// The padding string is repeated as needed and truncated to fit exactly.
         /// If the string is already at or longer than the target length, it is returned unchanged.

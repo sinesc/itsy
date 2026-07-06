@@ -253,6 +253,68 @@ fn string_pad_end() {
 }
 
 #[test]
+fn string_split() {
+    let result = run(stringify!(
+        // basic split with exact divisor
+        let parts = "abcdef".split(2);
+        ret_u64(parts.len());
+        ret_string(parts[0]);
+        ret_string(parts[1]);
+        ret_string(parts[2]);
+
+        // split with remainder (last chunk shorter)
+        let parts2 = "Hello, World!".split(3);
+        ret_u64(parts2.len());
+        ret_string(parts2[0]);
+        ret_string(parts2[parts2.len() - 1]);
+
+        // empty string
+        let parts3 = "".split(5);
+        ret_u64(parts3.len());
+
+        // single character chunks
+        let parts4 = "abc".split(1);
+        ret_u64(parts4.len());
+        ret_string(parts4[0]);
+        ret_string(parts4[1]);
+        ret_string(parts4[2]);
+
+        // chunk larger than string
+        let parts5 = "hi".split(10);
+        ret_u64(parts5.len());
+        ret_string(parts5[0]);
+    ));
+    assert_all!(&result, [
+        3u64, "ab".to_string(), "cd".to_string(), "ef".to_string(),
+        5u64, "Hel".to_string(), "!".to_string(),
+        0u64,
+        3u64, "a".to_string(), "b".to_string(), "c".to_string(),
+        1u64, "hi".to_string(),
+    ]);
+}
+
+#[test]
+fn string_split_unicode() {
+    let result = run(stringify!(
+        // unicode characters (multi-byte) split by character count
+        let parts = "🎉🎊🎈🎁".split(2);
+        ret_u64(parts.len());
+        ret_string(parts[0]);
+        ret_string(parts[1]);
+
+        // mixed ascii and unicode
+        let parts2 = "äöü".split(2);
+        ret_u64(parts2.len());
+        ret_string(parts2[0]);
+        ret_string(parts2[1]);
+    ));
+    assert_all!(&result, [
+        2u64, "🎉🎊".to_string(), "🎈🎁".to_string(),
+        2u64, "äö".to_string(), "ü".to_string(),
+    ]);
+}
+
+#[test]
 fn temporary_string() {
     let result = run(stringify!(
         fn return_new_string(n: i32) -> String {

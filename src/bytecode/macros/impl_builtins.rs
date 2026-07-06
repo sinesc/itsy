@@ -23,6 +23,7 @@ macro_rules! impl_builtins {
     (@handle_ret_value $vm:ident, Map, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, KeyArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, ValueArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
+    (@handle_ret_value $vm:ident, StringArray, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, OptionalElement, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, OptionalValue, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
     (@handle_ret_value $vm:ident, OptionalIndex, $value:ident, $_ctor:ident) => { $vm.stack.push($value); };
@@ -41,6 +42,7 @@ macro_rules! impl_builtins {
     (@handle_param_type Value) => { HeapRef };
     (@handle_param_type KeyArray) => { HeapRef };
     (@handle_param_type ValueArray) => { HeapRef };
+    (@handle_param_type StringArray) => { HeapRef };
     (@handle_param_type OptionalElement) => { HeapRef };
     (@handle_param_type OptionalValue) => { HeapRef };
     (@handle_param_type OptionalIndex) => { HeapRef };
@@ -55,6 +57,7 @@ macro_rules! impl_builtins {
     (@handle_ref_param_value $vm:ident, Value, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, KeyArray, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, ValueArray, $arg_name:ident) => { $arg_name };
+    (@handle_ref_param_value $vm:ident, StringArray, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, GenValue, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, GenKey, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { $arg_name };
@@ -67,6 +70,7 @@ macro_rules! impl_builtins {
     (@map_ref_type Value) => { HeapRef };
     (@map_ref_type KeyArray) => { HeapRef };
     (@map_ref_type ValueArray) => { HeapRef };
+    (@map_ref_type StringArray) => { HeapRef };
     (@map_ref_type OptionalElement) => { HeapRef };
     (@map_ref_type OptionalValue) => { HeapRef };
     (@map_ref_type OptionalIndex) => { HeapRef };
@@ -84,6 +88,7 @@ macro_rules! impl_builtins {
     (@handle_ref_param_free $vm:ident, Value, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, KeyArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, ValueArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
+    (@handle_ref_param_free $vm:ident, StringArray, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     // Generator pseudo-types: refcounting is not needed (opcodes handle it directly).
     (@handle_ref_param_free $vm:ident, GenValue, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
     (@handle_ref_param_free $vm:ident, GenKey, $arg_name:ident, $constructor:ident, $element_constructor:ident) => { };
@@ -144,6 +149,9 @@ macro_rules! impl_builtins {
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, ValueArray) => { {
         let map_ty = $resolver.type_by_id($type_id).as_map().unwrap();
         $resolver.create_array_type(map_ty.value_type_id.unwrap())
+    } };
+    (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, StringArray) => { {
+        $resolver.create_array_type($resolver.primitive_type_id(Type::String).unwrap())
     } };
     // Generator pseudo-types: resolve via generator_signature.
     (@type_map $resolver:ident, $type_id:ident, $inner_type_id:ident, GenValue) => { {
@@ -430,6 +438,8 @@ macro_rules! impl_builtins {
             /// Placeholder for `Option<u64>`: a character index from a fallible string search (e.g.
             /// `find`), `None` when no match is found. Not a built-in type.
             pub type OptionalIndex = ();
+            /// Placeholder for `[String]`: an array of strings, returned by `String::split`. Not a built-in type.
+            pub type StringArray = ();
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }
