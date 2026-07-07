@@ -898,6 +898,27 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     }
                 }
             },
+            ast::Statement::TraitDef(trait_def) => {
+                // Collect trait consts with default values (provided consts)
+                for const_def in &trait_def.consts {
+                    // Skip required consts (no default value)
+                    if const_def.expr.is_none() {
+                        continue;
+                    }
+                    let constant_id = const_def.constant_id.expect("ConstDef not resolved");
+                    let constant = self.resolved.constant(constant_id);
+                    let type_id = constant.type_id.expect("Const type not resolved");
+                    let ty = self.ty(&type_id);
+                    if ty.is_ref() {
+                        let offset = self.writer.store_const(HeapAddress::default());
+                        self.resolved.constant_mut(constant_id).value =
+                            crate::shared::meta::ConstantValue::UserConst(
+                                crate::shared::meta::UserConstValue::HeapRef(offset)
+                            );
+                        self.user_const_heap_refs.push((constant_id, offset));
+                    }
+                }
+            },
             ast::Statement::Function(func) => {
                 // Recurse into function body to find consts defined inside functions
                 if let Some(ref block) = func.shared.block {
@@ -1006,6 +1027,13 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 },
                 ast::Statement::ImplBlock(impl_block) => {
                     for const_def in &impl_block.consts {
+                        if const_def.constant_id == Some(constant_id) {
+                            return Some(const_def);
+                        }
+                    }
+                },
+                ast::Statement::TraitDef(trait_def) => {
+                    for const_def in &trait_def.consts {
                         if const_def.constant_id == Some(constant_id) {
                             return Some(const_def);
                         }
@@ -1126,7 +1154,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             let type_id = const_def.type_id(self).expect("Const type not resolved");
             let constructor = self.constructor(self.ty(&type_id))?;
             // Compile the const expression — stack: heap_addr
-            self.compile_expression(&const_def.expr)?;
+            self.compile_expression(const_def.expr.as_ref().ice()?)?;
             // Clone it — stack: heap_addr heap_addr
             self.writer.clone(size_of::<HeapAddress>() as FrameAddress);
             // Store one copy in the const pool slot — stack: heap_addr
@@ -2786,7 +2814,7 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
     fn write_target(self: &Self, addr: StackAddress) -> CompileResult<StackAddress> {
         Ok(self.writer.target(addr as u32))
     }
-    
+
     /// Builds the generator entry live-ref-map: the ref-typed arguments captured into a not-yet-started
     /// generator's frame, released if it is dropped before the first `next()`. Arguments occupy the start
     /// of the frame in declaration order, so their frame offsets are the cumulative argument sizes.

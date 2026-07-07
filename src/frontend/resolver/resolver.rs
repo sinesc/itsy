@@ -870,7 +870,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             TraitDef(trait_def) => self.resolve_trait_type(trait_def),
             LetBinding(binding) => self.resolve_let_binding(binding),
             LetPattern(let_pattern) => self.resolve_let_pattern(let_pattern),
-            ConstDef(const_def) => self.resolve_const_def(const_def),
+            ConstDef(const_def) => self.resolve_const_def(const_def, None, TypeId::VOID),
             IfBlock(if_block) => self.resolve_if_block(if_block, None), // accept any type for these, result is discarded
             ForLoop(for_loop) => self.resolve_for_loop(for_loop),
             WhileLoop(while_loop) => self.resolve_while_loop(while_loop),
@@ -1275,6 +1275,53 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 let type_name = self.type_name(type_id);
                 self.scopes.insert_alias(self.scope_id, &type_name, "Self");
             }
+            // Register the trait implementation on the type (even for empty impl blocks)
+            // so that trait-default fallback can find provided consts/methods.
+            if let Some(Some(trait_type_id)) = trait_type_id {
+                if let Some(impl_traits) = self.type_by_id_mut(type_id).impl_traits_map_mut() {
+                    impl_traits.entry(trait_type_id).or_insert(ImplTrait::new());
+                }
+            }
+            // Resolve const declarations inside the impl block FIRST
+            // so they're in scope when functions resolve (they may reference them).
+            // Store them with qualified names: TypeName::CONST
+            let type_name = self.type_name(type_id);
+            for const_def in &mut item.consts {
+                // For trait impls, validate that the const is declared by the trait
+                if let Some(Some(trait_type_id)) = trait_type_id {
+                    let trt = self.type_by_id(trait_type_id).as_trait().ice()?;
+                    let const_name = &const_def.ident.name;
+                    // Check if const is declared in trait (required or provided)
+                    if trt.required_consts.get(const_name).is_none() && trt.provided_consts.get(const_name).is_none() {
+                        let trait_name = item.trt.as_ref().ice()?.path.to_string(0);
+                        return Err(ResolveError::new(const_def, ResolveErrorKind::TraitConstNotDeclared(const_name.clone(), trait_name), self.module_path));
+                    }
+                    // If the trait declares this const, check type matches
+                    if let Some(&trait_const_id) = trt.required_consts.get(const_name).or(trt.provided_consts.get(const_name)) {
+                        if let Some(trait_const_type_id) = trait_const_id.and_then(|id| self.scopes.constant_ref(id).type_id) {
+                            // If the impl const has no explicit type, infer it from the trait const
+                            if const_def.ty.is_none() {
+                                const_def.ty = Some(ast::InlineType::TypeName(ast::TypeName {
+                                    path:    ast::Path { position: const_def.position, segments: vec![] },
+                                    type_id: Some(trait_const_type_id),
+                                }));
+                            }
+                            // Resolve the impl const's type
+                            if let Some(ty) = &mut const_def.ty {
+                                self.resolve_inline_type(ty)?;
+                            }
+                            if let Some(impl_type_id) = const_def.ty.as_ref().and_then(|t| t.type_id(self)) {
+                                if !self.type_equals(impl_type_id, trait_const_type_id) {
+                                    let expected = self.type_name(trait_const_type_id);
+                                    let got = self.type_name(impl_type_id);
+                                    return Err(ResolveError::new(const_def, ResolveErrorKind::TraitConstTypeMismatch(const_name.clone(), expected, got), self.module_path));
+                                }
+                            }
+                        }
+                    }
+                }
+                self.resolve_const_def(const_def, Some(&type_name), type_id)?;
+            }
             for function in &mut item.functions {
                 self.resolve_function(function, Some(type_id))?;
                 // if this is a trait impl and the trait is resolved
@@ -1294,9 +1341,75 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     }
                 }
             }
-            // Resolve const declarations inside the impl block
-            for const_def in &mut item.consts {
-                self.resolve_const_def(const_def)?;
+            // Generate specialized trait default methods if impl overrides any provided const.
+            // When a trait default method references `Self::CONST` and the impl overrides that const,
+            // we need a specialized copy of the method that uses the impl's const instead.
+            if let Some(Some(trait_type_id)) = trait_type_id {
+                let trt = self.type_by_id(trait_type_id).as_trait().ice()?;
+
+                // Build set of const names the impl defines
+                let impl_const_names: Set<String> = item.consts.iter()
+                    .map(|c| c.ident.name.clone()).collect();
+
+                // Check if impl overrides any trait-provided const
+                let has_overridden_const = impl_const_names.iter().any(|name| {
+                    trt.provided_consts.get(name).is_some()
+                });
+
+                if has_overridden_const {
+                    // Build replacement map: trait const_id -> impl const_id
+                    let mut const_replacements: UnorderedMap<ConstantId, ConstantId> = UnorderedMap::new();
+                    for const_name in &impl_const_names {
+                        if let Some(&Some(trait_const_id)) = trt.provided_consts.get(const_name) {
+                            let impl_const_id = item.consts.iter()
+                                .find(|c| c.ident.name == *const_name)
+                                .and_then(|c| c.constant_id);
+                            if let Some(impl_const_id) = impl_const_id {
+                                const_replacements.insert(trait_const_id, impl_const_id);
+                            }
+                        }
+                    }
+
+                    // For each trait default method not overridden by the impl
+                    for (method_name, _) in &trt.provided {
+                        // Skip if impl already provides this method
+                        if item.functions.iter().any(|f| f.shared.sig.ident.name == *method_name) {
+                            continue;
+                        }
+
+                        // Get the trait method's FunctionShared
+                        let trait_func_shared = match trt.method_bodies.get(method_name) {
+                            Some(fs) => fs,
+                            None => continue,
+                        };
+
+                        // Check if this method uses any Self::CONST that we're overriding
+                        let block = trait_func_shared.block.as_ref().ice()?;
+                        let uses_overridden = Self::block_uses_consts(block, &const_replacements);
+                        if !uses_overridden {
+                            continue;
+                        }
+
+                        // Clone the FunctionShared and patch const refs in the body
+                        let mut new_func_shared = trait_func_shared.clone();
+                        let mut patched_block = new_func_shared.block.take().ice()?;
+                        Self::patch_const_refs(&mut patched_block, &const_replacements);
+                        new_func_shared.block = Some(patched_block);
+
+                        // Reuse the original scope — all names are already resolved (constants
+                        // have constant_id set, types have type_id set), so no new scope is needed.
+
+                        // Create the new Function AST node
+                        let new_func = ast::Function {
+                            shared: new_func_shared,
+                            constant_id: None,  // will be set during resolution on next pass
+                        };
+
+                        // Add to impl block's functions list
+                        // The resolver will pick it up on the next pass
+                        item.functions.push(new_func);
+                    }
+                }
             }
         }
         self.scope_id = parent_scope_id;
@@ -1312,13 +1425,238 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
     }
 
+    /// Check if a block references any of the constant_ids in the replacement map.
+    fn block_uses_consts(block: &ast::Block, target_ids: &UnorderedMap<ConstantId, ConstantId>) -> bool {
+        let mut found = false;
+        Self::check_consts_in_block(block, &target_ids.keys().map(|k| *k).collect(), &mut found);
+        found
+    }
+
+    fn check_consts_in_block(block: &ast::Block, target_ids: &Set<ConstantId>, found: &mut bool) {
+        for stmt in &block.statements {
+            Self::check_consts_in_statement(stmt, target_ids, found);
+        }
+        if let Some(ref result) = block.result {
+            Self::check_consts_in_expr(result, target_ids, found);
+        }
+    }
+
+    fn check_consts_in_statement(stmt: &ast::Statement, target_ids: &Set<ConstantId>, found: &mut bool) {
+        use ast::Statement;
+        match stmt {
+            Statement::Expression(e) => Self::check_consts_in_expr(e, target_ids, found),
+            Statement::IfBlock(ib) => {
+                Self::check_consts_in_expr(&ib.cond, target_ids, found);
+                Self::check_consts_in_block(&ib.if_block, target_ids, found);
+                if let Some(ref eb) = ib.else_block {
+                    Self::check_consts_in_block(eb, target_ids, found);
+                }
+            },
+            Statement::Block(b) => Self::check_consts_in_block(b, target_ids, found),
+            Statement::ForLoop(fl) => {
+                Self::check_consts_in_expr(&fl.expr, target_ids, found);
+                Self::check_consts_in_block(&fl.block, target_ids, found);
+            },
+            Statement::WhileLoop(wl) => {
+                Self::check_consts_in_expr(&wl.expr, target_ids, found);
+                Self::check_consts_in_block(&wl.block, target_ids, found);
+            },
+            Statement::Return(r) => Self::check_consts_in_expr(&r.expr, target_ids, found),
+            Statement::Yield(y) => {
+                if let Some(ref k) = y.key { Self::check_consts_in_expr(k, target_ids, found); }
+                Self::check_consts_in_expr(&y.value, target_ids, found);
+            },
+            _ => {},
+        }
+    }
+
+    fn check_consts_in_expr(expr: &ast::Expression, target_ids: &Set<ConstantId>, found: &mut bool) {
+        use ast::Expression;
+        match expr {
+            Expression::Constant(c) => {
+                if let Some(id) = c.constant_id {
+                    if target_ids.contains(&id) { *found = true; }
+                }
+            },
+            Expression::BinaryOp(b) => {
+                Self::check_consts_in_operand(&b.left, target_ids, found);
+                Self::check_consts_in_operand(&b.right, target_ids, found);
+            },
+            Expression::UnaryOp(u) => Self::check_consts_in_expr(&u.expr, target_ids, found),
+            Expression::Cast(c) => Self::check_consts_in_expr(&c.expr, target_ids, found),
+            Expression::Block(b) => Self::check_consts_in_block(b, target_ids, found),
+            Expression::IfBlock(ib) => {
+                Self::check_consts_in_expr(&ib.cond, target_ids, found);
+                Self::check_consts_in_block(&ib.if_block, target_ids, found);
+                if let Some(ref eb) = ib.else_block {
+                    Self::check_consts_in_block(eb, target_ids, found);
+                }
+            },
+            Expression::Closure(cl) => {
+                if let Some(ref b) = cl.shared.block {
+                    Self::check_consts_in_block(b, target_ids, found);
+                }
+            },
+            Expression::Assignment(a) => {
+                Self::check_consts_in_expr(&a.left, target_ids, found);
+                Self::check_consts_in_expr(&a.right, target_ids, found);
+            },
+            _ => {},
+        }
+    }
+
+    fn check_consts_in_operand(op: &ast::BinaryOperand, target_ids: &Set<ConstantId>, found: &mut bool) {
+        use ast::BinaryOperand;
+        match op {
+            BinaryOperand::Expression(e) => Self::check_consts_in_expr(e, target_ids, found),
+            BinaryOperand::ArgumentList(al) => {
+                for arg in &al.args {
+                    Self::check_consts_in_expr(arg, target_ids, found);
+                }
+            },
+            BinaryOperand::Member(_) => {},
+        }
+    }
+
+    /// Walk a block and replace constant_ids according to the replacement map.
+    fn patch_const_refs(block: &mut ast::Block, replacements: &UnorderedMap<ConstantId, ConstantId>) {
+        for stmt in &mut block.statements {
+            Self::patch_stmt_const_refs(stmt, replacements);
+        }
+        if let Some(ref mut result) = block.result {
+            Self::patch_expr_const_refs(result, replacements);
+        }
+    }
+
+    fn patch_stmt_const_refs(stmt: &mut ast::Statement, replacements: &UnorderedMap<ConstantId, ConstantId>) {
+        use ast::Statement;
+        match stmt {
+            Statement::Expression(e) => Self::patch_expr_const_refs(e, replacements),
+            Statement::IfBlock(ib) => {
+                Self::patch_expr_const_refs(&mut ib.cond, replacements);
+                Self::patch_block_const_refs(&mut ib.if_block, replacements);
+                if let Some(ref mut eb) = ib.else_block {
+                    Self::patch_block_const_refs(eb, replacements);
+                }
+            },
+            Statement::Block(b) => Self::patch_block_const_refs(b, replacements),
+            Statement::ForLoop(fl) => {
+                Self::patch_expr_const_refs(&mut fl.expr, replacements);
+                Self::patch_block_const_refs(&mut fl.block, replacements);
+            },
+            Statement::WhileLoop(wl) => {
+                Self::patch_expr_const_refs(&mut wl.expr, replacements);
+                Self::patch_block_const_refs(&mut wl.block, replacements);
+            },
+            Statement::Return(r) => Self::patch_expr_const_refs(&mut r.expr, replacements),
+            Statement::Yield(y) => {
+                if let Some(ref mut k) = y.key { Self::patch_expr_const_refs(k, replacements); }
+                Self::patch_expr_const_refs(&mut y.value, replacements);
+            },
+            _ => {},
+        }
+    }
+
+    fn patch_block_const_refs(block: &mut ast::Block, replacements: &UnorderedMap<ConstantId, ConstantId>) {
+        for stmt in &mut block.statements {
+            Self::patch_stmt_const_refs(stmt, replacements);
+        }
+        if let Some(ref mut result) = block.result {
+            Self::patch_expr_const_refs(result, replacements);
+        }
+    }
+
+    fn patch_expr_const_refs(expr: &mut ast::Expression, replacements: &UnorderedMap<ConstantId, ConstantId>) {
+        use ast::Expression;
+        match expr {
+            Expression::Constant(c) => {
+                if let Some(id) = c.constant_id {
+                    if let Some(&new_id) = replacements.get(&id) {
+                        c.constant_id = Some(new_id);
+                    }
+                }
+            },
+            Expression::BinaryOp(b) => {
+                Self::patch_operand_const_refs(&mut b.left, replacements);
+                Self::patch_operand_const_refs(&mut b.right, replacements);
+            },
+            Expression::UnaryOp(u) => Self::patch_expr_const_refs(&mut u.expr, replacements),
+            Expression::Cast(c) => Self::patch_expr_const_refs(&mut c.expr, replacements),
+            Expression::Block(b) => Self::patch_block_const_refs(b, replacements),
+            Expression::IfBlock(ib) => {
+                Self::patch_expr_const_refs(&mut ib.cond, replacements);
+                Self::patch_block_const_refs(&mut ib.if_block, replacements);
+                if let Some(ref mut eb) = ib.else_block {
+                    Self::patch_block_const_refs(eb, replacements);
+                }
+            },
+            Expression::Closure(cl) => {
+                if let Some(ref mut b) = cl.shared.block {
+                    Self::patch_block_const_refs(b, replacements);
+                }
+            },
+            Expression::Assignment(a) => {
+                Self::patch_expr_const_refs(&mut a.left, replacements);
+                Self::patch_expr_const_refs(&mut a.right, replacements);
+            },
+            _ => {},
+        }
+    }
+
+    fn patch_operand_const_refs(op: &mut ast::BinaryOperand, replacements: &UnorderedMap<ConstantId, ConstantId>) {
+        use ast::BinaryOperand;
+        match op {
+            BinaryOperand::Expression(e) => Self::patch_expr_const_refs(e, replacements),
+            BinaryOperand::ArgumentList(al) => {
+                for arg in &mut al.args {
+                    Self::patch_expr_const_refs(arg, replacements);
+                }
+            },
+            BinaryOperand::Member(_) => {},
+        }
+    }
+
     /// Resolves a const declaration.
-    fn resolve_const_def(self: &mut Self, item: &mut ast::ConstDef) -> ResolveResult {
+    ///
+    /// `type_name_prefix` — when `Some`, the const is stored with a qualified name
+    /// (`TypeName::CONST`) in the root scope, making it accessible via `Self::CONST`
+    /// or `TypeName::CONST` rather than a bare name. Used for impl block and trait consts.
+    ///
+    /// `owning_type_id` — the type that owns this constant. For module-level consts this is
+    /// `TypeId::VOID`; for impl block consts this is the impl target type; for trait consts
+    /// this is the trait type id.
+    fn resolve_const_def(self: &mut Self, item: &mut ast::ConstDef, type_name_prefix: Option<&str>, owning_type_id: TypeId) -> ResolveResult {
+        // Handle required trait consts (no default value)
+        if item.expr.is_none() {
+            // Resolve the type annotation (required for trait consts)
+            let type_id = if let Some(ty) = &mut item.ty {
+                self.resolve_inline_type(ty)?;
+                ty.type_id(self)
+            } else {
+                None
+            };
+
+            // Insert placeholder constant (value will be filled by the impl)
+            if item.constant_id.is_none() {
+                let name = if let Some(prefix) = type_name_prefix {
+                    self.make_path(&[prefix, &item.ident.name])
+                } else {
+                    self.make_path(&[&item.ident.name])
+                };
+                item.constant_id = Some(self.scopes.insert_constant(
+                    &name, owning_type_id, type_id,
+                    ConstantValue::UserConst(crate::shared::meta::UserConstValue::Void),
+                ));
+            }
+            return self.resolved(item);
+        }
+
         // Resolve the expression first (this also resolves any const references inside it)
-        self.resolve_expression(&mut item.expr, item.ty.as_ref().and_then(|t| t.type_id(self)))?;
+        let expr = item.expr.as_mut().ice()?;
+        self.resolve_expression(expr, item.ty.as_ref().and_then(|t| t.type_id(self)))?;
 
         // Validate: expression must be static (literals + const references only)
-        if !self.is_const_expr(&item.expr) {
+        if !self.is_const_expr(expr) {
             return Err(ResolveError::new(item,
                 ResolveErrorKind::InvalidOperation("const expression must be a literal or a reference to another const".into()),
                 self.module_path));
@@ -1329,11 +1667,8 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             self.resolve_inline_type(ty)?;
             ty.type_id(self)
         } else {
-            item.expr.type_id(self)
+            expr.type_id(self)
         };
-
-        // Determine the owning type id (root scope = VOID, impl block = the impl target type)
-        let owning_type_id = self.get_owning_type_id();
 
         // Build the user const value
         let user_const_value = if let Some(type_id) = type_id {
@@ -1343,7 +1678,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 crate::shared::meta::UserConstValue::HeapRef(0)
             } else {
                 // Value type: extract the literal value
-                match &item.expr {
+                match expr {
                     ast::Expression::Literal(literal) => match &literal.value {
                         ast::LiteralValue::Void => crate::shared::meta::UserConstValue::Void,
                         ast::LiteralValue::Bool(b) => crate::shared::meta::UserConstValue::Bool(*b),
@@ -1367,9 +1702,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             crate::shared::meta::UserConstValue::Void
         };
 
+        // Build the name: qualified for impl/trait consts, bare for module-level consts
+        let name = if let Some(prefix) = type_name_prefix {
+            self.make_path(&[prefix, &item.ident.name])
+        } else {
+            self.make_path(&[&item.ident.name])
+        };
+
         // Insert constant into scope (or update if already inserted)
         if item.constant_id.is_none() {
-            let name = self.make_path(&[&item.ident.name]);
             item.constant_id = Some(self.scopes.insert_constant(
                 &name, owning_type_id, type_id,
                 ConstantValue::UserConst(user_const_value),
@@ -1387,12 +1728,6 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.resolved(item)
     }
 
-    /// Returns the owning type id for the current scope.
-    /// For module-level declarations this is TypeId::VOID; for impl block declarations it is the impl target type.
-    fn get_owning_type_id(self: &Self) -> TypeId {
-        TypeId::VOID
-    }
-
     /// Resolves a trait definition block.
     fn resolve_trait_type(self: &mut Self, item: &mut ast::TraitDef) -> ResolveResult {
         let parent_scope_id = self.scope_id;
@@ -1406,6 +1741,15 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     Some(_) => trt.provided.insert(name, None),
                     None => trt.required.insert(name, None),
                 };
+            }
+            // Register trait consts: required (no default) and provided (has default)
+            for const_def in &item.consts {
+                let name = const_def.ident.name.clone();
+                if const_def.expr.is_some() {
+                    trt.provided_consts.insert(name, None);
+                } else {
+                    trt.required_consts.insert(name, None);
+                }
             }
             let qualified = self.make_path(&[ &item.ident.name ]);
             let type_id = self.scopes.insert_type(Some(&qualified), Type::Trait(trt));
@@ -1421,7 +1765,12 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         for function in &mut item.functions {
             self.resolve_function(function, Some(item.type_id.ice()?))?;
         }
-        // update trait
+        // resolve trait consts (with default values) and required consts (placeholders)
+        let trait_name = self.type_name(item.type_id.ice()?);
+        for const_def in &mut item.consts {
+            self.resolve_const_def(const_def, Some(&trait_name), item.type_id.ice()?)?;
+        }
+        // update trait with function constant_ids
         for function in &item.functions {
             if let Some(constant_id) = function.constant_id {
                 let name = &function.shared.sig.ident.name;
@@ -1430,6 +1779,27 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     Some(_) => *trt.provided.get_mut(name).ice()? = Some(constant_id),
                     None => *trt.required.get_mut(name).ice()? = Some(constant_id),
                 };
+            }
+        }
+        // update trait with const constant_ids
+        for const_def in &item.consts {
+            if let Some(constant_id) = const_def.constant_id {
+                let name = &const_def.ident.name;
+                let trt = self.type_by_id_mut(item.type_id.ice()?).as_trait_mut().ice()?;
+                if const_def.expr.is_some() {
+                    *trt.provided_consts.get_mut(name).ice()? = Some(constant_id);
+                } else {
+                    *trt.required_consts.get_mut(name).ice()? = Some(constant_id);
+                }
+            }
+        }
+        // Store method bodies of provided (default) methods for later specialization.
+        // Done AFTER resolution so that constant references in the body are resolved.
+        for function in &item.functions {
+            if function.shared.block.is_some() {
+                let name = function.shared.sig.ident.name.clone();
+                let trt = self.type_by_id_mut(item.type_id.ice()?).as_trait_mut().ice()?;
+                trt.method_bodies.insert(name, function.shared.clone());
             }
         }
         self.scope_id = parent_scope_id;
@@ -1699,10 +2069,37 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         }
         // resolve constant
         if item.constant_id.is_none() {
-            let path = self.make_path(&item.path.segments);
+            // Resolve `Self` alias for the first path segment so that `Self::CONST` resolves to
+            // `TypeName::CONST` which matches how impl/trait consts are stored.
+            let resolved_segments: Vec<String> = item.path.segments.iter().enumerate().map(|(i, seg)| {
+                if i == 0 {
+                    self.scopes.alias(self.scope_id, &seg.name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| seg.name.clone())
+                } else {
+                    seg.name.clone()
+                }
+            }).collect();
+            let path = self.make_path(&resolved_segments);
+            // Try VOID first (module-level consts), then try the type's own id (impl block consts)
             item.constant_id = self.scopes.constant_id(self.scope_id, &path, TypeId::VOID);
+            if item.constant_id.is_none() && resolved_segments.len() >= 2 {
+                // For `TypeName::CONST`, also try looking up with the type as the owner
+                if let Some(type_id) = self.scopes.type_id(self.scope_id, &resolved_segments[0]) {
+                    item.constant_id = self.scopes.constant_id(self.scope_id, &path, type_id);
+                }
+            }
+
+            // If not found and the path has 2+ segments (e.g., `Self::CONST` in a trait impl),
+            // try trait-default fallback: look up the const in the trait's provided consts.
+            if item.constant_id.is_none() && item.path.segments.len() >= 2 {
+                if let Some(trait_const_id) = self.try_resolve_trait_const_default(&resolved_segments) {
+                    item.constant_id = Some(trait_const_id);
+                }
+            }
+
             // builtin function
-            if item.path.segments.len() == 2 {
+            if item.constant_id.is_none() && item.path.segments.len() == 2 {
                 if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.segments[0]) {
                     if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.segments[1].name, type_id)? {
                         item.constant_id = Some(constant_id);
@@ -1745,6 +2142,45 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             }
         }
         self.types_resolved(item, expected_result)
+    }
+
+    /// Try to resolve a trait const default value.
+    ///
+    /// When `Self::CONST` is used in a trait impl method and the impl doesn't define the const,
+    /// this falls back to the trait's provided (default) const. Returns the constant id of the
+    /// trait default, or None if no fallback applies.
+    fn try_resolve_trait_const_default(self: &Self, resolved_segments: &[String]) -> Option<ConstantId> {
+        // Need at least 2 segments: TypeName::CONST
+        if resolved_segments.len() < 2 {
+            return None;
+        }
+        let type_name = &resolved_segments[0];
+        let const_name = &resolved_segments[1];
+
+        // Look up the type
+        let type_id = self.scopes.type_id(self.scope_id, type_name)?;
+        let ty = self.type_by_id(type_id);
+
+        // If it's a trait, look in its provided consts
+        if let Some(trt) = ty.as_trait() {
+            if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                return const_id;
+            }
+        }
+
+        // If it's a concrete type, check its impl'd traits for provided consts with matching names
+        if let Some(impl_traits) = ty.impl_traits_map() {
+            for (&trait_type_id, _) in impl_traits {
+                let trait_ty = self.type_by_id(trait_type_id);
+                if let Some(trt) = trait_ty.as_trait() {
+                    if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                        return const_id;
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Resolves an if block.
@@ -2579,7 +3015,18 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                             // try method on type or trait default implementation
                             let type_name = self.type_flat_name(owning_type_id).ice_msg("Unnamed type")?;
                             let path = self.make_path(&[ type_name, member_name ]);
+                            // For trait types, also check the trait's own provided/required methods
+                            let trait_method_id = if self.type_by_id(owning_type_id).as_trait().is_some() {
+                                let trt = self.type_by_id(owning_type_id).as_trait().ice()?;
+                                trt.provided.get(member_name).copied()
+                                    .or(trt.required.get(member_name).copied())
+                                    .and_then(|id| id)
+                            } else {
+                                None
+                            };
                             self.scopes.constant_id(self.scope_id, &path, owning_type_id)
+                                .or(self.scopes.constant_id(self.scope_id, &path, TypeId::VOID))
+                                .or(trait_method_id)
                                 .or(self.scopes.trait_provided_constant_id(member_name, owning_type_id))
                         };
                         if let Some(constant_id) = constant_id {

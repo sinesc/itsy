@@ -126,10 +126,14 @@ impl ImplTrait {
 }
 
 /// Information about a trait definition in a resolved program.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct Trait {
     pub provided: Map<String, Option<ConstantId>>,
     pub required: Map<String, Option<ConstantId>>,
+    /// Trait constants with default values (provided consts).
+    pub provided_consts: Map<String, Option<ConstantId>>,
+    /// Trait constants without default values (required consts; every impl must define them).
+    pub required_consts: Map<String, Option<ConstantId>>,
     /// Set for intrinsic traits whose required-method signatures are defined by each implementor rather
     /// than fixed by the trait (currently only `Index`). Such a trait registers placeholder constants for
     /// its required methods (so the trait type resolves and impl blocks accept the method names), but those
@@ -137,16 +141,38 @@ pub struct Trait {
     /// concrete impl's method, never virtually dispatched. The compiler therefore excludes these methods
     /// from the vtable and skips the impl-vs-trait signature compatibility check for them.
     pub impl_defined: bool,
+    /// AST bodies of provided (default) methods, stored for specialization when an impl overrides consts.
+    pub method_bodies: Map<String, crate::frontend::ast::FunctionShared>,
+}
+
+impl PartialEq for Trait {
+    fn eq(self: &Self, other: &Self) -> bool {
+        self.provided == other.provided
+            && self.required == other.required
+            && self.provided_consts == other.provided_consts
+            && self.required_consts == other.required_consts
+            && self.impl_defined == other.impl_defined
+    }
+}
+impl Eq for Trait {}
+impl Hash for Trait {
+    fn hash<H: std::hash::Hasher>(self: &Self, state: &mut H) {
+        self.provided.hash(state);
+        self.required.hash(state);
+        self.provided_consts.hash(state);
+        self.required_consts.hash(state);
+        self.impl_defined.hash(state);
+    }
 }
 
 impl Trait {
     /// A trait with fixed required/provided method signatures (the common case).
     pub fn new() -> Self {
-        Self { provided: Map::new(), required: Map::new(), impl_defined: false }
+        Self { provided: Map::new(), required: Map::new(), provided_consts: Map::new(), required_consts: Map::new(), impl_defined: false, method_bodies: Map::new() }
     }
     /// An intrinsic trait whose required-method signatures are defined per implementor (see `impl_defined`).
     pub fn new_impl_defined() -> Self {
-        Self { provided: Map::new(), required: Map::new(), impl_defined: true }
+        Self { provided: Map::new(), required: Map::new(), provided_consts: Map::new(), required_consts: Map::new(), impl_defined: true, method_bodies: Map::new() }
     }
 }
 

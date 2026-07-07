@@ -388,7 +388,7 @@ pub(crate) trait ControlFlow {
 }
 
 /// Visibility of types and functions.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Visibility {
     Private,
     Public,
@@ -419,7 +419,7 @@ impl AsRef<str> for Ident {
 
 
 /// A path to an item, e.g. `path::to::item`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Path {
     pub position: Position,
     pub segments: Vec<Ident>,
@@ -458,6 +458,7 @@ impl Display for Path {
 
 
 /// An itsy statement.
+#[derive(Clone)]
 pub enum Statement {
     LetBinding(LetBinding),
     LetPattern(LetPattern),
@@ -538,7 +539,7 @@ impl Debug for Statement {
 
 
 /// A module declaration, e.g. `mod mymodule;`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModuleDecl {
     pub position    : Position,
     pub ident       : Ident,
@@ -556,7 +557,7 @@ impl ModuleDecl {
 }
 
 /// A use declaration, e.g. `use frontend::{ast::Use, parser::{parse, parse_module}};`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UseDecl {
     pub position    : Position,
     pub mapping     : UnorderedMap<String, (String, bool)>,
@@ -573,7 +574,7 @@ impl Resolvable for UseDecl {
 
 
 /// A let binding, e.g. `let a = 1;`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LetBinding {
     pub position    : Position,
     pub ident       : Ident,
@@ -606,7 +607,7 @@ impl Typeable for LetBinding {
 }
 
 /// A destructuring let binding, e.g. `let Struct { a, b } = value;`. The pattern must be irrefutable.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LetPattern {
     pub position    : Position,
     pub pattern     : Pattern,
@@ -627,26 +628,31 @@ impl Display for LetPattern {
 }
 
 /// A const declaration, e.g. `const NAME: Type = expr;`. The expression must be a static expression
-/// (literals and references to previously-defined consts only).
-#[derive(Debug)]
+/// (literals and references to previously-defined consts only). For trait consts, `expr` may be `None`
+/// to indicate a required (no default) const.
+#[derive(Debug, Clone)]
 pub struct ConstDef {
     pub position    : Position,
     pub ident       : Ident,
     pub ty          : Option<InlineType>,
-    pub expr        : Expression,
+    pub expr        : Option<Expression>,
     pub constant_id : Option<ConstantId>,
 }
 
 impl_positioned!(ConstDef);
 impl_resolvable!(ConstDef {
     ty: OptionalItem,
-    expr: Item,
+    expr: OptionalItem,
     constant_id: ConstantId,
 });
 
 impl Display for ConstDef {
     fn fmt(self: &Self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "const {} = {}", self.ident, self.expr)
+        if let Some(expr) = &self.expr {
+            write!(f, "const {} = {}", self.ident, expr)
+        } else {
+            write!(f, "const {}", self.ident)
+        }
     }
 }
 
@@ -665,8 +671,29 @@ impl Typeable for ConstDef {
     }
 }
 
+/// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } const X: u32 = 5; }`.
+#[derive(Debug, Clone)]
+pub struct TraitDef {
+    pub position    : Position,
+    pub functions   : Vec<Function>,
+    pub consts      : Vec<ConstDef>,
+    pub scope_id    : ScopeId,
+    pub ident       : Ident,
+    pub type_id     : Option<TypeId>,
+    pub vis         : Visibility,
+}
+
+impl_positioned!(TraitDef);
+impl_display!(TraitDef, "trait {} {{ ... }}", ident);
+impl_typeable!(TraitDef);
+impl_resolvable!(TraitDef {
+    functions: ItemList,
+    consts: ItemList,
+    type_id: TypeId,
+});
+
 /// The signatures of a function or closure.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Signature {
     pub ident   : Ident,
     pub params  : Vec<LetBinding>,
@@ -709,7 +736,7 @@ impl Positioned for Signature {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionShared {
     pub position: Position,
     pub sig     : Signature,
@@ -725,7 +752,7 @@ impl_resolvable!(FunctionShared {
 
 
 /// A closure, e.g. `|a: u8, b: String| -> u16 { ... }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Closure {
     pub shared              : FunctionShared,
     pub function_id         : Option<FunctionId>,
@@ -768,7 +795,7 @@ impl Display for Closure {
 
 
 /// A function definition, e.g. `fn myfunc(a: u8, b: String) -> u16 { ... }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub shared      : FunctionShared,
     pub constant_id : Option<ConstantId>,
@@ -808,7 +835,7 @@ impl Typeable for Function {
 
 
 /// A type name (a type-id attached to a Path).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeName {
     pub path    : Path,
     pub type_id : Option<TypeId>,
@@ -843,7 +870,7 @@ impl Positioned for TypeName {
 }
 
 /// An inlineable type (e.g. `MyStruct` or `[ MyInt; 16 ]`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InlineType {
     /// Regular type name
     TypeName(TypeName),
@@ -909,7 +936,7 @@ impl Typeable for InlineType {
 
 
 /// A multiple-trait bound, e.g. `TraitA + TraitB`. Accepts any type implementing all listed traits.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TraitBound {
     pub position: Position,
     pub traits  : Vec<TypeName>,
@@ -931,7 +958,7 @@ impl Display for TraitBound {
 
 
 /// An array definition, e.g. `[ MyInt ]`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayDef {
     pub position    : Position,
     pub element_type: InlineType,
@@ -948,7 +975,7 @@ impl_resolvable!(ArrayDef {
 
 
 /// A map type definition, e.g. `[ KeyType => ValueType ]`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MapDef {
     pub position    : Position,
     pub key_type    : InlineType,
@@ -968,7 +995,7 @@ impl_resolvable!(MapDef {
 
 /// A result type definition, e.g. `Result<OkType>`. The error side is always the built-in `Error`
 /// trait, so only the success type is written.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResultDef {
     pub position    : Position,
     pub ok_type     : InlineType,
@@ -986,7 +1013,7 @@ impl_resolvable!(ResultDef {
 
 /// An option type definition, e.g. `Option<T>`. The inner type is the `Some` payload; `None` is a
 /// nullary unit variant.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OptionDef {
     pub position    : Position,
     pub some_type   : InlineType,
@@ -1004,7 +1031,7 @@ impl_resolvable!(OptionDef {
 
 /// A generator type definition, e.g. `Generator<V>` or `Generator<K, V>`. A generator produced by a
 /// generator function yields values (and optionally keys), driven via `next()`/`value()`/`key()`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GeneratorDef {
     pub position    : Position,
     pub key_type    : Option<InlineType>,
@@ -1031,7 +1058,7 @@ impl Display for GeneratorDef {
 
 
 /// The kind of a variant, either `Simple` (without associated data) or `Data`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VariantKind {
     Simple(Option<ConstantId>, Option<Literal>),
     Data(Option<ConstantId>, Vec<InlineType>),
@@ -1067,7 +1094,7 @@ impl Display for VariantKind {
 
 
 /// An enum variant definition, e.g. `MyVariant(u16, f32)` or `MySimpleVariant`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VariantDef {
     pub position    : Position,
     pub ident       : Ident,
@@ -1082,7 +1109,7 @@ impl_resolvable!(VariantDef {
 
 
 /// An enum definition, e.g. `enum MyEnum { A, B(u32) }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EnumDef {
     pub position: Position,
     pub ident   : Ident,
@@ -1108,7 +1135,7 @@ impl EnumDef {
 
 
 /// The type signature of an anonymous function/closure.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallableDef {
     pub position: Position,
     pub params  : Vec<InlineType>,
@@ -1136,7 +1163,7 @@ impl Display for CallableDef {
 
 
 /// A struct definition, e.g. `struct MyStruct { a: u8, b: String }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructDef {
     pub position: Position,
     pub ident   : Ident,
@@ -1160,7 +1187,7 @@ impl Display for StructDef {
 
 
 /// An `impl` block for a struct, e.g. `impl MyStruct { fn new() { ... } -> Self }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImplBlock {
     pub position    : Position,
     pub functions   : Vec<Function>,
@@ -1187,26 +1214,6 @@ impl Display for ImplBlock {
     }
 }
 
-/// A `trait` definition, e.g. `trait Demoable { fn needthis(); fn gotthis() { ... } }`.
-#[derive(Debug)]
-pub struct TraitDef {
-    pub position    : Position,
-    pub functions   : Vec<Function>,
-    pub scope_id    : ScopeId,
-    pub ident       : Ident,
-    pub type_id     : Option<TypeId>,
-    pub vis         : Visibility,
-}
-
-impl_positioned!(TraitDef);
-impl_display!(TraitDef, "trait {} {{ ... }}", ident);
-impl_typeable!(TraitDef);
-impl_resolvable!(TraitDef {
-    functions: ItemList,
-    type_id: TypeId,
-});
-
-
 /// A for-in loop, e.g. `for i in 0..10 { ... }`.
 ///
 /// The Some/None state of the two binding fields encodes the iteration form:
@@ -1222,7 +1229,7 @@ impl_resolvable!(TraitDef {
 /// the binding in `iter`: an array's indices become a counting range `0 .. array.len()`, a map's keys
 /// become `map.keys()`. Map value/key-value iteration (`for v`/`for k, v`) is left as-is and lowered
 /// to dedicated iteration opcodes by the compiler.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ForLoop {
     pub position: Position,
     /// The value binding, or `None` for key-only iteration before the resolver normalizes it.
@@ -1255,7 +1262,7 @@ impl ControlFlow for ForLoop {
 
 
 /// A while loop, e.g. `while a < 10 { a += 1; }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhileLoop {
     pub position: Position,
     pub expr    : Expression,
@@ -1282,7 +1289,7 @@ impl ControlFlow for WhileLoop {
 
 
 /// A return statement, e.g. `return false;`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Return {
     pub position        : Position,
     pub expr            : Expression,
@@ -1297,7 +1304,7 @@ impl_resolvable!(Return {
 
 /// A yield statement, e.g. `yield value;` or `yield key, value;`. Only legal inside a generator
 /// function; suspends execution and surfaces the yielded value (and optional key) to the caller.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Yield {
     pub position    : Position,
     pub key         : Option<Expression>,
@@ -1321,7 +1328,7 @@ impl Display for Yield {
 
 
 /// A break statement.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Break {
     pub position: Position,
 }
@@ -1332,7 +1339,7 @@ impl_display!(Break, "break");
 
 
 /// A continue statement.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Continue {
     pub position: Position,
 }
@@ -1345,7 +1352,7 @@ impl_display!(Continue, "continue");
 /// A suspend statement. Suspends the entire VM, retaining stack and heap state; execution resumes at
 /// the following instruction when the host calls run() again. Unlike break/continue/return it does not
 /// interrupt control flow.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Suspend {
     pub position: Position,
 }
@@ -1356,7 +1363,7 @@ impl_display!(Suspend, "suspend");
 
 
 /// A deconstruction pattern, e.g. `_`, `123`, `name` or `Enum::Variant(123, inner)`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Pattern {
     /// `_` - matches anything, binds nothing.
     Wildcard(Position),
@@ -1411,7 +1418,7 @@ impl Display for Pattern {
 }
 
 /// A binding introduced by a pattern, e.g. the `name` in `Enum::Variant(name)`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BindingPattern {
     pub position    : Position,
     pub ident       : Ident,
@@ -1431,7 +1438,7 @@ impl Typeable for BindingPattern {
 }
 
 /// A data-carrying variant pattern with sub-patterns, e.g. `Enum::Variant(123, inner)`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VariantTuplePattern {
     pub position    : Position,
     pub path        : Path,
@@ -1442,7 +1449,7 @@ impl_positioned!(VariantTuplePattern);
 
 /// A struct pattern with field sub-patterns, e.g. `Struct { a: 123, b }`. When `rest` is set, a trailing
 /// `..` was given and unlisted fields are ignored rather than required (e.g. `Struct { a, .. }`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructPattern {
     pub position    : Position,
     pub path        : Path,
@@ -1453,7 +1460,7 @@ pub struct StructPattern {
 impl_positioned!(StructPattern);
 
 /// A numeric range pattern, e.g. `1..5` (exclusive) or `1..=5` (inclusive).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RangePattern {
     pub position    : Position,
     pub lo          : Literal,
@@ -1471,7 +1478,7 @@ impl Display for RangePattern {
 
 
 /// An or-pattern: a list of alternative patterns, any of which matches, e.g. `1 | 2 | 3`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OrPattern {
     pub position        : Position,
     pub alternatives    : Vec<Pattern>,
@@ -1487,7 +1494,7 @@ impl Display for OrPattern {
 
 
 /// A match block, e.g. `match e { Enum::Variant => { ... } }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchBlock {
     pub position    : Position,
     pub expr        : Expression,
@@ -1518,7 +1525,7 @@ impl Typeable for MatchBlock {
 }
 
 /// An if block, e.g. `if a { ... } else { ... }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfBlock {
     pub position    : Position,
     pub cond        : Expression,
@@ -1576,7 +1583,7 @@ impl Typeable for IfBlock {
 
 
 /// A regular block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub position    : Position,
     pub statements  : Vec<Statement>,
@@ -1644,6 +1651,7 @@ impl ControlFlow for Block {
 }
 
 /// An itsy expression.
+#[derive(Clone)]
 pub enum Expression {
     Literal(Literal),
     Constant(Constant),
@@ -1747,7 +1755,7 @@ impl Display for Expression {
 
 
 /// A literal.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Literal {
     pub position    : Position,
     pub value       : LiteralValue,
@@ -1778,6 +1786,7 @@ impl Display for Literal {
 }
 
 /// Value-storage for literals.
+#[derive(Clone)]
 pub enum LiteralValue {
     Void,
     Bool(bool),
@@ -1913,7 +1922,7 @@ impl Debug for LiteralValue {
 }
 
 /// An inline array literal, e.g. `[ 2, 3, 5, 7 ]`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayLiteral {
     pub elements: Vec<Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
@@ -1930,7 +1939,7 @@ impl Display for ArrayLiteral {
 
 
 /// An inline map literal, e.g. `[ "a" => 1, "b" => 2 ]`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MapLiteral {
     pub entries: Vec<(Expression, Expression)>,
 }
@@ -1954,7 +1963,7 @@ impl Display for MapLiteral {
 
 
 /// An inline struct literal, e.g. `MyStruct { a: 10, b: "Hello" }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructLiteral {
     pub fields: UnorderedMap<String, Expression>, // TODO: struct/array literals containing expressions should be expressions themselves instead of literals
 }
@@ -1971,7 +1980,7 @@ impl Display for StructLiteral {
 
 
 /// A variable.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub position    : Position,
     pub ident       : Ident,
@@ -1995,7 +2004,7 @@ impl Typeable for Variable {
 
 
 /// A constant.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Constant {
     pub position    : Position,
     pub path        : Path,
@@ -2025,7 +2034,7 @@ impl Typeable for Constant {
 
 
 /// A member identifier for a struct field.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Member {
     pub position    : Position,
     pub ident       : Ident,
@@ -2050,7 +2059,7 @@ impl Resolvable for Member {
 }
 
 /// Argument list of a function call.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArgumentList {
     pub position        : Position,
     pub args            : Vec<Expression>,
@@ -2078,7 +2087,7 @@ impl ControlFlow for ArgumentList {
 /// A compound assignment to a custom type is dispatched to an operator-trait method; `op_dispatch` being
 /// `None` marks an arithmetic compound assignment that is still awaiting classification (e.g. its target
 /// type or the target type's operator-trait impl has not resolved yet).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CompoundDispatch {
     /// A built-in numeric (or string `+=`) compound assignment, compiled with the arithmetic opcodes.
     Builtin,
@@ -2102,7 +2111,7 @@ pub enum CompoundDispatch {
 }
 
 /// A variable assignment within an expression, e.g. `x = 10`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Assignment {
     pub position    : Position,
     pub op          : BinaryOperator,
@@ -2166,14 +2175,14 @@ impl ControlFlow for Assignment {
 /// trait (e.g. `ToString`) are lowered to method calls and never survive as a `Cast`, so the only kind
 /// that reaches the compiler is `Primitive`; `kind` being `None` marks a cast that is still awaiting
 /// classification (e.g. a trait-backed cast whose operand's trait impl has not resolved yet).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CastKind {
     /// A built-in primitive conversion, compiled via the cast opcodes.
     Primitive,
 }
 
 /// An explicit `as` type-cast.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cast {
     pub position    : Position,
     pub expr        : Expression,
@@ -2206,7 +2215,7 @@ impl ControlFlow for Cast {
 }
 
 /// An operand for a binary operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinaryOperand {
     Expression(Expression),
     ArgumentList(ArgumentList),
@@ -2264,7 +2273,7 @@ impl ControlFlow for BinaryOperand {
 
 
 /// A binary operation within an expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryOp {
     pub position    : Position,
     pub op          : BinaryOperator,
@@ -2306,7 +2315,7 @@ impl ControlFlow for BinaryOp {
 }
 
 /// A unary operation within an expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryOp {
     pub position    : Position,
     pub op          : UnaryOperator,

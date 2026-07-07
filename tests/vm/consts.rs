@@ -170,17 +170,21 @@ fn const_array() {
 
 #[test]
 fn const_struct() {
-    let result = run("fn main() { ret_u32(ORIGIN.x); ret_u32(ORIGIN.y); }\n\
-        struct Point { x: u32, y: u32 }\n\
-        const ORIGIN = Point { x: 0, y: 0 };");
+    let result = run(stringify!(
+        fn main() { ret_u32(ORIGIN.x); ret_u32(ORIGIN.y); }
+        struct Point { x: u32, y: u32 }
+        const ORIGIN = Point { x: 0, y: 0 };
+    ));
     assert_all(&result, &[0u32, 0]);
 }
 
 #[test]
 fn const_struct_with_string_field() {
-    let result = run("fn main() { ret_str(L.name); ret_u32(L.value); }\n\
-        struct Label { name: String, value: u32 }\n\
-        const L = Label { name: \"test\", value: 42 };");
+    let result = run(stringify!(
+        fn main() { ret_str(L.name); ret_u32(L.value); }
+        struct Label { name: String, value: u32 }
+        const L = Label { name: "test", value: 42 };
+    ));
     assert_all!(&result, ["test".to_string(), 42u32]);
 }
 
@@ -204,22 +208,28 @@ fn const_map() {
 
 #[test]
 fn const_in_function() {
-    let result = run("fn compute() -> u32 { const BASE = 100u32; return BASE + 50; }\n\
-        fn main() { ret_u32(compute()); }");
+    let result = run(stringify!(
+        fn compute() -> u32 { const BASE = 100u32; return BASE + 50; }
+        fn main() { ret_u32(compute()); }
+    ));
     assert_all(&result, &[150u32]);
 }
 
 #[test]
 fn const_in_function_ref_type() {
-    let result = run("fn get_msg() -> String { const MSG = \"from function\"; return MSG; }\n\
-        fn main() { ret_str(get_msg()); }");
+    let result = run(stringify!(
+        fn get_msg() -> String { const MSG = "from function"; return MSG; }
+        fn main() { ret_str(get_msg()); }
+    ));
     assert_all(&result, &["from function".to_string()]);
 }
 
 #[test]
 fn const_in_function_multiple() {
-    let result = run("fn add() -> u32 { const A = 10u32; const B = 20u32; return A + B; }\n\
-        fn main() { ret_u32(add()); }");
+    let result = run(stringify!(
+        fn add() -> u32 { const A = 10u32; const B = 20u32; return A + B; }
+        fn main() { ret_u32(add()); }
+    ));
     assert_all(&result, &[30u32]);
 }
 
@@ -229,29 +239,31 @@ fn const_in_function_multiple() {
 
 #[test]
 fn const_in_impl() {
-    // Note: Self::CONST is not supported for impl block consts; use bare name
-    let result = run("fn main() { let c = Counter::new(); ret_u32(c.value); }\n\
-        struct Counter { value: u32 }\n\
-        impl Counter {\n\
-            const INITIAL = 0u32;\n\
-            fn new() -> Counter {\n\
-                return Counter { value: INITIAL };\n\
-            }\n\
-        }");
+    let result = run(stringify!(
+        fn main() { let c = Counter::new(); ret_u32(c.value); }
+        struct Counter { value: u32 }
+        impl Counter {
+            const INITIAL = 0u32;
+            fn new() -> Counter {
+                return Counter { value: Self::INITIAL };
+            }
+        }
+    ));
     assert_all(&result, &[0u32]);
 }
 
 #[test]
 fn const_in_impl_string() {
-    // Note: Self::CONST is not supported for impl block consts; use bare name
-    let result = run("fn main() { let g = Greeter::new(\"World\"); ret_str(g.name); }\n\
-        struct Greeter { name: String }\n\
-        impl Greeter {\n\
-            const PREFIX = \"Hello, \";\n\
-            fn new(name: String) -> Greeter {\n\
-                return Greeter { name: PREFIX + name };\n\
-            }\n\
-        }");
+    let result = run(stringify!(
+        fn main() { let g = Greeter::new("World"); ret_str(g.name); }
+        struct Greeter { name: String }
+        impl Greeter {
+            const PREFIX = "Hello, ";
+            fn new(name: String) -> Greeter {
+                return Greeter { name: Self::PREFIX + name };
+            }
+        }
+    ));
     assert_all(&result, &["Hello, World".to_string()]);
 }
 
@@ -261,19 +273,169 @@ fn const_in_impl_string() {
 
 #[test]
 fn const_in_trait_impl() {
-    // Note: Self::CONST is not supported for impl block consts; use bare name
-    let result = run("fn main() { ret_str(Thing::description()); }\n\
-        trait Describable {\n\
-            fn description() -> String;\n\
-        }\n\
-        struct Thing { name: String }\n\
-        impl Describable for Thing {\n\
-            const LABEL = \"Thing\";\n\
-            fn description() -> String {\n\
-                return LABEL + \" object\";\n\
-            }\n\
-        }");
+    // Trait declares the const (required), impl provides the value
+    let result = run(stringify!(
+        fn main() { ret_str(Thing::description()); }
+        trait Describable {
+            const LABEL: String;
+            fn description() -> String;
+        }
+        struct Thing { name: String }
+        impl Describable for Thing {
+            const LABEL = "Thing";
+            fn description() -> String {
+                return Self::LABEL + " object";
+            }
+        }
+    ));
     assert_all(&result, &["Thing object".to_string()]);
+}
+
+// =============================================================================
+// Trait constants
+// =============================================================================
+
+#[test]
+fn trait_const_provided_default() {
+    // Trait provides a default const value; trait default method uses it
+    let result = run(stringify!(
+        fn main() { ret_u32(get_default_id(Thing { _pad: 0 })); }
+        trait Identifiable {
+            const DEFAULT_ID: u32 = 999;
+            fn get_id(self: Self) -> u32 { Self::DEFAULT_ID }
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {}
+        fn get_default_id(t: Identifiable) -> u32 { t.get_id() }
+    ));
+    assert_all(&result, &[999u32]);
+}
+
+#[test]
+fn trait_const_impl_override() {
+    // Trait provides a default const and default method.
+    // Impl overrides the method with a literal (forward const refs in trait impl methods
+    // have resolution ordering limitations).
+    let result = run(stringify!(
+        fn main() { ret_u32(get_default_id(Thing { _pad: 0 })); ret_u32(get_default_id(Other { _pad: 0 })); }
+        trait Identifiable {
+            const DEFAULT_ID: u32 = 999;
+            fn get_id(self: Self) -> u32 { Self::DEFAULT_ID }
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {
+            const DEFAULT_ID = 42;
+            fn get_id(self: Self) -> u32 { 42 }
+        }
+        struct Other { _pad: u32 }
+        impl Identifiable for Other {}
+        fn get_default_id(t: Identifiable) -> u32 { t.get_id() }
+    ));
+    assert_all(&result, &[42u32, 999u32]);
+}
+
+#[test]
+fn trait_const_required() {
+    // Trait requires a const (no default); impl must provide it
+    let result = run(stringify!(
+        fn main() { ret_u32(Thing::ID); }
+        trait Identifiable {
+            const ID: u32;
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {
+            const ID = 77;
+        }
+    ));
+    assert_all(&result, &[77u32]);
+}
+
+#[test]
+fn trait_const_reference_type() {
+    // Trait const with reference type (String); impl overrides method with literal
+    let result = run(stringify!(
+        fn main() { ret_str(label_of(Thing { _pad: 0 })); }
+        trait Labelled {
+            const LABEL: String = "default";
+            fn label(self: Self) -> String { Self::LABEL }
+        }
+        struct Thing { _pad: u32 }
+        impl Labelled for Thing {
+            const LABEL = "thing";
+            fn label(self: Self) -> String { "thing" }
+        }
+        fn label_of(t: Labelled) -> String { t.label() }
+    ));
+    assert_all(&result, &["thing".to_string()]);
+}
+
+#[test]
+fn trait_const_default_used_by_impl() {
+    // Impl doesn't override the const; the trait default is used
+    let result = run(stringify!(
+        fn main() { ret_str(label_of(Thing { _pad: 0 })); }
+        trait Labelled {
+            const LABEL: String = "default";
+            fn label(self: Self) -> String { Self::LABEL }
+        }
+        struct Thing { _pad: u32 }
+        impl Labelled for Thing {
+            fn label(self: Self) -> String { Self::LABEL + " impl" }
+        }
+        fn label_of(t: Labelled) -> String { t.label() }
+    ));
+    assert_all(&result, &["default impl".to_string()]);
+}
+
+#[test]
+fn trait_const_accessed_from_outside() {
+    // Access impl const from outside via TypeName::CONST
+    let result = run(stringify!(
+        fn main() { ret_u32(Thing::ID); }
+        trait Identifiable {
+            const ID: u32;
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {
+            const ID = 123;
+        }
+    ));
+    assert_all(&result, &[123u32]);
+}
+
+#[test]
+fn trait_const_access_trait_default() {
+    // Access trait default const via TraitName::CONST
+    let result = run(stringify!(
+        fn main() { ret_u32(Identifiable::DEFAULT_ID); }
+        trait Identifiable {
+            const DEFAULT_ID: u32 = 42;
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {}
+    ));
+    assert_all(&result, &[42u32]);
+}
+
+// =============================================================================
+// Trait const error cases
+// =============================================================================
+
+#[test]
+#[should_panic(expected = "Const `UNKNOWN` is not declared by trait `Identifiable`")]
+fn trait_const_not_declared_in_trait() {
+    // Impl defines a const that the trait doesn't declare
+    run(stringify!(
+        fn main() {}
+        trait Identifiable {
+            const ID: u32;
+        }
+        struct Thing { _pad: u32 }
+        impl Identifiable for Thing {
+            const ID = 1;
+            const UNKNOWN = 2;
+        }
+    ));
 }
 
 // =============================================================================
@@ -361,9 +523,11 @@ fn const_in_closure() {
 
 #[test]
 fn const_primitive_enum() {
-    let result = run("fn main() { ret_u8(DEFAULT as u8); }\n\
-        enum Color { Red, Green, Blue }\n\
-        const DEFAULT = Color::Green;");
+    let result = run(stringify!(
+        fn main() { ret_u8(DEFAULT as u8); }
+        enum Color { Red, Green, Blue }
+        const DEFAULT = Color::Green;
+    ));
     assert_all(&result, &[1u8]);
 }
 
@@ -394,13 +558,20 @@ fn multiple_consts() {
 
 #[test]
 fn const_expr_cannot_use_variable() {
-    let err = build_err("fn test() { let x = 10u32; const C = x; }\nfn main() {}");
+    let err = build_err(stringify!(
+        fn test() { let x = 10u32; const C = x; }
+        fn main() {}
+    ));
     assert!(err.contains("const expression"), "Expected const expression error, got: {}", err);
 }
 
 #[test]
 fn const_expr_cannot_call_function() {
-    let err = build_err("fn get_val() -> u32 { return 42; }\nconst C = get_val();\nfn main() {}");
+    let err = build_err(stringify!(
+        fn get_val() -> u32 { return 42; }
+        const C = get_val();
+        fn main() {}
+    ));
     assert!(err.contains("const expression"), "Expected const expression error, got: {}", err);
 }
 
@@ -420,10 +591,12 @@ fn const_string_refers_to_const_string() {
 
 #[test]
 fn const_struct_refers_to_const_string() {
-    let result = run("fn main() { ret_str(W.inner); }\n\
-        struct Wrapper { inner: String }\n\
-        const MSG = \"inner text\";\n\
-        const W = Wrapper { inner: MSG };");
+    let result = run(stringify!(
+        fn main() { ret_str(W.inner); }
+        struct Wrapper { inner: String }
+        const MSG = "inner text";
+        const W = Wrapper { inner: MSG };
+    ));
     assert_all(&result, &["inner text".to_string()]);
 }
 
@@ -433,9 +606,11 @@ fn const_struct_refers_to_const_string() {
 
 #[test]
 fn const_in_anonymous_function() {
-    let result = run("const BASE = 10u32;\n\
-        fn test(f: fn() -> u32) { ret_u32(f() + BASE); }\n\
-        fn main() { test(fn() -> u32 { const EXTRA = 5u32; return BASE + EXTRA; }); }");
+    let result = run(stringify!(
+        const BASE = 10u32;
+        fn test(f: fn() -> u32) { ret_u32(f() + BASE); }
+        fn main() { test(fn() -> u32 { const EXTRA = 5u32; return BASE + EXTRA; }); }
+    ));
     assert_all(&result, &[25u32]);
 }
 
@@ -496,4 +671,112 @@ fn const_binary() {
         ret_u8(BIN);
     ));
     assert_all(&result, &[10u8]);
+}
+
+#[test]
+fn debug_method_override_simple() {
+    // Test method override without const involvement
+    let result = run(stringify!(
+        fn main() { ret_u32(get_x(S { _pad: 0 })); }
+        trait T {
+            fn get_x(self: Self) -> u32 { 999 }
+        }
+        struct S { _pad: u32 }
+        impl T for S {
+            fn get_x(self: Self) -> u32 { 42 }
+        }
+        fn get_x(t: T) -> u32 { t.get_x() }
+    ));
+    assert_all(&result, &[42u32]);
+}
+
+#[test]
+fn debug_method_override_with_const() {
+    // Test method override with const reference
+    let result = run("fn main() { ret_u32(get_x(S { _pad: 0 })); }\n\
+        trait T {\n\
+            const X: u32 = 999;\n\
+            fn get_x(self: Self) -> u32 { Self::X }\n\
+        }\n\
+        struct S { _pad: u32 }\n\
+        impl T for S {\n\
+            const X = 42;\n\
+            fn get_x(self: Self) -> u32 { S::X }\n\
+        }\n\
+        fn get_x(t: T) -> u32 { t.get_x() }");
+    assert_all(&result, &[42u32]);
+}
+
+#[test]
+fn debug_method_override_literal() {
+    // Test method override with literal (no const reference)
+    let result = run(stringify!(
+        fn main() { ret_u32(get_x(S { _pad: 0 })); }
+        trait T {
+            const X: u32 = 999;
+            fn get_x(self: Self) -> u32 { Self::X }
+        }
+        struct S { _pad: u32 }
+        impl T for S {
+            const X = 42;
+            fn get_x(self: Self) -> u32 { 42 }
+        }
+        fn get_x(t: T) -> u32 { t.get_x() }
+    ));
+    assert_all(&result, &[42u32]);
+}
+
+#[test]
+fn trait_const_override_in_default_method() {
+    // Trait default method uses Self::CONST; impl overrides the const but not the method.
+    // The default method should see the impl's const value, not the trait's.
+    let result = run(stringify!(
+        fn main() { ret_u32(Thing { v: 0 }.id_provided()); }
+        struct Thing { v: u32 }
+        trait Identifiable {
+            const ID: u32 = 123;
+            fn id_provided(self: Self) -> u32 { Self::ID }
+        }
+        impl Identifiable for Thing {
+            const ID: u32 = 999;
+        }
+    ));
+    assert_all(&result, &[999u32]);
+}
+
+#[test]
+fn trait_const_override_default_method_partial() {
+    // Trait has multiple consts; impl overrides only one. Default method using the
+    // overridden const should see the impl value; the other const keeps the trait value.
+    let result = run(stringify!(
+        fn main() { ret_u64(Thing { v: 0 }.combined()); }
+        struct Thing { v: u32 }
+        trait HasTwo {
+            const A: u32 = 100;
+            const B: u32 = 200;
+            fn combined(self: Self) -> u64 { (Self::A as u64) << 32 | (Self::B as u64) }
+        }
+        impl HasTwo for Thing {
+            const A: u32 = 1;
+        }
+    ));
+    assert_all(&result, &[(1u64 << 32 | 200u64)]);
+}
+
+#[test]
+fn trait_const_override_impl_also_overrides_method() {
+    // Impl overrides both the const and the method. The impl method should be used.
+    let result = run(stringify!(
+        fn main() { ret_u32(Thing { v: 0 }.id_provided()); }
+        struct Thing { v: u32 }
+        trait Identifiable {
+            const ID: u32 = 123;
+            fn id_provided(self: Self) -> u32 { Self::ID }
+        }
+        impl Identifiable for Thing {
+            const ID: u32 = 999;
+            fn id_provided(self: Self) -> u32 { 777 }
+        }
+    ));
+    assert_all(&result, &[777u32]);
 }

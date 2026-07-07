@@ -59,6 +59,12 @@ pub enum ResolveErrorKind {
     /// Compound assignment through `[]` on a custom `Index` type requires `get` and `set` to share
     /// the same value type, but they differ.
     IndexCompoundAssignMismatch(String, String, String),
+    /// A trait impl defines a const not declared by the trait.
+    TraitConstNotDeclared(String, String),
+    /// A trait impl does not define a required trait const.
+    RequiredTraitConstMissing(String, String),
+    /// A trait impl const type does not match the trait declaration.
+    TraitConstTypeMismatch(String, String, String),
     CannotResolve(String),
     InvalidOperation(String),
     Internal(String),
@@ -140,6 +146,9 @@ impl Display for ResolveError {
             ResolveErrorKind::NotCallable(t) => write!(f, "Type `{t}` is not callable"),
             ResolveErrorKind::RecursiveType(name) => write!(f, "Recursive type `{name}` has infinite size. Recursive types are not supported"),
             ResolveErrorKind::IndexCompoundAssignMismatch(ty, get_ret, set_val) => write!(f, "compound assignment through `[]` on `{ty}` requires `Index::get` to return the same type `Index::set` accepts (got `{get_ret}` vs `{set_val}`)"),
+            ResolveErrorKind::TraitConstNotDeclared(name, trait_name) => write!(f, "Const `{name}` is not declared by trait `{trait_name}`"),
+            ResolveErrorKind::RequiredTraitConstMissing(name, trait_name) => write!(f, "Required const `{name}` is not defined by impl of trait `{trait_name}`"),
+            ResolveErrorKind::TraitConstTypeMismatch(name, expected, got) => write!(f, "Const `{name}` type mismatch in trait impl: expected `{expected}`, got `{got}`"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve `{b}`"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {o}"),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),

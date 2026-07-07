@@ -422,6 +422,20 @@ fn struct_def(i: Input) -> Output<StructDef> {
     )(i)
 }
 
+/// Internal enum for parsing trait body contents (functions and consts).
+enum TraitItem {
+    Function(Function),
+    Const(ConstDef),
+}
+
+/// Parses a single item inside a trait block (either a function or a const).
+fn trait_item(i: Input) -> Output<TraitItem> {
+    alt((
+        map(trait_const_def, |c| TraitItem::Const(c)),
+        map(function, |f| TraitItem::Function(f)),
+    ))(i)
+}
+
 /// Matches a trait definition.
 fn trait_def(i: Input) -> Output<TraitDef> {
     let position = i.position();
@@ -429,15 +443,19 @@ fn trait_def(i: Input) -> Output<TraitDef> {
     with_scope(ScopeKind::Module, map(
         pair(
             terminated(opt(keyword("pub")), check_flags(keyword("trait"), |s| if s.in_function { Some(ParseErrorKind::IllegalTraitDef) } else { None })),
-            tuple((ident, punct("{"), with_flags(&|flags| flags.in_trait = true, many0(function)), punct("}")))
+            tuple((ident, punct("{"), with_flags(&|flags| flags.in_trait = true, many0(trait_item)), punct("}")))
         ),
-        move |pair| TraitDef {
-            position,
-            functions   : pair.1.2,
-            scope_id    : j.scope_id(),
-            ident       : pair.1.0,
-            type_id     : None,
-            vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+        move |pair| {
+            let (functions, consts): (Vec<_>, Vec<_>) = pair.1.2.into_iter().partition(|item| matches!(item, TraitItem::Function(_)));
+            TraitDef {
+                position,
+                functions   : functions.into_iter().filter_map(|item| if let TraitItem::Function(f) = item { Some(f) } else { None }).collect(),
+                consts      : consts.into_iter().filter_map(|item| if let TraitItem::Const(c) = item { Some(c) } else { None }).collect(),
+                scope_id    : j.scope_id(),
+                ident       : pair.1.0,
+                type_id     : None,
+                vis         : if pair.0.is_some() { Visibility::Public } else { Visibility::Private },
+            }
         }
     ))(i)
 }
@@ -1703,6 +1721,30 @@ fn const_def(i: Input) -> Output<ConstDef> {
             position,
             ident: m.1,
             ty: m.2,
+            expr: Some(m.4),
+            constant_id: None,
+        }
+    )(i)
+}
+
+/// Matches a trait-level const declaration.
+/// Required const: `const NAME: Type;`
+/// Provided const: `const NAME: Type = expr;`
+fn trait_const_def(i: Input) -> Output<ConstDef> {
+    let position = i.position();
+    map(
+        tuple((
+            keyword("const"),
+            ident,
+            punct(":"),
+            inline_type,
+            opt(preceded(punct("="), expression)),
+            punct(";"),
+        )),
+        move |m| ConstDef {
+            position,
+            ident: m.1,
+            ty: Some(m.3),
             expr: m.4,
             constant_id: None,
         }
@@ -1916,7 +1958,7 @@ fn const_def_function(i: Input) -> Output<ConstDef> {
             position,
             ident: m.1,
             ty: m.2,
-            expr: m.4,
+            expr: Some(m.4),
             constant_id: None,
         }
     )(i)
