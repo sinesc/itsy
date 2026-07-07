@@ -9,9 +9,9 @@ mod init_state;
 use crate::config::FrameAddress;
 use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
-use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}};
-use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, builtins::{Builtin, BuiltinType}};
+use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue, UserConstValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}, walker::AstVisitor, parser::types::ParsedModule};
+use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, ConstDescriptor, builtins::{Builtin, BuiltinType}};
 #[cfg(feature="call_function")]
 use crate::bytecode::call_function::build_function_table;
 use stack_frame::{StackFrame, StackFrames};
@@ -52,7 +52,7 @@ pub(crate) struct Compiler<'ast, T> {
     /// Each entry: (constant_id, const pool offset of the reserved heap address slot).
     user_const_heap_refs: Vec<(ConstantId, StackAddress)>,
     /// Reference to the program modules (for finding ConstDef AST nodes during init code emission).
-    modules_ref: Option<&'ast [crate::frontend::parser::types::ParsedModule]>,
+    modules_ref: Option<&'ast [ParsedModule]>,
 }
 
 /// Compiles a resolved program into bytecode.
@@ -157,14 +157,14 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
 
     // Emit pre-main initialization code: upload each reference-type const to the heap.
     // This runs before the entry function call.
-    compiler.emit_const_init()?;
+    compiler.write_const_init()?;
 
     // write placeholder jump to program entry
     let initial_pos = compiler.writer.call(123, 0);
 
     // Emit post-main cleanup code: decrement refcounts for reference-type consts.
     // This runs after the entry function returns, before exit.
-    compiler.emit_const_cleanup()?;
+    compiler.write_const_cleanup()?;
 
     // the exit following the entry call doubles as the return target for host-initiated calls
     // (VM::call_function): a function returning here breaks the exec loop back to the host
@@ -798,17 +798,14 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let type_id = item.type_id(self).ice()?;
                 let ty = self.ty(&type_id);
                 match user_const {
-                    crate::shared::meta::UserConstValue::HeapRef(offset) => {
+                    UserConstValue::HeapRef(offset) => {
                         // Reference-type const: load the heap address from the const pool.
                         self.writer.load_pool(*offset);
                     },
-                    crate::shared::meta::UserConstValue::Void => {
-                        // void has size 0, nothing to emit
-                    },
-                    crate::shared::meta::UserConstValue::Bool(b) => {
+                    UserConstValue::Bool(b) => {
                         self.write_immediate(ty, Numeric::Unsigned(*b as u64))?;
                     },
-                    crate::shared::meta::UserConstValue::Numeric(n) => {
+                    UserConstValue::Numeric(n) => {
                         // For primitive enums, use the underlying primitive type
                         let write_ty = if let Type::Enum(e) = ty {
                             if let Some((primitive_type_id, _)) = e.primitive {
@@ -821,360 +818,11 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                         };
                         self.write_immediate(write_ty, *n)?;
                     },
+                    UserConstValue::Unresolved => {
+                        Self::ice(&format!("Unresolved const type"))?
+                    },
                 }
             },
-        }
-        Ok(())
-    }
-
-    /// Walks the AST to find all reference-type user consts and reserves const pool space for their
-    /// heap addresses. Updates resolved metadata with the real const pool offset.
-    fn collect_user_const_heap_refs(self: &mut Self) -> CompileResult {
-        let modules = self.modules_ref.expect("modules_ref not set");
-        for module in modules {
-            for statement in module.statements() {
-                self.collect_const_defs_from_statement(statement);
-            }
-        }
-        Ok(())
-    }
-
-    /// Helper: recursively collect ConstDef statements from a statement.
-    fn collect_const_defs_from_statement(self: &mut Self, statement: &ast::Statement) {
-        match statement {
-            ast::Statement::ConstDef(const_def) => {
-                let constant_id = const_def.constant_id.expect("ConstDef not resolved");
-                let constant = self.resolved.constant(constant_id);
-                let type_id = constant.type_id.expect("Const type not resolved");
-                let ty = self.ty(&type_id);
-                if ty.is_ref() {
-                    // Reserve const pool space for the heap address and update resolved metadata.
-                    let offset = self.writer.store_const(HeapAddress::default());
-                    self.resolved.constant_mut(constant_id).value =
-                        crate::shared::meta::ConstantValue::UserConst(
-                            crate::shared::meta::UserConstValue::HeapRef(offset)
-                        );
-                    self.user_const_heap_refs.push((constant_id, offset));
-                }
-            },
-            ast::Statement::Block(block) => {
-                for stmt in &block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-            },
-            ast::Statement::IfBlock(if_block) => {
-                for stmt in &if_block.if_block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-                if let Some(else_block) = &if_block.else_block {
-                    for stmt in &else_block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            ast::Statement::ForLoop(for_loop) => {
-                for stmt in &for_loop.block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-            },
-            ast::Statement::WhileLoop(while_loop) => {
-                for stmt in &while_loop.block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-            },
-            ast::Statement::ImplBlock(impl_block) => {
-                for const_def in &impl_block.consts {
-                    let constant_id = const_def.constant_id.expect("ConstDef not resolved");
-                    let constant = self.resolved.constant(constant_id);
-                    let type_id = constant.type_id.expect("Const type not resolved");
-                    let ty = self.ty(&type_id);
-                    if ty.is_ref() {
-                        let offset = self.writer.store_const(HeapAddress::default());
-                        self.resolved.constant_mut(constant_id).value =
-                            crate::shared::meta::ConstantValue::UserConst(
-                                crate::shared::meta::UserConstValue::HeapRef(offset)
-                            );
-                        self.user_const_heap_refs.push((constant_id, offset));
-                    }
-                }
-            },
-            ast::Statement::TraitDef(trait_def) => {
-                // Collect trait consts with default values (provided consts)
-                for const_def in &trait_def.consts {
-                    // Skip required consts (no default value)
-                    if const_def.expr.is_none() {
-                        continue;
-                    }
-                    let constant_id = const_def.constant_id.expect("ConstDef not resolved");
-                    let constant = self.resolved.constant(constant_id);
-                    let type_id = constant.type_id.expect("Const type not resolved");
-                    let ty = self.ty(&type_id);
-                    if ty.is_ref() {
-                        let offset = self.writer.store_const(HeapAddress::default());
-                        self.resolved.constant_mut(constant_id).value =
-                            crate::shared::meta::ConstantValue::UserConst(
-                                crate::shared::meta::UserConstValue::HeapRef(offset)
-                            );
-                        self.user_const_heap_refs.push((constant_id, offset));
-                    }
-                }
-            },
-            ast::Statement::Function(func) => {
-                // Recurse into function body to find consts defined inside functions
-                if let Some(ref block) = func.shared.block {
-                    for stmt in &block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            ast::Statement::Expression(expr) => {
-                // Expressions can contain closures/anonymous functions with nested consts
-                self.collect_const_defs_from_expression(expr);
-            },
-            _ => {},
-        }
-    }
-
-    /// Helper: recursively collect ConstDef statements from an expression.
-    fn collect_const_defs_from_expression(self: &mut Self, expr: &ast::Expression) {
-        match expr {
-            ast::Expression::Block(block) => {
-                for stmt in &block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-            },
-            ast::Expression::IfBlock(if_block) => {
-                for stmt in &if_block.if_block.statements {
-                    self.collect_const_defs_from_statement(stmt);
-                }
-                if let Some(else_block) = &if_block.else_block {
-                    for stmt in &else_block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            ast::Expression::MatchBlock(match_block) => {
-                for (_, block) in &match_block.branches {
-                    for stmt in &block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            ast::Expression::Closure(closure) => {
-                if let Some(ref block) = closure.shared.block {
-                    for stmt in &block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            ast::Expression::AnonymousFunction(func) => {
-                if let Some(ref block) = func.shared.block {
-                    for stmt in &block.statements {
-                        self.collect_const_defs_from_statement(stmt);
-                    }
-                }
-            },
-            // Recurse into sub-expressions that might contain closures
-            ast::Expression::BinaryOp(binop) => {
-                self.collect_const_defs_from_operand(&binop.left);
-                self.collect_const_defs_from_operand(&binop.right);
-            },
-            ast::Expression::UnaryOp(unop) => {
-                self.collect_const_defs_from_expression(&unop.expr);
-            },
-            ast::Expression::Cast(cast) => {
-                self.collect_const_defs_from_expression(&cast.expr);
-            },
-            _ => {},
-        }
-    }
-
-    /// Helper: collect from a binary operand.
-    fn collect_const_defs_from_operand(self: &mut Self, operand: &ast::BinaryOperand) {
-        match operand {
-            ast::BinaryOperand::Expression(expr) => {
-                self.collect_const_defs_from_expression(expr);
-            },
-            ast::BinaryOperand::ArgumentList(arg_list) => {
-                for arg in &arg_list.args {
-                    self.collect_const_defs_from_expression(arg);
-                }
-            },
-            ast::BinaryOperand::Member(_) => {
-                // Member is just a field accessor (ident + type info), no nested expressions
-            },
-        }
-    }
-
-    /// Finds the ConstDef AST node for a given constant_id by walking the modules.
-    /// Static method to avoid borrowing self.
-    fn find_const_def_in_modules(modules: &[crate::frontend::parser::types::ParsedModule], constant_id: ConstantId) -> Option<&ast::ConstDef> {
-        for module in modules {
-            if let Some(def) = Self::find_const_def_in_statements(module.statements(), constant_id) {
-                return Some(def);
-            }
-        }
-        None
-    }
-
-    fn find_const_def_in_statements<'a>(statements: impl Iterator<Item = &'a ast::Statement>, constant_id: ConstantId) -> Option<&'a ast::ConstDef> {
-        for statement in statements {
-            match statement {
-                ast::Statement::ConstDef(const_def) => {
-                    if const_def.constant_id == Some(constant_id) {
-                        return Some(const_def);
-                    }
-                },
-                ast::Statement::ImplBlock(impl_block) => {
-                    for const_def in &impl_block.consts {
-                        if const_def.constant_id == Some(constant_id) {
-                            return Some(const_def);
-                        }
-                    }
-                },
-                ast::Statement::TraitDef(trait_def) => {
-                    for const_def in &trait_def.consts {
-                        if const_def.constant_id == Some(constant_id) {
-                            return Some(const_def);
-                        }
-                    }
-                },
-                ast::Statement::Block(block) => {
-                    if let Some(def) = Self::find_const_def_in_statements(block.statements.iter(), constant_id) {
-                        return Some(def);
-                    }
-                },
-                ast::Statement::IfBlock(if_block) => {
-                    if let Some(def) = Self::find_const_def_in_statements(if_block.if_block.statements.iter(), constant_id) {
-                        return Some(def);
-                    }
-                    if let Some(else_block) = &if_block.else_block {
-                        if let Some(def) = Self::find_const_def_in_statements(else_block.statements.iter(), constant_id) {
-                            return Some(def);
-                        }
-                    }
-                },
-                ast::Statement::ForLoop(for_loop) => {
-                    if let Some(def) = Self::find_const_def_in_statements(for_loop.block.statements.iter(), constant_id) {
-                        return Some(def);
-                    }
-                },
-                ast::Statement::WhileLoop(while_loop) => {
-                    if let Some(def) = Self::find_const_def_in_statements(while_loop.block.statements.iter(), constant_id) {
-                        return Some(def);
-                    }
-                },
-                ast::Statement::Function(func) => {
-                    if let Some(ref block) = func.shared.block {
-                        if let Some(def) = Self::find_const_def_in_statements(block.statements.iter(), constant_id) {
-                            return Some(def);
-                        }
-                    }
-                },
-                ast::Statement::Expression(expr) => {
-                    if let Some(def) = Self::find_const_def_in_expression(expr, constant_id) {
-                        return Some(def);
-                    }
-                },
-                _ => {},
-            }
-        }
-        None
-    }
-
-    /// Helper: find ConstDef in an expression (for closures/anonymous functions).
-    fn find_const_def_in_expression<'a>(expr: &'a ast::Expression, constant_id: ConstantId) -> Option<&'a ast::ConstDef> {
-        match expr {
-            ast::Expression::Block(block) => {
-                Self::find_const_def_in_statements(block.statements.iter(), constant_id)
-            },
-            ast::Expression::IfBlock(if_block) => {
-                Self::find_const_def_in_statements(if_block.if_block.statements.iter(), constant_id)
-                    .or_else(|| if_block.else_block.as_ref().and_then(|eb| {
-                        Self::find_const_def_in_statements(eb.statements.iter(), constant_id)
-                    }))
-            },
-            ast::Expression::MatchBlock(match_block) => {
-                match_block.branches.iter().find_map(|(_, block)| {
-                    Self::find_const_def_in_statements(block.statements.iter(), constant_id)
-                })
-            },
-            ast::Expression::Closure(closure) => {
-                closure.shared.block.as_ref().and_then(|block| {
-                    Self::find_const_def_in_statements(block.statements.iter(), constant_id)
-                })
-            },
-            ast::Expression::AnonymousFunction(func) => {
-                func.shared.block.as_ref().and_then(|block| {
-                    Self::find_const_def_in_statements(block.statements.iter(), constant_id)
-                })
-            },
-            ast::Expression::BinaryOp(binop) => {
-                Self::find_const_def_in_operand(&binop.left, constant_id)
-                    .or_else(|| Self::find_const_def_in_operand(&binop.right, constant_id))
-            },
-            ast::Expression::UnaryOp(unop) => {
-                Self::find_const_def_in_expression(&unop.expr, constant_id)
-            },
-            ast::Expression::Cast(cast) => {
-                Self::find_const_def_in_expression(&cast.expr, constant_id)
-            },
-            _ => None,
-        }
-    }
-
-    /// Helper: find ConstDef in a binary operand.
-    fn find_const_def_in_operand<'a>(operand: &'a ast::BinaryOperand, constant_id: ConstantId) -> Option<&'a ast::ConstDef> {
-        match operand {
-            ast::BinaryOperand::Expression(expr) => {
-                Self::find_const_def_in_expression(expr, constant_id)
-            },
-            ast::BinaryOperand::ArgumentList(arg_list) => {
-                arg_list.args.iter().find_map(|arg| {
-                    Self::find_const_def_in_expression(arg, constant_id)
-                })
-            },
-            ast::BinaryOperand::Member(_) => {
-                // Member is just a field accessor (ident + type info), no nested expressions
-                None
-            },
-        }
-    }
-
-    /// Emits pre-main initialization code: compile each reference-type const expression and store
-    /// the resulting heap address in the const pool slot.
-    fn emit_const_init(self: &mut Self) -> CompileResult {
-        // Collect (constant_id, offset) pairs first to avoid borrow conflicts.
-        let init_items: Vec<(ConstantId, StackAddress)> = self.user_const_heap_refs.clone();
-        let modules = self.modules_ref.expect("modules_ref not set");
-        for (constant_id, offset) in init_items {
-            let const_def = Self::find_const_def_in_modules(modules, constant_id).expect("ConstDef not found");
-            comment!(self, "init user const {}", const_def.ident.name);
-            // Get the constructor for the const's type
-            let type_id = const_def.type_id(self).expect("Const type not resolved");
-            let constructor = self.constructor(self.ty(&type_id))?;
-            // Compile the const expression — stack: heap_addr
-            self.compile_expression(const_def.expr.as_ref().ice()?)?;
-            // Clone it — stack: heap_addr heap_addr
-            self.writer.clone(size_of::<HeapAddress>() as FrameAddress);
-            // Store one copy in the const pool slot — stack: heap_addr
-            self.writer.store_pool(offset);
-            // Increment refcount (pops the heap address) — stack: --
-            self.writer.cnt_sa(constructor, HeapRefOp::Inc);
-        }
-        Ok(())
-    }
-
-    /// Emits post-main cleanup code: decrement refcounts for reference-type consts.
-    fn emit_const_cleanup(self: &mut Self) -> CompileResult {
-        let modules = self.modules_ref.expect("modules_ref not set");
-        for (constant_id, offset) in &self.user_const_heap_refs {
-            let const_def = Self::find_const_def_in_modules(modules, *constant_id).expect("ConstDef not found");
-            comment!(self, "cleanup user const {}", const_def.ident.name);
-            let type_id = const_def.type_id(self).expect("Const type not resolved");
-            let constructor = self.constructor(self.ty(&type_id))?;
-            self.writer.load_pool(*offset);
-            self.writer.cnt_sa(constructor, HeapRefOp::Dec);
         }
         Ok(())
     }
@@ -1493,6 +1141,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         Ok(())
     }
 
+    // Compiles a for-in-range loop.
     fn compile_for_loop_range(self: &mut Self, item: &ast::ForLoop, iter_loc: FrameAddress, iter_type_id: TypeId) -> CompileResult {
         comment!(self, "for in range");
         // store lower range bound in iter variable
@@ -2214,7 +1863,6 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         self.write_cast(from, to)?;
         Ok(())
     }
-
 }
 
 impl<T> Compiler<'_, T> where T: VMFunc<T> {
@@ -2576,7 +2224,7 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         self.writer.store_const(total_size);
         // write raw field bytes into const pool
         let mut program = self.writer.program();
-        program.const_descriptors.push(crate::bytecode::ConstDescriptor { size: total_size });
+        program.const_descriptors.push(ConstDescriptor { size: total_size });
         let consts = &mut program.consts;
         for (field_expr, (_, type_id_opt)) in fields.iter().zip(struct_ty.fields.iter()) {
             let type_id = type_id_opt.expect("Unresolved struct field type");
@@ -2599,7 +2247,7 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         self.writer.store_const(total_size);
         // write raw element bytes into const pool
         let mut program = self.writer.program();
-        program.const_descriptors.push(crate::bytecode::ConstDescriptor { size: total_size });
+        program.const_descriptors.push(ConstDescriptor { size: total_size });
         let consts = &mut program.consts;
         for element in elements {
             self.serialize_literal_bytes(element, element_type, consts)?;
@@ -2611,7 +2259,7 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
     fn serialize_literal_bytes(self: &Self, expr: &ast::Expression, field_type: &Type, buf: &mut Vec<u8>) -> CompileResult {
         let literal = expr.as_literal().ice_msg("Expected literal expression for const aggregate")?;
         match &literal.value {
-            crate::frontend::ast::LiteralValue::Numeric(numeric) => {
+            ast::LiteralValue::Numeric(numeric) => {
                 match numeric {
                     Numeric::Signed(v) => match field_type {
                         Type::i8  => buf.extend_from_slice(&(*v as i8).to_ne_bytes()),
@@ -2634,10 +2282,10 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
                     },
                 };
             }
-            crate::frontend::ast::LiteralValue::Bool(v) => {
+            ast::LiteralValue::Bool(v) => {
                 buf.push(*v as u8);
             }
-            crate::frontend::ast::LiteralValue::Void => {
+            ast::LiteralValue::Void => {
                 // Zero bytes - nothing to write
             }
             // Nested structs/arrays/strings/maps are not const-serializable
@@ -2686,6 +2334,45 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
     /// to the match subject itself; otherwise the type of the last navigation step is the value's type.
     fn pattern_value_type(self: &Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)]) -> TypeId {
         access.last().map(|&(_, type_id)| type_id).unwrap_or(subject_type_id)
+    }
+
+    /// Walks the AST to find all reference-type user consts and reserves const pool space for their
+    /// heap addresses. Updates resolved metadata with the real const pool offset.
+    fn collect_user_const_heap_refs(self: &mut Self) -> CompileResult {
+        let modules = self.modules_ref.expect("modules_ref not set");
+        for module in modules {
+            for statement in module.statements() {
+                self.walk_statement(statement);
+            }
+        }
+        Ok(())
+    }
+
+    /// Visitor helper that checks if a ConstDef is a reference type and reserve const pool space for its heap address.
+    fn collect_user_const_heap_refs_visitor(&mut self, cd: &ast::ConstDef) {
+        let constant_id = cd.constant_id.expect("ConstDef not resolved");
+        let constant = self.resolved.constant(constant_id);
+        let type_id = constant.type_id.expect("Const type not resolved");
+        let ty = self.ty(&type_id);
+        if ty.is_ref() {
+            let offset = self.writer.store_const(HeapAddress::default());
+            self.resolved.constant_mut(constant_id).value = ConstantValue::UserConst(UserConstValue::HeapRef(offset));
+            self.user_const_heap_refs.push((constant_id, offset));
+        }
+    }
+
+    /// Finds the ConstDef AST node for a given constant_id by walking the modules.
+    fn find_const_def_in_modules(modules: &[ParsedModule], constant_id: ConstantId) -> Option<&ast::ConstDef> {
+        let mut finder = ConstDefFinder { constant_id, found: None };
+        for module in modules {
+            for statement in module.statements() {
+                finder.walk_statement(statement);
+                if finder.found.is_some() {
+                    return finder.found;
+                }
+            }
+        }
+        None
     }
 }
 
@@ -2764,6 +2451,44 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             }
         }
         self.locals.push(frame);
+        Ok(())
+    }
+
+    /// Emits pre-main initialization code: compile each reference-type const expression and store
+    /// the resulting heap address in the const pool slot.
+    fn write_const_init(self: &mut Self) -> CompileResult {
+        // Collect (constant_id, offset) pairs first to avoid borrow conflicts.
+        let init_items: Vec<(ConstantId, StackAddress)> = self.user_const_heap_refs.clone();
+        let modules = self.modules_ref.expect("modules_ref not set");
+        for (constant_id, offset) in init_items {
+            let const_def = Self::find_const_def_in_modules(modules, constant_id).expect("ConstDef not found");
+            comment!(self, "init user const {}", const_def.ident.name);
+            // Get the constructor for the const's type
+            let type_id = const_def.type_id(self).expect("Const type not resolved");
+            let constructor = self.constructor(self.ty(&type_id))?;
+            // Compile the const expression — stack: heap_addr
+            self.compile_expression(const_def.expr.as_ref().ice()?)?;
+            // Clone it — stack: heap_addr heap_addr
+            self.writer.clone(size_of::<HeapAddress>() as FrameAddress);
+            // Store one copy in the const pool slot — stack: heap_addr
+            self.writer.store_pool(offset);
+            // Increment refcount (pops the heap address) — stack: --
+            self.writer.cnt_sa(constructor, HeapRefOp::Inc);
+        }
+        Ok(())
+    }
+
+    /// Emits post-main cleanup code: decrement refcounts for reference-type consts.
+    fn write_const_cleanup(self: &mut Self) -> CompileResult {
+        let modules = self.modules_ref.expect("modules_ref not set");
+        for (constant_id, offset) in &self.user_const_heap_refs {
+            let const_def = Self::find_const_def_in_modules(modules, *constant_id).expect("ConstDef not found");
+            comment!(self, "cleanup user const {}", const_def.ident.name);
+            let type_id = const_def.type_id(self).expect("Const type not resolved");
+            let constructor = self.constructor(self.ty(&type_id))?;
+            self.writer.load_pool(*offset);
+            self.writer.cnt_sa(constructor, HeapRefOp::Dec);
+        }
         Ok(())
     }
 
@@ -3572,5 +3297,71 @@ impl<T> MetaContainer for Compiler<'_, T> {
     }
     fn function_by_id_mut(self: &mut Self, _: FunctionId) -> &mut Function {
         unreachable!("Compiler does not mutate functions.")
+    }
+}
+
+/// Visitor that reserves const pool slots for const heap refs.
+impl<'ast, T> AstVisitor<'ast> for Compiler<'ast, T> where T: VMFunc<T> {
+    fn visit_statement(&mut self, stmt: &'ast ast::Statement) -> bool {
+        match stmt {
+            ast::Statement::ConstDef(cd) => {
+                self.collect_user_const_heap_refs_visitor(cd);
+            },
+            ast::Statement::ImplBlock(ib) => {
+                for cd in &ib.consts {
+                    self.collect_user_const_heap_refs_visitor(cd);
+                }
+            },
+            ast::Statement::TraitDef(td) => {
+                for cd in &td.consts {
+                    // Skip required consts (no default value)
+                    if cd.expr.is_some() {
+                        self.collect_user_const_heap_refs_visitor(cd);
+                    }
+                }
+            },
+            _ => {},
+        }
+        true // keep walking
+    }
+}
+
+/// Visitor that finds a ConstDef by constant_id during AST walking.
+struct ConstDefFinder<'ast> {
+    constant_id: ConstantId,
+    found: Option<&'ast ast::ConstDef>,
+}
+
+impl<'ast> AstVisitor<'ast> for ConstDefFinder<'ast> {
+    fn visit_statement(&mut self, stmt: &'ast ast::Statement) -> bool {
+        if self.found.is_some() {
+            return false; // short-circuit
+        }
+        match stmt {
+            ast::Statement::ConstDef(cd) => {
+                if cd.constant_id == Some(self.constant_id) {
+                    self.found = Some(cd);
+                    return false;
+                }
+            },
+            ast::Statement::ImplBlock(ib) => {
+                for cd in &ib.consts {
+                    if cd.constant_id == Some(self.constant_id) {
+                        self.found = Some(cd);
+                        return false;
+                    }
+                }
+            },
+            ast::Statement::TraitDef(td) => {
+                for cd in &td.consts {
+                    if cd.constant_id == Some(self.constant_id) {
+                        self.found = Some(cd);
+                        return false;
+                    }
+                }
+            },
+            _ => {},
+        }
+        true // keep walking
     }
 }

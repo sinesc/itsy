@@ -7,3 +7,6 @@ pub mod parser;
 
 #[path="resolver/resolver.rs"]
 pub mod resolver;
+
+#[path="walker.rs"]
+pub mod walker;

@@ -13,10 +13,10 @@ pub struct Binding {
 /// Value of a user-defined `const` declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UserConstValue {
+    /// Const value type not yet resolved.
+    Unresolved,
     /// Reference-type constant: const pool offset of the reserved heap address slot.
     HeapRef(StackAddress),
-    /// Value-type constant: void.
-    Void,
     /// Value-type constant: boolean.
     Bool(bool),
     /// Value-type constant: numeric (covers integers and floats).

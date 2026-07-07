@@ -16,11 +16,12 @@ use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable, C
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::frontend::resolver::resolved::ResolvedProgram;
 use crate::shared::{Progress, MetaContainer, parts_to_path, path_to_parts};
-use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, Callable, Function};
+use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, ImplTrait, Type, FunctionKind, Binding, Constant, ConstantValue, UserConstValue, Callable, Function};
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo, OrderingInfo, register_intrinsics};
+use crate::frontend::walker::{AstVisitor, AstVisitorMut};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -1424,196 +1425,64 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             _ => false,
         }
     }
+}
 
+/// Visitor that checks if any target constant_ids are referenced in the AST.
+struct ConstUsageChecker {
+    target_ids: Set<ConstantId>,
+    found: bool,
+}
+
+impl<'ast> AstVisitor<'ast> for ConstUsageChecker {
+    fn visit_expression(&mut self, expr: &'ast ast::Expression) -> bool {
+        if self.found {
+            return false; // short-circuit
+        }
+        if let ast::Expression::Constant(c) = expr {
+            if let Some(id) = c.constant_id {
+                if self.target_ids.contains(&id) {
+                    self.found = true;
+                    return false;
+                }
+            }
+        }
+        true // keep walking
+    }
+}
+
+/// Visitor that replaces constant_ids in Constant expressions.
+struct ConstRefPatcher<'a> {
+    replacements: &'a UnorderedMap<ConstantId, ConstantId>,
+}
+
+impl<'a, 'ast> AstVisitorMut<'ast> for ConstRefPatcher<'a> {
+    fn visit_expression(&mut self, expr: &mut ast::Expression) -> bool {
+        if let ast::Expression::Constant(c) = expr {
+            if let Some(id) = c.constant_id {
+                if let Some(&new_id) = self.replacements.get(&id) {
+                    c.constant_id = Some(new_id);
+                }
+            }
+        }
+        true // keep walking
+    }
+}
+
+impl<'ctx> Resolver<'ctx> {
     /// Check if a block references any of the constant_ids in the replacement map.
     fn block_uses_consts(block: &ast::Block, target_ids: &UnorderedMap<ConstantId, ConstantId>) -> bool {
-        let mut found = false;
-        Self::check_consts_in_block(block, &target_ids.keys().map(|k| *k).collect(), &mut found);
-        found
-    }
-
-    fn check_consts_in_block(block: &ast::Block, target_ids: &Set<ConstantId>, found: &mut bool) {
-        for stmt in &block.statements {
-            Self::check_consts_in_statement(stmt, target_ids, found);
-        }
-        if let Some(ref result) = block.result {
-            Self::check_consts_in_expr(result, target_ids, found);
-        }
-    }
-
-    fn check_consts_in_statement(stmt: &ast::Statement, target_ids: &Set<ConstantId>, found: &mut bool) {
-        use ast::Statement;
-        match stmt {
-            Statement::Expression(e) => Self::check_consts_in_expr(e, target_ids, found),
-            Statement::IfBlock(ib) => {
-                Self::check_consts_in_expr(&ib.cond, target_ids, found);
-                Self::check_consts_in_block(&ib.if_block, target_ids, found);
-                if let Some(ref eb) = ib.else_block {
-                    Self::check_consts_in_block(eb, target_ids, found);
-                }
-            },
-            Statement::Block(b) => Self::check_consts_in_block(b, target_ids, found),
-            Statement::ForLoop(fl) => {
-                Self::check_consts_in_expr(&fl.expr, target_ids, found);
-                Self::check_consts_in_block(&fl.block, target_ids, found);
-            },
-            Statement::WhileLoop(wl) => {
-                Self::check_consts_in_expr(&wl.expr, target_ids, found);
-                Self::check_consts_in_block(&wl.block, target_ids, found);
-            },
-            Statement::Return(r) => Self::check_consts_in_expr(&r.expr, target_ids, found),
-            Statement::Yield(y) => {
-                if let Some(ref k) = y.key { Self::check_consts_in_expr(k, target_ids, found); }
-                Self::check_consts_in_expr(&y.value, target_ids, found);
-            },
-            _ => {},
-        }
-    }
-
-    fn check_consts_in_expr(expr: &ast::Expression, target_ids: &Set<ConstantId>, found: &mut bool) {
-        use ast::Expression;
-        match expr {
-            Expression::Constant(c) => {
-                if let Some(id) = c.constant_id {
-                    if target_ids.contains(&id) { *found = true; }
-                }
-            },
-            Expression::BinaryOp(b) => {
-                Self::check_consts_in_operand(&b.left, target_ids, found);
-                Self::check_consts_in_operand(&b.right, target_ids, found);
-            },
-            Expression::UnaryOp(u) => Self::check_consts_in_expr(&u.expr, target_ids, found),
-            Expression::Cast(c) => Self::check_consts_in_expr(&c.expr, target_ids, found),
-            Expression::Block(b) => Self::check_consts_in_block(b, target_ids, found),
-            Expression::IfBlock(ib) => {
-                Self::check_consts_in_expr(&ib.cond, target_ids, found);
-                Self::check_consts_in_block(&ib.if_block, target_ids, found);
-                if let Some(ref eb) = ib.else_block {
-                    Self::check_consts_in_block(eb, target_ids, found);
-                }
-            },
-            Expression::Closure(cl) => {
-                if let Some(ref b) = cl.shared.block {
-                    Self::check_consts_in_block(b, target_ids, found);
-                }
-            },
-            Expression::Assignment(a) => {
-                Self::check_consts_in_expr(&a.left, target_ids, found);
-                Self::check_consts_in_expr(&a.right, target_ids, found);
-            },
-            _ => {},
-        }
-    }
-
-    fn check_consts_in_operand(op: &ast::BinaryOperand, target_ids: &Set<ConstantId>, found: &mut bool) {
-        use ast::BinaryOperand;
-        match op {
-            BinaryOperand::Expression(e) => Self::check_consts_in_expr(e, target_ids, found),
-            BinaryOperand::ArgumentList(al) => {
-                for arg in &al.args {
-                    Self::check_consts_in_expr(arg, target_ids, found);
-                }
-            },
-            BinaryOperand::Member(_) => {},
-        }
+        let mut checker = ConstUsageChecker {
+            target_ids: target_ids.keys().copied().collect(),
+            found: false,
+        };
+        checker.walk_block(block);
+        checker.found
     }
 
     /// Walk a block and replace constant_ids according to the replacement map.
     fn patch_const_refs(block: &mut ast::Block, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        for stmt in &mut block.statements {
-            Self::patch_stmt_const_refs(stmt, replacements);
-        }
-        if let Some(ref mut result) = block.result {
-            Self::patch_expr_const_refs(result, replacements);
-        }
-    }
-
-    fn patch_stmt_const_refs(stmt: &mut ast::Statement, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        use ast::Statement;
-        match stmt {
-            Statement::Expression(e) => Self::patch_expr_const_refs(e, replacements),
-            Statement::IfBlock(ib) => {
-                Self::patch_expr_const_refs(&mut ib.cond, replacements);
-                Self::patch_block_const_refs(&mut ib.if_block, replacements);
-                if let Some(ref mut eb) = ib.else_block {
-                    Self::patch_block_const_refs(eb, replacements);
-                }
-            },
-            Statement::Block(b) => Self::patch_block_const_refs(b, replacements),
-            Statement::ForLoop(fl) => {
-                Self::patch_expr_const_refs(&mut fl.expr, replacements);
-                Self::patch_block_const_refs(&mut fl.block, replacements);
-            },
-            Statement::WhileLoop(wl) => {
-                Self::patch_expr_const_refs(&mut wl.expr, replacements);
-                Self::patch_block_const_refs(&mut wl.block, replacements);
-            },
-            Statement::Return(r) => Self::patch_expr_const_refs(&mut r.expr, replacements),
-            Statement::Yield(y) => {
-                if let Some(ref mut k) = y.key { Self::patch_expr_const_refs(k, replacements); }
-                Self::patch_expr_const_refs(&mut y.value, replacements);
-            },
-            _ => {},
-        }
-    }
-
-    fn patch_block_const_refs(block: &mut ast::Block, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        for stmt in &mut block.statements {
-            Self::patch_stmt_const_refs(stmt, replacements);
-        }
-        if let Some(ref mut result) = block.result {
-            Self::patch_expr_const_refs(result, replacements);
-        }
-    }
-
-    fn patch_expr_const_refs(expr: &mut ast::Expression, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        use ast::Expression;
-        match expr {
-            Expression::Constant(c) => {
-                if let Some(id) = c.constant_id {
-                    if let Some(&new_id) = replacements.get(&id) {
-                        c.constant_id = Some(new_id);
-                    }
-                }
-            },
-            Expression::BinaryOp(b) => {
-                Self::patch_operand_const_refs(&mut b.left, replacements);
-                Self::patch_operand_const_refs(&mut b.right, replacements);
-            },
-            Expression::UnaryOp(u) => Self::patch_expr_const_refs(&mut u.expr, replacements),
-            Expression::Cast(c) => Self::patch_expr_const_refs(&mut c.expr, replacements),
-            Expression::Block(b) => Self::patch_block_const_refs(b, replacements),
-            Expression::IfBlock(ib) => {
-                Self::patch_expr_const_refs(&mut ib.cond, replacements);
-                Self::patch_block_const_refs(&mut ib.if_block, replacements);
-                if let Some(ref mut eb) = ib.else_block {
-                    Self::patch_block_const_refs(eb, replacements);
-                }
-            },
-            Expression::Closure(cl) => {
-                if let Some(ref mut b) = cl.shared.block {
-                    Self::patch_block_const_refs(b, replacements);
-                }
-            },
-            Expression::Assignment(a) => {
-                Self::patch_expr_const_refs(&mut a.left, replacements);
-                Self::patch_expr_const_refs(&mut a.right, replacements);
-            },
-            _ => {},
-        }
-    }
-
-    fn patch_operand_const_refs(op: &mut ast::BinaryOperand, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        use ast::BinaryOperand;
-        match op {
-            BinaryOperand::Expression(e) => Self::patch_expr_const_refs(e, replacements),
-            BinaryOperand::ArgumentList(al) => {
-                for arg in &mut al.args {
-                    Self::patch_expr_const_refs(arg, replacements);
-                }
-            },
-            BinaryOperand::Member(_) => {},
-        }
+        let mut patcher = ConstRefPatcher { replacements };
+        patcher.walk_block(block);
     }
 
     /// Resolves a const declaration.
@@ -1643,10 +1512,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                 } else {
                     self.make_path(&[&item.ident.name])
                 };
-                item.constant_id = Some(self.scopes.insert_constant(
-                    &name, owning_type_id, type_id,
-                    ConstantValue::UserConst(crate::shared::meta::UserConstValue::Void),
-                ));
+                item.constant_id = Some(self.scopes.insert_constant(&name, owning_type_id, type_id, ConstantValue::UserConst(UserConstValue::Unresolved)));
             }
             return self.resolved(item);
         }
@@ -1675,31 +1541,30 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
             let ty = self.type_by_id(type_id);
             if ty.is_ref() {
                 // Reference type: placeholder, updated during compilation
-                crate::shared::meta::UserConstValue::HeapRef(0)
+                UserConstValue::HeapRef(0)
             } else {
                 // Value type: extract the literal value
                 match expr {
                     ast::Expression::Literal(literal) => match &literal.value {
-                        ast::LiteralValue::Void => crate::shared::meta::UserConstValue::Void,
-                        ast::LiteralValue::Bool(b) => crate::shared::meta::UserConstValue::Bool(*b),
-                        ast::LiteralValue::Numeric(n) => crate::shared::meta::UserConstValue::Numeric(*n),
-                        _ => unreachable!("Non-ref, non-primitive literal"),
+                        ast::LiteralValue::Bool(b) => UserConstValue::Bool(*b),
+                        ast::LiteralValue::Numeric(n) => UserConstValue::Numeric(*n),
+                        _ => Self::ice("Non-ref, non-primitive literal")?,
                     },
                     ast::Expression::Constant(c) => {
                         // const Y = X where X is a value-type const: inline X's value
                         let ref_const = self.scopes.constant_ref(c.constant_id.ice()?);
                         match &ref_const.value {
                             ConstantValue::UserConst(uv) => uv.clone(),
-                            ConstantValue::Discriminant(n) => crate::shared::meta::UserConstValue::Numeric(*n),
-                            _ => unreachable!("Expected user const value or discriminant"),
+                            ConstantValue::Discriminant(n) => UserConstValue::Numeric(*n),
+                            _ => Self::ice("Expected user const value or discriminant")?,
                         }
                     },
-                    _ => unreachable!("is_const_expr already validated"),
+                    _ => Self::ice("is_const_expr already validated")?,
                 }
             }
         } else {
             // Type not yet resolved — use a placeholder that will be set once the type is known
-            crate::shared::meta::UserConstValue::Void
+            UserConstValue::Unresolved
         };
 
         // Build the name: qualified for impl/trait consts, bare for module-level consts
