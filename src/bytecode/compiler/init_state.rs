@@ -190,16 +190,22 @@ impl InitState {
 
     /// Whether a binding is initialized in the current branching path at the current code position.
     pub fn initialized(self: &Self, binding_id: BindingId) -> BranchingState {
+        let mut best = BranchingState::Uninitialized;
         for branching in self.branchings.iter().rev() {
             if let Some(binding) = branching.bindings.get(&binding_id) {
-                // this used to continue looping if both branches were false, now immediately returns. this should be fine since there is no way to uninitialize a binding after it was already initialized
-                return match branching.current_path {
+                let state = match branching.current_path {
                     BranchingPath::A => binding.path_a,
                     BranchingPath::B => binding.path_b,
                 };
+                if state == BranchingState::Initialized {
+                    return BranchingState::Initialized;
+                }
+                if state as usize > best as usize {
+                    best = state;
+                }
             }
         }
-        return BranchingState::Uninitialized;
+        best
     }
 
     /// Returns a mutable reference to the state of a binding.

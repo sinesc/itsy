@@ -295,6 +295,72 @@ fn block_exit_with_maybe_unitialized() {
 }
 
 #[test]
+fn uninitialized_read_in_else_branch_rejected() {
+    // variable declared but NOT initialized before if/else, only set in if branch,
+    // read in else branch → must still be caught as uninitialized
+    let err = build_err(stringify!(
+        fn main() {
+            let x = true;
+            let mut v: i32;
+            if x {
+                v = 1;
+            } else if v == 0 {
+                ret_i32(v); // v not initialized in this path
+            }
+        }
+    ));
+    assert!(err.contains("Uninitialized") || err.contains("might not"), "unexpected error: {}", err);
+}
+
+#[test]
+fn uninitialized_after_if_only_rejected() {
+    // variable declared before if (no else), initialized only inside if, read after
+    let err = build_err(stringify!(
+        fn main() {
+            let v: i32;
+            if true {
+                v = 1;
+            }
+            ret_i32(v); // v maybe uninitialized (no else branch)
+        }
+    ));
+    assert!(err.contains("Uninitialized") || err.contains("might not"), "unexpected error: {}", err);
+}
+
+#[test]
+fn initialized_before_if_else_both_branches_ok() {
+    // variable initialized BEFORE if/else, written in if branch, read in else branch
+    // this used to be falsely rejected as uninitialized (InitState shadowing bug)
+    let result = run(stringify!(
+        let x = true;
+        let mut v = 0;
+        if x {
+            v = 1;
+        } else {
+            ret_i32(v); // v is initialized from outer scope
+        }
+        ret_i32(v);
+    ));
+    assert_all(&result, &[ 1i32 ]);
+}
+
+#[test]
+fn initialized_before_if_else_read_both_branches_ok() {
+    // variable initialized before if/else, read in both branches, written only in if
+    let result = run(stringify!(
+        let x = false;
+        let mut v = 42;
+        if x {
+            v = 1;
+        } else if v == 42 {
+            ret_i32(v); // v is 42 from outer scope
+        }
+        ret_i32(v);
+    ));
+    assert_all(&result, &[ 42i32, 42 ]);
+}
+
+#[test]
 fn while_break() {
     let result = run(stringify!(
         let i = 3;
