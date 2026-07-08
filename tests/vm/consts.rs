@@ -957,3 +957,150 @@ fn const_expr_rem_by_zero() {
         ret_u32(X);
     ));
 }
+
+// =============================================================================
+// Const unary expressions
+// =============================================================================
+
+#[test]
+fn const_unary_neg_signed() {
+    let result = run(stringify!(
+        const A = 42i32;
+        const B = -A;
+        ret_i32(B);
+    ));
+    assert_all(&result, &[-42i32]);
+}
+
+#[test]
+fn const_unary_neg_double() {
+    let result = run(stringify!(
+        const A = -(-42i32);
+        ret_i32(A);
+    ));
+    assert_all(&result, &[42i32]);
+}
+
+#[test]
+fn const_unary_neg_float() {
+    let result = run(stringify!(
+        const A = 3.14f64;
+        const B = -A;
+        ret_f64(B);
+    ));
+    assert_all(&result, &[-3.14f64]);
+}
+
+#[test]
+fn const_unary_neg_unsigned_zero() {
+    let result = run(stringify!(
+        const A = 0u32;
+        const B = -A;
+        ret_u32(B);
+    ));
+    assert_all(&result, &[0u32]);
+}
+
+#[test]
+fn const_unary_positive() {
+    let result = run(stringify!(
+        const A = +42i32;
+        ret_i32(A);
+    ));
+    assert_all(&result, &[42i32]);
+}
+
+#[test]
+fn const_unary_not_bool() {
+    let result = run(stringify!(
+        const A = true;
+        const B = !A;
+        const C = !B;
+        ret_bool(B);
+        ret_bool(C);
+    ));
+    assert_all(&result, &[false, true]);
+}
+
+#[test]
+fn const_unary_not_bitwise_u8() {
+    let result = run(stringify!(
+        const A = 0u8;
+        const B = !A;
+        ret_u8(B);
+    ));
+    assert_all(&result, &[255u8]);
+}
+
+#[test]
+fn const_unary_not_bitwise_u32() {
+    let result = run(stringify!(
+        const A = 0u32;
+        const B = !A;
+        ret_u32(B);
+    ));
+    assert_all(&result, &[4294967295u32]);
+}
+
+#[test]
+fn const_unary_not_bitwise_value() {
+    let result = run(stringify!(
+        const A = 15u8;
+        const B = !A;
+        ret_u8(B);
+    ));
+    assert_all(&result, &[240u8]);
+}
+
+#[test]
+fn const_unary_not_bitwise_signed() {
+    let result = run(stringify!(
+        const A = 0i32;
+        const B = !A;
+        ret_i32(B);
+    ));
+    assert_all(&result, &[-1i32]);
+}
+
+#[test]
+fn const_unary_in_array() {
+    let result = run(stringify!(
+        const A = 5u32;
+        const ARR = [A + 1, A + 2];
+        ret_u32(ARR[0]);
+        ret_u32(ARR[1]);
+    ));
+    assert_all(&result, &[6u32, 7u32]);
+}
+
+// Signed integer negation overflow (i64::MIN cannot be negated)
+#[test]
+#[should_panic(expected = "Integer overflow in const expression")]
+fn const_unary_neg_overflow_signed_min() {
+    run(stringify!(
+        const A = -9223372036854775808i64;
+        const B = -A;
+        ret_i64(B);
+    ));
+}
+
+// Unsigned negation of non-zero value
+#[test]
+#[should_panic(expected = "Integer overflow in const expression")]
+fn const_unary_neg_overflow_unsigned() {
+    run(stringify!(
+        const A = 1u32;
+        const B = -A;
+        ret_u32(B);
+    ));
+}
+
+#[test]
+fn const_unary_not_negated_value() {
+    // !(-128) as i8: -128 is 0b10000000, ! gives 0b01111111 = 127
+    let result = run(stringify!(
+        const A: i8 = !(-128);
+        ret_i8(A);
+    ));
+    assert_all(&result, &[127i8]);
+}

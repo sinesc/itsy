@@ -1427,6 +1427,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                     && bo.left.as_expression().map(|e| self.is_const_expr(e)).unwrap_or(false)
                     && bo.right.as_expression().map(|e| self.is_const_expr(e)).unwrap_or(false)
             },
+            ast::Expression::UnaryOp(u) => self.is_const_expr(&u.expr),
             ast::Expression::Cast(c) => self.is_const_expr(&c.expr),
             _ => false,
         }
@@ -1521,6 +1522,94 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
                         self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Rem, position, module_path)
                     },
                     _ => Self::ice("Unsupported operator in const expression"),
+                }
+            },
+            ast::Expression::UnaryOp(u) => {
+                let inner_value = self.evaluate_const_expr(&u.expr, position, module_path)?;
+
+                let usr_err = |kind: ResolveErrorKind| ResolveError::at(position, kind, module_path);
+
+                match u.op {
+                    ast::UnaryOperator::Minus => {
+                        // Numeric negation
+                        match inner_value {
+                            UserConstValue::Numeric(n) => {
+                                let negated = match n {
+                                    Numeric::Signed(s) => {
+                                        s.checked_neg().map(Numeric::Signed)
+                                            .ok_or(usr_err(ResolveErrorKind::IntegerOverflow))?
+                                    },
+                                    Numeric::Unsigned(val) => {
+                                        // Unsigned literal negated: check target type.
+                                        // If target is signed, convert and negate. If unsigned, only 0 is valid.
+                                        let type_id = u.type_id.or_else(|| u.expr.type_id(self));
+                                        if let Some(type_id) = type_id {
+                                            let ty = self.type_by_id(type_id);
+                                            if ty.is_signed() {
+                                                // Target is signed: convert unsigned to signed and negate
+                                                let s = val as i64;
+                                                s.checked_neg().map(Numeric::Signed)
+                                                    .ok_or(usr_err(ResolveErrorKind::IntegerOverflow))?
+                                            } else if val == 0 {
+                                                Numeric::Unsigned(0)
+                                            } else {
+                                                return Err(usr_err(ResolveErrorKind::IntegerOverflow));
+                                            }
+                                        } else {
+                                            // Unknown type: only 0 is unconditionally safe
+                                            if val == 0 {
+                                                Numeric::Unsigned(0)
+                                            } else {
+                                                return Err(usr_err(ResolveErrorKind::IntegerOverflow));
+                                            }
+                                        }
+                                    },
+                                    Numeric::Float(f) => Numeric::Float(-f),
+                                };
+                                Ok(UserConstValue::Numeric(negated))
+                            },
+                            _ => Self::ice("Non-numeric operand in const negation"),
+                        }
+                    },
+                    ast::UnaryOperator::Plus => {
+                        // Positive: no-op pass-through
+                        Ok(inner_value)
+                    },
+                    ast::UnaryOperator::Not => {
+                        // Logical not for bool (no type needed), bitwise not for integers (needs bit width)
+                        if let UserConstValue::Bool(b) = inner_value {
+                            return Ok(UserConstValue::Bool(!b));
+                        }
+                        // Bitwise not: need type for bit width. Try UnaryOp type, then operand type.
+                        let type_id = u.type_id.or_else(|| u.expr.type_id(self));
+                        match type_id {
+                            Some(type_id) => {
+                                let ty = self.type_by_id(type_id);
+                                match inner_value {
+                                    UserConstValue::Numeric(n) => {
+                                        let bit_width = ty.primitive_size() as u32 * 8;
+                                        let mask = if bit_width == 64 { !0i64 } else { (1i64 << bit_width) - 1 };
+                                        let val = match n {
+                                            Numeric::Signed(s) => s,
+                                            Numeric::Unsigned(u) => u as i64,
+                                            Numeric::Float(_) => Self::ice("Bitwise not on float in const expression")?,
+                                        };
+                                        let result = (!val) & mask;
+                                        if ty.is_signed() {
+                                            Ok(UserConstValue::Numeric(Numeric::Signed(result)))
+                                        } else {
+                                            Ok(UserConstValue::Numeric(Numeric::Unsigned(result as u64)))
+                                        }
+                                    },
+                                    _ => Self::ice("Non-numeric operand in const bitwise not"),
+                                }
+                            },
+                            None => {
+                                // Type not resolved yet — defer to a later pass
+                                return Ok(UserConstValue::Unresolved);
+                            },
+                        }
+                    },
                 }
             },
             _ => Self::ice("Unexpected expression in const evaluation"),

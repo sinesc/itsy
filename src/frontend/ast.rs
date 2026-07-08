@@ -1809,6 +1809,7 @@ impl LiteralValue {
                         && bo.left.as_expression().map(expr_is_const).unwrap_or(false)
                         && bo.right.as_expression().map(expr_is_const).unwrap_or(false)
                 },
+                Expression::UnaryOp(u) => expr_is_const(&u.expr),
                 Expression::Cast(c) => expr_is_const(&c.expr),
                 _ => false,
             }
