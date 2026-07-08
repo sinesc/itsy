@@ -87,18 +87,18 @@ struct Game {
     paddle: Paddle,
     ball: Ball,
     bricks: [ Brick ],
-    // pre-computed ANSI escape sequences
-    clear: String,
-    home: String,
-    color_reset: String,
-    paddle_color: String,
-    brick_colors: [ String ],
 }
 
 impl Game {
+    const ESC = "\u{1b}";
+    const CLEAR = "{Self::ESC}[2J{Self::ESC}[1;1H";
+    const HOME = "{Self::ESC}[1;1H";
+    const COLOR_RESET = "{Self::ESC}[0m";
+    const PADDLE_COLOR = "{Self::ESC}[97m";
+    const BRICK_COLORS = ["{Self::ESC}[91m", "{Self::ESC}[93m", "{Self::ESC}[92m", "{Self::ESC}[96m", "{Self::ESC}[94m", "{Self::ESC}[95m", "{Self::ESC}[97m", "{Self::ESC}[90m"];
+
     fn new(term_w: u32, term_h: u32) -> Game {
         let area_rows = term_h - 2;
-        let esc = String::from_ascii(27);
         let paddle = Paddle::new(term_w, term_h);
         let ball = Ball::new(paddle);
 
@@ -112,16 +112,11 @@ impl Game {
             paddle: paddle,
             ball: ball,
             bricks: [],
-            clear: esc + "[2J" + esc + "[1;1H",
-            home: esc + "[1;1H",
-            color_reset: esc + "[0m",
-            paddle_color: esc + "[97m",
-            brick_colors: [esc + "[91m", esc + "[93m", esc + "[92m", esc + "[96m", esc + "[94m", esc + "[95m", esc + "[97m", esc + "[90m"],
         };
     }
 
     fn full_clear(self: Self) {
-        print(self.clear);
+        print(Self::CLEAR);
         flush();
     }
 
@@ -269,32 +264,42 @@ impl Game {
         // game area — row by row
         let mut frame = hud + "\r\n";
         for row in 0..self.area_rows {
+            let mut need_reset = false;
             for col in 0..self.term_w {
                 if self.ball.launched && (self.ball.x as u32) == col && (self.ball.y as u32) == row {
-                    frame += "{self.color_reset}●";
+                    if need_reset {
+                        frame += Self::COLOR_RESET;
+                    }
+                    frame += "●";
                 } else if row == self.paddle.row && col >= self.paddle.x && col < self.paddle.x + self.paddle.width {
-                    frame += "{self.paddle_color}▀";
+                    frame += "{Self::PADDLE_COLOR}▀";
+                    need_reset = true;
                 } else {
                     let on_brick = false;
                     for brick in self.bricks {
                         if brick.alive && col >= brick.col && col < brick.col + 2 && row >= brick.row && row < brick.row + 2 {
                             let _ci = (brick.row % 8) as u64;
-                            let _bc = self.brick_colors[_ci];
+                            let _bc = Self::BRICK_COLORS[_ci];
                             let _ch = _bc + "█";
                             frame += _ch;
                             on_brick = true;
+                            need_reset = true;
                             break;
                         }
                     }
                     if !on_brick {
-                        frame += "{self.color_reset} ";
+                        if need_reset {
+                            frame += Self::COLOR_RESET;
+                        }
+                        frame += " ";
+                        need_reset = false;
                     }
                 }
             }
-            frame += "{self.color_reset}\r\n";
+            frame += "\r\n";
         }
 
-        print(self.home + frame);
+        print(Self::HOME + frame);
         flush();
     }
 
