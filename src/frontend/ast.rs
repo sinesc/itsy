@@ -1799,10 +1799,19 @@ pub enum LiteralValue {
 
 impl LiteralValue {
     pub fn is_const(self: &Self) -> bool {
-        // Helper: check if an expression is a literal with const value or a const reference
+        // Helper: check if an expression is valid in a const context
         fn expr_is_const(e: &Expression) -> bool {
-            e.as_literal().map(|l| l.value.is_const()).unwrap_or(false)
-            || e.as_constant().is_some()  // const reference is always static
+            match e {
+                Expression::Literal(l) => l.value.is_const(),
+                Expression::Constant(_) => true,  // const reference is always static
+                Expression::BinaryOp(bo) => {
+                    matches!(bo.op, BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Mul | BinaryOperator::Div | BinaryOperator::Rem)
+                        && bo.left.as_expression().map(expr_is_const).unwrap_or(false)
+                        && bo.right.as_expression().map(expr_is_const).unwrap_or(false)
+                },
+                Expression::Cast(c) => expr_is_const(&c.expr),
+                _ => false,
+            }
         }
         match self {
             LiteralValue::Array(v) => v.elements.iter().all(|e| expr_is_const(e)),

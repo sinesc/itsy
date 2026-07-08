@@ -780,3 +780,180 @@ fn trait_const_override_impl_also_overrides_method() {
     ));
     assert_all(&result, &[777u32]);
 }
+
+// =============================================================================
+// Const expressions (binary operations on const values)
+// =============================================================================
+
+#[test]
+fn const_expr_add_numeric() {
+    let result = run(stringify!(
+        const A = 10u32;
+        const B = 20u32;
+        const C = A + B;
+        ret_u32(C);
+    ));
+    assert_all(&result, &[30u32]);
+}
+
+#[test]
+fn const_expr_sub_numeric() {
+    let result = run(stringify!(
+        const A = 50u32;
+        const B = 20u32;
+        const C = A - B;
+        ret_u32(C);
+    ));
+    assert_all(&result, &[30u32]);
+}
+
+#[test]
+fn const_expr_mul_numeric() {
+    let result = run(stringify!(
+        const A = 6u32;
+        const B = 7u32;
+        const C = A * B;
+        ret_u32(C);
+    ));
+    assert_all(&result, &[42u32]);
+}
+
+#[test]
+fn const_expr_div_numeric() {
+    let result = run(stringify!(
+        const A = 100u32;
+        const B = 4u32;
+        const C = A / B;
+        ret_u32(C);
+    ));
+    assert_all(&result, &[25u32]);
+}
+
+#[test]
+fn const_expr_rem_numeric() {
+    let result = run(stringify!(
+        const A = 17u32;
+        const B = 5u32;
+        const C = A % B;
+        ret_u32(C);
+    ));
+    assert_all(&result, &[2u32]);
+}
+
+#[test]
+fn const_expr_mixed_ops() {
+    // 2 + 3 * 4 = 14
+    let result = run(stringify!(
+        const X = 2u32 + 3u32 * 4u32;
+        ret_u32(X);
+    ));
+    assert_all(&result, &[14u32]);
+}
+
+#[test]
+fn const_expr_signed_numeric() {
+    let result = run(stringify!(
+        const A = 10i32;
+        const B = -3i32;
+        const C = A + B;
+        ret_i32(C);
+    ));
+    assert_all(&result, &[7i32]);
+}
+
+#[test]
+fn const_expr_float() {
+    let result = run(stringify!(
+        const A = 1.5f64;
+        const B = 2.0f64;
+        const C = A * B;
+        ret_f64(C);
+    ));
+    assert_all(&result, &[3.0f64]);
+}
+
+#[test]
+fn const_expr_string_concat() {
+    let result = run(stringify!(
+        const A = "Hello";
+        const B = "World";
+        const C = A + B;
+        ret_string(C);
+    ));
+    assert_all(&result, &["HelloWorld".to_string()]);
+}
+
+#[test]
+fn const_expr_string_concat_chain() {
+    let result = run(stringify!(
+        const A = "A";
+        const B = "B";
+        const C = "C";
+        const D = A + B + C;
+        ret_string(D);
+    ));
+    assert_all(&result, &["ABC".to_string()]);
+}
+
+#[test]
+fn const_expr_string_interpolation() {
+    // String interpolation desugars to concatenation + casts
+    let result = run(stringify!(
+        const NAME = "World";
+        const GREETING = "Hello {NAME}!";
+        ret_string(GREETING);
+    ));
+    assert_all(&result, &["Hello World!".to_string()]);
+}
+
+#[test]
+fn const_expr_string_interpolation_multiple() {
+    let result = run(stringify!(
+        const A = "foo";
+        const B = "bar";
+        const MSG = "{A}-{B}";
+        ret_string(MSG);
+    ));
+    assert_all(&result, &["foo-bar".to_string()]);
+}
+
+#[test]
+fn const_expr_in_array() {
+    let result = run(stringify!(
+        const X = 1u32 + 2u32;
+        const ARR = [X, X * 2];
+        ret_u32(ARR[0]);
+        ret_u32(ARR[1]);
+    ));
+    assert_all(&result, &[3u32, 6u32]);
+}
+
+// Integer overflow in const expression (u64 max + 1)
+#[test]
+#[should_panic(expected = "Integer overflow in const expression")]
+fn const_expr_overflow_u64() {
+    run(stringify!(
+        const X = 18446744073709551615u64 + 1u64;
+        ret_u64(X);
+    ));
+}
+
+// Division by zero in const expression
+#[test]
+#[should_panic(expected = "Division by zero in const expression")]
+fn const_expr_div_by_zero() {
+    run(stringify!(
+        const X = 10u32 / 0u32;
+        ret_u32(X);
+    ));
+}
+
+// Modulo by zero in const expression
+#[test]
+#[should_panic(expected = "Division by zero in const expression")]
+fn const_expr_rem_by_zero() {
+    run(stringify!(
+        const X = 10u32 % 0u32;
+        ret_u32(X);
+    ));
+}

@@ -818,6 +818,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                         };
                         self.write_immediate(write_ty, *n)?;
                     },
+                    UserConstValue::String(s) => {
+                        // String const: store in const pool and load onto heap (same as string literals)
+                        let string_const = self.writer.const_len();
+                        self.writer.store_const(s.as_str());
+                        self.writer.upload_const(string_const, ItemIndex::MAX);
+                    },
                     UserConstValue::Unresolved => {
                         Self::ice(&format!("Unresolved const type"))?
                     },

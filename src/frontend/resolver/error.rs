@@ -67,6 +67,10 @@ pub enum ResolveErrorKind {
     TraitConstTypeMismatch(String, String, String),
     CannotResolve(String),
     InvalidOperation(String),
+    /// Arithmetic overflow in a const expression.
+    IntegerOverflow,
+    /// Division by zero in a const expression.
+    DivisionByZero,
     Internal(String),
 }
 
@@ -80,6 +84,10 @@ pub struct ResolveError {
 impl ResolveError {
     pub(crate) fn new(item: &impl Positioned, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
         Self { kind, position: item.position(), module_path: module_path.to_string() }
+    }
+    /// Construct from an explicit position (used when the Positioned item is not available).
+    pub(crate) fn at(position: Position, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
+        Self { kind, position, module_path: module_path.to_string() }
     }
     #[cfg(not(feature="ice_panics"))]
     pub(crate) fn ice(message: String) -> ResolveError {
@@ -151,6 +159,8 @@ impl Display for ResolveError {
             ResolveErrorKind::TraitConstTypeMismatch(name, expected, got) => write!(f, "Const `{name}` type mismatch in trait impl: expected `{expected}`, got `{got}`"),
             ResolveErrorKind::CannotResolve(b) => write!(f, "Cannot resolve `{b}`"), // fallback case
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {o}"),
+            ResolveErrorKind::IntegerOverflow => write!(f, "Integer overflow in const expression"),
+            ResolveErrorKind::DivisionByZero => write!(f, "Division by zero in const expression"),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }

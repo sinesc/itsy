@@ -21,6 +21,8 @@ pub enum UserConstValue {
     Bool(bool),
     /// Value-type constant: numeric (covers integers and floats).
     Numeric(Numeric),
+    /// Value-type constant: string.
+    String(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
