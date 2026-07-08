@@ -69,6 +69,45 @@ impl<'ctx> Resolver<'ctx> {
         }
     }
 
+    /// Try to resolve a trait const default value.
+    ///
+    /// When `Self::CONST` is used in a trait impl method and the impl doesn't define the const,
+    /// this falls back to the trait's provided (default) const. Returns the constant id of the
+    /// trait default, or None if no fallback applies.
+    pub(super) fn try_resolve_trait_const_default(self: &Self, resolved_segments: &[String]) -> Option<ConstantId> {
+        // Need at least 2 segments: TypeName::CONST
+        if resolved_segments.len() < 2 {
+            return None;
+        }
+        let type_name = &resolved_segments[0];
+        let const_name = &resolved_segments[1];
+
+        // Look up the type
+        let type_id = self.scopes.type_id(self.scope_id, type_name)?;
+        let ty = self.type_by_id(type_id);
+
+        // If it's a trait, look in its provided consts
+        if let Some(trt) = ty.as_trait() {
+            if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                return const_id;
+            }
+        }
+
+        // If it's a concrete type, check its impl'd traits for provided consts with matching names
+        if let Some(impl_traits) = ty.impl_traits_map() {
+            for (&trait_type_id, _) in impl_traits {
+                let trait_ty = self.type_by_id(trait_type_id);
+                if let Some(trt) = trait_ty.as_trait() {
+                    if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                        return const_id;
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Evaluate a resolved const expression to a `UserConstValue`.
     /// ICE if the expression was not validated by `is_const_expr` first.
     pub(crate) fn evaluate_const_expr(self: &Self, expr: &ast::Expression, position: ast::Position, module_path: &str, expected_type: Option<TypeId>) -> Result<UserConstValue, ResolveError> {
