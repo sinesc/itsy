@@ -6,6 +6,7 @@ mod stage;
 mod exhaustiveness;
 mod apinamespace;
 mod intrinsic;
+mod const_eval;
 pub mod error;
 pub mod resolved;
 
@@ -21,7 +22,7 @@ use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionI
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
 use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo, OrderingInfo, register_intrinsics};
-use crate::frontend::walker::{AstVisitor, AstVisitorMut};
+
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -266,7 +267,7 @@ fn type_contains_self(scopes: &scopes::Scopes, start: TypeId) -> bool {
 }
 
 /// General utility methods.
-impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
+impl<'ctx> Resolver<'ctx> {
 
     /// Try to create concrete array builtin function signature for the given array type
     fn try_create_array_builtin(self: &mut Self, item: &ast::Expression, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
@@ -859,7 +860,7 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
 }
 
 /// Methods to resolve individual AST structures.
-impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
+impl<'ctx> Resolver<'ctx> {
 
     /// Resolves types and bindings used in a statement.
     fn resolve_statement(self: &mut Self, item: &mut ast::Statement) -> ResolveResult  {
@@ -1416,335 +1417,9 @@ impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
         self.scope_id = parent_scope_id;
         self.resolved(item)
     }
-
-    /// Returns whether a const expression is valid: every sub-expression is a literal, const reference, supported binary op, or cast.
-    fn is_const_expr(self: &Self, expr: &ast::Expression) -> bool {
-        match expr {
-            ast::Expression::Literal(l) => l.value.is_const(),
-            ast::Expression::Constant(_) => true,  // resolved const reference — always static
-            ast::Expression::BinaryOp(bo) => {
-                matches!(bo.op, ast::BinaryOperator::Add | ast::BinaryOperator::Sub | ast::BinaryOperator::Mul | ast::BinaryOperator::Div | ast::BinaryOperator::Rem)
-                    && bo.left.as_expression().map(|e| self.is_const_expr(e)).unwrap_or(false)
-                    && bo.right.as_expression().map(|e| self.is_const_expr(e)).unwrap_or(false)
-            },
-            ast::Expression::UnaryOp(u) => self.is_const_expr(&u.expr),
-            ast::Expression::Cast(c) => self.is_const_expr(&c.expr),
-            _ => false,
-        }
-    }
-
-    /// Evaluate a resolved const expression to a `UserConstValue`.
-    /// ICE if the expression was not validated by `is_const_expr` first.
-    fn evaluate_const_expr(self: &Self, expr: &ast::Expression, position: ast::Position, module_path: &str) -> Result<UserConstValue, ResolveError> {
-        match expr {
-            ast::Expression::Literal(l) => match &l.value {
-                ast::LiteralValue::Bool(b) => Ok(UserConstValue::Bool(*b)),
-                ast::LiteralValue::Numeric(n) => Ok(UserConstValue::Numeric(*n)),
-                ast::LiteralValue::String(s) => Ok(UserConstValue::String(s.clone())),
-                _ => Self::ice("Non-primitive literal in const expression"),
-            },
-            ast::Expression::Constant(c) => {
-                let constant_id = c.constant_id.ice()?;
-                let constant = self.scopes.constant_ref(constant_id);
-                match &constant.value {
-                    ConstantValue::UserConst(uv) => Ok(uv.clone()),
-                    ConstantValue::Discriminant(n) => Ok(UserConstValue::Numeric(*n)),
-                    _ => Self::ice("Unexpected constant value in const expression"),
-                }
-            },
-            ast::Expression::Cast(c) => {
-                let target_type_id = c.type_id.ice()?;
-                let target_ty = self.type_by_id(target_type_id);
-                let inner_value = self.evaluate_const_expr(&c.expr, position, module_path)?;
-
-                // Cast to String from String: pass-through
-                if target_ty.is_string() {
-                    match &inner_value {
-                        UserConstValue::String(s) => Ok(UserConstValue::String(s.clone())),
-                        _ => Self::ice("Cast to String from non-string in const expression"),
-                    }
-                }
-                // Numeric cast: coerce signedness
-                else if target_ty.is_numeric() {
-                    match inner_value {
-                        UserConstValue::Numeric(n) => {
-                            let coerced = if target_ty.is_signed() {
-                                match n {
-                                    Numeric::Signed(s) => Numeric::Signed(s),
-                                    Numeric::Unsigned(u) => Numeric::Signed(u as i64),
-                                    Numeric::Float(_) => Self::ice("Cannot cast float to integer in const expression")?,
-                                }
-                            } else if target_ty.is_float() {
-                                match n {
-                                    Numeric::Signed(s) => Numeric::Float(s as f64),
-                                    Numeric::Unsigned(u) => Numeric::Float(u as f64),
-                                    Numeric::Float(f) => Numeric::Float(f),
-                                }
-                            } else {
-                                // unsigned integer target
-                                match n {
-                                    Numeric::Signed(s) => Numeric::Unsigned(s as u64),
-                                    Numeric::Unsigned(u) => Numeric::Unsigned(u),
-                                    Numeric::Float(_) => Self::ice("Cannot cast float to integer in const expression")?,
-                                }
-                            };
-                            Ok(UserConstValue::Numeric(coerced))
-                        },
-                        _ => Self::ice("Non-numeric value in numeric const cast"),
-                    }
-                } else {
-                    Self::ice("Unsupported cast target in const expression")
-                }
-            },
-            ast::Expression::BinaryOp(bo) => {
-                let left_value = self.evaluate_const_expr(bo.left.as_expression().ice()?, position, module_path)?;
-                let right_value = self.evaluate_const_expr(bo.right.as_expression().ice()?, position, module_path)?;
-
-                match bo.op {
-                    ast::BinaryOperator::Add => {
-                        // String concatenation
-                        if let (UserConstValue::String(l), UserConstValue::String(r)) = (&left_value, &right_value) {
-                            return Ok(UserConstValue::String(format!("{l}{r}")));
-                        }
-                        // Numeric addition
-                        self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Add, position, module_path)
-                    },
-                    ast::BinaryOperator::Sub => {
-                        self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Sub, position, module_path)
-                    },
-                    ast::BinaryOperator::Mul => {
-                        self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Mul, position, module_path)
-                    },
-                    ast::BinaryOperator::Div => {
-                        self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Div, position, module_path)
-                    },
-                    ast::BinaryOperator::Rem => {
-                        self.const_numeric_op(left_value, right_value, ast::BinaryOperator::Rem, position, module_path)
-                    },
-                    _ => Self::ice("Unsupported operator in const expression"),
-                }
-            },
-            ast::Expression::UnaryOp(u) => {
-                let inner_value = self.evaluate_const_expr(&u.expr, position, module_path)?;
-
-                let usr_err = |kind: ResolveErrorKind| ResolveError::at(position, kind, module_path);
-
-                match u.op {
-                    ast::UnaryOperator::Minus => {
-                        // Numeric negation
-                        match inner_value {
-                            UserConstValue::Numeric(n) => {
-                                let negated = match n {
-                                    Numeric::Signed(s) => {
-                                        s.checked_neg().map(Numeric::Signed)
-                                            .ok_or(usr_err(ResolveErrorKind::IntegerOverflow))?
-                                    },
-                                    Numeric::Unsigned(val) => {
-                                        // Unsigned literal negated: check target type.
-                                        // If target is signed, convert and negate. If unsigned, only 0 is valid.
-                                        let type_id = u.type_id.or_else(|| u.expr.type_id(self));
-                                        if let Some(type_id) = type_id {
-                                            let ty = self.type_by_id(type_id);
-                                            if ty.is_signed() {
-                                                // Target is signed: convert unsigned to signed and negate
-                                                let s = val as i64;
-                                                s.checked_neg().map(Numeric::Signed)
-                                                    .ok_or(usr_err(ResolveErrorKind::IntegerOverflow))?
-                                            } else if val == 0 {
-                                                Numeric::Unsigned(0)
-                                            } else {
-                                                return Err(usr_err(ResolveErrorKind::IntegerOverflow));
-                                            }
-                                        } else {
-                                            // Unknown type: only 0 is unconditionally safe
-                                            if val == 0 {
-                                                Numeric::Unsigned(0)
-                                            } else {
-                                                return Err(usr_err(ResolveErrorKind::IntegerOverflow));
-                                            }
-                                        }
-                                    },
-                                    Numeric::Float(f) => Numeric::Float(-f),
-                                };
-                                Ok(UserConstValue::Numeric(negated))
-                            },
-                            _ => Self::ice("Non-numeric operand in const negation"),
-                        }
-                    },
-                    ast::UnaryOperator::Plus => {
-                        // Positive: no-op pass-through
-                        Ok(inner_value)
-                    },
-                    ast::UnaryOperator::Not => {
-                        // Logical not for bool (no type needed), bitwise not for integers (needs bit width)
-                        if let UserConstValue::Bool(b) = inner_value {
-                            return Ok(UserConstValue::Bool(!b));
-                        }
-                        // Bitwise not: need type for bit width. Try UnaryOp type, then operand type.
-                        let type_id = u.type_id.or_else(|| u.expr.type_id(self));
-                        match type_id {
-                            Some(type_id) => {
-                                let ty = self.type_by_id(type_id);
-                                match inner_value {
-                                    UserConstValue::Numeric(n) => {
-                                        let bit_width = ty.primitive_size() as u32 * 8;
-                                        let mask = if bit_width == 64 { !0i64 } else { (1i64 << bit_width) - 1 };
-                                        let val = match n {
-                                            Numeric::Signed(s) => s,
-                                            Numeric::Unsigned(u) => u as i64,
-                                            Numeric::Float(_) => Self::ice("Bitwise not on float in const expression")?,
-                                        };
-                                        let result = (!val) & mask;
-                                        if ty.is_signed() {
-                                            Ok(UserConstValue::Numeric(Numeric::Signed(result)))
-                                        } else {
-                                            Ok(UserConstValue::Numeric(Numeric::Unsigned(result as u64)))
-                                        }
-                                    },
-                                    _ => Self::ice("Non-numeric operand in const bitwise not"),
-                                }
-                            },
-                            None => {
-                                // Type not resolved yet — defer to a later pass
-                                return Ok(UserConstValue::Unresolved);
-                            },
-                        }
-                    },
-                }
-            },
-            _ => Self::ice("Unexpected expression in const evaluation"),
-        }
-    }
-
-    /// Perform a numeric binary operation on const values with overflow checking.
-    fn const_numeric_op(self: &Self, left: UserConstValue, right: UserConstValue, op: ast::BinaryOperator, position: ast::Position, module_path: &str) -> Result<UserConstValue, ResolveError> {
-        let (left_num, right_num) = match (left, right) {
-            (UserConstValue::Numeric(l), UserConstValue::Numeric(r)) => (l, r),
-            _ => Self::ice("Non-numeric operands in const numeric operation")?,
-        };
-
-        let usr_err = |kind: ResolveErrorKind| ResolveError::at(position, kind, module_path);
-
-        // Use checked arithmetic for integer overflow detection
-        let result = match (left_num, right_num) {
-            (Numeric::Signed(l), Numeric::Signed(r)) => {
-                let res = match op {
-                    ast::BinaryOperator::Add => l.checked_add(r),
-                    ast::BinaryOperator::Sub => l.checked_sub(r),
-                    ast::BinaryOperator::Mul => l.checked_mul(r),
-                    ast::BinaryOperator::Div => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l / r) },
-                    ast::BinaryOperator::Rem => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l % r) },
-                    _ => Self::ice("Unsupported operator in const numeric operation")?,
-                };
-                match res {
-                    Some(v) => Numeric::Signed(v),
-                    None => return Err(usr_err(ResolveErrorKind::IntegerOverflow)),
-                }
-            },
-            (Numeric::Unsigned(l), Numeric::Unsigned(r)) => {
-                let res = match op {
-                    ast::BinaryOperator::Add => l.checked_add(r),
-                    ast::BinaryOperator::Sub => l.checked_sub(r),
-                    ast::BinaryOperator::Mul => l.checked_mul(r),
-                    ast::BinaryOperator::Div => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l / r) },
-                    ast::BinaryOperator::Rem => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l % r) },
-                    _ => Self::ice("Unsupported operator in const numeric operation")?,
-                };
-                match res {
-                    Some(v) => Numeric::Unsigned(v),
-                    None => return Err(usr_err(ResolveErrorKind::IntegerOverflow)),
-                }
-            },
-            (Numeric::Float(l), Numeric::Float(r)) => {
-                match op {
-                    ast::BinaryOperator::Add => Numeric::Float(l + r),
-                    ast::BinaryOperator::Sub => Numeric::Float(l - r),
-                    ast::BinaryOperator::Mul => Numeric::Float(l * r),
-                    ast::BinaryOperator::Div => Numeric::Float(l / r),
-                    ast::BinaryOperator::Rem => Numeric::Float(l % r),
-                    _ => Self::ice("Unsupported operator in const numeric operation")?,
-                }
-            },
-            _ => {
-                // Mixed signed/unsigned: convert to signed (the resolver should have unified types)
-                let l = left_num.as_signed().unwrap_or(left_num.as_unsigned().unwrap() as i64);
-                let r = right_num.as_signed().unwrap_or(right_num.as_unsigned().unwrap() as i64);
-                let res = match op {
-                    ast::BinaryOperator::Add => l.checked_add(r),
-                    ast::BinaryOperator::Sub => l.checked_sub(r),
-                    ast::BinaryOperator::Mul => l.checked_mul(r),
-                    ast::BinaryOperator::Div => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l / r) },
-                    ast::BinaryOperator::Rem => if r == 0 { return Err(usr_err(ResolveErrorKind::DivisionByZero)); } else { Some(l % r) },
-                    _ => Self::ice("Unsupported operator in const numeric operation")?,
-                };
-                match res {
-                    Some(v) => Numeric::Signed(v),
-                    None => return Err(usr_err(ResolveErrorKind::IntegerOverflow)),
-                }
-            },
-        };
-        Ok(UserConstValue::Numeric(result))
-    }
-}
-
-/// Visitor that checks if any target constant_ids are referenced in the AST.
-struct ConstUsageChecker {
-    target_ids: Set<ConstantId>,
-    found: bool,
-}
-
-impl<'ast> AstVisitor<'ast> for ConstUsageChecker {
-    fn visit_expression(&mut self, expr: &'ast ast::Expression) -> bool {
-        if self.found {
-            return false; // short-circuit
-        }
-        if let ast::Expression::Constant(c) = expr {
-            if let Some(id) = c.constant_id {
-                if self.target_ids.contains(&id) {
-                    self.found = true;
-                    return false;
-                }
-            }
-        }
-        true // keep walking
-    }
-}
-
-/// Visitor that replaces constant_ids in Constant expressions.
-struct ConstRefPatcher<'a> {
-    replacements: &'a UnorderedMap<ConstantId, ConstantId>,
-}
-
-impl<'a, 'ast> AstVisitorMut<'ast> for ConstRefPatcher<'a> {
-    fn visit_expression(&mut self, expr: &mut ast::Expression) -> bool {
-        if let ast::Expression::Constant(c) = expr {
-            if let Some(id) = c.constant_id {
-                if let Some(&new_id) = self.replacements.get(&id) {
-                    c.constant_id = Some(new_id);
-                }
-            }
-        }
-        true // keep walking
-    }
 }
 
 impl<'ctx> Resolver<'ctx> {
-    /// Check if a block references any of the constant_ids in the replacement map.
-    fn block_uses_consts(block: &ast::Block, target_ids: &UnorderedMap<ConstantId, ConstantId>) -> bool {
-        let mut checker = ConstUsageChecker {
-            target_ids: target_ids.keys().copied().collect(),
-            found: false,
-        };
-        checker.walk_block(block);
-        checker.found
-    }
-
-    /// Walk a block and replace constant_ids according to the replacement map.
-    fn patch_const_refs(block: &mut ast::Block, replacements: &UnorderedMap<ConstantId, ConstantId>) {
-        let mut patcher = ConstRefPatcher { replacements };
-        patcher.walk_block(block);
-    }
-
     /// Resolves a const declaration.
     ///
     /// `type_name_prefix` — when `Some`, the const is stored with a qualified name
@@ -1787,7 +1462,7 @@ impl<'ctx> Resolver<'ctx> {
         // Validate: expression must be static (literals + const references + supported ops)
         if !self.is_const_expr(expr) {
             return Err(ResolveError::new(item,
-                ResolveErrorKind::InvalidOperation("const expression must be a literal, a reference to another const, or a supported operation (+, -, *, /, %)".into()),
+                ResolveErrorKind::InvalidOperation("const expression must be a literal, a reference to another const, or a supported operation (+, -, *, /, %).".into()),
                 self.module_path));
         }
 
@@ -1799,29 +1474,29 @@ impl<'ctx> Resolver<'ctx> {
             expr.type_id(self)
         };
 
-        // Build the user const value
-        let user_const_value = if let Some(type_id) = type_id {
-            let ty = self.type_by_id(type_id);
-            if ty.is_string() {
-                // String const: evaluate the expression (concatenation, interpolation, etc.)
-                self.evaluate_const_expr(expr, item_position, &self.module_path)?
-            } else if ty.is_ref() {
-                // Other reference type (array, map, struct): placeholder, updated during compilation
-                UserConstValue::HeapRef(0)
-            } else {
-                // Value type: evaluate the const expression
-                self.evaluate_const_expr(expr, item_position, &self.module_path)?
-            }
-        } else {
-            // Type not yet resolved — use a placeholder that will be set once the type is known
-            UserConstValue::Unresolved
-        };
-
         // Build the name: qualified for impl/trait consts, bare for module-level consts
         let name = if let Some(prefix) = type_name_prefix {
             self.make_path(&[prefix, &item.ident.name])
         } else {
             self.make_path(&[&item.ident.name])
+        };
+
+        // Build the user const value
+        let user_const_value = if let Some(type_id) = type_id {
+            let ty = self.type_by_id(type_id);
+            if ty.is_string() {
+                // String const: evaluate the expression (concatenation, interpolation, etc.)
+                self.evaluate_const_expr(expr, item_position, &self.module_path, Some(type_id))?
+            } else if ty.is_ref() {
+                // Other reference type (array, map, struct): placeholder, updated during compilation
+                UserConstValue::HeapRef(0)
+            } else {
+                // Value type: evaluate the const expression
+                self.evaluate_const_expr(expr, item_position, &self.module_path, Some(type_id))?
+            }
+        } else {
+            // Type not yet resolved — use a placeholder that will be set once the type is known
+            UserConstValue::Unresolved
         };
 
         // Insert constant into scope (or update if already inserted)
@@ -1832,8 +1507,6 @@ impl<'ctx> Resolver<'ctx> {
             ));
         } else {
             // Update the constant value and type_id in later resolution passes.
-            // In early passes the type might not be resolved yet (placeholder Void),
-            // but later passes fill in the actual value.
             let constant_id = item.constant_id.ice()?;
             let constant = self.scopes.constant_mut(constant_id);
             constant.type_id = type_id;
@@ -3618,7 +3291,7 @@ impl<'ctx> Resolver<'ctx> {
 }
 
 /// Utility methods for resolve_binary_op.
-impl<'ast, 'ctx> Resolver<'ctx> where 'ast: 'ctx {
+impl<'ctx> Resolver<'ctx> {
 
     /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
     /// element type from the value argument.
