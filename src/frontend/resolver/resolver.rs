@@ -6,6 +6,7 @@ mod stage;
 mod exhaustiveness;
 mod apinamespace;
 mod intrinsic;
+mod type_synthesis;
 mod const_eval;
 pub mod error;
 pub mod resolved;
@@ -21,7 +22,8 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
-use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, ResultTypeInfo, OptionTypeInfo, OrderingInfo, register_intrinsics};
+use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, OrderingInfo, register_intrinsics};
+use crate::frontend::resolver::type_synthesis::{ResultTypeInfo, OptionTypeInfo};
 
 
 /// Temporary internal state during program type/binding resolution.
@@ -629,87 +631,6 @@ impl<'ctx> Resolver<'ctx> {
         }
     }
 
-    /// Returns the type id of the `Result<T>` data enum for the given success type, synthesizing it on
-    /// first use. `Result<T>` is represented as an anonymous data enum with variants `Ok(T)` and
-    /// `Err(Error)`; structurally identical results (same `T`) dedupe to a single type id. On first
-    /// synthesis the two variant constructors are created and recorded in `result_types`.
-    fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
-        let error_trait_type_id = self.error_trait_type_id;
-        let variants = vec![
-            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ])),
-            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ])),
-        ];
-        // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
-        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
-        let result_type_id = self.scopes.insert_anonymous_type(true, ty);
-        if !self.result_types.contains_key(&result_type_id) {
-            // names embed the enum type id to stay unique across distinct `Result<T>`; they are never
-            // looked up by name (callers bind to the constructor's constant id directly).
-            let raw = result_type_id.into_usize();
-            let ok_constructor = self.scopes.insert_function(
-                &format!("Result#{raw}::Ok"), Some(result_type_id), vec![ Some(ok_type_id) ],
-                Some(FunctionKind::Variant(result_type_id, 0)),
-            );
-            let err_constructor = self.scopes.insert_function(
-                &format!("Result#{raw}::Err"), Some(result_type_id), vec![ Some(error_trait_type_id) ],
-                Some(FunctionKind::Variant(result_type_id, 1)),
-            );
-            self.result_types.insert(result_type_id, ResultTypeInfo { ok_type_id, ok_constructor, err_constructor });
-        }
-        result_type_id
-    }
-
-    /// Returns the type id of the `Option<T>` enum for the given inner type, synthesizing it on first
-    /// use. `Option<T>` is represented as an anonymous mixed enum with variants `Some(T)` (data) and
-    /// `None` (simple/unit); structurally identical options (same `T`) dedupe to a single type id.
-    /// On first synthesis the `Some` constructor function and the `None` unit-variant constant are
-    /// created and recorded in `option_types`.
-    pub(crate) fn synthesize_option_type(self: &mut Self, some_type_id: TypeId) -> TypeId {
-        let variants = vec![
-            ("Some".to_string(), EnumVariant::Data(vec![ Some(some_type_id) ])),
-            ("None".to_string(), EnumVariant::Simple(None)),
-        ];
-        // primitive: None -> data-carrying (heap) enum, since the Some variant carries data
-        let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
-        let option_type_id = self.scopes.insert_anonymous_type(true, ty);
-        if !self.option_types.contains_key(&option_type_id) {
-            // mangled, never looked up by name: callers bind to the constant/constructor id directly
-            let raw = option_type_id.into_usize();
-            let some_constructor = self.scopes.insert_function(
-                &format!("Option#{raw}::Some"), Some(option_type_id), vec![ Some(some_type_id) ],
-                Some(FunctionKind::Variant(option_type_id, 0)),
-            );
-            // None is a unit variant: a constant, like a user enum's `VariantKind::Simple`. The numeric is
-            // a placeholder (reference-enum codegen tags by variant index, ignoring it).
-            let none_constant = self.scopes.insert_constant(
-                &format!("Option#{raw}::None"), option_type_id, Some(option_type_id),
-                ConstantValue::Discriminant(Numeric::Unsigned(1)),
-            );
-            self.option_types.insert(option_type_id, OptionTypeInfo {
-                some_type_id,
-                some_constructor,
-                none_constant,
-            });
-        }
-        option_type_id
-    }
-
-    /// Returns the type id of the `Generator<V>` / `Generator<K, V>` carrier for the given key/value
-    /// types, synthesizing it on first use. The carrier is an anonymous struct with sentinel fields
-    /// `$value` (and `$key` for the keyed form); the `$` keeps the field names unwritable by user
-    /// code, so the structural `generator_signature` check can identify it. Structurally identical
-    /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
-    /// carrier will hold at runtime is *not* modelled as typed fields here - that stays opaque bytes.
-    fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
-        let mut fields = Map::new();
-        fields.insert("$value".to_string(), Some(value_type_id));
-        if let Some(key_type_id) = key_type_id {
-            fields.insert("$key".to_string(), Some(key_type_id));
-        }
-        let ty = Type::Struct(Struct { fields, impl_traits: Map::new() });
-        self.scopes.insert_anonymous_type(true, ty)
-    }
-
     /// Transforms a method call from a.b.c() format to c(a.b) if c is a function name (i.e. not a function reference)
     fn rewrite_method_call_to_constant_call(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
         let mut constant = None;
@@ -1046,55 +967,6 @@ impl<'ctx> Resolver<'ctx> {
         Ok(item.type_id)
     }
 
-    /// Resolves a result definition `Result<T>` into its synthesized two-variant data enum
-    /// `Ok(T)` / `Err(Error)`.
-    fn resolve_result_type(self: &mut Self, item: &mut ast::ResultDef) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved(self) {
-            return Ok(item.type_id);
-        }
-        if let (None, Some(ok_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.ok_type)?) {
-            item.type_id = Some(self.synthesize_result_type(ok_type_id));
-        }
-        self.types_resolved(item, None)?;
-        Ok(item.type_id)
-    }
-
-    /// Resolves `Option<T>` into its synthesized `Some(T)` / `None` enum.
-    fn resolve_option_type(self: &mut Self, item: &mut ast::OptionDef) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved(self) {
-            return Ok(item.type_id);
-        }
-        if let (None, Some(some_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.some_type)?) {
-            item.type_id = Some(self.synthesize_option_type(some_type_id));
-        }
-        self.types_resolved(item, None)?;
-        Ok(item.type_id)
-    }
-
-    /// Resolves a generator definition `Generator<V>` / `Generator<K, V>` into its synthesized struct
-    /// carrier.
-    fn resolve_generator_type(self: &mut Self, item: &mut ast::GeneratorDef) -> ResolveResult<Option<TypeId>> {
-        if item.type_id.is_some() && item.is_resolved(self) {
-            return Ok(item.type_id);
-        }
-        // resolve the value type and the optional key type first
-        let value_type_id = self.resolve_inline_type(&mut item.value_type)?;
-        let key_type_id = match &mut item.key_type {
-            Some(key_type) => self.resolve_inline_type(key_type)?,
-            None => None,
-        };
-        // synthesize once the value (and the key, if this generator has one) are resolved
-        if item.type_id.is_none() {
-            if let Some(value_type_id) = value_type_id {
-                if item.key_type.is_none() || key_type_id.is_some() {
-                    item.type_id = Some(self.synthesize_generator_type(key_type_id, value_type_id));
-                }
-            }
-        }
-        self.types_resolved(item, None)?;
-        Ok(item.type_id)
-    }
-
     /// Resolves a map definition.
     fn resolve_map_type(self: &mut Self, item: &mut ast::MapDef) -> ResolveResult<Option<TypeId>> {
         if item.type_id.is_some() && item.is_resolved(self) {
@@ -1417,9 +1289,7 @@ impl<'ctx> Resolver<'ctx> {
         self.scope_id = parent_scope_id;
         self.resolved(item)
     }
-}
 
-impl<'ctx> Resolver<'ctx> {
     /// Resolves a const declaration.
     ///
     /// `type_name_prefix` — when `Some`, the const is stored with a qualified name
@@ -1932,45 +1802,6 @@ impl<'ctx> Resolver<'ctx> {
         self.types_resolved(item, expected_result)
     }
 
-    /// Try to resolve a trait const default value.
-    ///
-    /// When `Self::CONST` is used in a trait impl method and the impl doesn't define the const,
-    /// this falls back to the trait's provided (default) const. Returns the constant id of the
-    /// trait default, or None if no fallback applies.
-    fn try_resolve_trait_const_default(self: &Self, resolved_segments: &[String]) -> Option<ConstantId> {
-        // Need at least 2 segments: TypeName::CONST
-        if resolved_segments.len() < 2 {
-            return None;
-        }
-        let type_name = &resolved_segments[0];
-        let const_name = &resolved_segments[1];
-
-        // Look up the type
-        let type_id = self.scopes.type_id(self.scope_id, type_name)?;
-        let ty = self.type_by_id(type_id);
-
-        // If it's a trait, look in its provided consts
-        if let Some(trt) = ty.as_trait() {
-            if let Some(&const_id) = trt.provided_consts.get(const_name) {
-                return const_id;
-            }
-        }
-
-        // If it's a concrete type, check its impl'd traits for provided consts with matching names
-        if let Some(impl_traits) = ty.impl_traits_map() {
-            for (&trait_type_id, _) in impl_traits {
-                let trait_ty = self.type_by_id(trait_type_id);
-                if let Some(trt) = trait_ty.as_trait() {
-                    if let Some(&const_id) = trt.provided_consts.get(const_name) {
-                        return const_id;
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
     /// Resolves an if block.
     fn resolve_if_block(self: &mut Self, item: &mut ast::IfBlock, expected_result: Option<TypeId>) -> ResolveResult {
         let parent_scope_id = self.scope_id;
@@ -2412,6 +2243,114 @@ impl<'ctx> Resolver<'ctx> {
         // an assignment is an expression that produces no value, so it must match the expected type (if any) against void
         assignment.type_id = Some(TypeId::VOID);
         self.types_resolved(assignment, expected_result)
+    }
+
+    /// Resolves a compound index-assignment `a[i] += v` on a type implementing the intrinsic `Index`
+    /// trait. Sets up `CompoundDispatch::IndexMethod` with the get/set method constants and temp bindings.
+    fn resolve_index_compound_assign(self: &mut Self, item: &mut ast::Assignment, recv_type_id: TypeId, intrinsic: &IntrinsicIndex, expected_result: Option<TypeId>) -> ResolveResult {
+        use ast::BinaryOperator::*;
+        let base_op = item.op.arithmetic_assign_base().ice()?;
+
+        // Look up the get and set methods.
+        let (get_id, set_id) = match self.intrinsic_index_methods(recv_type_id, intrinsic) {
+            Some(pair) => pair,
+            None => {
+                // Methods not yet resolved; defer to a later pass.
+                // Resolve the right side without type constraints.
+                self.resolve_expression(&mut item.right, None)?;
+                item.type_id = Some(TypeId::VOID);
+                return self.types_resolved(item, expected_result);
+            }
+        };
+
+        // Get the get method's return type, index param type, and set method's value param type.
+        // Extract all values before any mutable borrows.
+        let get_function_id = self.scopes.constant_function_id(get_id).ice()?;
+        let get_ret_type_id = self.scopes.function_ref(get_function_id).ret_type_id(self).ice()?;
+        let get_index_type_id = self.scopes.function_ref(get_function_id).arg_type_ids(self).get(1).and_then(|t| *t).ice()?;
+
+        let set_function_id = self.scopes.constant_function_id(set_id).ice()?;
+        // set's value parameter is the third (index 2: self, index, value)
+        let set_value_type_id = self.scopes.function_ref(set_function_id).arg_type_ids(self).get(2).and_then(|t| *t).ice()?;
+
+        // For compound assignment, get's return type must match set's value type.
+        if !self.type_equals(get_ret_type_id, set_value_type_id) {
+            if self.stage.must_resolve() {
+                let type_name = self.type_name(recv_type_id);
+                let get_ret_name = self.type_name(get_ret_type_id);
+                let set_val_name = self.type_name(set_value_type_id);
+                return Err(ResolveError::new(item, ResolveErrorKind::IndexCompoundAssignMismatch(type_name, get_ret_name, set_val_name), self.module_path));
+            }
+            self.resolve_expression(&mut item.right, None)?;
+            item.type_id = Some(TypeId::VOID);
+            return self.types_resolved(item, expected_result);
+        }
+
+        // Resolve the right-hand value expression against the value type.
+        self.resolve_expression(&mut item.right, Some(set_value_type_id))?;
+
+        // Determine the operator dispatch: is the value type a custom type needing trait dispatch,
+        // or a built-in primitive?
+        let value_type = self.type_by_id(set_value_type_id);
+        let is_bitwise_shift = matches!(base_op, BitAnd | BitOr | BitXor | Shl | Shr);
+        let is_builtin_value = if is_bitwise_shift {
+            value_type.is_integer()
+        } else {
+            value_type.is_numeric() || value_type.is_string()
+        };
+        // A built-in value type uses the arithmetic/bitwise opcodes directly; a custom value type must
+        // implement the matching operator trait (e.g. `Add`), dispatched like a standalone `a + b`.
+        let op_method = if is_builtin_value {
+            None
+        } else {
+            let op_intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
+            match self.intrinsic_op_method_constant(set_value_type_id, &op_intrinsic) {
+                Some(constant_id) => Some(constant_id),
+                None if self.stage.must_resolve() => {
+                    let type_name = self.type_name(set_value_type_id);
+                    let trait_name = self.type_name(op_intrinsic.trait_type_id);
+                    return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
+                },
+                None => {
+                    // operator-trait impl not resolved yet; defer to a later pass.
+                    self.resolve_expression(&mut item.right, None)?;
+                    item.type_id = Some(TypeId::VOID);
+                    return self.types_resolved(item, expected_result);
+                },
+            }
+        };
+
+        // Type the temp bindings (recv and idx).
+        let bin = item.left.as_binary_op_mut().ice()?;
+        // Type the receiver expression.
+        self.set_type_id(bin.left.as_expression_mut().ice()?, recv_type_id)?;
+        // Resolve and type the index expression against get's index parameter.
+        self.resolve_expression(bin.right.as_expression_mut().ice()?, Some(get_index_type_id))?;
+        self.set_type_id(bin.right.as_expression_mut().ice()?, get_index_type_id)?;
+        // Type the `IndexWrite` node itself with the indexed value type (get's return == set's value), so the
+        // assignment's `left` operand counts as resolved (see BinaryOp::resolvables).
+        let bin = item.left.as_binary_op_mut().ice()?;
+        bin.type_id = Some(set_value_type_id);
+
+        // Set the temp binding types.
+        if let Some(recv_binding) = item.temp_recv {
+            self.scopes.binding_mut(recv_binding).type_id = Some(recv_type_id);
+        }
+        if let Some(idx_binding) = item.temp_idx {
+            self.scopes.binding_mut(idx_binding).type_id = Some(get_index_type_id);
+        }
+
+        // Set up the dispatch.
+        item.op_dispatch = Some(ast::CompoundDispatch::IndexMethod {
+            get_method: get_id,
+            set_method: set_id,
+            op_method,
+            recv: item.temp_recv.ice()?,
+            idx: item.temp_idx.ice()?,
+        });
+
+        item.type_id = Some(TypeId::VOID);
+        self.types_resolved(item, expected_result)
     }
 
     /// Resolves a type cast. Built-in primitive conversions are validated against the conversion matrix;
@@ -3029,7 +2968,7 @@ impl<'ctx> Resolver<'ctx> {
                     },
                     Some(operand_type_id) if !self.type_by_id(operand_type_id).is_primitive() => {
                         // custom type: dispatch through the `Not` trait, lowering `!a` to `a.not()`
-                        if let Some(()) = self.dispatch_unary_op(item, Not, operand_type_id, expected_type)? {
+                        if self.dispatch_unary_op(item, Not, operand_type_id, expected_type)? {
                             return Ok(());
                         }
                     },
@@ -3047,7 +2986,7 @@ impl<'ctx> Resolver<'ctx> {
                     if self.type_by_id(operand_type_id).is_primitive() {
                         // built-in numeric negation (and the prior no-op behavior for any other primitive)
                         self.set_type_id(item.as_unary_op_mut().ice()?, operand_type_id)?;
-                    } else if let Some(()) = self.dispatch_unary_op(item, Minus, operand_type_id, expected_type)? {
+                    } else if self.dispatch_unary_op(item, Minus, operand_type_id, expected_type)? {
                         // custom type: dispatched through the `Neg` trait, lowering `-a` to `a.neg()`
                         return Ok(());
                     }
@@ -3062,24 +3001,6 @@ impl<'ctx> Resolver<'ctx> {
         let unary = item.as_unary_op_mut().ice()?;
         self.types_resolved(&unary.expr, None)?;
         self.types_resolved(item, expected_type)
-    }
-
-    /// Attempts to dispatch a unary operator on a custom type through its intrinsic operator trait.
-    /// Returns `Some(())` (after rewriting `item` to the trait-method call) once the operand type is
-    /// known to implement the trait; `None` while the implementation is not yet known (so resolution
-    /// retries on a later pass). In the final `must_resolve` pass a still-missing impl is an error.
-    fn dispatch_unary_op(self: &mut Self, item: &mut ast::Expression, op: ast::UnaryOperator, operand_type_id: TypeId, expected_type: Option<TypeId>) -> ResolveResult<Option<()>> {
-        let intrinsic = self.intrinsic_unary_ops.get(&op).copied().ice()?;
-        if self.type_accepted_for(operand_type_id, intrinsic.trait_type_id) {
-            self.rewrite_unary_op_to_method(item, intrinsic.method, expected_type)?;
-            Ok(Some(()))
-        } else if self.stage.must_resolve() {
-            let type_name = self.type_name(operand_type_id);
-            let trait_name = self.type_name(intrinsic.trait_type_id);
-            Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path))
-        } else {
-            Ok(None)
-        }
     }
 
     /// Resolves a literal type if it is annotated, otherwise let the parent expression pick a concrete type.
@@ -3292,6 +3213,24 @@ impl<'ctx> Resolver<'ctx> {
 
 /// Utility methods for resolve_binary_op.
 impl<'ctx> Resolver<'ctx> {
+
+    /// Attempts to dispatch a unary operator on a custom type through its intrinsic operator trait.
+    /// Returns `true` (after rewriting `item` to the trait-method call) once the operand type is
+    /// known to implement the trait; `false` while the implementation is not yet known (so resolution
+    /// retries on a later pass). In the final `must_resolve` pass a still-missing impl is an error.
+    fn dispatch_unary_op(self: &mut Self, item: &mut ast::Expression, op: ast::UnaryOperator, operand_type_id: TypeId, expected_type: Option<TypeId>) -> ResolveResult<bool> {
+        let intrinsic = self.intrinsic_unary_ops.get(&op).copied().ice()?;
+        if self.type_accepted_for(operand_type_id, intrinsic.trait_type_id) {
+            self.rewrite_unary_op_to_method(item, intrinsic.method, expected_type)?;
+            Ok(true)
+        } else if self.stage.must_resolve() {
+            let type_name = self.type_name(operand_type_id);
+            let trait_name = self.type_name(intrinsic.trait_type_id);
+            Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path))
+        } else {
+            Ok(false)
+        }
+    }
 
     /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
     /// element type from the value argument.
@@ -3577,191 +3516,43 @@ impl<'ctx> Resolver<'ctx> {
         self.resolve_expression(item, expected_result)
     }
 
-    /// Resolves a compound index-assignment `a[i] += v` on a type implementing the intrinsic `Index`
-    /// trait. Sets up `CompoundDispatch::IndexMethod` with the get/set method constants and temp bindings.
-    fn resolve_index_compound_assign(self: &mut Self, item: &mut ast::Assignment, recv_type_id: TypeId, intrinsic: &IntrinsicIndex, expected_result: Option<TypeId>) -> ResolveResult {
-        use ast::BinaryOperator::*;
-        let base_op = item.op.arithmetic_assign_base().ice()?;
+    /// Try to resolve a trait const default value.
+    ///
+    /// When `Self::CONST` is used in a trait impl method and the impl doesn't define the const,
+    /// this falls back to the trait's provided (default) const. Returns the constant id of the
+    /// trait default, or None if no fallback applies.
+    fn try_resolve_trait_const_default(self: &Self, resolved_segments: &[String]) -> Option<ConstantId> {
+        // Need at least 2 segments: TypeName::CONST
+        if resolved_segments.len() < 2 {
+            return None;
+        }
+        let type_name = &resolved_segments[0];
+        let const_name = &resolved_segments[1];
 
-        // Look up the get and set methods.
-        let (get_id, set_id) = match self.intrinsic_index_methods(recv_type_id, intrinsic) {
-            Some(pair) => pair,
-            None => {
-                // Methods not yet resolved; defer to a later pass.
-                // Resolve the right side without type constraints.
-                self.resolve_expression(&mut item.right, None)?;
-                item.type_id = Some(TypeId::VOID);
-                return self.types_resolved(item, expected_result);
+        // Look up the type
+        let type_id = self.scopes.type_id(self.scope_id, type_name)?;
+        let ty = self.type_by_id(type_id);
+
+        // If it's a trait, look in its provided consts
+        if let Some(trt) = ty.as_trait() {
+            if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                return const_id;
             }
-        };
-
-        // Get the get method's return type, index param type, and set method's value param type.
-        // Extract all values before any mutable borrows.
-        let get_function_id = self.scopes.constant_function_id(get_id).ice()?;
-        let get_ret_type_id = self.scopes.function_ref(get_function_id).ret_type_id(self).ice()?;
-        let get_index_type_id = self.scopes.function_ref(get_function_id).arg_type_ids(self).get(1).and_then(|t| *t).ice()?;
-
-        let set_function_id = self.scopes.constant_function_id(set_id).ice()?;
-        // set's value parameter is the third (index 2: self, index, value)
-        let set_value_type_id = self.scopes.function_ref(set_function_id).arg_type_ids(self).get(2).and_then(|t| *t).ice()?;
-
-        // For compound assignment, get's return type must match set's value type.
-        if !self.type_equals(get_ret_type_id, set_value_type_id) {
-            if self.stage.must_resolve() {
-                let type_name = self.type_name(recv_type_id);
-                let get_ret_name = self.type_name(get_ret_type_id);
-                let set_val_name = self.type_name(set_value_type_id);
-                return Err(ResolveError::new(item, ResolveErrorKind::IndexCompoundAssignMismatch(type_name, get_ret_name, set_val_name), self.module_path));
-            }
-            self.resolve_expression(&mut item.right, None)?;
-            item.type_id = Some(TypeId::VOID);
-            return self.types_resolved(item, expected_result);
         }
 
-        // Resolve the right-hand value expression against the value type.
-        self.resolve_expression(&mut item.right, Some(set_value_type_id))?;
-
-        // Determine the operator dispatch: is the value type a custom type needing trait dispatch,
-        // or a built-in primitive?
-        let value_type = self.type_by_id(set_value_type_id);
-        let is_bitwise_shift = matches!(base_op, BitAnd | BitOr | BitXor | Shl | Shr);
-        let is_builtin_value = if is_bitwise_shift {
-            value_type.is_integer()
-        } else {
-            value_type.is_numeric() || value_type.is_string()
-        };
-        // A built-in value type uses the arithmetic/bitwise opcodes directly; a custom value type must
-        // implement the matching operator trait (e.g. `Add`), dispatched like a standalone `a + b`.
-        let op_method = if is_builtin_value {
-            None
-        } else {
-            let op_intrinsic = self.intrinsic_ops.get(&base_op).copied().ice()?;
-            match self.intrinsic_op_method_constant(set_value_type_id, &op_intrinsic) {
-                Some(constant_id) => Some(constant_id),
-                None if self.stage.must_resolve() => {
-                    let type_name = self.type_name(set_value_type_id);
-                    let trait_name = self.type_name(op_intrinsic.trait_type_id);
-                    return Err(ResolveError::new(item, ResolveErrorKind::MissingTraitImplementation(type_name, trait_name), self.module_path));
-                },
-                None => {
-                    // operator-trait impl not resolved yet; defer to a later pass.
-                    self.resolve_expression(&mut item.right, None)?;
-                    item.type_id = Some(TypeId::VOID);
-                    return self.types_resolved(item, expected_result);
-                },
-            }
-        };
-
-        // Type the temp bindings (recv and idx).
-        let bin = item.left.as_binary_op_mut().ice()?;
-        // Type the receiver expression.
-        self.set_type_id(bin.left.as_expression_mut().ice()?, recv_type_id)?;
-        // Resolve and type the index expression against get's index parameter.
-        self.resolve_expression(bin.right.as_expression_mut().ice()?, Some(get_index_type_id))?;
-        self.set_type_id(bin.right.as_expression_mut().ice()?, get_index_type_id)?;
-        // Type the `IndexWrite` node itself with the indexed value type (get's return == set's value), so the
-        // assignment's `left` operand counts as resolved (see BinaryOp::resolvables).
-        let bin = item.left.as_binary_op_mut().ice()?;
-        bin.type_id = Some(set_value_type_id);
-
-        // Set the temp binding types.
-        if let Some(recv_binding) = item.temp_recv {
-            self.scopes.binding_mut(recv_binding).type_id = Some(recv_type_id);
-        }
-        if let Some(idx_binding) = item.temp_idx {
-            self.scopes.binding_mut(idx_binding).type_id = Some(get_index_type_id);
-        }
-
-        // Set up the dispatch.
-        item.op_dispatch = Some(ast::CompoundDispatch::IndexMethod {
-            get_method: get_id,
-            set_method: set_id,
-            op_method,
-            recv: item.temp_recv.ice()?,
-            idx: item.temp_idx.ice()?,
-        });
-
-        item.type_id = Some(TypeId::VOID);
-        self.types_resolved(item, expected_result)
-    }
-
-    /// If the call target is a bare, still-unbound `Ok`/`Err`, bind it to the matching `Result<T>` variant
-    /// constructor so the generic call resolution below handles argument checking and the result type.
-    /// `T` comes from the expected result type when available, otherwise (for `Ok`) is inferred from the
-    /// argument. `Err` without an expected `Result` type cannot infer `T` and is left unbound (reported as
-    /// an undefined identifier in the final stage).
-    fn try_bind_result_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
-        let variant = match item.left.as_expression().and_then(|e| e.as_constant()) {
-            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 => match c.path.segments[0].name.as_str() {
-                "Ok" => 0 as VariantIndex,
-                "Err" => 1 as VariantIndex,
-                _ => return Ok(()),
-            },
-            _ => return Ok(()),
-        };
-        // an expected result type pins T directly; this is the common case (`return Ok(x)`, match arms, ...)
-        let expected_result_type = expected_result.filter(|t| self.result_types.contains_key(t));
-        let result_type_id = match (variant, expected_result_type) {
-            (_, Some(result_type_id)) => Some(result_type_id),
-            // Ok(x): infer T from the argument's type
-            (0, None) => {
-                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
-                    self.resolve_expression(arg, None)?;
-                    arg.type_id(self).map(|ok_type_id| self.synthesize_result_type(ok_type_id))
-                } else {
-                    None
-                }
-            },
-            // Err(e): cannot determine T from the error alone; wait for / require context
-            (_, None) => None,
-        };
-        if let Some(result_type_id) = result_type_id {
-            let info = *self.result_types.get(&result_type_id).ice()?;
-            let constructor = if variant == 0 { info.ok_constructor } else { info.err_constructor };
-            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(constructor);
-        } else if self.stage.must_resolve() {
-            // the constructor could not be bound to any `Result<T>`: there is no result type to infer from
-            // (e.g. `?` or a bare `Err`/`Ok` in a function that does not return `Result`). Report this
-            // directly instead of letting the unbound `Ok`/`Err` surface as a misleading "undefined identifier".
-            let from_try = item.right.as_argument_list().and_then(|a| a.args.first())
-                .and_then(|arg| arg.as_variable())
-                .map_or(false, |var| var.ident.name == "try$err" || var.ident.name == "try$ok");
-            let expected = expected_result.map(|type_id| self.type_name(type_id));
-            return Err(ResolveError::new(item, ResolveErrorKind::ResultOutsideResultContext(from_try, expected), self.module_path));
-        }
-        Ok(())
-    }
-
-    /// If the call target is a bare, still-unbound `Some`, bind it to the matching `Option<T>` variant
-    /// constructor so the generic call resolution below handles argument checking and the result type.
-    /// `T` comes from the expected result type when available, otherwise is inferred from the argument.
-    /// `None` is a bare constant (not a call) and is handled in `resolve_constant`.
-    fn try_bind_option_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
-        // only `Some(x)` is a call; `None` is a bare unit-variant constant, bound in resolve_constant
-        let is_some = matches!(
-            item.left.as_expression().and_then(|e| e.as_constant()),
-            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 1 && c.path.segments[0].name == "Some"
-        );
-        if !is_some {
-            return Ok(());
-        }
-        // an expected Option type pins T directly; otherwise infer T from the argument
-        let option_type_id = match expected_result.filter(|t| self.option_types.contains_key(t)) {
-            Some(option_type_id) => Some(option_type_id),
-            None => {
-                if let Some(arg) = item.right.as_argument_list_mut().ice()?.args.first_mut() {
-                    self.resolve_expression(arg, None)?;
-                    arg.type_id(self).map(|some_type_id| self.synthesize_option_type(some_type_id))
-                } else {
-                    None
+        // If it's a concrete type, check its impl'd traits for provided consts with matching names
+        if let Some(impl_traits) = ty.impl_traits_map() {
+            for (&trait_type_id, _) in impl_traits {
+                let trait_ty = self.type_by_id(trait_type_id);
+                if let Some(trt) = trait_ty.as_trait() {
+                    if let Some(&const_id) = trt.provided_consts.get(const_name) {
+                        return const_id;
+                    }
                 }
             }
-        };
-        if let Some(option_type_id) = option_type_id {
-            let info = *self.option_types.get(&option_type_id).ice()?;
-            item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id = Some(info.some_constructor);
         }
-        Ok(())
+
+        None
     }
 }
 
