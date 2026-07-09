@@ -8,6 +8,13 @@ Strongly typed scripting language with a rusty syntax and easy Rust integration 
 Clone the repository. It contains VSCode tasks to run the currently opened `.itsy`-source. Open a file (e.g. `itsy/examples/mandelbrot.itsy`) in the editor, run the task
 *"cargo run file in runner"*. This will build the `run` application and use it to run the opened file.
 
+## What does the code look like?
+
+The examples can be found in the `itsy/examples/` folder, e.g.
+
+- [Mandelbrot Zoom](itsy/examples/mandelbrot.itsy)
+- [Retrobricks Terminal Arcade Game](itsy/examples/retrobricks.itsy)
+
 ## Installation
 
 Add the following to our `Cargo.toml` to make Itsy avaialble in your project.
@@ -50,5 +57,5 @@ fn main() {
 ## Where to go from here
 
 **Crate reference:** [here](https://docs.rs/itsy/)\
-**Standard library/builtins reference** Linked on the index page of the crate documentation.\
-**Language reference:** non-existent, some differences listed [here](doc/differences.md)
+**Standard library/builtins reference** Linked on the index page of the above crate documentation.\
+**Language reference:** non-existent, some differences listed [here](doc/differences.md), syntax is essentially Rust without lifetimes and generics.
