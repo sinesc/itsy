@@ -3,6 +3,265 @@ use itsy::{itsy_api, VMValue};
 use std::{thread, time::{Instant, Duration}, io::{self, Write, stdout}};
 use std::collections::HashSet;
 
+/// Demo context data.
+#[allow(dead_code)]
+pub struct Context {
+    pub seed: f64,
+    pub started: Instant,
+    pub last_frame: Instant,
+    pub args: Vec<String>,
+    pub keys_down: HashSet<KeyCode>,
+    pub modifiers_down: HashSet<ModifierKey>,
+    pub keys_last_seen: std::collections::HashMap<KeyCode, u64>,
+    pub frame_count: u64,
+    pub raw_mode: bool,
+    pub kitty: bool,
+}
+
+#[allow(dead_code)]
+impl Context {
+    pub fn new(args: &[ String ]) -> Self {
+        Self {
+            seed: 1.2345,
+            started: Instant::now(),
+            last_frame: Instant::now(),
+            args: args.to_vec(),
+            keys_down: HashSet::new(),
+            modifiers_down: HashSet::new(),
+            keys_last_seen: std::collections::HashMap::new(),
+            frame_count: 0,
+            raw_mode: false,
+            kitty: false,
+        }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        if self.raw_mode {
+            restore_terminal();
+            self.raw_mode = false;
+        }
+    }
+}
+
+itsy_api! {
+    /// Demo API providing some basic functionality
+    pub MyAPI<Context> {
+        /// Prints the given string to standard output.
+        fn print(&mut context, value: String) {
+            print!("{}", value);
+        }
+        /// Prints the given string followed by a newline to standard output.
+        fn println(&mut context, value: String) {
+            println!("{}", value);
+        }
+        /// Flushes standard output.
+        fn flush(&mut context) {
+            io::stdout().flush().unwrap();
+        }
+        /// Returns a (bad) pseudo-random number between 0.0 and non-inclusive 1.0
+        fn random(&mut context) -> f64 {
+            context.seed += 1.0;
+            let large = context.seed.sin() * 100000000.0;
+            large - large.floor()
+        }
+        /// Terminates the process.
+        fn exit(&mut context, code: i32) {
+            if context.raw_mode {
+                restore_terminal();
+                context.raw_mode = false;
+            }
+            std::process::exit(code);
+        }
+        /// Milliseconds since context initialization.
+        fn runtime(&mut context) -> u64 {
+            (Instant::now() - context.started).as_millis() as u64
+        }
+        /// Pauses for the given number of milliseconds.
+        fn sleep(&mut context, milliseconds: u64) {
+            thread::sleep(Duration::from_millis(milliseconds));
+        }
+        /// Pauses for the given number of milliseconds minus the number of milliseconds since the last call.
+        fn wait_frame(&mut context, milliseconds: u64) -> u64 {
+            let already_expired = (Instant::now() - context.last_frame).as_millis() as u64;
+            if already_expired < milliseconds {
+                let remaining = milliseconds - already_expired;
+                thread::sleep(Duration::from_millis(remaining));
+            }
+            context.last_frame = Instant::now();
+            already_expired
+        }
+        /// Returns given argument or empty string. TODO: support array result
+        fn get_arg(&mut context, arg: u64) -> String {
+            context.args.get(arg as usize).cloned().unwrap_or_else(|| "".to_string())
+        }
+        /// Returns whether given argument is present.
+        fn has_arg(&mut context, arg: String) -> bool {
+            context.args.contains(&arg)
+        }
+        /// Compute mandelbrot value for given point.
+        fn fastbrot(&mut context, depth: u32, x: f64, y: f64) -> u32 {
+            let mut n = 0;
+            let mut r = 0.0f64;
+            let mut i = 0.0f64;
+            while n < depth && 4.0 > r * r + i * i {
+                let i_tmp = i * i;
+                i = r * i * 2.0 + y;
+                r = r * r - i_tmp + x;
+                n += 1;
+            }
+            n
+        }
+
+        // --------------------------------
+        // Keyboard control for the demos.
+        // --------------------------------
+
+        /// Puts the terminal into raw mode for keyboard input. Returns false if already enabled or on error.
+        fn enable_raw_mode(&mut context) -> bool {
+            if context.raw_mode {
+                false
+            } else if crossterm::terminal::enable_raw_mode().is_err() {
+                false
+            } else {
+                use crossterm::{execute, event::{PushKeyboardEnhancementFlags, KeyboardEnhancementFlags}};
+                let mut out = stdout();
+                let _ = execute!(out, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
+                context.raw_mode = true;
+                true
+            }
+        }
+        /// Restores the terminal to normal (canonical) mode.
+        fn disable_raw_mode(&mut context) {
+            if context.raw_mode {
+                restore_terminal();
+                context.raw_mode = false;
+            }
+        }
+        /// Polls for pending keyboard events and updates internal key state. Call once per frame.
+        /// Returns false if Ctrl+C was pressed (signal to quit).
+        fn update_input(&mut context) -> bool {
+            context.frame_count += 1;
+            let mut ctrl_c = false;
+            let mut keys_this_frame: HashSet<KeyCode> = HashSet::new();
+            use crossterm::event::{poll, read, Event, KeyEventKind, KeyModifiers};
+            while poll(Duration::ZERO).unwrap_or(false) {
+                let event = match read() {
+                    Ok(e) => e,
+                    Err(_) => break,
+                };
+                if let Event::Key(key) = event {
+                    // Ctrl+C => signal to quit
+                    if matches!(key.code, crossterm::event::KeyCode::Char('c'))
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        ctrl_c = true;
+                        break;
+                    }
+                    match key.kind {
+                        KeyEventKind::Press | KeyEventKind::Repeat => {
+                            if let Some(kc) = KeyCode::from_crossterm(key.code) {
+                                context.keys_down.insert(kc);
+                                keys_this_frame.insert(kc);
+                                context.keys_last_seen.insert(kc, context.frame_count);
+                            }
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                context.modifiers_down.insert(ModifierKey::Shift);
+                            }
+                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                context.modifiers_down.insert(ModifierKey::Ctrl);
+                            }
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                context.modifiers_down.insert(ModifierKey::Alt);
+                            }
+                        }
+                        KeyEventKind::Release => {
+                            context.kitty = true; // we've seen a release event, disable auto release mechanism below
+                            if let Some(kc) = KeyCode::from_crossterm(key.code) {
+                                context.keys_down.remove(&kc);
+                                context.keys_last_seen.remove(&kc);
+                            }
+                        }
+                    }
+                }
+            }
+            // remove keys not seen for too long (handles terminals without Release events)
+            if !context.kitty {
+                let stale = context.keys_last_seen
+                    .iter()
+                    .filter(|&(_, &last)| context.frame_count - last > 2)
+                    .map(|(&kc, _)| kc)
+                    .collect::<HashSet<KeyCode>>();
+                for kc in &stale {
+                    context.keys_down.remove(kc);
+                    context.keys_last_seen.remove(kc);
+                }
+            }
+            !ctrl_c
+        }
+        /// Returns true if the key is currently held down.
+        fn is_key_down(&mut context, keycode: KeyCode) -> bool {
+            context.keys_down.contains(&keycode)
+        }
+        /// Returns true if the key is not currently held down.
+        fn is_key_up(&mut context, keycode: KeyCode) -> bool {
+            !context.keys_down.contains(&keycode)
+        }
+        /// Returns true if the modifier key is currently held down.
+        fn is_modifier_down(&mut context, modifier: ModifierKey) -> bool {
+            context.modifiers_down.contains(&modifier)
+        }
+        /// Returns true if the modifier key is not currently held down.
+        fn is_modifier_up(&mut context, modifier: ModifierKey) -> bool {
+            !context.modifiers_down.contains(&modifier)
+        }
+        /// Returns the terminal width in columns. Falls back to 80 if the query fails.
+        fn terminal_width(&mut context) -> u16 {
+            crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80)
+        }
+        /// Returns the terminal height in rows. Falls back to 24 if the query fails.
+        fn terminal_height(&mut context) -> u16 {
+            crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24)
+        }
+        /// Returns whether the terminal has kitty support (requires a key press first)
+        fn is_kitty(&mut context) -> bool {
+            context.kitty
+        }
+
+        // --------------------------------
+        // Benchmark compatibility methods.
+        // --------------------------------
+
+        /// Returns the given value unchanged.
+        fn ret_u8(&mut context, value: u8) -> u8 { value }
+        /// Returns the given value unchanged.
+        fn ret_u16(&mut context, value: u16) -> u16 { value }
+        /// Returns the given value unchanged.
+        fn ret_u32(&mut context, value: u32) -> u32 { value }
+        /// Returns the given value unchanged.
+        fn ret_u64(&mut context, value: u64) -> u64 { value }
+        /// Returns the given value unchanged.
+        fn ret_i8(&mut context, value: i8) -> i8 { value }
+        /// Returns the given value unchanged.
+        fn ret_i16(&mut context, value: i16) -> i16 { value }
+        /// Returns the given value unchanged.
+        fn ret_i32(&mut context, value: i32) -> i32 { value }
+        /// Returns the given value unchanged.
+        fn ret_i64(&mut context, value: i64) -> i64 { value }
+        /// Returns the given value unchanged.
+        fn ret_f32(&mut context, value: f32) -> f32 { value }
+        /// Returns the given value unchanged.
+        fn ret_f64(&mut context, value: f64) -> f64 { value }
+        /// Returns the given value unchanged.
+        fn ret_bool(&mut context, value: bool) -> bool { value }
+        /// Returns the given value unchanged.
+        fn ret_string(&mut context, value: String) -> String { value }
+        /// Returns the given value as a String.
+        fn ret_str(&mut context, value: str) -> String { value.to_string() }
+    }
+}
+
 /// Key codes exposed to Itsy scripts.
 #[derive(VMValue, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum KeyCode {
@@ -100,253 +359,43 @@ impl KeyCode {
     }
 }
 
-/// Demo context data.
-#[allow(dead_code)]
-pub struct Context {
-    pub seed: f64,
-    pub started: Instant,
-    pub last_frame: Instant,
-    pub args: Vec<String>,
-    pub keys_down: HashSet<KeyCode>,
-    pub modifiers_down: HashSet<ModifierKey>,
-    pub keys_last_seen: std::collections::HashMap<KeyCode, u64>,
-    pub frame_count: u64,
-    pub raw_mode: bool,
-    pub kitty: bool,
+/// Restores the terminal to normal mode.
+fn restore_terminal() {
+    let mut out = stdout();
+
+    // Explicitly disable kitty keyboard protocol.
+    // PopKeyboardEnhancementFlags (\x1b=>) pops the mode stack but does not
+    // guarantee the terminal leaves kitty keyboard mode.  The \x1b[>u sequence
+    // unconditionally disables it, which is what we need so the shell receives
+    // normal escape sequences again.
+    let _ = out.write_all(b"\x1b[>u");
+    let _ = out.flush();
+
+    // Drain any leftover bytes in the tty input buffer.  Without this, partial
+    // kitty escape sequences (e.g. \x1b;1:3u) sitting in the driver buffer are
+    // delivered to the shell when raw mode is disabled.
+    #[cfg(unix)]
+    drain_stdin();
+
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = out.flush();
 }
 
-#[allow(dead_code)]
-impl Context {
-    pub fn new(args: &[ String ]) -> Self {
-        Self {
-            seed: 1.2345,
-            started: Instant::now(),
-            last_frame: Instant::now(),
-            args: args.to_vec(),
-            keys_down: HashSet::new(),
-            modifiers_down: HashSet::new(),
-            keys_last_seen: std::collections::HashMap::new(),
-            frame_count: 0,
-            raw_mode: false,
-            kitty: false,
+/// Drains leftover bytes from stdin.
+///
+/// When the tty is in raw mode, keyboard events arrive as escape sequences.
+/// Any unconsumed bytes left in the driver buffer when raw mode is disabled
+/// are delivered to the next reader (the shell), which misinterprets them.
+#[cfg(unix)]
+fn drain_stdin() {
+    use std::os::fd::AsRawFd;
+    let fd = io::stdin().as_raw_fd();
+    unsafe {
+        // tcflush(TCIFLUSH) discards input that arrived but has not been read.
+        if libc::tcflush(fd, libc::TCIFLUSH) < 0 {
+            // tcflush failed (e.g. fd is not a tty)
+            eprintln!("failed to restore terminal mode!");
         }
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        if self.raw_mode {
-            let _ = crossterm::terminal::disable_raw_mode();
-        }
-    }
-}
-
-itsy_api! {
-    /// Demo API providing some basic functionality
-    pub MyAPI<Context> {
-        /// Prints the given string to standard output.
-        fn print(&mut context, value: String) {
-            print!("{}", value);
-        }
-        /// Prints the given string followed by a newline to standard output.
-        fn println(&mut context, value: String) {
-            println!("{}", value);
-        }
-        /// Flushes standard output.
-        fn flush(&mut context) {
-            io::stdout().flush().unwrap();
-        }
-        /// Returns a (bad) pseudo-random number between 0.0 and non-inclusive 1.0
-        fn random(&mut context) -> f64 {
-            context.seed += 1.0;
-            let large = context.seed.sin() * 100000000.0;
-            large - large.floor()
-        }
-        /// Terminates the process.
-        fn exit(&mut context, code: i32) {
-            std::process::exit(code);
-        }
-        /// Milliseconds since context initialization.
-        fn runtime(&mut context) -> u64 {
-            (Instant::now() - context.started).as_millis() as u64
-        }
-        /// Pauses for the given number of milliseconds.
-        fn sleep(&mut context, milliseconds: u64) {
-            thread::sleep(Duration::from_millis(milliseconds));
-        }
-        /// Pauses for the given number of milliseconds minus the number of milliseconds since the last call.
-        fn wait_frame(&mut context, milliseconds: u64) -> u64 {
-            let already_expired = (Instant::now() - context.last_frame).as_millis() as u64;
-            if already_expired < milliseconds {
-                let remaining = milliseconds - already_expired;
-                thread::sleep(Duration::from_millis(remaining));
-            }
-            context.last_frame = Instant::now();
-            already_expired
-        }
-        /// Returns given argument or empty string. TODO: support array result
-        fn get_arg(&mut context, arg: u64) -> String {
-            context.args.get(arg as usize).cloned().unwrap_or_else(|| "".to_string())
-        }
-        /// Returns whether given argument is present.
-        fn has_arg(&mut context, arg: String) -> bool {
-            context.args.contains(&arg)
-        }
-        /// Compute mandelbrot value for given point.
-        fn fastbrot(&mut context, depth: u32, x: f64, y: f64) -> u32 {
-            let mut n = 0;
-            let mut r = 0.0f64;
-            let mut i = 0.0f64;
-            while n < depth && 4.0 > r * r + i * i {
-                let i_tmp = i * i;
-                i = r * i * 2.0 + y;
-                r = r * r - i_tmp + x;
-                n += 1;
-            }
-            n
-        }
-
-        // Keyboard control for the demos.
-        /// Puts the terminal into raw mode for keyboard input. Returns false if already enabled or on error.
-        fn enable_raw_mode(&mut context) -> bool {
-            if context.raw_mode {
-                false
-            } else if crossterm::terminal::enable_raw_mode().is_err() {
-                false
-            } else {
-                use crossterm::{execute, event::{PushKeyboardEnhancementFlags, KeyboardEnhancementFlags}};
-                let mut out = stdout();
-                let _ = execute!(out, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
-                context.raw_mode = true;
-                true
-            }
-        }
-        /// Restores the terminal to normal (canonical) mode.
-        fn disable_raw_mode(&mut context) {
-            if context.raw_mode {
-                use crossterm::{execute, event::PopKeyboardEnhancementFlags};
-                let mut out = stdout();
-                let _ = execute!(out, PopKeyboardEnhancementFlags);
-                let _ = crossterm::terminal::disable_raw_mode();
-                context.raw_mode = false;
-            }
-        }
-        /// Polls for pending keyboard events and updates internal key state. Call once per frame.
-        /// Returns false if Ctrl+C was pressed (signal to quit).
-        fn update_input(&mut context) -> bool {
-            context.frame_count += 1;
-            let mut ctrl_c = false;
-            let mut keys_this_frame: HashSet<KeyCode> = HashSet::new();
-            use crossterm::event::{poll, read, Event, KeyEventKind, KeyModifiers};
-            while poll(Duration::ZERO).unwrap_or(false) {
-                let event = match read() {
-                    Ok(e) => e,
-                    Err(_) => break,
-                };
-                if let Event::Key(key) = event {
-                    // Ctrl+C => signal to quit
-                    if matches!(key.code, crossterm::event::KeyCode::Char('c'))
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                        ctrl_c = true;
-                        break;
-                    }
-                    match key.kind {
-                        KeyEventKind::Press | KeyEventKind::Repeat => {
-                            if let Some(kc) = KeyCode::from_crossterm(key.code) {
-                                context.keys_down.insert(kc);
-                                keys_this_frame.insert(kc);
-                                context.keys_last_seen.insert(kc, context.frame_count);
-                            }
-                            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                context.modifiers_down.insert(ModifierKey::Shift);
-                            }
-                            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                context.modifiers_down.insert(ModifierKey::Ctrl);
-                            }
-                            if key.modifiers.contains(KeyModifiers::ALT) {
-                                context.modifiers_down.insert(ModifierKey::Alt);
-                            }
-                        }
-                        KeyEventKind::Release => {
-                            context.kitty = true; // we've seen a release event, disable auto release mechanism below
-                            if let Some(kc) = KeyCode::from_crossterm(key.code) {
-                                context.keys_down.remove(&kc);
-                                context.keys_last_seen.remove(&kc);
-                            }
-                        }
-                    }
-                }
-            }
-            // remove keys not seen for too long (handles terminals without Release events)
-            if !context.kitty {
-                let stale = context.keys_last_seen
-                    .iter()
-                    .filter(|&(_, &last)| context.frame_count - last > 2)
-                    .map(|(&kc, _)| kc)
-                    .collect::<HashSet<KeyCode>>();
-                for kc in &stale {
-                    context.keys_down.remove(kc);
-                    context.keys_last_seen.remove(kc);
-                }
-            }
-            !ctrl_c
-        }
-        /// Returns true if the key is currently held down.
-        fn is_key_down(&mut context, keycode: KeyCode) -> bool {
-            context.keys_down.contains(&keycode)
-        }
-        /// Returns true if the key is not currently held down.
-        fn is_key_up(&mut context, keycode: KeyCode) -> bool {
-            !context.keys_down.contains(&keycode)
-        }
-        /// Returns true if the modifier key is currently held down.
-        fn is_modifier_down(&mut context, modifier: ModifierKey) -> bool {
-            context.modifiers_down.contains(&modifier)
-        }
-        /// Returns true if the modifier key is not currently held down.
-        fn is_modifier_up(&mut context, modifier: ModifierKey) -> bool {
-            !context.modifiers_down.contains(&modifier)
-        }
-        /// Returns the terminal width in columns. Falls back to 80 if the query fails.
-        fn terminal_width(&mut context) -> u16 {
-            crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80)
-        }
-        /// Returns the terminal height in rows. Falls back to 24 if the query fails.
-        fn terminal_height(&mut context) -> u16 {
-            crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24)
-        }
-        /// Returns whether the terminal has kitty support (requires a key press first)
-        fn is_kitty(&mut context) -> bool {
-            context.kitty
-        }
-        // Benchmark compatibility methods.
-        /// Returns the given value unchanged.
-        fn ret_u8(&mut context, value: u8) -> u8 { value }
-        /// Returns the given value unchanged.
-        fn ret_u16(&mut context, value: u16) -> u16 { value }
-        /// Returns the given value unchanged.
-        fn ret_u32(&mut context, value: u32) -> u32 { value }
-        /// Returns the given value unchanged.
-        fn ret_u64(&mut context, value: u64) -> u64 { value }
-        /// Returns the given value unchanged.
-        fn ret_i8(&mut context, value: i8) -> i8 { value }
-        /// Returns the given value unchanged.
-        fn ret_i16(&mut context, value: i16) -> i16 { value }
-        /// Returns the given value unchanged.
-        fn ret_i32(&mut context, value: i32) -> i32 { value }
-        /// Returns the given value unchanged.
-        fn ret_i64(&mut context, value: i64) -> i64 { value }
-        /// Returns the given value unchanged.
-        fn ret_f32(&mut context, value: f32) -> f32 { value }
-        /// Returns the given value unchanged.
-        fn ret_f64(&mut context, value: f64) -> f64 { value }
-        /// Returns the given value unchanged.
-        fn ret_bool(&mut context, value: bool) -> bool { value }
-        /// Returns the given value unchanged.
-        fn ret_string(&mut context, value: String) -> String { value }
-        /// Returns the given value as a String.
-        fn ret_str(&mut context, value: str) -> String { value.to_string() }
     }
 }
 
