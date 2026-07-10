@@ -177,6 +177,88 @@ pub trait MetaContainer {
             }
         }
     }
+    /// Recursively unifies two structurally matching types by propagating resolved inner type-ids
+    /// onto their still-unresolved counterpart (in either direction). This lets a fully resolved
+    /// compound type help resolve a partially inferred one, e.g. comparing `[ i32 ]` with `[ ? ]`
+    /// fills in the latter's element type instead of failing the equality check.
+    fn unify_type_ids(self: &mut Self, first_type_id: TypeId, second_type_id: TypeId) {
+        if first_type_id == second_type_id {
+            return;
+        }
+        // unify arrays: propagate known element type onto the unresolved counterpart
+        if let (Some(first_arr), Some(second_arr)) =
+            (self.type_by_id(first_type_id).as_array(), self.type_by_id(second_type_id).as_array())
+        {
+            match (first_arr.type_id, second_arr.type_id) {
+                (Some(a), Some(b)) => self.unify_type_ids(a, b),
+                (Some(a), None) => {
+                    if let Some(arr) = self.type_by_id_mut(second_type_id).as_array_mut() {
+                        arr.type_id = Some(a);
+                    }
+                }
+                (None, Some(b)) => {
+                    if let Some(arr) = self.type_by_id_mut(first_type_id).as_array_mut() {
+                        arr.type_id = Some(b);
+                    }
+                }
+                (None, None) => {},
+            }
+        }
+        // unify maps: propagate known key/value types onto the unresolved counterpart
+        if let (Some(first_map), Some(second_map)) =
+            (self.type_by_id(first_type_id).as_map(), self.type_by_id(second_type_id).as_map())
+        {
+            // Copy inner type ids out before mutating
+            let (first_key, second_key, first_value, second_value) =
+                (first_map.key_type_id, second_map.key_type_id, first_map.value_type_id, second_map.value_type_id);
+            // unify keys
+            match (first_key, second_key) {
+                (Some(a), Some(b)) => self.unify_type_ids(a, b),
+                (Some(a), None) => {
+                    if let Some(m) = self.type_by_id_mut(second_type_id).as_map_mut() {
+                        m.key_type_id = Some(a);
+                    }
+                }
+                (None, Some(b)) => {
+                    if let Some(m) = self.type_by_id_mut(first_type_id).as_map_mut() {
+                        m.key_type_id = Some(b);
+                    }
+                }
+                (None, None) => {},
+            }
+            // unify values
+            match (first_value, second_value) {
+                (Some(a), Some(b)) => self.unify_type_ids(a, b),
+                (Some(a), None) => {
+                    if let Some(m) = self.type_by_id_mut(second_type_id).as_map_mut() {
+                        m.value_type_id = Some(a);
+                    }
+                }
+                (None, Some(b)) => {
+                    if let Some(m) = self.type_by_id_mut(first_type_id).as_map_mut() {
+                        m.value_type_id = Some(b);
+                    }
+                }
+                (None, None) => {},
+            }
+        }
+    }
+    /// Returns whether the type identified by `type_id` contains itself, directly or transitively.
+    fn type_contains_self(self: &Self, type_id: TypeId) -> bool {
+        let mut visited = Set::new();
+        let mut stack = vec![type_id];
+        while let Some(current) = stack.pop() {
+            for next in self.type_by_id(current).contained_type_ids() {
+                if next == type_id {
+                    return true;
+                }
+                if visited.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        false
+    }
     /// Returns a reference to the Binding.
     fn binding_by_id(self: &Self, binding_id: BindingId) -> &Binding;
     /// Returns a mutable reference to the Binding.

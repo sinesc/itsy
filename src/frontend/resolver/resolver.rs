@@ -226,7 +226,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
                 _ => continue,
             };
             if let Some(type_id) = type_id {
-                if type_contains_self(&scopes, type_id) {
+                if scopes.type_contains_self(type_id) {
                     return Err(ResolveError::new(statement, ResolveErrorKind::RecursiveType(name.clone()), &module.path));
                 }
             }
@@ -249,22 +249,6 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         entry_fn        : entry_fn.usr(None, ResolveErrorKind::UndefinedFunction(entry_function.to_string()))?,
         resolved        : scopes.into(),
     })
-}
-
-/// Returns whether the type identified by `start` contains itself, directly or transitively.
-fn type_contains_self(scopes: &scopes::Scopes, start: TypeId) -> bool {
-    fn reaches(scopes: &scopes::Scopes, current: TypeId, start: TypeId, visited: &mut Set<TypeId>) -> bool {
-        for next in scopes.type_ref(current).contained_type_ids() {
-            if next == start {
-                return true;
-            }
-            if visited.insert(next) && reaches(scopes, next, start, visited) {
-                return true;
-            }
-        }
-        false
-    }
-    reaches(scopes, start, start, &mut Set::new())
 }
 
 /// General utility methods.
@@ -517,63 +501,6 @@ impl<'ctx> Resolver<'ctx> {
             self.check_type_equals(item, item_type_id, new_type_id)?;
         }
         item.set_type_id(self, new_type_id);
-        Ok(())
-    }
-
-    /// Recursively unifies two structurally matching types by propagating resolved inner type-ids
-    /// onto their still-unresolved counterpart (in either direction). This lets a fully resolved
-    /// compound type help resolve a partially inferred one, e.g. comparing `[ i32 ]` with `[ ? ]`
-    /// fills in the latter's element type instead of failing the equality check.
-    fn unify_type_ids(self: &mut Self, first_type_id: TypeId, second_type_id: TypeId) -> ResolveResult {
-        if first_type_id == second_type_id {
-            return Ok(());
-        }
-        // unify arrays: propagate known element type onto the unresolved counterpart
-        let inner = match (self.type_by_id(first_type_id).as_array(), self.type_by_id(second_type_id).as_array()) {
-            (Some(first), Some(second)) => Some((first.type_id, second.type_id)),
-            _ => None,
-        };
-        if let Some((first_inner, second_inner)) = inner {
-            match (first_inner, second_inner) {
-                (Some(first_inner), Some(second_inner)) => self.unify_type_ids(first_inner, second_inner)?,
-                (Some(first_inner), None) => self.type_by_id_mut(second_type_id).as_array_mut().ice()?.type_id = Some(first_inner),
-                (None, Some(second_inner)) => self.type_by_id_mut(first_type_id).as_array_mut().ice()?.type_id = Some(second_inner),
-                (None, None) => {},
-            }
-        }
-        // unify maps: propagate known key/value types onto the unresolved counterpart
-        let map_inner = match (self.type_by_id(first_type_id).as_map(), self.type_by_id(second_type_id).as_map()) {
-            (Some(first), Some(second)) => Some((first.key_type_id, second.key_type_id, first.value_type_id, second.value_type_id)),
-            _ => None,
-        };
-        if let Some((first_key, second_key, first_value, second_value)) = map_inner {
-            // unify keys
-            match (first_key, second_key) {
-                (Some(fk), Some(sk)) => self.unify_type_ids(fk, sk)?,
-                (Some(fk), None) => {
-                    let map_ty = self.type_by_id_mut(second_type_id).as_map_mut().ice()?;
-                    map_ty.key_type_id = Some(fk);
-                },
-                (None, Some(sk)) => {
-                    let map_ty = self.type_by_id_mut(first_type_id).as_map_mut().ice()?;
-                    map_ty.key_type_id = Some(sk);
-                },
-                (None, None) => {},
-            }
-            // unify values
-            match (first_value, second_value) {
-                (Some(fv), Some(sv)) => self.unify_type_ids(fv, sv)?,
-                (Some(fv), None) => {
-                    let map_ty = self.type_by_id_mut(second_type_id).as_map_mut().ice()?;
-                    map_ty.value_type_id = Some(fv);
-                },
-                (None, Some(sv)) => {
-                    let map_ty = self.type_by_id_mut(first_type_id).as_map_mut().ice()?;
-                    map_ty.value_type_id = Some(sv);
-                },
-                (None, None) => {},
-            }
-        }
         Ok(())
     }
 
@@ -1732,7 +1659,7 @@ impl<'ctx> Resolver<'ctx> {
         } else if let (Some(item_type_id), Some(expected_result)) = (item.type_id(self), expected_result) {
             // the binding already carries a (possibly only partially inferred) type: complete its
             // inner types from the expected type instead of failing the check in types_resolved
-            self.unify_type_ids(item_type_id, expected_result)?;
+            self.unify_type_ids(item_type_id, expected_result);
         }
         self.types_resolved(item, expected_result)
     }
@@ -1889,7 +1816,7 @@ impl<'ctx> Resolver<'ctx> {
                     match reference_type_id {
                         None => reference_type_id = Some(block_type_id),
                         Some(reference_type_id) => {
-                            self.unify_type_ids(reference_type_id, block_type_id)?;
+                            self.unify_type_ids(reference_type_id, block_type_id);
                             if self.type_id_complete(reference_type_id) && self.type_id_complete(block_type_id) {
                                 self.check_type_accepted_for(block, block_type_id, reference_type_id)?;
                             }
@@ -2361,7 +2288,7 @@ impl<'ctx> Resolver<'ctx> {
                 // propagate inner types between operands so a partially inferred compound type
                 // (e.g. `[ ? ]`) is completed from the other side before the equality check below
                 if let (Some(left_type_id), Some(right_type_id)) = (left_type_id, right_type_id) {
-                    self.unify_type_ids(left_type_id, right_type_id)?;
+                    self.unify_type_ids(left_type_id, right_type_id);
                 }
                 if let Some(common_type_id) = left_type_id.or(right_type_id) {
                     self.set_type_id(item.left.as_expression_mut().ice()?, common_type_id)?;
