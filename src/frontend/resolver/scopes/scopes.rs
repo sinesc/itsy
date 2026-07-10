@@ -45,7 +45,7 @@ impl Scopes {
         Scopes {
             aliases         : UnorderedMap::new(),
             types           : Repository::new(),
-            bindings        : binding_map.into_iter().map(|binding_id| (binding_id, Binding { mutable: true, type_id: None })).collect(),
+            bindings        : binding_map.into_iter().map(|binding_id| (binding_id, Binding { mutable: true, type_id: None, from_const: false })).collect(),
             constants       : Repository::new(),
             functions       : Vec::new(),
             scopefunction   : UnorderedMap::new(),
@@ -120,7 +120,7 @@ impl Scopes {
         };
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
         let function_id = FunctionId::from(self.functions.len());
-        self.functions.push(Function { callable_type_id: signature_type_id, kind });
+        self.functions.push(Function { callable_type_id: signature_type_id, kind, mutated_params: Set::new() });
         self.insert_constant(name, type_id, Some(signature_type_id), ConstantValue::Function(function_id))
     }
 
@@ -128,7 +128,7 @@ impl Scopes {
     pub fn insert_closure(self: &mut Self, result_type_id: Option<TypeId>, arg_type_ids: Vec<Option<TypeId>>) -> FunctionId {
         let signature_type_id = self.insert_anonymous_type(true, Type::Callable(Callable { ret_type_id: result_type_id, arg_type_ids }));
         let function_id = FunctionId::from(self.functions.len());
-        self.functions.push(Function { callable_type_id: signature_type_id, kind: Some(FunctionKind::Function) });
+        self.functions.push(Function { callable_type_id: signature_type_id, kind: Some(FunctionKind::Function), mutated_params: Set::new() });
         function_id
     }
 

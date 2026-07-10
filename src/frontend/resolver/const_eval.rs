@@ -6,7 +6,7 @@ use crate::frontend::resolver::error::{OptionToResolveError, ResolveError, Resol
 use crate::frontend::walker::{AstVisitor, AstVisitorMut};
 use crate::shared::meta::{ConstantValue, Type, UserConstValue};
 use crate::shared::numeric::Numeric;
-use crate::shared::typed_ids::{ConstantId, TypeId};
+use crate::shared::typed_ids::{BindingId, ConstantId, TypeId};
 use crate::shared::MetaContainer;
 
 use super::Resolver;
@@ -52,6 +52,56 @@ impl<'a, 'ast> AstVisitorMut<'ast> for ConstRefPatcher<'a> {
     }
 }
 
+/// Visitor that collects `BindingId`s mutated by assignments in a function body.
+struct MutationCollector<'a> {
+    candidate_ids: &'a Set<BindingId>,
+    mutated: Set<BindingId>,
+}
+
+impl<'a, 'ast> AstVisitor<'ast> for MutationCollector<'a> {
+    fn visit_statement(&mut self, stmt: &'ast ast::Statement) -> bool {
+        // Only recurse into statement types that can contain expressions with assignments
+        matches!(stmt,
+            ast::Statement::Expression(_)
+            | ast::Statement::Return(_)
+            | ast::Statement::Block(_)
+            | ast::Statement::IfBlock(_)
+            | ast::Statement::ForLoop(_)
+            | ast::Statement::WhileLoop(_)
+            | ast::Statement::Function(_)
+        )
+    }
+
+    fn visit_expression(&mut self, expr: &'ast ast::Expression) -> bool {
+        if let ast::Expression::Assignment(a) = expr {
+            if let Some(root_id) = extract_root_binding_id(&a.left) {
+                if self.candidate_ids.contains(&root_id) {
+                    self.mutated.insert(root_id);
+                }
+            }
+        }
+        true // keep walking
+    }
+}
+
+/// Extract the root `BindingId` from an assignment LHS expression.
+/// Handles plain variables, field access (`x.field`), and index access (`x[i]`).
+pub(crate) fn extract_root_binding_id(expr: &ast::Expression) -> Option<BindingId> {
+    match expr {
+        ast::Expression::Variable(v) => Some(v.binding_id),
+        ast::Expression::BinaryOp(bo) => {
+            if matches!(bo.op, ast::BinaryOperator::Access | ast::BinaryOperator::AccessWrite | ast::BinaryOperator::Index | ast::BinaryOperator::IndexWrite) {
+                if let ast::BinaryOperand::Expression(ref left) = bo.left {
+                    return extract_root_binding_id(left);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Const-related resolver methods.
 impl<'ctx> Resolver<'ctx> {
     /// Returns whether a const expression is valid: every sub-expression is a literal, const reference, supported binary op, or cast.
     pub(crate) fn is_const_expr(self: &Self, expr: &ast::Expression) -> bool {
@@ -379,4 +429,108 @@ impl<'ctx> Resolver<'ctx> {
         let mut patcher = ConstRefPatcher { replacements };
         patcher.walk_block(block);
     }
+
+    /// Walk the receiver chain of an expression looking for user const references
+    /// or const-derived variable bindings. Returns the first const/const-derived name found, or None.
+    ///
+    /// Only walks the receiver/base of each access operation. The index/key side of `[]` is NOT
+    /// part of the receiver chain. For example, `arr[MY_INDEX] = value` should be allowed
+    /// (`MY_INDEX` is used as an offset, not mutated), but `MY_CONST[i] = value` should be rejected.
+    pub(crate) fn find_const_in_receiver_chain(self: &Self, expr: &ast::Expression) -> Option<String> {
+        use ast::{Expression, BinaryOperand};
+        match expr {
+            Expression::Constant(c) => {
+                if let Some(constant_id) = c.constant_id {
+                    let constant = self.scopes.constant_ref(constant_id);
+                    if matches!(constant.value, ConstantValue::UserConst(_)) {
+                        // Extract the const name from the path
+                        if let Some(segment) = c.path.segments.last() {
+                            return Some(segment.name.clone());
+                        }
+                    }
+                }
+                None
+            }
+            Expression::Variable(v) => {
+                let binding = self.scopes.binding_ref(v.binding_id);
+                if binding.from_const {
+                    return Some(v.ident.name.clone());
+                }
+                None
+            }
+            Expression::BinaryOp(bo) => {
+                match bo.op {
+                    // For access/index operations, only recurse into the left (receiver) side
+                    ast::BinaryOperator::Index
+                    | ast::BinaryOperator::IndexWrite
+                    | ast::BinaryOperator::Access
+                    | ast::BinaryOperator::AccessWrite => {
+                        if let BinaryOperand::Expression(ref left) = bo.left {
+                            self.find_const_in_receiver_chain(left)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None, // other operators shouldn't appear in receiver chains
+                }
+            }
+            Expression::UnaryOp(u) => self.find_const_in_receiver_chain(&u.expr),
+            Expression::Cast(c) => self.find_const_in_receiver_chain(&c.expr),
+            _ => None,
+        }
+    }
+
+    /// Check if an expression's receiver chain references a user const.
+    /// Used for setting the `from_const` flag on let bindings.
+    pub(crate) fn expr_references_user_const(self: &Self, expr: &ast::Expression) -> bool {
+        use ast::{Expression, BinaryOperand};
+        match expr {
+            Expression::Constant(c) => {
+                if let Some(constant_id) = c.constant_id {
+                    let constant = self.scopes.constant_ref(constant_id);
+                    matches!(constant.value, ConstantValue::UserConst(_))
+                } else {
+                    false
+                }
+            }
+            Expression::Variable(v) => self.scopes.binding_ref(v.binding_id).from_const,
+            Expression::BinaryOp(bo) => {
+                match bo.op {
+                    ast::BinaryOperator::Index
+                    | ast::BinaryOperator::Access => {
+                        if let BinaryOperand::Expression(ref left) = bo.left {
+                            self.expr_references_user_const(left)
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                }
+            }
+            Expression::UnaryOp(u) => self.expr_references_user_const(&u.expr),
+            Expression::Cast(c) => self.expr_references_user_const(&c.expr),
+            _ => false,
+        }
+    }
+
+    /// Set of method names that mutate their receiver.
+    pub(crate) fn is_mutating_method(name: &str) -> bool {
+        matches!(name,
+            // Array mutating methods
+            "push" | "pop" | "truncate" | "insert" | "remove" | "reverse" | "clear" | "swap" | "resize" | "swap_remove"
+            // Index trait mutating method
+            | "set"
+        )
+    }
+
+    /// Walk a function body and collect the parameter indices whose bindings are mutation targets.
+    pub(crate) fn collect_mutated_param_indices(self: &Self, block: &ast::Block, param_binding_ids: &[BindingId]) -> Set<usize> {
+        let param_set: Set<BindingId> = param_binding_ids.iter().copied().collect();
+        let mut collector = MutationCollector { candidate_ids: &param_set, mutated: Set::new() };
+        collector.walk_block(block);
+        param_binding_ids.iter().enumerate()
+            .filter_map(|(idx, bid)| if collector.mutated.contains(bid) { Some(idx) } else { None })
+            .collect()
+    }
 }
+

@@ -25,7 +25,6 @@ use crate::bytecode::{VMFunc, builtins::builtin_types};
 use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, OrderingInfo, register_intrinsics};
 use crate::frontend::resolver::type_synthesis::{ResultTypeInfo, OptionTypeInfo};
 
-
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
     /// Resolution stage.
@@ -1546,6 +1545,11 @@ impl<'ctx> Resolver<'ctx> {
             item.function_id = Some(function_id);
             self.scopes.scope_set_function_id(self.scope_id, function_id);
         }
+        // Collect which parameters are mutated in the body
+        let function_id = item.function_id.ice()?;
+        let param_binding_ids: Vec<BindingId> = item.shared.sig.params.iter().map(|p| p.binding_id).collect();
+        let mutated = self.collect_mutated_param_indices(item.shared.block.as_ref().ice()?, &param_binding_ids);
+        self.scopes.function_mut(function_id).mutated_params = mutated;
 
         self.scope_id = parent_scope_id;
 
@@ -1602,6 +1606,10 @@ impl<'ctx> Resolver<'ctx> {
             let ret_type = self.scopes.function_ref(function_id).ret_type_id(self);
             if let Some(block) = &mut item.shared.block {
                 self.resolve_block(block, ret_type)?;
+                // Collect which parameters are mutated in the body
+                let param_binding_ids: Vec<BindingId> = item.shared.sig.params.iter().map(|p| p.binding_id).collect();
+                let mutated = self.collect_mutated_param_indices(block, &param_binding_ids);
+                self.scopes.function_mut(function_id).mutated_params = mutated;
             }
         }
         self.scope_id = parent_scope_id;
@@ -2191,6 +2199,11 @@ impl<'ctx> Resolver<'ctx> {
         // "expected <target>, got <value>"; resolving the target against the value's type instead (the
         // reverse) would name the operands the wrong way round for an assignment.
         self.resolve_expression(&mut assignment.left, None)?;
+        // Check if the assignment target references a user const or const-derived binding.
+        // This check runs AFTER resolving the left side so that constant_id is set on const references.
+        if let Some(const_name) = self.find_const_in_receiver_chain(&assignment.left) {
+            return Err(ResolveError::new(item, ResolveErrorKind::AssignToConst(const_name), self.module_path));
+        }
         let left_type_id = assignment.left.type_id(self);
 
         // classify compound assignment once the target type is known. Numeric/string targets for arithmetic,
@@ -2214,6 +2227,12 @@ impl<'ctx> Resolver<'ctx> {
                     Some(left_type_id) // Self
                 };
                 self.resolve_expression(&mut assignment.right, rhs_expected)?;
+                // Propagate from_const to the assignment target if RHS references a user const
+                if self.expr_references_user_const(&assignment.right) {
+                    if let Some(target_binding_id) = const_eval::extract_root_binding_id(&assignment.left) {
+                        self.scopes.binding_mut(target_binding_id).from_const = true;
+                    }
+                }
                 if let Some(right_type_id) = assignment.right.type_id(self) {
                     if !matches!(base_op, Shl | Shr) {
                         self.check_type_accepted_for(assignment, right_type_id, left_type_id)?; // rhs must be Self
@@ -2231,6 +2250,12 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
         self.resolve_expression(&mut assignment.right, if shift_assign { None } else { left_type_id })?;
+        // Propagate from_const to the assignment target if RHS references a user const
+        if self.expr_references_user_const(&assignment.right) {
+            if let Some(target_binding_id) = const_eval::extract_root_binding_id(&assignment.left) {
+                self.scopes.binding_mut(target_binding_id).from_const = true;
+            }
+        }
         let right_type_id = assignment.right.type_id(self);
         // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
         // untyped array's element type, or an uninitialized binding learned from what is assigned to it)
@@ -2712,11 +2737,30 @@ impl<'ctx> Resolver<'ctx> {
                 let call_func = item.left.as_expression_mut().ice()?;
                 self.resolve_expression(call_func, None)?;
                 let call_args = item.right.as_argument_list_mut().ice()?;
+                // Check for mutating method calls on const receivers BEFORE the method call rewrite,
+                // because after the rewrite the Access is replaced with a Constant and the receiver
+                // is moved to the argument list, making the check impossible.
+                let mutating_on_const = if let Some(binary_op) = call_func.as_binary_op()
+                    && binary_op.op == ast::BinaryOperator::Access
+                    && let Some(member) = binary_op.right.as_member()
+                    && Self::is_mutating_method(&member.ident.name)
+                    && let ast::BinaryOperand::Expression(ref receiver) = binary_op.left
+                    && let Some(const_name) = self.find_const_in_receiver_chain(receiver)
+                {
+                    Some((const_name, member.ident.name.clone()))
+                } else {
+                    None
+                };
+                if let Some((const_name, method_name)) = mutating_on_const {
+                    return Err(ResolveError::new(item, ResolveErrorKind::MutateConst(const_name, method_name), self.module_path));
+                }
                 // an array builtin like `arr.push(x)` can't resolve while the array's element type is
                 // unknown, but for `push`/`insert` that type is exactly what the value argument supplies.
                 self.try_infer_array_element_from_builtin_args(call_func, call_args)?;
                 self.try_infer_map_types_from_builtin_args(call_func, call_args)?;
                 self.rewrite_method_call_to_constant_call(call_func, call_args)?;
+                // Extract callee constant_id after method-call rewrite (callee is now a Constant)
+                let callee_constant_id = call_func.as_constant().and_then(|c| c.constant_id);
                 let num_args = call_args.args.len();
                 // set return type from signature
                 if let Some(function_type_id) = call_func.type_id(self) {
@@ -2778,6 +2822,27 @@ impl<'ctx> Resolver<'ctx> {
                             self.check_type_accepted_for(&arguments.args[index], actual_type_id, expected_type_id)?;
                         }
                     }
+                    // Check if any from_const argument is passed to a mutating parameter
+                    if let Some(call_const_id) = callee_constant_id {
+                        if let Some(callee_func_id) = self.scopes.constant_function_id(call_const_id) {
+                            let callee = self.scopes.function_ref(callee_func_id);
+                            if !callee.mutated_params.is_empty() {
+                                let arguments = item.right.as_argument_list().ice()?;
+                                for (arg_index, arg_expr) in arguments.args.iter().enumerate() {
+                                    if callee.mutated_params.contains(&arg_index)
+                                        && self.expr_references_user_const(arg_expr)
+                                    {
+                                        let func_name = item.left.as_expression().ice()?.as_constant().ice()?.path.to_string(0);
+                                        return Err(ResolveError::new(
+                                            item,
+                                            ResolveErrorKind::ConstArgToMutatingParam(func_name, arg_index),
+                                            self.module_path,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 // if we expect the result to be of a particular type, set it now // TODO move above inference block, fix borrow issue
                 if let Some(expected_result) = expected_result {
@@ -2823,6 +2888,14 @@ impl<'ctx> Resolver<'ctx> {
                 self.set_type_id(item, expr_type_id)?;
             }
         };
+        // Track whether this binding was initialized from a user const expression.
+        // This lets us reject mutation of const-derived data through variable bindings.
+        // Done after the block above so that mutable borrows of item.expr have ended.
+        if let Some(expr) = &item.expr {
+            if self.expr_references_user_const(expr) {
+                self.scopes.binding_mut(item.binding_id).from_const = true;
+            }
+        }
 
         // check binding is resolved. Resolvable (via resolved_or_err) does not do this for us. (TODO/FIXME)
         if self.stage.must_resolve() {

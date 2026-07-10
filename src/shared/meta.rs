@@ -8,6 +8,9 @@ use crate::bytecode::builtins::BuiltinType;
 pub struct Binding {
     pub mutable: bool,
     pub type_id: Option<TypeId>,
+    /// Whether this binding was initialized from a user const expression (e.g. `let x = MY_CONST`).
+    /// Used to reject mutation of const-derived data through variable bindings.
+    pub from_const: bool,
 }
 
 /// Value of a user-defined `const` declaration.
@@ -207,6 +210,8 @@ impl Callable {
 pub struct Function {
     pub kind                : Option<FunctionKind>,
     pub callable_type_id    : TypeId,
+    /// Indices of parameters that are mutated in the function body.
+    pub mutated_params      : Set<usize>,
 }
 
 impl Function {
