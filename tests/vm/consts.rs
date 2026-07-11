@@ -1467,3 +1467,15 @@ fn const_arg_method_self_not_mutated() {
     ));
     assert_all(&result, &[42u32]);
 }
+
+#[test]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
+fn const_arg_method_call_mutated_via_push() {
+    // Mutation via method call (push) on a parameter, not via assignment
+    run(stringify!(
+        struct S { val: u8 }
+        const C = [ S { val: 1 } ];
+        fn f(a: [ S ]) { a.push(S { val: 7 }); }
+        fn main() { f(C); }
+    ));
+}

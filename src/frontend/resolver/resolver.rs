@@ -1523,11 +1523,14 @@ impl<'ctx> Resolver<'ctx> {
             let function_id = self.scopes.constant_function_id(constant_id).ice()?;
             let ret_type = self.scopes.function_ref(function_id).ret_type_id(self);
             if let Some(block) = &mut item.shared.block {
-                self.resolve_block(block, ret_type)?;
-                // Collect which parameters are mutated in the body
+                // Collect which parameters are mutated BEFORE resolve_block,
+                // because method calls are rewritten (Access -> Constant) during resolution
+                // and the MutationCollector needs the original AST structure.
                 let param_binding_ids: Vec<BindingId> = item.shared.sig.params.iter().map(|p| p.binding_id).collect();
                 let mutated = self.collect_mutated_param_indices(block, &param_binding_ids);
                 self.scopes.function_mut(function_id).mutated_params = mutated;
+
+                self.resolve_block(block, ret_type)?;
             }
         }
         self.scope_id = parent_scope_id;

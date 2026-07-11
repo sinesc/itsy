@@ -80,6 +80,23 @@ impl<'a, 'ast> AstVisitor<'ast> for MutationCollector<'a> {
                 }
             }
         }
+        // Also detect mutating method calls on parameter bindings (e.g. `v.push(...)`, `v.set(...)`)
+        if let ast::Expression::BinaryOp(bo) = expr {
+            if bo.right.as_argument_list().is_some()
+                && let ast::BinaryOperand::Expression(ref call_func) = bo.left
+                && let ast::Expression::BinaryOp(access) = call_func
+                && access.op == ast::BinaryOperator::Access
+                && let ast::BinaryOperand::Member(ref member) = access.right
+                && Resolver::is_mutating_method(&member.ident.name)
+                && let ast::BinaryOperand::Expression(ref receiver) = access.left
+            {
+                if let Some(root_id) = extract_root_binding_id(receiver) {
+                    if self.candidate_ids.contains(&root_id) {
+                        self.mutated.insert(root_id);
+                    }
+                }
+            }
+        }
         true // keep walking
     }
 }
