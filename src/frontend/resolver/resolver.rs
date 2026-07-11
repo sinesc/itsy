@@ -254,6 +254,16 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 /// General utility methods.
 impl<'ctx> Resolver<'ctx> {
 
+    /// Insert a resolved builtin function signature into the root scope.
+    fn insert_builtin_fn(self: &mut Self, name: &str, type_id: TypeId, builtin_type: crate::bytecode::builtins::BuiltinType, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> ConstantId {
+        self.scopes.insert_function(
+            name,
+            Some(result_type_id),
+            arg_type_ids.into_iter().map(Some).collect(),
+            Some(FunctionKind::Builtin(type_id, builtin_type)),
+        )
+    }
+
     /// Try to create concrete array builtin function signature for the given array type
     fn try_create_array_builtin(self: &mut Self, item: &ast::Expression, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
 
@@ -266,12 +276,7 @@ impl<'ctx> Resolver<'ctx> {
             Ok(match builtin_types::Array::resolve(self, name, type_id, element_type_id) {
                 None => None,
                 Some((builtin_type, result_type_id, arg_type_ids)) => {
-                    Some(self.scopes.insert_function(
-                        name,
-                        Some(result_type_id),
-                        arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
-                        Some(FunctionKind::Builtin(type_id, builtin_type))
-                    ))
+                    Some(self.insert_builtin_fn(name, type_id, builtin_type, result_type_id, arg_type_ids))
                 },
             })
         } else if self.stage.must_resolve() {
@@ -302,12 +307,7 @@ impl<'ctx> Resolver<'ctx> {
         Ok(match builtin_types::Map::resolve(self, name, type_id, Some(key_type_id)) {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
-                Some(self.scopes.insert_function(
-                    name,
-                    Some(result_type_id),
-                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::Builtin(type_id, builtin_type))
-                ))
+                Some(self.insert_builtin_fn(name, type_id, builtin_type, result_type_id, arg_type_ids))
             },
         })
     }
@@ -325,12 +325,7 @@ impl<'ctx> Resolver<'ctx> {
         Ok(match builtin_types::Generator::resolve(self, name, type_id, Some(type_id)) {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
-                Some(self.scopes.insert_function(
-                    name,
-                    Some(result_type_id),
-                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::Builtin(type_id, builtin_type))
-                ))
+                Some(self.insert_builtin_fn(name, type_id, builtin_type, result_type_id, arg_type_ids))
             },
         })
     }
@@ -352,12 +347,7 @@ impl<'ctx> Resolver<'ctx> {
         Ok(match resolved {
             None => None,
             Some((builtin_type, result_type_id, arg_type_ids)) => {
-                Some(self.scopes.insert_function(
-                    name,
-                    Some(result_type_id),
-                    arg_type_ids.iter().map(|id| Some(*id)).collect::<Vec<Option<TypeId>>>(),
-                    Some(FunctionKind::Builtin(type_id, builtin_type))
-                ))
+                Some(self.insert_builtin_fn(name, type_id, builtin_type, result_type_id, arg_type_ids))
             },
         })
     }
