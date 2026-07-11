@@ -352,7 +352,7 @@ impl<'ctx> Resolver<'ctx> {
         })
     }
 
-    /// Creates an Array<T> type and returns its TypeId.
+    /// Creates an Array<T> type and returns its TypeId. Used by impl_builtins macro.
     pub(crate) fn create_array_type(self: &mut Self, element_type_id: TypeId) -> TypeId {
         use crate::shared::meta::Array;
         self.scopes.insert_type(None, Type::Array(Array { type_id: Some(element_type_id) }))
@@ -2945,12 +2945,10 @@ impl<'ctx> Resolver<'ctx> {
     fn resolve_struct_literal(self: &mut Self, item: &mut ast::Literal) -> ResolveResult {
 
         // resolve type from name
-
         let type_name = item.type_name.as_mut().ice()?;
         let type_id = self.resolve_type_name(type_name, None)?;
 
         // resolve fields from field definition
-
         if let Some(type_id) = type_id {
             self.set_type_id(item, type_id)?;
             let struct_def = self.type_by_id(type_id).as_struct().usr(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()))?.clone();
@@ -2972,15 +2970,9 @@ impl<'ctx> Resolver<'ctx> {
 
         let mut elements_type_id = None;
 
-        // apply expected type if known. if we already have a known type, set_type_id will check that it matches the one we're trying to set
+        // apply expected type if known
         if let Some(expected_type_id) = expected_type_id {
-            if self.type_by_id(expected_type_id).as_array().is_some() {
-                self.set_type_id(item, expected_type_id)?;
-            } else {
-                let expected_name = self.type_name(expected_type_id);
-                let received_name = if let Some(type_id) = item.type_id { self.type_name(type_id) } else { "?".to_string() };
-                return Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(received_name, expected_name), self.module_path));
-            }
+            self.validate_expected_container_type(item, expected_type_id, |ty| ty.as_array().is_some())?;
         }
 
         // if we have a type for the array, check if we also have an inner type. if so we want to apply it to all contained literals later.
@@ -3010,20 +3002,12 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
 
-        // if we don't yet have one, create type based on the inner type, otherwise check types all match
+        // synthesize the type if not yet created, otherwise propagate the inferred element type
         if type_id.is_none() {
-            let new_type_id = self.scopes.insert_type(None, Type::Array(Array {
-                type_id : elements_type_id,
-            }));
+            let new_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: elements_type_id }));
             item.set_type_id(self, new_type_id);
         } else if let Some(elements_type_id) = elements_type_id {
-            let array_type_id = item.type_id(self).ice()?;
-            let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().ice()?;
-            if let Some(current_element_type_id) = array_ty.type_id {
-                self.check_type_accepted_for(item, current_element_type_id, elements_type_id)?;
-            } else {
-                array_ty.type_id = Some(elements_type_id);
-            }
+            self.update_array_element_type(item, elements_type_id)?;
         }
 
         self.types_resolved(item, expected_type_id)
@@ -3037,13 +3021,7 @@ impl<'ctx> Resolver<'ctx> {
 
         // apply expected type if known
         if let Some(expected_type_id) = expected_type_id {
-            if self.type_by_id(expected_type_id).as_map().is_some() {
-                self.set_type_id(item, expected_type_id)?;
-            } else {
-                let expected_name = self.type_name(expected_type_id);
-                let received_name = if let Some(type_id) = item.type_id { self.type_name(type_id) } else { "?".to_string() };
-                return Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(received_name, expected_name), self.module_path));
-            }
+            self.validate_expected_container_type(item, expected_type_id, |ty| ty.as_map().is_some())?;
         }
 
         // if we have a type for the map, pick up its known key/value types to apply to the entries
@@ -3077,27 +3055,12 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
 
-        // create the map type if we don't have one yet, otherwise propagate inferred key/value types
+        // synthesize the type if not yet created, otherwise propagate the inferred key/value types
         if type_id.is_none() {
-            let new_type_id = self.scopes.insert_type(None, Type::Map(MapType {
-                key_type_id,
-                value_type_id,
-            }));
+            let new_type_id = self.scopes.insert_type(None, Type::Map(MapType { key_type_id, value_type_id }));
             item.set_type_id(self, new_type_id);
         } else {
-            let map_type_id = item.type_id(self).ice()?;
-            if let Some(key_type_id) = key_type_id {
-                let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
-                if map_ty.key_type_id.is_none() {
-                    map_ty.key_type_id = Some(key_type_id);
-                }
-            }
-            if let Some(value_type_id) = value_type_id {
-                let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
-                if map_ty.value_type_id.is_none() {
-                    map_ty.value_type_id = Some(value_type_id);
-                }
-            }
+            self.update_map_types(item, key_type_id, value_type_id)?;
         }
 
         self.types_resolved(item, expected_type_id)

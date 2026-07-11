@@ -249,4 +249,45 @@ impl<'ctx> Resolver<'ctx> {
         }
         Ok(())
     }
+
+    /// Validate that `expected_type_id` matches the container kind, and apply it to `item`.
+    pub(super) fn validate_expected_container_type(self: &mut Self, item: &mut ast::Literal, expected_type_id: TypeId, is_container: impl FnOnce(&Type) -> bool) -> ResolveResult<()> {
+        if is_container(self.type_by_id(expected_type_id)) {
+            self.set_type_id(item, expected_type_id)
+        } else {
+            let expected_name = self.type_name(expected_type_id);
+            let received_name = if let Some(type_id) = item.type_id { self.type_name(type_id) } else { "?".to_string() };
+            Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(received_name, expected_name), self.module_path))
+        }
+    }
+
+    /// Propagate an inferred element type into an existing array type, checking compatibility.
+    pub(super) fn update_array_element_type(self: &mut Self, item: &mut ast::Literal, elements_type_id: TypeId) -> ResolveResult<()> {
+        let array_type_id = item.type_id(self).ice()?;
+        let array_ty = self.type_by_id_mut(array_type_id).as_array_mut().ice()?;
+        if let Some(current_element_type_id) = array_ty.type_id {
+            self.check_type_accepted_for(item, current_element_type_id, elements_type_id)?;
+        } else {
+            array_ty.type_id = Some(elements_type_id);
+        }
+        Ok(())
+    }
+
+    /// Propagate inferred key/value types into an existing map type.
+    pub(super) fn update_map_types(self: &mut Self, item: &mut ast::Literal, key_type_id: Option<TypeId>, value_type_id: Option<TypeId>) -> ResolveResult<()> {
+        let map_type_id = item.type_id(self).ice()?;
+        if let Some(key_type_id) = key_type_id {
+            let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
+            if map_ty.key_type_id.is_none() {
+                map_ty.key_type_id = Some(key_type_id);
+            }
+        }
+        if let Some(value_type_id) = value_type_id {
+            let map_ty = self.type_by_id_mut(map_type_id).as_map_mut().ice()?;
+            if map_ty.value_type_id.is_none() {
+                map_ty.value_type_id = Some(value_type_id);
+            }
+        }
+        Ok(())
+    }
 }
