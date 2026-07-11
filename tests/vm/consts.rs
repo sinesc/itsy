@@ -1376,7 +1376,7 @@ fn const_mutation_conditional_assign_else() {
 // =============================================================================
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to parameter")]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
 fn const_arg_mutating_param_field() {
     run(stringify!(
         struct S { val: u8 }
@@ -1387,7 +1387,7 @@ fn const_arg_mutating_param_field() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to parameter")]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
 fn const_arg_mutating_param_nested_field() {
     run(stringify!(
         struct Inner { val: u8 }
@@ -1399,7 +1399,7 @@ fn const_arg_mutating_param_nested_field() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to parameter")]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
 fn const_arg_mutating_param_compound_assign() {
     run(stringify!(
         struct S { val: u32 }
@@ -1421,7 +1421,7 @@ fn const_arg_nonmutating_param() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to parameter")]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
 fn const_arg_multi_param_first_mutated() {
     run(stringify!(
         struct S { val: u8 }
@@ -1443,7 +1443,7 @@ fn const_arg_multi_param_second_not_mutated() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to parameter")]
+#[should_panic(expected = "Cannot pass const value to mutating parameter")]
 fn const_arg_method_self_mutated() {
     run(stringify!(
         struct S { val: u8 }

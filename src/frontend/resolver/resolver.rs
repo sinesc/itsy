@@ -1672,8 +1672,7 @@ impl<'ctx> Resolver<'ctx> {
         }
         // resolve constant
         if item.constant_id.is_none() {
-            // Resolve `Self` alias for the first path segment so that `Self::CONST` resolves to
-            // `TypeName::CONST` which matches how impl/trait consts are stored.
+            // Resolve `Self` alias for the first path segment so that `Self::CONST` resolves to `TypeName::CONST`.
             let resolved_segments: Vec<String> = item.path.segments.iter().enumerate().map(|(i, seg)| {
                 if i == 0 {
                     self.scopes.alias(self.scope_id, &seg.name)
@@ -1684,7 +1683,8 @@ impl<'ctx> Resolver<'ctx> {
                 }
             }).collect();
             let path = self.make_path(&resolved_segments);
-            // Try VOID first (module-level consts), then try the type's own id (impl block consts)
+
+            // try module-level consts, then try the type's own id (impl block consts)
             item.constant_id = self.scopes.constant_id(self.scope_id, &path, TypeId::VOID);
             if item.constant_id.is_none() && resolved_segments.len() >= 2 {
                 // For `TypeName::CONST`, also try looking up with the type as the owner
@@ -1693,15 +1693,14 @@ impl<'ctx> Resolver<'ctx> {
                 }
             }
 
-            // If not found and the path has 2+ segments (e.g., `Self::CONST` in a trait impl),
-            // try trait-default fallback: look up the const in the trait's provided consts.
+            // look up the const in the a trait's provided consts
             if item.constant_id.is_none() && item.path.segments.len() >= 2 {
                 if let Some(trait_const_id) = self.try_resolve_trait_const_default(&resolved_segments) {
                     item.constant_id = Some(trait_const_id);
                 }
             }
 
-            // builtin function
+            // check builtin functions
             if item.constant_id.is_none() && item.path.segments.len() == 2 {
                 if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.segments[0]) {
                     if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.segments[1].name, type_id)? {
@@ -1709,15 +1708,17 @@ impl<'ctx> Resolver<'ctx> {
                     }
                 }
             }
-            if item.constant_id.is_none() {
+
+            // handle specialcase None constant
+            if item.constant_id.is_none() && item.path.segments.len() == 1 && item.path.segments[0].name == "None" {
                 // bare `None` is the unit variant of a synthesized `Option<T>`; bind it once the expected
                 // Option type is known (`return None`, `let x: Option<_> = None`, match arm bodies, ...)
-                if item.constant_id.is_none() && item.path.segments.len() == 1 && item.path.segments[0].name == "None" {
-                    if let Some(option_type_id) = expected_result.filter(|t| self.option_types.contains_key(t)) {
-                        item.constant_id = Some(self.option_types.get(&option_type_id).ice()?.none_constant);
-                    }
+                if let Some(option_type_id) = expected_result.filter(|t| self.option_types.contains_key(t)) {
+                    item.constant_id = Some(self.option_types.get(&option_type_id).ice()?.none_constant);
                 }
             }
+
+            // still unresolved, check stage, select appropriate error message
             if item.constant_id.is_none() {
                 // `Ok`/`Err` are bound to a `Result<T>` variant constructor by try_bind_result_constructor
                 // once a `Result` context is known, which can be as late as literal/type inference. Defer

@@ -9,10 +9,7 @@ use crate::shared::numeric::Numeric;
 pub enum ResolveErrorKind {
     UndefinedIdentifier(String),
     UndefinedMember(String),
-    /// A method (or builtin) was accessed on a receiver that does not provide it. First field is the
-    /// member name, second is the receiver type name. Used for non-struct receivers (traits, trait bounds,
-    /// enums, scalars), whose missing methods cannot be pinned to a single owning trait/impl, so the
-    /// message names the receiver type rather than guessing a trait.
+    /// A method (or builtin) was accessed on a receiver that does not provide it. First field is the member name, second is the receiver type name.
     UndefinedMethod(String, String),
     UndefinedFunction(String),
     UndefinedType(String),
@@ -23,12 +20,10 @@ pub enum ResolveErrorKind {
     /// A cast to a type backed by an intrinsic conversion trait (e.g. `String` via `ToString`) was attempted
     /// on a type that does not implement that trait. Arguments are the source type and the trait name.
     MissingTraitImplementation(String, String),
-    /// A `Result` constructor (`Ok`/`Err`) or the `?` operator was used outside a `Result` context, so its
-    /// type could not be determined. First field: whether the construct was a desugared `?`. Second field:
-    /// the type the surrounding context expects instead (if known).
+    /// A `Result` constructor (`Ok`/`Err`) or the `?` operator was used outside a `Result` context. First field: whether the construct was a desugared `?`.
+    /// Second field: the type the surrounding context expects instead (if known).
     ResultOutsideResultContext(bool, Option<String>),
-    /// A `Some`/`None` was used outside an `Option` context so its type could not be determined.
-    /// Field: the expected type if one was known.
+    /// A `Some`/`None` was used outside an `Option` context so its type could not be determined. Field: the expected type if one was known.
     OptionOutsideOptionContext(Option<String>),
     IncompatibleNumeric(String, Numeric),
     NumberOfArguments(String, ItemIndex, ItemIndex),
@@ -146,7 +141,7 @@ impl Display for ResolveError {
             ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
             ResolveErrorKind::AssignToConst(name) => write!(f, "Cannot assign to const `{name}`"),
             ResolveErrorKind::MutateConst(name, method) => write!(f, "Cannot call mutating method `{method}()` on const `{name}`"),
-            ResolveErrorKind::ConstArgToMutatingParam(func, param) => write!(f, "Cannot pass const value to parameter {param} of `{func}` — parameter may be mutated"),
+            ResolveErrorKind::ConstArgToMutatingParam(func, param) => write!(f, "Cannot pass const value to mutating parameter {param} of `{func}`"),
             ResolveErrorKind::UndefinedFunction(func) => write!(f, "Undefined function `{func}`"),
             ResolveErrorKind::UndefinedType(t) => write!(f, "Undefined type `{t}`"),
             ResolveErrorKind::UndefinedItem(i) => write!(f, "Undefined item `{i}`"),
