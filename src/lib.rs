@@ -26,6 +26,11 @@ pub mod documentation;
 
 pub use interface::*;
 
+// Re-exported so the `itsy_api!` macro can build per-API identifiers (e.g. the `callables` extension
+// trait name) in downstream crates without requiring them to depend on `paste` directly.
+#[doc(hidden)]
+pub use ::paste::paste;
+
 /// Derives the marshalling glue required to use a struct as an Itsy API argument or return type.
 ///
 /// See [itsy_api!] for how API functions are defined. Requires the `derive` feature.
@@ -63,6 +68,28 @@ use config_derived::*;
 ///
 /// Arrays of any supported type are written using Itsy's `[ T ]` syntax and map to a Rust `Vec<T>`;
 /// nesting is supported, so e.g. `[ [ String ] ]` maps to `Vec<Vec<String>>`.
+///
+/// # Calling into the script
+///
+/// In addition to the Rust functions the script can call, an optional `callables { ... }` block (after
+/// the function definitions, requires the `call_function` feature) declares top-level Itsy functions the
+/// *host* intends to call. Each declaration generates a typed method on the program's
+/// [`VM`](crate::runtime::VM) via a `<TypeName>Callables` extension trait, marshalling the same
+/// parameter/return types (primitives, `String`, arrays and `#[derive(VMValue)]` structs/enums) in both
+/// directions. Building a script verifies that each declared callable is defined with a matching
+/// signature, so a host/script mismatch is a compile-time error rather than a runtime failure:
+///
+/// ```ignore
+/// itsy_api!(MyAPI<MyContext> {
+///     fn print(&mut context, val: i32) { println!("{}", val); }
+///     callables {
+///         fn update(input: InputState, delta: f32) -> Commands;
+///     }
+/// });
+/// // ... after building a program and `let mut vm = VM::new(program);`:
+/// use MyAPICallables; // brings the generated `update` method into scope
+/// let commands = vm.update(&mut context, input, 0.016).unwrap();
+/// ```
 ///
 /// # Examples
 ///
@@ -233,6 +260,71 @@ macro_rules! itsy_api {
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:tt $($rest:tt)* ] $($reversed:tt)*) => {
         itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
     };
+
+    // --- `callables { ... }` support: host-initiated calls into top-level Itsy functions ---
+    // Counts callable argument names into a usize.
+    (@callable_count) => { 0usize };
+    (@callable_count $head:ident $($rest:ident)*) => { 1usize + itsy_api!(@callable_count $($rest)*) };
+    // The Rust type a callable argument/return value is expressed as on the host side. Reuses the
+    // parameter-type mapping (`str` -> `&str`, `[ T ]` -> `Vec<T>`, everything else unchanged).
+    (@callable_rust_type) => { () };
+    (@callable_rust_type $ty:tt) => { itsy_api!(@handle_ref_param_type $ty) };
+    // Push a callable argument onto the stack. Primitives push directly; bool widens to u8; strings are
+    // allocated + retained (refcount 1, freed by the callee epilogue); reference types (structs/enums/
+    // arrays) go through the VMValue marshalling helper.
+    (@callable_push $stack:ident, $heap:ident, u8, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, u16, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, u32, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, u64, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, i8, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, i16, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, i32, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, i64, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, f32, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, f64, $n:ident) => { $stack.push($n); };
+    (@callable_push $stack:ident, $heap:ident, bool, $n:ident) => { $stack.push($n as u8); };
+    (@callable_push $stack:ident, $heap:ident, String, $n:ident) => { {
+        let index = $heap.alloc_copy($n.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
+        $heap.ref_item(index, $crate::internals::binary::heap::HeapRefOp::Inc);
+        $stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
+    } };
+    (@callable_push $stack:ident, $heap:ident, str, $n:ident) => { {
+        let index = $heap.alloc_copy($n.as_bytes(), $crate::internals::binary::sizes::ItemIndex::MAX);
+        $heap.ref_item(index, $crate::internals::binary::heap::HeapRefOp::Inc);
+        $stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
+    } };
+    (@callable_push $stack:ident, $heap:ident, [ $($inner:tt)+ ], $n:ident) => {
+        $crate::internals::marshal::push_call_argument($n, $stack, $heap);
+    };
+    (@callable_push $stack:ident, $heap:ident, $other:ident, $n:ident) => {
+        $crate::internals::marshal::push_call_argument($n, $stack, $heap);
+    };
+    // Read a callable return value off the stack top. Mirrors @callable_push; void yields ().
+    (@callable_read $stack:ident, $heap:ident, ) => { () };
+    (@callable_read $stack:ident, $heap:ident, u8) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, u16) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, u32) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, u64) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, i8) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, i16) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, i32) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, i64) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, f32) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, f64) => { $stack.top() };
+    (@callable_read $stack:ident, $heap:ident, bool) => { { let tmp: u8 = $stack.top(); tmp != 0 } };
+    (@callable_read $stack:ident, $heap:ident, String) => { {
+        let item: $crate::internals::binary::heap::HeapRef = $stack.top();
+        let result = $heap.string(item).unwrap().to_string();
+        $heap.ref_item(item.index(), $crate::internals::binary::heap::HeapRefOp::Free);
+        result
+    } };
+    (@callable_read $stack:ident, $heap:ident, [ $($inner:tt)+ ]) => {
+        $crate::internals::marshal::read_call_return::<itsy_api!(@vec_type [ $($inner)+ ])>($stack, $heap)
+    };
+    (@callable_read $stack:ident, $heap:ident, $other:ident) => {
+        $crate::internals::marshal::read_call_return::<$other>($stack, $heap)
+    };
+
     // Main definition block
     (
         $(#[$globalmeta:meta])*
@@ -243,7 +335,16 @@ macro_rules! itsy_api {
             // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
             // components using push down accumulation to transform them into a non-ambiguous format
             fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $arg_type:tt )* ) $( -> $ret_type:tt )? $code:block
-        )* }
+        )*
+        $(
+            // Optional block declaring top-level Itsy functions the host intends to call into. Arg/return
+            // types must be registered API types (or primitives/String/arrays) so the script and host
+            // agree on their layout; see the generated extension trait below.
+            callables { $(
+                fn $cname:ident ( $( $carg_name:ident : $carg_type:tt ),* $(,)? ) $( -> $cret_type:tt )? ;
+            )* }
+        )?
+        }
     ) => {
 
         #[allow(non_camel_case_types)]
@@ -294,7 +395,26 @@ macro_rules! itsy_api {
                     $( <itsy_api!(@vec_type $arg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
                     $( <itsy_api!(@vec_type $ret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
                 )*
+                // Types referenced only by `callables` signatures must also be registered so scripts can
+                // name them in the functions the host calls into.
+                $(
+                    $(
+                        $( <itsy_api!(@vec_type $carg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
+                        $( <itsy_api!(@vec_type $cret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
+                    )*
+                )?
                 defs
+            }
+            #[allow(unused_mut)]
+            #[cfg(feature="compiler")]
+            fn resolve_callables() -> Vec<(&'static str, ::std::option::Option<$crate::internals::marshal::ApiType>, Vec<$crate::internals::marshal::ApiType>)> {
+                let mut list = Vec::new();
+                $(
+                    $(
+                        list.push((stringify!($cname), itsy_api!(@ret_descriptor $($cret_type)?), vec![ $( itsy_api!(@type_descriptor $carg_type) ),* ]));
+                    )*
+                )?
+                list
             }
         }
 
@@ -333,6 +453,53 @@ macro_rules! itsy_api {
                 }
             }
         }
+
+        // Host-initiated calls into top-level Itsy functions. Generates an extension trait
+        // `<$type_name>Callables` implemented for the program's `VM`, with one typed method per declared
+        // callable. Each method marshals its arguments via the monomorphised VMValue path and invokes
+        // `VM::call_typed`, so structs/enums/arrays (registered through this same API) flow in and out.
+        $(
+            $crate::paste! {
+                #[cfg(all(feature="runtime", feature="call_function"))]
+                $vis trait [< $type_name Callables >] {
+                    $(
+                        fn $cname(
+                            self: &mut Self,
+                            context: &mut $context_type
+                            $( , $carg_name: itsy_api!(@callable_rust_type $carg_type) )*
+                        ) -> ::std::result::Result< itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError >;
+                    )*
+                }
+
+                #[cfg(all(feature="runtime", feature="call_function"))]
+                impl [< $type_name Callables >] for $crate::runtime::VM<$type_name, $context_type> {
+                    $(
+                        #[allow(unused_variables)]
+                        fn $cname(
+                            self: &mut Self,
+                            context: &mut $context_type
+                            $( , $carg_name: itsy_api!(@callable_rust_type $carg_type) )*
+                        ) -> ::std::result::Result< itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError > {
+                            self.call_typed(
+                                context,
+                                stringify!($cname),
+                                itsy_api!(@callable_count $( $carg_name )*),
+                                #[allow(unused_variables, unused_imports)]
+                                |stack, heap| {
+                                    use $crate::internals::binary::stack::StackOp;
+                                    $( itsy_api!(@callable_push stack, heap, $carg_type, $carg_name); )*
+                                },
+                                #[allow(unused_variables, unused_imports)]
+                                |stack, heap| {
+                                    use $crate::internals::binary::stack::StackOp;
+                                    itsy_api!(@callable_read stack, heap, $($cret_type)?)
+                                },
+                            )
+                        }
+                    )*
+                }
+            }
+        )?
     };
 }
 

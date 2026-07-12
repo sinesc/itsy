@@ -21,6 +21,8 @@ use crate::{ItemIndex, VariantIndex};
 use crate::bytecode::{HeapRef, HeapRefOp};
 #[cfg(feature = "runtime")]
 use crate::bytecode::runtime::heap::Heap;
+#[cfg(feature = "runtime")]
+use crate::bytecode::runtime::stack::{Stack, StackOp};
 
 /// Compile-time structural description of an API type, used by the resolver to register the type in
 /// the root scope so that scripts and the Rust API agree on its layout.
@@ -101,6 +103,15 @@ pub trait VMValue: Sized {
     /// Recursively frees any heap object owned by the stack representation if it is no longer
     /// referenced. A no-op for value types.
     fn free_stack(heap: &mut Heap, raw: Self::Stack);
+    /// Recursively increments the reference count of the stack representation and every heap object
+    /// reachable through it to 1. A no-op for value types.
+    ///
+    /// Used to marshal a value as an argument *into* a host-initiated call: `to_stack` builds the whole
+    /// structure at reference count 0 (the return-value convention, where the consuming script retains
+    /// it), but a reference-typed *parameter* is released by the callee's epilogue via a recursive
+    /// decrement, so every reference in the structure must arrive at count 1 to balance. This mirrors
+    /// [free_stack](Self::free_stack) with an increment.
+    fn retain_stack(heap: &mut Heap, raw: Self::Stack);
 }
 
 /// A value that can appear as a field within a marshalled struct or enum variant. Implemented for
@@ -118,6 +129,10 @@ pub trait VMField: Sized {
     fn write_field(self, heap: &mut Heap, buf: &mut Vec<u8>);
     /// Recursively frees any heap object reachable through this field. A no-op for value types.
     fn free_field(heap: &mut Heap, base: HeapRef, offset: usize);
+    /// Recursively increments to 1 the reference count of any heap object reachable through this field.
+    /// A no-op for value types. Mirror of [free_field](Self::free_field); see
+    /// [VMValue::retain_stack].
+    fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize);
 }
 
 // --- compiler-side built-in type registrations ---
@@ -214,6 +229,7 @@ macro_rules! impl_vmfield_numeric {
                     buf.extend_from_slice(&self.to_ne_bytes());
                 }
                 fn free_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
+                fn retain_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
             }
         )*
     };
@@ -232,6 +248,7 @@ impl VMField for bool {
         buf.push(self as u8);
     }
     fn free_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
+    fn retain_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
 }
 
 #[cfg(feature = "runtime")]
@@ -248,6 +265,10 @@ impl VMField for String {
     fn free_field(heap: &mut Heap, base: HeapRef, offset: usize) {
         let item = read_heap_ref(heap, base, offset);
         heap.ref_item(item.index(), HeapRefOp::Free);
+    }
+    fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize) {
+        let item = read_heap_ref(heap, base, offset);
+        heap.ref_item(item.index(), HeapRefOp::Inc);
     }
 }
 
@@ -286,6 +307,15 @@ impl<T: VMField> VMValue for Vec<T> {
         }
         heap.ref_item(this.index(), HeapRefOp::Free);
     }
+    fn retain_stack(heap: &mut Heap, this: HeapRef) {
+        let count = heap.item(this.index()).data.len() / T::HEAP_SIZE;
+        let mut offset = 0usize;
+        for _ in 0..count {
+            T::retain_field(heap, this, offset);
+            offset += T::HEAP_SIZE;
+        }
+        heap.ref_item(this.index(), HeapRefOp::Inc);
+    }
 }
 
 #[cfg(feature = "runtime")]
@@ -303,4 +333,44 @@ impl<T: VMField> VMField for Vec<T> {
         let item = read_heap_ref(heap, base, offset);
         <Self as VMValue>::free_stack(heap, item);
     }
+    fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize) {
+        let item = read_heap_ref(heap, base, offset);
+        <Self as VMValue>::retain_stack(heap, item);
+    }
+}
+
+// --- host-initiated call marshalling (VM::call_typed / itsy_api! `callables`) ---
+
+/// Marshals `value` onto the VM stack as an argument to a host-initiated Itsy call: allocates its heap
+/// representation (reference types) via [VMValue::to_stack], then [retains](VMValue::retain_stack) the
+/// whole structure to reference count 1 so the callee epilogue's recursive release of reference
+/// parameters balances, and pushes it. Used by the `itsy_api!`-generated call wrappers for
+/// struct/enum/array arguments.
+#[cfg(feature = "runtime")]
+pub fn push_call_argument<V>(value: V, stack: &mut Stack, heap: &mut Heap)
+where
+    V: VMValue,
+    V::Stack: Copy,
+    Stack: StackOp<V::Stack>,
+{
+    let raw = value.to_stack(heap);
+    V::retain_stack(heap, raw);
+    stack.push(raw);
+}
+
+/// Reads the return value of a host-initiated Itsy call off the stack top and materialises it via
+/// [VMValue::from_stack], then releases the producer's reference-count-0 heap object (a no-op for value
+/// types). Mirrors the String handling in
+/// [`VM::call_function`](crate::runtime::VM::call_function)'s result reading, generalised over [VMValue].
+#[cfg(feature = "runtime")]
+pub fn read_call_return<V>(stack: &Stack, heap: &mut Heap) -> V
+where
+    V: VMValue,
+    V::Stack: Copy,
+    Stack: StackOp<V::Stack>,
+{
+    let raw: V::Stack = stack.top();
+    let value = V::from_stack(heap, raw);
+    V::free_stack(heap, raw);
+    value
 }

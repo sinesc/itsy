@@ -90,6 +90,11 @@ impl ResolveError {
     pub(crate) fn at(position: Position, kind: ResolveErrorKind, module_path: &str) -> ResolveError {
         Self { kind, position, module_path: module_path.to_string() }
     }
+    /// Creates an error not tied to a specific source position (start of file). Used for API-contract
+    /// errors that have no corresponding AST node, e.g. a host-declared callable the script never defines.
+    pub(crate) fn global(kind: ResolveErrorKind, module_path: &str) -> ResolveError {
+        Self { kind, position: Position(0), module_path: module_path.to_string() }
+    }
     #[cfg(not(feature="ice_panics"))]
     pub(crate) fn ice(message: String) -> ResolveError {
         Self { kind: ResolveErrorKind::Internal(message), position: Position(0), module_path: "".to_string() }

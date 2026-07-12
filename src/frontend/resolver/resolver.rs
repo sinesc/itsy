@@ -235,9 +235,12 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     }
 
     // find entry module (empty path) and main function within
-    let entry_scope_id = program.modules()
-        .find(|&m| m.path == "").ice()?
-        .scope_id;
+    let entry_module = program.modules()
+        .find(|&m| m.path == "").ice()?;
+    let entry_scope_id = entry_module.scope_id;
+
+    // verify host-declared callables (itsy_api! `callables { ... }`) match the script's definitions
+    apinamespace::validate_callables::<T>(&mut scopes, &ns, entry_scope_id, entry_module)?;
 
     let entry_fn = match scopes.constant_id(entry_scope_id, &entry_function, TypeId::VOID) {
         Some(constant_id) => scopes.constant_function_id(constant_id),

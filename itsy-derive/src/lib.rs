@@ -111,6 +111,15 @@ fn impl_struct(ident: &Ident, data: &DataStruct) -> syn::Result<proc_macro2::Tok
                     }
                     heap.ref_item(this.index(), HeapRefOp::Free);
                 }
+                #[allow(unused_assignments, unused_mut, unused_variables)]
+                fn retain_stack(heap: &mut Heap, this: HeapRef) {
+                    let mut offset = 0usize;
+                    #(
+                        <#field_types as VMField>::retain_field(heap, this, offset);
+                        offset += <#field_types as VMField>::HEAP_SIZE;
+                    )*
+                    heap.ref_item(this.index(), HeapRefOp::Inc);
+                }
             }
 
             impl VMField for #ident {
@@ -126,6 +135,10 @@ fn impl_struct(ident: &Ident, data: &DataStruct) -> syn::Result<proc_macro2::Tok
                 fn free_field(heap: &mut Heap, base: HeapRef, offset: usize) {
                     let item = read_nested_ref(heap, base, offset);
                     <Self as VMValue>::free_stack(heap, item);
+                }
+                fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize) {
+                    let item = read_nested_ref(heap, base, offset);
+                    <Self as VMValue>::retain_stack(heap, item);
                 }
             }
         };
@@ -191,6 +204,7 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
                     self as i32
                 }
                 fn free_stack(_heap: &mut Heap, _raw: i32) {}
+                fn retain_stack(_heap: &mut Heap, _raw: i32) {}
             }
 
             impl VMField for #ident {
@@ -203,6 +217,7 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
                     <i32 as VMField>::write_field(self as i32, heap, buf);
                 }
                 fn free_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
+                fn retain_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
             }
         };
     };
@@ -220,6 +235,7 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
     let mut from_arms = Vec::new();
     let mut to_arms = Vec::new();
     let mut free_arms = Vec::new();
+    let mut retain_arms = Vec::new();
 
     for (index, variant) in data.variants.iter().enumerate() {
         let vident = &variant.ident;
@@ -268,6 +284,16 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
                 let mut offset = VARIANT_TAG_SIZE;
                 #(
                     <#field_types as VMField>::free_field(heap, this, offset);
+                    offset += <#field_types as VMField>::HEAP_SIZE;
+                )*
+            }
+        });
+
+        retain_arms.push(quote! {
+            #index => {
+                let mut offset = VARIANT_TAG_SIZE;
+                #(
+                    <#field_types as VMField>::retain_field(heap, this, offset);
                     offset += <#field_types as VMField>::HEAP_SIZE;
                 )*
             }
@@ -332,6 +358,14 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
                     }
                     heap.ref_item(this.index(), HeapRefOp::Free);
                 }
+                #[allow(unused_assignments, unused_mut, unused_variables)]
+                fn retain_stack(heap: &mut Heap, this: HeapRef) {
+                    match read_variant_tag(heap, this) {
+                        #( #retain_arms )*
+                        _ => {}
+                    }
+                    heap.ref_item(this.index(), HeapRefOp::Inc);
+                }
             }
 
             impl VMField for #ident {
@@ -347,6 +381,10 @@ fn impl_data_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::To
                 fn free_field(heap: &mut Heap, base: HeapRef, offset: usize) {
                     let item = read_nested_ref(heap, base, offset);
                     <Self as VMValue>::free_stack(heap, item);
+                }
+                fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize) {
+                    let item = read_nested_ref(heap, base, offset);
+                    <Self as VMValue>::retain_stack(heap, item);
                 }
             }
         };

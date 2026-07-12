@@ -46,6 +46,12 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     #[cfg(feature="compiler")]
     fn resolve_types() -> Vec<crate::internals::marshal::ApiTypeDef> { Vec::new() }
+    /// Returns the top-level Itsy functions the host declared it will call (`callables { ... }`), as
+    /// `(name, return type, argument types)`, so the resolver can verify each is defined in the script
+    /// with the declared signature.
+    #[doc(hidden)]
+    #[cfg(feature="compiler")]
+    fn resolve_callables() -> Vec<(&'static str, Option<crate::internals::marshal::ApiType>, Vec<crate::internals::marshal::ApiType>)> { Vec::new() }
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.

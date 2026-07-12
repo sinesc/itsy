@@ -1,7 +1,10 @@
 use std::collections::HashMap;
-use crate::{prelude::*, VariantIndex};
+use crate::{prelude::*, ItemIndex, VariantIndex};
 use crate::frontend::resolver::scopes::Scopes;
-use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult};
+use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
+use crate::frontend::parser::types::ParsedModule;
+use crate::frontend::ast::Statement;
+use crate::shared::MetaContainer;
 use crate::shared::meta::{Array, Struct, Enum, EnumVariant, Type, FunctionKind, ConstantValue};
 use crate::shared::typed_ids::{ScopeId, TypeId};
 use crate::shared::numeric::Numeric;
@@ -125,4 +128,92 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
         }
     }
     Ok(ns)
+}
+
+/// Verifies that every function the host declared as callable (an `itsy_api!` `callables { ... }` block)
+/// is defined in the script's entry module with a signature matching the host's declaration. This makes
+/// a host/script mismatch a compile-time [ResolveError] instead of a heap corruption at call time. Run
+/// after resolution so the script functions' types are known; reuses `ns`/[resolve_type_id] to map the
+/// host-declared types to the same registered type ids the script uses.
+pub(super) fn validate_callables<T: VMFunc<T>>(scopes: &mut Scopes, ns: &ApiNamespace, entry_scope_id: ScopeId, entry_module: &ParsedModule) -> ResolveResult<()> {
+    for (name, ret_api, arg_apis) in T::resolve_callables() {
+        // Resolve the host-declared types first (resolve_type_id may insert anonymous array types, hence
+        // the &mut borrow). Done before looking at the script function to keep borrows non-overlapping.
+        let expected_args: Vec<TypeId> = arg_apis.iter()
+            .map(|api| resolve_type_id(scopes, api, ns, name, "argument"))
+            .collect::<ResolveResult<_>>()?;
+        let expected_ret: Option<TypeId> = match &ret_api {
+            Some(api) => Some(resolve_type_id(scopes, api, ns, name, "return")?),
+            None => None,
+        };
+        // Locate the script's function definition (for a precise error position).
+        let function_def = entry_module.statements().find_map(|s| match s {
+            Statement::Function(f) if f.shared.sig.ident.name == name => Some(f),
+            _ => None,
+        });
+        let function_def = match function_def {
+            Some(f) => f,
+            None => return Err(ResolveError::global(ResolveErrorKind::UndefinedFunction(name.to_string()), &entry_module.path)),
+        };
+        // Fetch its resolved signature (cloned, to release the scopes borrow before comparisons).
+        let (script_args, script_ret) = match scopes.constant_id(entry_scope_id, name, TypeId::VOID).and_then(|cid| scopes.constant_function_id(cid)) {
+            Some(fid) => {
+                let func = scopes.function_ref(fid);
+                (func.arg_type_ids(scopes).clone(), func.ret_type_id(scopes))
+            },
+            None => return Err(ResolveError::new(function_def, ResolveErrorKind::UndefinedFunction(name.to_string()), &entry_module.path)),
+        };
+        // Arity.
+        if script_args.len() != expected_args.len() {
+            return Err(ResolveError::new(function_def, ResolveErrorKind::NumberOfArguments(name.to_string(), expected_args.len() as ItemIndex, script_args.len() as ItemIndex), &entry_module.path));
+        }
+        // Argument types.
+        for (expected, actual) in expected_args.iter().zip(script_args.iter()) {
+            let actual = actual.ice()?;
+            if !types_compatible(scopes, *expected, actual) {
+                return Err(ResolveError::new(function_def, ResolveErrorKind::TypeMismatch(type_name(scopes, actual), type_name(scopes, *expected)), &entry_module.path));
+            }
+        }
+        // Return type. A missing host return means the script function must be `void`.
+        match (expected_ret, script_ret) {
+            (Some(expected), Some(actual)) if !types_compatible(scopes, expected, actual) => {
+                return Err(ResolveError::new(function_def, ResolveErrorKind::TypeMismatch(type_name(scopes, actual), type_name(scopes, expected)), &entry_module.path));
+            },
+            (None, Some(actual)) if !matches!(scopes.type_ref(actual), Type::void) => {
+                return Err(ResolveError::new(function_def, ResolveErrorKind::TypeMismatch(type_name(scopes, actual), "void".to_string()), &entry_module.path));
+            },
+            (Some(expected), None) => {
+                return Err(ResolveError::new(function_def, ResolveErrorKind::TypeMismatch("void".to_string(), type_name(scopes, expected)), &entry_module.path));
+            },
+            _ => {},
+        }
+    }
+    Ok(())
+}
+
+/// Structural type compatibility for callable-signature validation. Named types (structs, enums) and
+/// primitives are interned, so equal [TypeId]s already match; only structural types (arrays) need a
+/// recursive element comparison, since the host's anonymous `[ T ]` gets a fresh id.
+fn types_compatible(scopes: &Scopes, a: TypeId, b: TypeId) -> bool {
+    if a == b {
+        return true;
+    }
+    match (scopes.type_ref(a), scopes.type_ref(b)) {
+        (Type::Array(a), Type::Array(b)) => match (a.type_id, b.type_id) {
+            (Some(a), Some(b)) => types_compatible(scopes, a, b),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Renders a readable type name for error messages, recursing into arrays.
+fn type_name(scopes: &Scopes, type_id: TypeId) -> String {
+    if let Some(name) = scopes.type_flat_name(type_id) {
+        name.clone()
+    } else if let Type::Array(array) = scopes.type_ref(type_id) {
+        format!("[ {} ]", array.type_id.map_or_else(|| "_".to_string(), |e| type_name(scopes, e)))
+    } else {
+        format!("{}", scopes.type_ref(type_id))
+    }
 }
