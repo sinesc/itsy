@@ -4,3 +4,4 @@
 logs/*
 /itsy/examples/devtest.itsy
 Cargo.lock
+/notes
