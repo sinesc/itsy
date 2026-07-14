@@ -11,7 +11,7 @@ use crate::config::FrameAddress;
 use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue, UserConstValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
-use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}, walker::AstVisitor, parser::types::ParsedModule};
+use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}, ast_visitor::AstVisitor, parser::types::ParsedModule};
 use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, ConstDescriptor, builtins::{Builtin, BuiltinType}};
 #[cfg(feature="call_function")]
 use crate::bytecode::call_function::build_function_table;

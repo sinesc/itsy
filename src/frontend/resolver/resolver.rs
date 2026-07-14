@@ -5,10 +5,10 @@ mod scopes;
 mod stage;
 mod exhaustiveness;
 mod apinamespace;
-mod intrinsic;
-mod type_synthesis;
-mod const_eval;
-mod binary_op;
+mod resolver_intrinsic;
+mod resolver_type_synthesis;
+mod resolver_const_eval;
+mod resolver_binary_op;
 pub mod error;
 pub mod resolved;
 
@@ -23,8 +23,8 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::{VMFunc, builtins::builtin_types};
-use crate::frontend::resolver::intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, OrderingInfo, register_intrinsics};
-use crate::frontend::resolver::type_synthesis::{ResultTypeInfo, OptionTypeInfo};
+use crate::frontend::resolver::resolver_intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, OrderingInfo, register_intrinsics};
+use crate::frontend::resolver::resolver_type_synthesis::{ResultTypeInfo, OptionTypeInfo};
 
 /// Temporary internal state during program type/binding resolution.
 pub(crate) struct Resolver<'ctx> {
@@ -2204,7 +2204,7 @@ impl<'ctx> Resolver<'ctx> {
                 self.resolve_expression(&mut assignment.right, rhs_expected)?;
                 // Propagate from_const to the assignment target if RHS references a user const
                 if self.expr_references_user_const(&assignment.right) {
-                    if let Some(target_binding_id) = const_eval::extract_root_binding_id(&assignment.left) {
+                    if let Some(target_binding_id) = resolver_const_eval::extract_root_binding_id(&assignment.left) {
                         self.scopes.binding_mut(target_binding_id).from_const = true;
                     }
                 }
@@ -2227,7 +2227,7 @@ impl<'ctx> Resolver<'ctx> {
         self.resolve_expression(&mut assignment.right, if shift_assign { None } else { left_type_id })?;
         // Propagate from_const to the assignment target if RHS references a user const
         if self.expr_references_user_const(&assignment.right) {
-            if let Some(target_binding_id) = const_eval::extract_root_binding_id(&assignment.left) {
+            if let Some(target_binding_id) = resolver_const_eval::extract_root_binding_id(&assignment.left) {
                 self.scopes.binding_mut(target_binding_id).from_const = true;
             }
         }

@@ -3,7 +3,7 @@
 use crate::prelude::{Set, UnorderedMap};
 use crate::frontend::ast;
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveError, ResolveErrorKind, ResolveResult};
-use crate::frontend::walker::{AstVisitor, AstVisitorMut};
+use crate::frontend::ast_visitor::{AstVisitor, AstVisitorMut};
 use crate::shared::meta::{ConstantValue, Type, UserConstValue};
 use crate::shared::numeric::Numeric;
 use crate::shared::typed_ids::{BindingId, ConstantId, TypeId};

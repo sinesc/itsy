@@ -8,5 +8,5 @@ pub mod parser;
 #[path="resolver/resolver.rs"]
 pub mod resolver;
 
-#[path="walker.rs"]
-pub mod walker;
+#[path="ast_visitor.rs"]
+pub mod ast_visitor;
