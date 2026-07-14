@@ -2198,7 +2198,127 @@ impl_builtins! {
         }
     }
 
-    /// View type: zero-cost reinterpretation of an integer array's bytes as elements of type `T`.
+    /// `View<T>`: zero-cost reinterpretation of a byte buffer as elements of type `T`.
+    ///
+    /// A `View<T>` provides indexed access (`v[i]`) to a contiguous block of memory,
+    /// interpreting the raw bytes as elements of type `T`. The underlying storage is a
+    /// `[u8]` array; the view does not allocate its own data. This makes it useful for
+    /// treating a byte buffer as an array of structs, integers, or floats without copying.
+    ///
+    /// # Construction
+    ///
+    /// Create a new zero-initialized view with [`View::new`](crate::documentation::View::new):
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let v: View<i32> = View::new(5);   // space for 5 i32 values (20 bytes)
+    /// v[0] = 42;
+    /// v[1] = 100;
+    /// print("{v[0]}, {v[1]}");          // 42, 100
+    /// # }
+    /// ```
+    ///
+    /// Wrap an existing `[u8]` array with [`View::wrap`](crate::documentation::View::wrap):
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let bytes: [u8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    /// let v: View<i64> = View::wrap(bytes);
+    /// print(v.len() as String);           // 1  (8 bytes / 8 bytes per i64)
+    /// # }
+    /// ```
+    ///
+    /// The turbofish syntax `View<T>::new(n)` and `View<T>::wrap(arr)` lets you omit the
+    /// type annotation:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let v = View<i32>::new(3);          // no type annotation needed
+    /// # }
+    /// ```
+    ///
+    /// # Element access
+    ///
+    /// Elements are accessed via the index operator `[]`, both for reading and writing:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let v: View<f32> = View::new(2);
+    /// v[0] = 1.5;
+    /// v[1] = 2.5;
+    /// print((v[0] + v[1]) as String);    // 4
+    /// # }
+    /// ```
+    ///
+    /// # Struct elements
+    ///
+    /// A view can hold structs. Struct fields are accessed through the indexed element:
+    ///
+    /// ``` ignore
+    /// struct Point {
+    ///     x: i32,
+    ///     y: i32,
+    /// }
+    ///
+    /// # fn main() {
+    /// let v: View<Point> = View::new(3);
+    /// v[0].x = 10;
+    /// v[0].y = 20;
+    /// v[1].x = 30;
+    /// v[1].y = 40;
+    ///
+    /// print("({v[0].x}, {v[0].y})");    // (10, 20)
+    /// # }
+    /// ```
+    ///
+    /// Nested structs and enums are also supported:
+    ///
+    /// ``` ignore
+    /// struct Inner {
+    ///     a: i32,
+    ///     b: i32,
+    /// }
+    /// struct Outer {
+    ///     inner: Inner,
+    ///     c: i32,
+    /// }
+    ///
+    /// # fn main() {
+    /// let v: View<Outer> = View::new(1);
+    /// v[0].inner.a = 100;
+    /// v[0].c = 300;
+    /// # }
+    /// ```
+    ///
+    /// # Element type restrictions
+    ///
+    /// The element type `T` must be a *compact* type: its in-memory layout must consist
+    /// entirely of primitives and/or other compact types. This means `T` cannot contain
+    /// fields of reference types like `String`, `[V]` (arrays), or `[K => V]` (maps),
+    /// because those types store their data on the heap rather than inline.
+    ///
+    /// Valid element types include:
+    /// - All primitive types (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`)
+    /// - Enums (with unit variants or variants carrying compact data)
+    /// - Structs whose fields are all compact types
+    ///
+    /// # Length
+    ///
+    /// [`View::len`](crate::documentation::View::len) returns the number of elements in the view:
+    ///
+    /// ``` ignore
+    /// # fn main() {
+    /// let v: View<u8> = View::new(10);
+    /// print(v.len() as String);          // 10
+    /// # }
+    /// ```
+    ///
+    /// # Memory layout
+    ///
+    /// A view's underlying bytes are allocated contiguously. `View::new(n)` allocates
+    /// `n * sizeof(T)` zero-initialized bytes. `View::wrap(bytes)` uses the provided
+    /// buffer directly — the view's length is `bytes.len() / sizeof(T)`, truncated
+    /// to a whole number of elements.
     View {
         /// Returns the number of elements in the view.
         len(self: Self) -> u64 {
@@ -2208,7 +2328,7 @@ impl_builtins! {
         }
 
         /// Wrap an existing `[u8]` array as a `View<T>`.
-        wrap(array: Self) -> Self {
+        wrap(array: ViewBuffer) -> Self {
             fn view_wrap(array: HeapRef) -> HeapRef {
                 array
             }

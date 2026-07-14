@@ -18,7 +18,8 @@
 //! # Special purpose container
 //!
 //! [Result], success-or-error type: `Result<T>` with `Ok(value)` and `Err(error)`.\
-//! [Option], nullable type: `Option<T>` with `Some(value)` and `None`.
+//! [Option], nullable type: `Option<T>` with `Some(value)` and `None`.\
+//! [View], zero-cost byte reinterpretation: `View<T>` wraps an existing `[u8]` buffer or allocates a new one.
 //!
 //! # Traits
 //!

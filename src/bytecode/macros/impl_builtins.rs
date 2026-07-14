@@ -412,8 +412,10 @@ macro_rules! impl_builtins {
             // Placeholder types referenced by generated method signatures. They stand in for the
             // concrete types a value's element/key/value resolves to (which vary per instance) and are
             // documented as such.
-            /// Placeholder for an array's element type - the concrete type of the values it stores.
-            /// Not a built-in type; each array substitutes its own element type.
+
+            /// An array's element type - the concrete type of the values it stores.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type Element = ();
             /// Placeholder for the unsigned-integer counterpart of a signed numeric type (e.g. `u32` for
             /// `i32`), returned by `abs_diff`. Not a built-in type.
@@ -441,6 +443,8 @@ macro_rules! impl_builtins {
             pub type OptionalIndex = ();
             /// Placeholder for `[String]`: an array of strings, returned by `String::split`. Not a built-in type.
             pub type StringArray = ();
+            /// Placeholder for the underlying buffer type of a view. Not a built-in type.
+            pub type ViewBuffer = ();
             $(
                 $( #[ $builtin_type_attr ] )*
                 pub struct $builtin_type { }
