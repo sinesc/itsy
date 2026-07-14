@@ -29,14 +29,26 @@ pub fn optimize<T: VMFunc<T>>(program: Program<T>) -> Program<T> {
     let mut instructions = program.instructions.clone();
 
     // Fixpoint loop: run passes until no more changes.
-    let (optimized, addr_map, optimized_size) = loop {
+    // `cumulative_map` tracks original-pc -> current-pc across iterations so that
+    // addresses stored in program metadata (vtable, FunctionMeta) can be remapped
+    // correctly even after multiple optimization rounds.
+    let mut cumulative_map: Vec<(StackAddress, StackAddress)> = Vec::new();
+
+    let (optimized, optimized_size) = loop {
         let jump_targets = collect_jump_targets(&instructions);
         let output = run_passes(&instructions, &jump_targets);
         let has_removals = output.iter().any(|(_, _, d)| d.is_none());
-        let (compact, am, os) = build_optimized(&instructions, &output);
+        let (compact, iter_map, os) = build_optimized(&instructions, &output);
+
+        // Compose this iteration's addr_map into the cumulative one.
+        // iter_map: current_pc -> new_pc;  cumulative_map: orig_pc -> current_pc
+        // Result:   orig_pc -> new_pc
+        cumulative_map = compose_addr_maps(&cumulative_map, &iter_map);
+
         if !has_removals {
-            break (compact, am, os); // fixpoint reached
+            break (compact, os);
         }
+
         instructions = compact;
     };
 
@@ -44,9 +56,53 @@ pub fn optimize<T: VMFunc<T>>(program: Program<T>) -> Program<T> {
     program.instructions = optimized;
 
     // Patch vtable entries: remap stale function addresses to new locations
-    patch_vtable(&mut program, &addr_map, optimized_size);
+    patch_vtable(&mut program, &cumulative_map, optimized_size);
+
+    // Patch callable addresses: host_return_addr and each FunctionMeta::addr
+    #[cfg(feature = "call_function")]
+    {
+        let patch_addr = |orig: StackAddress| -> StackAddress {
+            match cumulative_map.binary_search_by_key(&orig, |(orig, _)| *orig) {
+                Ok(idx) => cumulative_map[idx].1,
+                Err(idx) => {
+                    if idx < cumulative_map.len() {
+                        cumulative_map[idx].1
+                    } else {
+                        optimized_size
+                    }
+                }
+            }
+        };
+        program.host_return_addr = patch_addr(program.host_return_addr);
+        for meta in program.functions.values_mut() {
+            meta.addr = patch_addr(meta.addr);
+        }
+    }
 
     program
+}
+
+/// Compose two address maps: `prev_map` (orig -> intermediate) and `iter_map`
+/// (intermediate -> new). Returns a sorted map (orig -> new).
+fn compose_addr_maps(prev_map: &[(StackAddress, StackAddress)], iter_map: &[(StackAddress, StackAddress)]) -> Vec<(StackAddress, StackAddress)> {
+    if prev_map.is_empty() {
+        return iter_map.to_vec();
+    }
+    let mut composed = Vec::with_capacity(prev_map.len());
+    for (orig, intermediate) in prev_map {
+        let new = match iter_map.binary_search_by_key(&intermediate, |(k, _)| k) {
+            Ok(idx) => iter_map[idx].1,
+            Err(idx) => {
+                if idx < iter_map.len() {
+                    iter_map[idx].1
+                } else {
+                    *intermediate
+                }
+            }
+        };
+        composed.push((*orig, new));
+    }
+    composed
 }
 
 /// Collect all addresses that are jump/call targets from the instruction stream.
