@@ -72,6 +72,14 @@ pub enum ResolveErrorKind {
     IntegerOverflow,
     /// Division by zero in a const expression.
     DivisionByZero,
+    /// Accessing a non-primitive member through a view.
+    ViewNonPrimitiveAccess(String),
+    /// Backing array element type incompatible with the view.
+    ViewBackingTypeMismatch(String, String),
+    /// Represented type size not divisible by backing element size.
+    ViewSizeMismatch(String, u8, u8),
+    /// Represented type transitively contains String.
+    ViewContainsString(String),
     Internal(String),
 }
 
@@ -170,6 +178,10 @@ impl Display for ResolveError {
             ResolveErrorKind::InvalidOperation(o) => write!(f, "Invalid operation: {o}"),
             ResolveErrorKind::IntegerOverflow => write!(f, "Integer overflow in const expression"),
             ResolveErrorKind::DivisionByZero => write!(f, "Division by zero in const expression"),
+            ResolveErrorKind::ViewNonPrimitiveAccess(ty) => write!(f, "Cannot access non-primitive member `{ty}` through a view"),
+            ResolveErrorKind::ViewBackingTypeMismatch(backing, expected) => write!(f, "View backing type `{backing}` is incompatible; expected `{expected}`"),
+            ResolveErrorKind::ViewSizeMismatch(ty, size, elem_size) => write!(f, "View represented type `{ty}` has size {size} which is not divisible by backing element size {elem_size}"),
+            ResolveErrorKind::ViewContainsString(ty) => write!(f, "View represented type `{ty}` transitively contains String, which is not supported"),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }

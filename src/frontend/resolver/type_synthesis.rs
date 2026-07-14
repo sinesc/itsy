@@ -6,7 +6,7 @@
 use crate::prelude::*;
 use crate::frontend::ast::{self, Typeable, Resolvable};
 use crate::frontend::resolver::error::{ResolveResult, ResolveError, ResolveErrorKind, OptionToResolveError};
-use crate::shared::meta::{Type, Enum, EnumVariant, Struct, FunctionKind, ConstantValue};
+use crate::shared::meta::{Type, Enum, EnumVariant, Struct, ViewType, FunctionKind, ConstantValue};
 use crate::shared::typed_ids::{TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::shared::MetaContainer;
@@ -250,6 +250,31 @@ impl<'ctx> Resolver<'ctx> {
         Ok(())
     }
 
+    /// If the call target is `View::new(...)` or `View::wrap(...)`, bind it to the matching
+    /// `View<T>` constructor so the generic call resolution below handles argument checking
+    /// and the result type. `T` comes from the expected result type.
+    pub(super) fn try_bind_view_constructor(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
+        let is_view_ctor = matches!(
+            item.left.as_expression().and_then(|e| e.as_constant()),
+            Some(c) if c.constant_id.is_none() && c.path.segments.len() == 2
+                && c.path.segments[0].name == "View"
+                && matches!(c.path.segments[1].name.as_str(), "new" | "wrap")
+        );
+        if !is_view_ctor {
+            return Ok(());
+        }
+        // The expected View type pins T directly
+        if let Some(view_type_id) = expected_result.filter(|t| self.type_by_id(*t).as_view().is_some()) {
+            let member_name = &item.left.as_expression().ice()?.as_constant().ice()?.path.segments[1].name;
+            let found = self.scopes.constant_id(self.scope_id, member_name, view_type_id).is_some();
+            if found {
+                item.left.as_expression_mut().ice()?.as_constant_mut().ice()?.constant_id
+                    = self.scopes.constant_id(self.scope_id, member_name, view_type_id);
+            }
+        }
+        Ok(())
+    }
+
     /// Validate that `expected_type_id` matches the container kind, and apply it to `item`.
     pub(super) fn validate_expected_container_type(self: &mut Self, item: &mut ast::Literal, expected_type_id: TypeId, is_container: impl FnOnce(&Type) -> bool) -> ResolveResult<()> {
         if is_container(self.type_by_id(expected_type_id)) {
@@ -289,5 +314,120 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
         Ok(())
+    }
+
+    /// Recursively computes the tightly-packed size of a type in bytes (sum of field sizes for structs,
+    /// primitive size for primitives/enums). Used for view stride calculations.
+    fn compute_packed_size(self: &Self, type_id: TypeId) -> u8 {
+        match self.type_by_id(type_id) {
+            ty if ty.is_primitive() => ty.primitive_size(),
+            Type::Struct(s) => {
+                s.fields.values().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum()
+            },
+            Type::Enum(e) => {
+                // Primitive enums use their discriminant size
+                if let Some((disc_type_id, _)) = e.primitive {
+                    self.type_by_id(disc_type_id).primitive_size()
+                } else {
+                    0 // Data enums are not valid for views
+                }
+            },
+            _ => 0, // Arrays, maps, strings, etc. are not valid for views
+        }
+    }
+
+    /// Checks whether a type transitively contains String fields. Returns true if the type is clean.
+    fn type_has_no_string_fields(self: &Self, type_id: TypeId, seen: &mut Set<TypeId>) -> bool {
+        if !seen.insert(type_id) {
+            return true; // Already checked, avoid infinite recursion
+        }
+        match self.type_by_id(type_id) {
+            Type::String => false,
+            Type::Struct(s) => {
+                s.fields.values().filter_map(|&f| f).all(|fid| self.type_has_no_string_fields(fid, seen))
+            },
+            Type::Enum(e) => {
+                if let Some((disc_type_id, _)) = e.primitive {
+                    self.type_has_no_string_fields(disc_type_id, seen)
+                } else {
+                    false // Data enums not supported for views
+                }
+            },
+            _ => true, // Primitives are fine
+        }
+    }
+
+    /// Returns the type id of the `View<T>` for the given element type, synthesizing it on first use.
+    /// The backing element type is always u8 (the view operates on a raw byte array). Structurally
+    /// identical views (same T) dedupe to a single type id.
+    pub(super) fn synthesize_view_type(self: &mut Self, element_type_id: TypeId) -> ResolveResult<TypeId> {
+        let packed_size = self.compute_packed_size(element_type_id);
+        if packed_size == 0 {
+            let name = self.type_name(element_type_id);
+            return Err(ResolveError::global(
+                ResolveErrorKind::ViewBackingTypeMismatch(name, "primitive, primitive enum, or struct".to_string()),
+                "",
+            ));
+        }
+        // Check for String fields
+        if !self.type_has_no_string_fields(element_type_id, &mut Set::new()) {
+            let name = self.type_name(element_type_id);
+            return Err(ResolveError::global(
+                ResolveErrorKind::ViewContainsString(name),
+                "",
+            ));
+        }
+        // Backing element type is always u8 for simplicity
+        let backing_type_id = self.primitive_type_id(Type::u8)?;
+        let ty = Type::View(ViewType {
+            element_type_id,
+            backing_element_type_id: backing_type_id,
+            packed_size,
+        });
+        let view_type_id = self.scopes.insert_anonymous_type(true, ty);
+
+        // Register View::wrap and View::new static methods
+        self.register_view_methods(view_type_id);
+
+        Ok(view_type_id)
+    }
+
+    /// Register View::wrap and View::new static methods on the view type.
+    fn register_view_methods(self: &mut Self, view_type_id: TypeId) {
+        let view_ty = self.type_by_id(view_type_id).as_view().ice().unwrap();
+
+        // View::wrap(array) -> View<T>
+        // Takes a reference to an array, returns a view reference
+        let wrap_path = self.make_path(&["View", "wrap"]);
+        let array_type_id = self.scopes.insert_anonymous_type(true, crate::shared::meta::Type::Array(crate::shared::meta::Array {
+            type_id: Some(view_ty.backing_element_type_id),
+        }));
+        let wrap_const_id = self.insert_builtin_fn("wrap", view_type_id,
+            crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::wrap),
+            view_type_id, vec![array_type_id]);
+        self.scopes.insert_constant(&wrap_path, view_type_id, None, crate::shared::meta::ConstantValue::Function(
+            self.scopes.constant_function_id(wrap_const_id).unwrap()));
+
+        // View::new(size) -> View<T>
+        // Takes a StackAddress (size), returns a view reference
+        let new_path = self.make_path(&["View", "new"]);
+        let stack_addr_type_id = self.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap();
+        let new_const_id = self.insert_builtin_fn("new", view_type_id,
+            crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::new),
+            view_type_id, vec![stack_addr_type_id]);
+        self.scopes.insert_constant(&new_path, view_type_id, None, crate::shared::meta::ConstantValue::Function(
+            self.scopes.constant_function_id(new_const_id).unwrap()));
+    }
+
+    /// Resolves a view definition `View<T>` into its synthesized view type.
+    pub(super) fn resolve_view_type(self: &mut Self, item: &mut ast::ViewDef) -> ResolveResult<Option<TypeId>> {
+        if item.type_id.is_some() && item.is_resolved(self) {
+            return Ok(item.type_id);
+        }
+        if let (None, Some(element_type_id)) = (item.type_id, self.resolve_inline_type(&mut item.element_type)?) {
+            item.type_id = Some(self.synthesize_view_type(element_type_id)?);
+        }
+        self.types_resolved(item, None)?;
+        Ok(item.type_id)
     }
 }

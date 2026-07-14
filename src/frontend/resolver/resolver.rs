@@ -13,7 +13,7 @@ pub mod error;
 pub mod resolved;
 
 use crate::{prelude::*, VariantIndex};
-use crate::{ItemIndex, STACK_ADDRESS_TYPE};
+use crate::{ItemIndex, STACK_ADDRESS_TYPE, StackAddress};
 use crate::frontend::parser::types::ParsedProgram;
 use crate::frontend::ast::{self, Visibility, Positioned, Typeable, Resolvable, ControlFlow};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
@@ -334,6 +334,30 @@ impl<'ctx> Resolver<'ctx> {
         })
     }
 
+    /// Try to create a concrete view builtin function signature (currently just `len()`).
+    fn try_create_view_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
+
+        if let Some(constant_id) = self.scopes.constant_id(ScopeId::ROOT, name, type_id) {
+            return Ok(Some(constant_id));
+        }
+
+        let view_ty = self.type_by_id(type_id).as_view().ice()?;
+        let _packed_size = view_ty.packed_size as StackAddress;
+        let stack_addr_type_id = self.primitive_type_id(crate::STACK_ADDRESS_TYPE)?;
+
+        // len() returns StackAddress (u64), takes self (the view type) as argument
+        if name == "len" {
+            return Ok(Some(self.insert_builtin_fn(
+                name, type_id,
+                crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::len),
+                stack_addr_type_id,
+                vec![type_id],
+            )));
+        }
+
+        Ok(None)
+    }
+
     /// Create integer/float/string builtin function signature.
     fn try_create_scalar_builtin(self: &mut Self, name: &str, type_id: TypeId) -> ResolveResult<Option<ConstantId>> {
 
@@ -564,6 +588,7 @@ impl<'ctx> Resolver<'ctx> {
                                 position: member.position,
                                 path: ast::Path { position: member.ident.position, segments: vec![ member.ident.clone() ]},
                                 constant_id: member.constant_id,
+                                type_parameter: None,
                             }
                         );
                     }
@@ -777,6 +802,7 @@ impl<'ctx> Resolver<'ctx> {
             AnonymousFunction(anonymous_function) => self.resolve_function(anonymous_function, None),
             Closure(closure) => self.resolve_closure(closure, expected_result),
             Cast(_) => self.resolve_cast(item, expected_result),
+            ViewAccess(_) => Ok(()), // Already resolved during chain flattening
         }
     }
 
@@ -792,6 +818,7 @@ impl<'ctx> Resolver<'ctx> {
             GeneratorDef(generator) => self.resolve_generator_type(generator),
             CallableDef(callable) => self.resolve_callable_type(callable),
             TraitBound(trait_bound) => self.resolve_trait_bound(trait_bound),
+            ViewDef(view) => self.resolve_view_type(view),
         }
     }
 
@@ -1715,6 +1742,26 @@ impl<'ctx> Resolver<'ctx> {
                 }
             }
 
+            // handle View::new / View::wrap: bind to the expected View type's constant
+            if item.constant_id.is_none() && item.path.segments.len() == 2
+                && item.path.segments[0].name == "View"
+                && matches!(item.path.segments[1].name.as_str(), "new" | "wrap")
+            {
+                // Try to determine the View type from turbofish parameter or expected result
+                let view_type_id = item.type_parameter.as_mut()
+                    .and_then(|ty| self.resolve_inline_type(ty).ok().flatten())
+                    .or(item.type_parameter.as_ref().and_then(|ty| ty.type_id(self)))
+                    .and_then(|element_id| {
+                        // Synthesize the View type from the element type
+                        self.synthesize_view_type(element_id).ok()
+                    })
+                    .or_else(|| expected_result.filter(|t| self.type_by_id(*t).as_view().is_some()));
+                if let Some(view_type_id) = view_type_id {
+                    let member_name = &item.path.segments[1].name;
+                    item.constant_id = self.scopes.constant_id(self.scope_id, member_name, view_type_id);
+                }
+            }
+
             // still unresolved, check stage, select appropriate error message
             if item.constant_id.is_none() {
                 // `Ok`/`Err` are bound to a `Result<T>` variant constructor by try_bind_result_constructor
@@ -1722,9 +1769,12 @@ impl<'ctx> Resolver<'ctx> {
                 // their existence check to must_resolve so a valid `Ok`/`Err` isn't prematurely rejected;
                 // genuine misuse (e.g. `?` in a non-`Result` function) gets a dedicated diagnostic there.
                 // Same for `Some`/`None` - defer so a valid `Some`/`None` isn't prematurely rejected.
+                // Same for `View::new`/`View::wrap` - defer so they bind once the View type is known.
                 let is_result_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Ok" | "Err");
                 let is_option_ctor = item.path.segments.len() == 1 && matches!(item.path.segments[0].name.as_str(), "Some" | "None");
-                let must_report = if is_result_ctor || is_option_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
+                let is_view_ctor = item.path.segments.len() == 2 && item.path.segments[0].name == "View"
+                    && matches!(item.path.segments[1].name.as_str(), "new" | "wrap");
+                let must_report = if is_result_ctor || is_option_ctor || is_view_ctor { self.stage.must_resolve() } else { self.stage.must_exist() };
                 if must_report {
                     if is_option_ctor {
                         let expected = expected_result.map(|type_id| self.type_name(type_id));

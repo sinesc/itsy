@@ -176,6 +176,32 @@ fn path(i: Input) -> Output<Path> {
     map(separated_list1(punct("::"), ident), move |name| Path { position, segments: name })(i)
 }
 
+/// Matches a path with optional turbofish type parameter on the first segment.
+/// Syntax: `View<Outer>::new` (no `::` before `<`).
+/// Only checks for turbofish when the first segment is "View" to avoid
+/// conflicting with the `<` comparison operator.
+/// Returns (Path, Option<InlineType>).
+fn path_turbofish(i: Input) -> Output<(Path, Option<InlineType>)> {
+    let position = i.position();
+    let (rest, first) = ident(i)?;
+    // Only check for turbofish on "View" to avoid confusing < with comparison
+    let (rest, type_param) = if first.name == "View" {
+        let trimmed = rest.trim_start();
+        if trimmed.starts_with('<') {
+            let (rest, tp) = delimited(punct("<"), inline_type, punct(">"))(rest)?;
+            (rest, Some(tp))
+        } else {
+            (rest, None)
+        }
+    } else {
+        (rest, None)
+    };
+    // Parse remaining ::segments
+    let (rest, mut segments) = many0(preceded(punct("::"), ident))(rest)?;
+    segments.insert(0, first);
+    Ok((rest, (Path { position, segments }, type_param)))
+}
+
 // Matches a module declaration, e.g. `mod mymodule;`.
 fn module_decl(i: Input) -> Output<ModuleDecl> {
     let position = i.position();
@@ -247,11 +273,12 @@ fn inline_type(i: Input) -> Output<InlineType> {
         )(i)
     }
     alt((
-        // `result_def`/`option_def`/`generator_def` must precede `type_name_or_bound`, otherwise
-        // `Result`/`Option`/`Generator` is consumed as a plain type name and the `<...>` argument is left dangling.
+        // `result_def`/`option_def`/`generator_def`/`view_def` must precede `type_name_or_bound`, otherwise
+        // `Result`/`Option`/`Generator`/`View` is consumed as a plain type name and the `<...>` argument is left dangling.
         map(result_def, |r| InlineType::ResultDef(Box::new(r))),
         map(option_def, |o| InlineType::OptionDef(Box::new(o))),
         map(generator_def, |g| InlineType::GeneratorDef(Box::new(g))),
+        map(view_def, |v| InlineType::ViewDef(Box::new(v))),
         type_name_or_bound,
         map(snap(callable_def), |f| InlineType::CallableDef(Box::new(f))),
         map(map_def, |m| InlineType::MapDef(Box::new(m))),
@@ -309,6 +336,19 @@ fn generator_def(i: Input) -> Output<GeneratorDef> {
                 value_type,
                 type_id: None,
             }
+        }
+    )(i)
+}
+
+/// Matches a view type definition, e.g. `View<MyStruct>`.
+fn view_def(i: Input) -> Output<ViewDef> {
+    let position = i.position();
+    map(
+        delimited(pair(keyword("View"), punct("<")), inline_type, punct(">")),
+        move |element| ViewDef {
+            position,
+            element_type: element,
+            type_id: None,
         }
     )(i)
 }
@@ -1152,7 +1192,7 @@ fn expression(i: Input) -> Output<Expression> {
             map(match_block, |m| Expression::MatchBlock(Box::new(m))),
             map(block, |m| Expression::Block(Box::new(m))),
             parens,
-            map(path, move |mut m| {
+            map(path_turbofish, move |(mut m, type_param)| {
                 // single element paths may be variables if their names exist in the current scope
                 if m.segments.len() == 1 {
                     match j.has_binding(&m.segments[0].name) {
@@ -1167,7 +1207,7 @@ fn expression(i: Input) -> Output<Expression> {
                         _ => {},
                     }
                 }
-                Expression::Constant(Constant { position: m.position, path: m, constant_id: None })
+                Expression::Constant(Constant { position: m.position, path: m, constant_id: None, type_parameter: type_param })
             }),
             map(snap(anonymous_function), move |m| Expression::AnonymousFunction(Box::new(m))),
             map(closure, move |m| Expression::Closure(Box::new(m))),
@@ -1587,6 +1627,7 @@ fn assignment(i: Input) -> Output<Assignment> {
                     position    : var_position,
                     constant_id : None,
                     path        : Path { segments: vec![ m ], position: var_position },
+                    type_parameter: None,
                 })
             }
         })(i)?;
@@ -1767,6 +1808,7 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
             position,
             path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ] },
             constant_id: None,
+            type_parameter: None,
         });
         Expression::BinaryOp(Box::new(BinaryOp {
             position,

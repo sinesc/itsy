@@ -700,6 +700,7 @@ impl<'ctx> Resolver<'ctx> {
                 ],
             },
             constant_id: Some(constant_id),
+            type_parameter: None,
         });
         item.op = cmp_op;
         item.left = ast::BinaryOperand::Expression(cmp_call);

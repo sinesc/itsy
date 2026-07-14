@@ -118,6 +118,17 @@ pub struct MapType {
     pub value_type_id: Option<TypeId>,
 }
 
+/// Information about a view in a resolved program.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ViewType {
+    /// The represented element type `T` (e.g. a struct)
+    pub element_type_id: TypeId,
+    /// The backing array element type (always a primitive integer: u8, u16, u32, or u64)
+    pub backing_element_type_id: TypeId,
+    /// Packed size of the represented type `T` in bytes (stride for index calculations)
+    pub packed_size: u8,
+}
+
 /// Information about a trait-implementation for a type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImplTrait {
@@ -274,6 +285,8 @@ pub enum Type {
     /// A multiple-trait bound, e.g. `TraitA + TraitB`. Holds the constituent trait type-ids.
     TraitBound(Vec<TypeId>),
     Callable(Callable),
+    /// A view type: zero-cost reinterpretation of an integer array's bytes as elements of type `T`.
+    View(ViewType),
 }
 
 impl Debug for Type {
@@ -299,6 +312,7 @@ impl Debug for Type {
             Type::Trait(_) => write!(f, "<Trait>"),
             Type::TraitBound(v) => write!(f, "<TraitBound {:?}>", v),
             Type::Callable(v) => write!(f,"{:?}", v),
+            Type::View(v) => write!(f, "{:?}", v),
         }
     }
 }
@@ -326,6 +340,7 @@ impl Display for Type {
             Type::Trait(_) => write!(f, "trait"),
             Type::TraitBound(_) => write!(f, "trait bound"),
             Type::Callable(_) => write!(f, "callable"),
+            Type::View(_) => write!(f, "view"),
         }
     }
 }
@@ -357,6 +372,10 @@ impl_as_getter!(Type {
     pub as_trait: Trait -> & Trait,
     /// Returns the type as a mutable trait.
     pub as_trait_mut: Trait -> mut Trait,
+    /// Returns the type as a view.
+    pub as_view: View -> &ViewType,
+    /// Returns the type as a mutable view.
+    pub as_view_mut: View -> mut ViewType,
 });
 
 impl Type {
@@ -381,7 +400,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Map(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Map(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) | Type::View(_) => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
@@ -431,6 +450,7 @@ impl Type {
         match self {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
             Type::String | Type::Array(_) | Type::Map(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => true,
+            Type::View(_) => true,
             _ => false,
         }
     }

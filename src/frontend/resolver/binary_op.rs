@@ -199,13 +199,17 @@ impl<'ctx> Resolver<'ctx> {
         Ok(())
     }
 
-    /// Resolve `[]` / `[]=` index operators (map, array, custom Index trait).
+    /// Resolve `[]` / `[]=` index operators (map, array, custom Index trait, view).
     pub(super) fn resolve_index_op(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
         self.resolve_expression(item.left.as_expression_mut().ice()?, None)?;
         let left_type_id = item.left.type_id(self);
         let is_map = left_type_id.map_or(false, |id| self.type_by_id(id).as_map().is_some());
         let is_array = left_type_id.map_or(false, |id| self.type_by_id(id).as_array().is_some());
+        let is_view = left_type_id.map_or(false, |id| self.type_by_id(id).as_view().is_some());
 
+        if is_view {
+            return self.resolve_index_op_view(item, left_type_id.ice()?, expected_result);
+        }
         if !is_map && !is_array {
             return self.resolve_index_op_custom(item, left_type_id, expected_result);
         }
@@ -214,6 +218,19 @@ impl<'ctx> Resolver<'ctx> {
         } else {
             self.resolve_index_op_array(item, expected_result)
         }
+    }
+
+    /// Resolve index on a view type: set the element type so the compiler can handle it.
+    fn resolve_index_op_view(self: &mut Self, item: &mut ast::BinaryOp, view_type_id: TypeId, _expected_result: Option<TypeId>) -> ResolveResult {
+        // Resolve the index expression
+        self.resolve_expression(item.right.as_expression_mut().ice()?, Some(self.primitive_type_id(crate::STACK_ADDRESS_TYPE)?))?;
+
+        let view_ty = self.type_by_id(view_type_id).as_view().ice()?;
+        let element_type_id = view_ty.element_type_id;
+
+        // Set the result type to the element type
+        item.set_type_id(self, element_type_id);
+        Ok(())
     }
 
     /// Handle index on a non-map, non-array type: custom `Index` trait or error.
@@ -345,6 +362,7 @@ impl<'ctx> Resolver<'ctx> {
         let is_map = left_ty.as_map().is_some();
         let is_scalar = left_ty.is_float() || left_ty.is_integer() || left_ty.is_string();
         let is_generator = self.generator_signature(left_type_id).is_some();
+        let is_view = left_ty.as_view().is_some();
         let trait_bound_ids = left_ty.as_trait_bound().cloned();
 
         let constant_id = if is_generator {
@@ -356,6 +374,9 @@ impl<'ctx> Resolver<'ctx> {
         } else if is_map {
             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                 .or(self.try_create_map_builtin(item.left.as_expression().ice()?, member_name, owning_type_id)?)
+        } else if is_view {
+            self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
+                .or(self.try_create_view_builtin(member_name, owning_type_id)?)
         } else if is_scalar {
             self.scopes.constant_id(self.scope_id, member_name, owning_type_id)
                 .or(self.try_create_scalar_builtin(member_name, owning_type_id)?)
@@ -431,6 +452,7 @@ impl<'ctx> Resolver<'ctx> {
     pub(super) fn resolve_call_op(self: &mut Self, item: &mut ast::BinaryOp, expected_result: Option<TypeId>) -> ResolveResult {
         self.try_bind_result_constructor(item, expected_result)?;
         self.try_bind_option_constructor(item, expected_result)?;
+        self.try_bind_view_constructor(item, expected_result)?;
 
         let call_func = item.left.as_expression_mut().ice()?;
         self.resolve_expression(call_func, None)?;

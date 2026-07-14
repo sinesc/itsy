@@ -153,6 +153,10 @@ pub(crate) trait Resolvable: Display {
                         .map(|opt_type_id| opt_type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen)))
                         .fold(Progress::zero(), |acc, a| acc + a)
                 },
+                Type::View(v) => {
+                    self.check_type_id(container, v.element_type_id, seen)
+                    + self.check_type_id(container, v.backing_element_type_id, seen)
+                },
             }
         }
     }
@@ -356,7 +360,7 @@ macro_rules! impl_matchall {
         }
     };
     ($self:ident, Expression, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction, Cast)
+        impl_matchall!(@match $self, Expression, $val_name, $code, [ ], Literal, Constant, Variable, Assignment, BinaryOp, UnaryOp, Block, IfBlock, MatchBlock, Closure, AnonymousFunction, Cast, ViewAccess)
     };
     ($self:ident, Statement, $val_name:ident, $code:tt) => {
         impl_matchall!(@match $self, Statement, $val_name, $code, [ ], LetBinding, LetPattern, ConstDef, Function, StructDef, ImplBlock, TraitDef, ForLoop, WhileLoop, IfBlock, Block, Return, Yield, Break, Continue, Suspend, Expression, Module, UseDecl, EnumDef)
@@ -365,7 +369,7 @@ macro_rules! impl_matchall {
         impl_matchall!(@match $self, BinaryOperand, $val_name, $code, [ ], Expression, ArgumentList, Member)
     };
     ($self:ident, InlineType, $val_name:ident, $code:tt) => {
-        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, ResultDef, OptionDef, GeneratorDef, CallableDef, TraitBound)
+        impl_matchall!(@match $self, InlineType, $val_name, $code, [ ], TypeName, ArrayDef, MapDef, ResultDef, OptionDef, GeneratorDef, CallableDef, TraitBound, ViewDef)
     };
     ($self:ident, $unsupported:ident, $val_name:ident, $code:tt) => {
         compile_error!(stringify!(Unsupported impl_matchall type $unsupported))
@@ -888,6 +892,8 @@ pub enum InlineType {
     CallableDef(Box<CallableDef>),
     /// Multiple trait bound, e.g. `TraitA + TraitB`
     TraitBound(Box<TraitBound>),
+    /// View definition, e.g. `View<u8, MyStruct>`
+    ViewDef(Box<ViewDef>),
 }
 
 impl_resolvable!(enum InlineType);
@@ -903,6 +909,7 @@ impl Display for InlineType {
             Self::GeneratorDef(generator_def) => write!(f, "{}", generator_def),
             Self::CallableDef(callable_def) => write!(f, "{}", callable_def),
             Self::TraitBound(trait_bound) => write!(f, "{}", trait_bound),
+            Self::ViewDef(view_def) => write!(f, "{}", view_def),
         }
     }
 }
@@ -918,6 +925,7 @@ impl Typeable for InlineType {
             InlineType::TypeName(type_name) => type_name.type_id(container),
             InlineType::CallableDef(callable_def) => callable_def.type_id(container),
             InlineType::TraitBound(trait_bound) => trait_bound.type_id(container),
+            InlineType::ViewDef(view_def) => view_def.type_id(container),
         }
     }
     fn set_type_id(self: &mut Self, container: &mut impl MetaContainer, type_id: TypeId) {
@@ -930,6 +938,7 @@ impl Typeable for InlineType {
             InlineType::TypeName(type_name) => type_name.set_type_id(container, type_id),
             InlineType::CallableDef(callable_def) => callable_def.set_type_id(container, type_id),
             InlineType::TraitBound(trait_bound) => trait_bound.set_type_id(container, type_id),
+            InlineType::ViewDef(view_def) => view_def.set_type_id(container, type_id),
         }
     }
 }
@@ -1055,6 +1064,25 @@ impl Display for GeneratorDef {
         }
     }
 }
+
+
+/// A view type definition, e.g. `View<u8, MyStruct>`. A view is a zero-cost reinterpretation of an
+/// integer array's bytes as elements of type `T`. The view reference IS the backing array's heap
+/// reference (no extra heap object).
+#[derive(Debug, Clone)]
+pub struct ViewDef {
+    pub position    : Position,
+    pub element_type: InlineType,
+    pub type_id     : Option<TypeId>,
+}
+
+impl_positioned!(ViewDef);
+impl_typeable!(ViewDef);
+impl_display!(ViewDef, "View<{}>", element_type);
+impl_resolvable!(ViewDef {
+    element_type: Item,
+    type_id: TypeId,
+});
 
 
 /// The kind of a variant, either `Simple` (without associated data) or `Data`.
@@ -1665,6 +1693,7 @@ pub enum Expression {
     Closure(Box<Closure>),
     AnonymousFunction(Box<Function>),
     Cast(Box<Cast>),
+    ViewAccess(Box<ViewAccess>),
 }
 
 impl_resolvable!(enum Expression);
@@ -1730,6 +1759,7 @@ impl ControlFlow for Expression {
             Expression::Block(v)        => v.identify_control_flow(scan_blocks),
             Expression::IfBlock(v)      => v.identify_control_flow(scan_blocks),
             Expression::Cast(v)         => v.identify_control_flow(scan_blocks),
+            Expression::ViewAccess(v)   => v.identify_control_flow(scan_blocks),
             _                           => None,
         }
     }
@@ -2019,6 +2049,8 @@ pub struct Constant {
     pub position    : Position,
     pub path        : Path,
     pub constant_id : Option<ConstantId>,
+    /// Turbofish type parameter, e.g. `View::<Outer>::new` stores `Outer` here.
+    pub type_parameter: Option<InlineType>,
 }
 
 impl_positioned!(Constant);
@@ -2221,6 +2253,40 @@ impl Resolvable for Cast {
 impl ControlFlow for Cast {
     fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
         self.expr.identify_control_flow(scan_blocks)
+    }
+}
+
+/// A flattened view access expression, e.g. `view[i].field1.field2`. Created by the resolver when
+/// it detects a chain of index + member accesses on a `View<T>` type. The byte offset into the
+/// represented type is precomputed at resolution time so the compiler can emit a single opcode.
+#[derive(Debug, Clone)]
+pub struct ViewAccess {
+    pub position     : Position,
+    pub view_expr    : Expression,
+    pub index_expr   : Expression,
+    pub field_offset : u16,
+    pub field_type_id: TypeId,
+    pub type_id      : Option<TypeId>,
+    pub is_write     : bool,
+}
+
+impl_typeable!(ViewAccess);
+impl_positioned!(ViewAccess);
+impl_display!(ViewAccess, "view_access[offset={}]", field_offset);
+
+impl Resolvable for ViewAccess {
+    fn resolvables(self: &Self) -> Vec<Resolvables> {
+        let mut result = self.view_expr.resolvables();
+        result.append(&mut self.index_expr.resolvables());
+        result.push(Resolvables::TypeId(self.field_type_id));
+        result.push(self.type_id.map_or(Resolvables::Progress(Progress::new(0, 1)), |type_id| Resolvables::TypeId(type_id)));
+        result
+    }
+}
+
+impl ControlFlow for ViewAccess {
+    fn identify_control_flow(self: &Self, scan_blocks: bool) -> Option<ControlFlowType> {
+        self.view_expr.identify_control_flow(scan_blocks).or(self.index_expr.identify_control_flow(scan_blocks))
     }
 }
 

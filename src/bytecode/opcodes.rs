@@ -1829,6 +1829,36 @@ impl_opcodes!{
         self.stack.extend_from(&key_bytes);
     }
 
+    /// Load a primitive from a view. Pops index and view heap reference, pushes the value.
+    /// Computes byte address as `index * stride + offset`.
+    fn <
+        view_load8<T: Data8>(stride: FrameAddress, offset: FrameAddress),
+        view_load16<T: Data16>(stride: FrameAddress, offset: FrameAddress),
+        view_load32<T: Data32>(stride: FrameAddress, offset: FrameAddress),
+        view_load64<T: Data64>(stride: FrameAddress, offset: FrameAddress),
+    >(&mut self) {
+        let index: StackAddress = self.stack.pop();
+        let view_ref: HeapRef = self.stack.pop();
+        let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
+        let data: T = self.heap.read(HeapRef::new(view_ref.index(), byte_offset));
+        self.stack.push(data);
+    }
+
+    /// Store a primitive to a view. Pops value, index, and view heap reference.
+    /// Computes byte address as `index * stride + offset`.
+    fn <
+        view_store8<T: Data8>(stride: FrameAddress, offset: FrameAddress),
+        view_store16<T: Data16>(stride: FrameAddress, offset: FrameAddress),
+        view_store32<T: Data32>(stride: FrameAddress, offset: FrameAddress),
+        view_store64<T: Data64>(stride: FrameAddress, offset: FrameAddress),
+    >(&mut self) {
+        let value: T = self.stack.pop();
+        let index: StackAddress = self.stack.pop();
+        let view_ref: HeapRef = self.stack.pop();
+        let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
+        self.heap.write(HeapRef::new(view_ref.index(), byte_offset), value);
+    }
+
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
     /// run() again. Unlike `exit`, no stack/heap teardown is performed.
     fn suspend(&mut self) [ return ] {

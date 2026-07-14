@@ -53,3 +53,6 @@ mod index_ops;
 mod int_methods;
 #[path="vm/consts.rs"]
 mod consts;
+
+#[path="vm/view.rs"]
+mod view;

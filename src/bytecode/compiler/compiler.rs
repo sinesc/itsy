@@ -5,6 +5,7 @@ mod macros;
 pub mod error;
 mod placeholder;
 mod init_state;
+mod compiler_view;
 
 use crate::config::FrameAddress;
 use crate::{prelude::*, HeapAddress};
@@ -401,6 +402,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             AnonymousFunction(anonymous_function) => self.compile_anonymous_function(anonymous_function),
             Closure(closure) => self.compile_closure(closure),
             Cast(cast) => self.compile_cast(cast),
+            ViewAccess(view_access) => self.compile_view_access(view_access),
         }
     }
 
@@ -485,6 +487,17 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                         self.compile_expression(&item.right)?;                      // stack: map key value
                         self.writer.call_builtinx(Builtin::map_insert, 0, constructor);                        // stack: --
                         return Ok(());
+                    }
+                    // view index-write `view[i] = v` (element is primitive)
+                    if (bin.op == BO::Index || bin.op == BO::IndexWrite) && self.ty(&bin.left).as_view().is_some() {
+                        return self.compile_view_store_simple(bin, &item.right);
+                    }
+                    // view access chain write: `view[i].field = v` (possibly nested: `view[i].a.b = v`)
+                    if (bin.op == BO::Access || bin.op == BO::AccessWrite)
+                        && let Some(index_bin) = Self::find_view_index_in_chain(bin)
+                        && self.ty(&index_bin.left).as_view().is_some()
+                    {
+                        return self.compile_view_store_chain(bin, index_bin, &item.right);
                     }
                 }
                 self.compile_expression(&item.left)?;       // stack: &left
@@ -1696,6 +1709,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     /// Compiles an offsetting binary operation, i.e.. indexing and member access.
     fn compile_binary_op_offseting(self: &mut Self, item: &ast::BinaryOp) -> CompileResult {
         use crate::frontend::ast::BinaryOperator::*;
+
+        // View access chain read: `view[i].field` (possibly nested: `view[i].a.b`)
+        if self.try_compile_view_load(item)? {
+            return Ok(());
+        }
+
         self.compile_expression(item.left.as_expression().ice()?)?;
         if item.op == Index || item.op == IndexWrite {
             self.compile_expression(item.right.as_expression().ice()?)?;
@@ -2196,6 +2215,10 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
                     Ok(0)
                 })?;
                 *prev_primitive = None;
+            }
+            Type::View(_view) => {
+                *prev_primitive = None;
+                self.store_constructor_view();
             }
             ty @ _ if ty.is_primitive() => {
                 // try to merge primitive with previous primitive
@@ -2863,6 +2886,10 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             (_, BuiltinType::Generator(generator_builtin)) => {
                 // Generator builtins use dedicated gen_* opcodes (handled in the default @write arm).
                 generator_builtin.write(self, type_id, None)
+            },
+            (Type::View(view_ty), BuiltinType::View(view_builtin)) => {
+                // View builtins need packed_size as the second parameter, not element constructor
+                self.write_view_builtin(view_ty, view_builtin)?
             },
             _ => Self::ice(&format!("Builtin {builtin:?} not implemented for {ty}"))?,
         })

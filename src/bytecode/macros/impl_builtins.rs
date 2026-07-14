@@ -330,6 +330,7 @@ macro_rules! impl_builtins {
                     )+
                 }
 
+                #[allow(dead_code)]
                 impl $builtin_type {
                     #[allow(unused_variables)]
                     pub(crate) fn resolve(resolver: &mut Resolver, name: &str, type_id: TypeId, inner_type_id: Option<TypeId>) -> Option<(BuiltinType, TypeId, Vec<TypeId>)> {

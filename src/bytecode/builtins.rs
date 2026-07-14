@@ -2197,4 +2197,31 @@ impl_builtins! {
             }
         }
     }
+
+    /// View type: zero-cost reinterpretation of an integer array's bytes as elements of type `T`.
+    View {
+        /// Returns the number of elements in the view.
+        len(self: Self) -> u64 {
+            fn view_len(&mut vm + packed_size, this: HeapRef) -> StackAddress {
+                (vm.heap.item(this.index()).data.len() / packed_size as usize) as StackAddress
+            }
+        }
+
+        /// Wrap an existing `[u8]` array as a `View<T>`.
+        wrap(array: Self) -> Self {
+            fn view_wrap(array: HeapRef) -> HeapRef {
+                array
+            }
+        }
+
+        /// Create a new `View<T>` with the given element count (zero-initialized).
+        new(size: u64) -> Self {
+            fn view_new(&mut vm + packed_size, size: StackAddress) -> HeapRef {
+                let data_len = size as usize * packed_size as usize;
+                let data = vec![0u8; data_len];
+                let index = vm.heap.alloc_copy(&data, 0);
+                HeapRef::new(index, 0)
+            }
+        }
+    }
 }
