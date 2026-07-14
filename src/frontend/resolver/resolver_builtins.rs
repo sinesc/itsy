@@ -133,7 +133,6 @@ impl<'ctx> Resolver<'ctx> {
 
     /// For a call like `arr.push(x)` whose receiver is an array of still-unknown element type, infer that
     /// element type from the value argument.
-    /// Note: method names/parameter index for inference are hardcoded in value_index match block and may need to be updated for new array builtins.
     pub(super) fn try_infer_array_element_from_builtin_args(self: &mut Self, call_exp: &mut ast::Expression, call_args: &mut ast::ArgumentList) -> ResolveResult {
         // identify `<array>.<method>` access whose array element type is still unresolved
         let (array_type_id, value_index) = {
@@ -142,10 +141,11 @@ impl<'ctx> Resolver<'ctx> {
                 _ => return Ok(()),
             };
             // which (pre-transform, so the receiver is not yet prepended) argument carries the Element value
-            let value_index = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
-                Some("push") => 0,
-                Some("insert") => 1,
-                _ => return Ok(()),
+            let value_index = match binary_op.right.as_member().and_then(|member| {
+                builtin_types::Array::element_param_index(&member.ident.name)
+            }) {
+                Some(idx) => idx,
+                None => return Ok(()),
             };
             match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_array()) {
                 Some(Some(&Array { type_id: None })) => (binary_op.left.type_id(self).ice()?, value_index),
@@ -172,11 +172,13 @@ impl<'ctx> Resolver<'ctx> {
                 Some(binary_op) if binary_op.op == ast::BinaryOperator::Access => binary_op,
                 _ => return Ok(()),
             };
-            let (key_index, value_index) = match binary_op.right.as_member().map(|member| member.ident.name.as_str()) {
-                Some("insert") => (Some(0), Some(1)),
-                Some("get") | Some("remove") => (Some(0), None),
-                _ => return Ok(()),
-            };
+            let (key_index, value_index) = binary_op.right.as_member().map(|member| {
+                (builtin_types::Map::key_param_index(&member.ident.name),
+                 builtin_types::Map::value_param_index(&member.ident.name))
+            }).unwrap_or_default();
+            if key_index.is_none() && value_index.is_none() {
+                return Ok(());
+            }
             match binary_op.left.type_id(self).map(|type_id| self.type_by_id(type_id).as_map()) {
                 Some(Some(_)) => (binary_op.left.type_id(self).ice()?, key_index, value_index),
                 _ => return Ok(()),

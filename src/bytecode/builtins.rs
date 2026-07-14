@@ -2225,3 +2225,43 @@ impl_builtins! {
         }
     }
 }
+
+/// Return the index of the `Element` parameter for array builtins that accept one
+/// (`push`, `insert`, `contains`). Returns `None` for methods that do not carry element data.
+///
+/// This centralises the knowledge of which builtins carry element values so that the
+/// resolver's type-inference code does not need a separate hardcoded match list.
+#[cfg(feature = "compiler")]
+impl builtin_types::Array {
+    pub(crate) fn element_param_index(name: &str) -> Option<usize> {
+        match name {
+            "push" => Some(0),
+            "insert" => Some(1),
+            "contains" => Some(0),
+            _ => None,
+        }
+    }
+}
+
+/// Return the index of the `Key` (and optionally `Value`) parameter for map builtins
+/// that accept them (`insert`, `get`, `contains_key`, `remove`). Returns `None` for
+/// methods that do not carry key/value data.
+///
+/// This centralises the knowledge of which builtins carry key/value data so that the
+/// resolver's type-inference code does not need a separate hardcoded match list.
+#[cfg(feature = "compiler")]
+impl builtin_types::Map {
+    pub(crate) fn key_param_index(name: &str) -> Option<usize> {
+        match name {
+            "insert" | "get" | "contains_key" | "remove" => Some(0),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn value_param_index(name: &str) -> Option<usize> {
+        match name {
+            "insert" => Some(1),
+            _ => None,
+        }
+    }
+}
