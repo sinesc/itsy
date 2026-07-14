@@ -417,33 +417,57 @@ macro_rules! impl_builtins {
             ///
             /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type Element = ();
-            /// Placeholder for the unsigned-integer counterpart of a signed numeric type (e.g. `u32` for
-            /// `i32`), returned by `abs_diff`. Not a built-in type.
+            /// The unsigned-integer counterpart of a signed numeric type (e.g. `u32` for
+            /// `i32`), returned by `abs_diff`.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type UnsignedSelf = ();
-            /// Placeholder for a map's key type. Not a built-in type; each map substitutes its own key type.
+            /// A map's key type.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type Key = ();
-            /// Placeholder for a map's value type. Not a built-in type; each map substitutes its own value type.
+            /// A map's value type.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type Value = ();
-            /// Placeholder for an array of a map's keys (`[Key]`), returned by `keys`. Not a built-in type.
+            /// An array of a map's keys (`[Key]`), returned by `keys`.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type KeyArray = ();
-            /// Placeholder for an array of a map's values (`[Value]`), returned by `values`. Not a built-in type.
+            /// An array of a map's values (`[Value]`), returned by `values`.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type ValueArray = ();
-            /// Placeholder for a generator's key (iteration index) type. Not a built-in type.
+            /// A generator's key (iteration index) type.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type GenKey = ();
-            /// Placeholder for a generator's yielded value type. Not a built-in type.
+            /// A generator's yielded value type.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type GenValue = ();
-            /// Placeholder for `Option<Element>`: an array element from a fallible lookup (e.g. `pop`,
-            /// `get`, `first`), `None` when absent. Not a built-in type.
+            /// `Option<Element>`: an array element from a fallible lookup (e.g. `pop`,
+            /// `get`, `first`), `None` when absent.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type OptionalElement = ();
-            /// Placeholder for `Option<Value>`: a map value looked up by key, `None` when the key is
-            /// absent. Not a built-in type.
+            /// `Option<Value>`: a map value looked up by key, `None` when the key is
+            /// absent.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type OptionalValue = ();
-            /// Placeholder for `Option<u64>`: a character index from a fallible string search (e.g.
-            /// `find`), `None` when no match is found. Not a built-in type.
+            /// `Option<u64>`: a character index from a fallible string search (e.g.
+            /// `find`), `None` when no match is found.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type OptionalIndex = ();
-            /// Placeholder for `[String]`: an array of strings, returned by `String::split`. Not a built-in type.
+            /// `[String]`: an array of strings, returned by `String::split`.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type StringArray = ();
-            /// Placeholder for the underlying buffer type of a view. Not a built-in type.
+            /// The underlying buffer type of a view.
+            ///
+            /// Placeholder-type for the documentation. Not an actual built-in type.
             pub type ViewBuffer = ();
             $(
                 $( #[ $builtin_type_attr ] )*

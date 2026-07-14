@@ -73,11 +73,15 @@ pub use crate::bytecode::builtins::builtin_type_documentation::*;
 /// }
 /// # fn main() { }
 /// ```
-pub enum Result { Ok(ResultType), Err(Error) }  // or: Err(Box<dyn intrinsic_traits::Error>), less readable
-/// Placeholder for a results's Ok type. Not a built-in type.
-pub type ResultType = ();
-/// Placeholder for a results's [Error](crate::documentation::intrinsic_traits::Error)-implementing type. Not a built-in type.
-pub type Error = ();
+pub enum Result { Ok(ResultOkType), Err(ResultErrorType) }  // or: Err(Box<dyn intrinsic_traits::Error>), less readable
+/// A result's Ok type.
+///
+/// Placeholder-type for the documentation. Not an actual built-in type.
+pub type ResultOkType = ();
+/// A result's [Error](crate::documentation::intrinsic_traits::Error)-implementing type.
+///
+/// Placeholder-type for the documentation. Not an actual built-in type.
+pub type ResultErrorType = ();
 
 /// Nullable type, written `Option<T>`.
 ///
@@ -124,9 +128,12 @@ pub type Error = ();
 /// }
 /// # fn main() { }
 /// ```
-pub enum Option { Some(OptionType), None }
-/// Placeholder for an option's content type. Not a built-in type.
-pub type OptionType = ();
+pub enum Option { Some(OptionSomeType), None }
+
+/// An option's content type.
+///
+/// Placeholder-type for the documentation. Not an actual built-in type.
+pub type OptionSomeType = ();
 
 /// Structs: fixed collections of named fields.
 ///
@@ -1027,16 +1034,21 @@ pub mod intrinsic_traits {
         fn set(self: Self, index: IndexType, value: ValueType);
     }
 
-    /// Placeholder for the index ("key") type an [`Index`] implementor chooses (e.g. `u64`, `String`).
-    /// Not a built-in type - it must be the same in [`Index::get`] and [`Index::set`].
+    /// The index ("key") type an [`Index`] implementor chooses (e.g. `u64`, `String`).
+    /// It must be the same in [`Index::get`] and [`Index::set`].
+    ///
+    /// Placeholder-type for the documentation. Not an actual built-in type.
     pub type IndexType = ();
 
-    /// Placeholder for the type [`Index::get`] returns. Not a built-in type. May be wrapped (e.g.
-    /// `Option<i64>`) and need not equal [`ValueType`], though compound assignment (`a[i] += v`) requires it to.
+    /// The type [`Index::get`] returns. May be wrapped (e.g. `Option<i64>`) and need not equal
+    /// [`ValueType`], though compound assignment (`a[i] += v`) requires it to.
+    ///
+    /// Placeholder-type for the documentation. Not an actual built-in type.
     pub type ResultType = ();
 
-    /// Placeholder for the value type [`Index::set`] accepts. Not a built-in type, and independent of
-    /// [`ResultType`].
+    /// The value type [`Index::set`] accepts. Independent of [`ResultType`].
+    ///
+    /// Placeholder-type for the documentation. Not an actual built-in type.
     pub type ValueType = ();
 
 }

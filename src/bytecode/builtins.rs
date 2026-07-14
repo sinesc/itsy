@@ -1953,7 +1953,7 @@ impl_builtins! {
         }
 
         /// Merges all entries from `other` into this map, overwriting values on key collision.
-        extend(self: Self, other: Map) {
+        extend(self: Self, other: Self) {
             fn map_extend(&mut vm + constructor, this: Map, other: Map) {
                 let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
                 let this_idx = this.index();
@@ -2120,7 +2120,7 @@ impl_builtins! {
         }
 
         /// Returns a shallow copy of the map.
-        clone(self: Self) -> Map {
+        clone(self: Self) -> Self {
             fn map_clone(&mut vm + constructor, this: Map) -> Map {
                 let data = vm.heap.item(this.index()).data.clone();
                 let clone_index = vm.heap.alloc_copy(&data, ItemIndex::MAX);
