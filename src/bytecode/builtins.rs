@@ -2201,9 +2201,10 @@ impl_builtins! {
     /// `View<T>`: zero-cost reinterpretation of a byte buffer as elements of type `T`.
     ///
     /// A `View<T>` provides indexed access (`v[i]`) to a contiguous block of memory,
-    /// interpreting the raw bytes as elements of type `T`. The underlying storage is a
-    /// `[u8]` array; the view does not allocate its own data. This makes it useful for
-    /// treating a byte buffer as an array of structs, integers, or floats without copying.
+    /// interpreting the raw bytes as elements of type `T`. The underlying storage is an
+    /// array of any integer type (`u8`-`u64`, `i8`-`i64`); the view does not allocate
+    /// its own data. This makes it useful for treating a byte buffer as an array of
+    /// structs, integers, or floats without copying.
     ///
     /// # Construction
     ///
@@ -2218,7 +2219,9 @@ impl_builtins! {
     /// # }
     /// ```
     ///
-    /// Wrap an existing `[u8]` array with [`View::wrap`](crate::documentation::View::wrap):
+    /// Wrap an existing array of any integer type with [`View::wrap`](crate::documentation::View::wrap):
+    ///
+    /// The backing element size must evenly divide the packed size of `T`:
     ///
     /// ``` ignore
     /// # fn main() {
@@ -2298,9 +2301,15 @@ impl_builtins! {
     /// because those types store their data on the heap rather than inline.
     ///
     /// Valid element types include:
-    /// - All primitive types (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`)
+    /// - All primitive types (`i8`-`i64`, `u8`-`u64`, `f32`, `f64`, `bool`)
     /// - Enums (with unit variants or variants carrying compact data)
     /// - Structs whose fields are all compact types
+    ///
+    /// # Backing array restrictions
+    ///
+    /// [`View::wrap`](crate::documentation::View::wrap) accepts an array of any integer type
+    /// (`u8`-`u64`, `i8`-`i64`). The backing element size must evenly divide the packed size
+    /// of `T` (i.e. `sizeof(T) % sizeof(backing_element) == 0`).
     ///
     /// # Length
     ///
@@ -2327,7 +2336,7 @@ impl_builtins! {
             }
         }
 
-        /// Wrap an existing `[u8]` array as a `View<T>`.
+        /// Wrap an existing array of any integer type as a `View<T>`.
         wrap(array: ViewBuffer) -> Self {
             fn view_wrap(array: HeapRef) -> HeapRef {
                 array

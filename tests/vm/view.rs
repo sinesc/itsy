@@ -207,3 +207,26 @@ fn view_turbofish_wrap() {
     ));
     assert_all(&result, &[1u64]);
 }
+
+#[test]
+fn view_wrap_i16_backing_struct() {
+    let result = run(stringify!(
+        struct Repr {
+            a: u32,
+            b: u16,
+            c: u8,
+            d: u8,
+        }
+
+        fn main() {
+            let backing: [i16] = [1, 2, 3, 4];
+            let v: View<Repr> = View::wrap(backing);
+            ret_u64(v.len());
+            ret_u32(v[0].a);
+            ret_u16(v[0].b);
+            ret_u8(v[0].c);
+            ret_u8(v[0].d);
+        }
+    ));
+    assert_all!(&result, [1u64, 131073u32, 3u16, 4u8, 0u8]);
+}
