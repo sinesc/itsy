@@ -2,9 +2,9 @@
 //!
 //! Each binary operator category gets its own method; the main `resolve_binary_op` dispatches to them.
 
-use crate::frontend::ast::{self, Typeable};
+use crate::frontend::ast::{self, Typeable, Positioned};
 use crate::frontend::resolver::error::{ResolveResult, ResolveError, ResolveErrorKind, OptionToResolveError};
-use crate::shared::meta::{Type, MapType, Array};
+use crate::shared::meta::{Type, MapType, Array, FunctionKind};
 use crate::shared::typed_ids::TypeId;
 use crate::shared::MetaContainer;
 use super::Resolver;
@@ -486,7 +486,7 @@ impl<'ctx> Resolver<'ctx> {
         if let Some(function_type_id) = call_func.type_id(self) {
             let func = self.validate_callable(item, function_type_id)?;
             self.resolve_call_return_type(item, &func, expected_result)?;
-            self.resolve_call_arguments(item, &func, num_args)?;
+            self.resolve_call_arguments(item, &func, num_args, callee_constant_id)?;
             self.check_const_args_to_mutating_params(item, callee_constant_id)?;
         }
 
@@ -533,14 +533,19 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Resolve and type-check each call argument against the callee signature.
-    fn resolve_call_arguments(self: &mut Self, item: &mut ast::BinaryOp, func: &crate::shared::meta::Callable, num_args: usize) -> ResolveResult {
+    fn resolve_call_arguments(self: &mut Self, item: &mut ast::BinaryOp, func: &crate::shared::meta::Callable, num_args: usize, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> ResolveResult {
         if func.arg_type_ids.len() != num_args {
             let function_name = format!("{}", item.left.as_expression().ice()?);
             return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_name, func.arg_type_ids.len() as crate::ItemIndex, num_args as crate::ItemIndex), self.module_path));
         }
+        // Check if this is a View::wrap call — these accept any integer array as backing,
+        // not just the registered [u8] type.
+        let is_view_wrap = self.is_view_wrap_builtin(callee_constant_id);
         let arguments = item.right.as_argument_list_mut().ice()?;
         for (index, &expected_type_id) in func.arg_type_ids.iter().enumerate() {
-            self.resolve_expression(&mut arguments.args[index], expected_type_id)?;
+            // For View::wrap, resolve without expected type so any integer array is accepted
+            let resolve_expected = if is_view_wrap && index == 0 { None } else { expected_type_id };
+            self.resolve_expression(&mut arguments.args[index], resolve_expected)?;
             let actual_type_id = arguments.args[index].type_id(self);
             // infer arguments
             if actual_type_id.is_none() && expected_type_id.is_some() {
@@ -550,9 +555,57 @@ impl<'ctx> Resolver<'ctx> {
                     }
                 }
                 self.set_type_id(&mut arguments.args[index], expected_type_id.ice()?)?;
+            } else if is_view_wrap && index == 0 {
+                // View::wrap: validate backing array type instead of strict type match
+                if let Some(actual_type_id) = actual_type_id {
+                    self.validate_view_backing_type(&arguments.args[index], actual_type_id, callee_constant_id)?;
+                }
             } else if let (Some(actual_type_id), Some(expected_type_id)) = (actual_type_id, expected_type_id) {
                 self.check_type_accepted_for(&arguments.args[index], actual_type_id, expected_type_id)?;
             }
+        }
+        Ok(())
+    }
+
+    /// Check whether the given constant id refers to a View::wrap builtin.
+    fn is_view_wrap_builtin(self: &Self, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> bool {
+        let kind = callee_constant_id
+            .and_then(|cid| self.scopes.constant_function_id(cid))
+            .map(|fid| self.scopes.function_ref(fid).kind)
+            .flatten();
+        if let Some(FunctionKind::Builtin(_, crate::bytecode::builtins::BuiltinType::View(v))) = kind {
+            return std::mem::discriminant(&v) == std::mem::discriminant(&crate::bytecode::builtins::builtin_types::View::wrap);
+        }
+        false
+    }
+
+    /// Validate that an array type is a legal backing for a View, and update the view type accordingly.
+    fn validate_view_backing_type(self: &mut Self, item: &impl Positioned, array_type_id: TypeId, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> ResolveResult {
+        let array_ty = self.type_by_id(array_type_id);
+        let Type::Array(Array { type_id: Some(elem_type_id) }) = array_ty else {
+            let name = self.type_name(array_type_id);
+            return Err(ResolveError::new(item, ResolveErrorKind::ViewBackingTypeMismatch(name, "array of integer type".to_string()), self.module_path));
+        };
+        let elem_ty = self.type_by_id(*elem_type_id);
+        if !elem_ty.is_integer() {
+            let name = self.type_name(*elem_type_id);
+            return Err(ResolveError::new(item, ResolveErrorKind::ViewBackingTypeMismatch(name, "integer type".to_string()), self.module_path));
+        }
+        let elem_size = elem_ty.primitive_size();
+        // Find the view type from the callee function's return type
+        if let Some(view_type_id) = callee_constant_id
+            .and_then(|cid| self.scopes.constant_function_id(cid))
+            .map(|fid| self.scopes.function_ref(fid).callable_type_id)
+            .and_then(|callable_tid| self.type_by_id(callable_tid).as_callable()?.ret_type_id)
+            .filter(|tid| self.type_by_id(*tid).as_view().is_some())
+        {
+            let view_ty = self.type_by_id(view_type_id).as_view().ice()?;
+            if view_ty.packed_size % elem_size != 0 {
+                return Err(ResolveError::new(item, ResolveErrorKind::ViewSizeMismatch(
+                    self.type_name(view_type_id), view_ty.packed_size, elem_size), self.module_path));
+            }
+            // Update the backing element type to match the actual array
+            self.type_by_id_mut(view_type_id).as_view_mut().ice()?.backing_element_type_id = *elem_type_id;
         }
         Ok(())
     }
