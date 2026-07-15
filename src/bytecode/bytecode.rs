@@ -24,6 +24,8 @@ use writer::{Writer, StoreConst};
 use crate::{ItemIndex, bytecode::runtime::{vm::VM, stack::{Stack, StackOp}}};
 #[cfg(feature="call_function")]
 use call_function::FunctionMeta;
+#[cfg(feature="compiler")]
+use crate::internals::marshal::{ApiType, ApiTypeDef};
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
@@ -35,7 +37,7 @@ pub trait VMFunc<T>: Debug {
     fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<crate::internals::marshal::ApiType>, Vec<crate::internals::marshal::ApiType>)>;
+    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<ApiType>, Vec<ApiType>)>;
     /// Returns the name given to the API in `itsy_api!`. API types are registered under this namespace
     /// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced.
     #[doc(hidden)]
@@ -45,13 +47,13 @@ pub trait VMFunc<T>: Debug {
     /// resolver can register them in the root scope.
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_types() -> Vec<crate::internals::marshal::ApiTypeDef> { Vec::new() }
+    fn resolve_types() -> Vec<ApiTypeDef> { Vec::new() }
     /// Returns the top-level Itsy functions the host declared it will call (`callables { ... }`), as
     /// `(name, return type, argument types)`, so the resolver can verify each is defined in the script
     /// with the declared signature.
     #[doc(hidden)]
     #[cfg(feature="compiler")]
-    fn resolve_callables() -> Vec<(&'static str, Option<crate::internals::marshal::ApiType>, Vec<crate::internals::marshal::ApiType>)> { Vec::new() }
+    fn resolve_callables() -> Vec<(&'static str, Option<ApiType>, Vec<ApiType>)> { Vec::new() }
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.

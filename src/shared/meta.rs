@@ -2,6 +2,7 @@ use crate::prelude::*;
 use crate::{HeapAddress, VariantIndex, FrameAddress, RustFnIndex, StackAddress};
 use crate::shared::{impl_as_getter, MetaContainer, typed_ids::{TypeId, FunctionId, ConstantId}, numeric::{Numeric, Signed, Unsigned}};
 use crate::bytecode::builtins::BuiltinType;
+use crate::frontend::ast::FunctionShared;
 
 /// Information about a binding in a resolved program.
 #[derive(Debug)]
@@ -158,7 +159,7 @@ pub struct Trait {
     /// from the vtable and skips the impl-vs-trait signature compatibility check for them.
     pub impl_defined: bool,
     /// AST bodies of provided (default) methods, stored for specialization when an impl overrides consts.
-    pub method_bodies: Map<String, crate::frontend::ast::FunctionShared>,
+    pub method_bodies: Map<String, FunctionShared>,
 }
 
 impl PartialEq for Trait {

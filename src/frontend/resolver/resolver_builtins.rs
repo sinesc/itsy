@@ -3,14 +3,14 @@ use crate::frontend::ast::{self, Typeable};
 use crate::frontend::resolver::error::{OptionToResolveError, ResolveResult, ResolveError, ResolveErrorKind};
 use crate::shared::{MetaContainer, meta::{Array, FunctionKind}};
 use crate::shared::typed_ids::{ScopeId, TypeId, ConstantId};
-use crate::bytecode::builtins::builtin_types;
+use crate::bytecode::builtins::{builtin_types, BuiltinType};
 use crate::frontend::resolver::Resolver;
 
 /// General utility methods.
 impl<'ctx> Resolver<'ctx> {
 
     /// Insert a resolved builtin function signature into the root scope.
-    pub(super) fn insert_builtin_fn(self: &mut Self, name: &str, type_id: TypeId, builtin_type: crate::bytecode::builtins::BuiltinType, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> ConstantId {
+    pub(super) fn insert_builtin_fn(self: &mut Self, name: &str, type_id: TypeId, builtin_type: BuiltinType, result_type_id: TypeId, arg_type_ids: Vec<TypeId>) -> ConstantId {
         self.scopes.insert_function(
             name,
             Some(result_type_id),
@@ -100,7 +100,7 @@ impl<'ctx> Resolver<'ctx> {
         if name == "len" {
             return Ok(Some(self.insert_builtin_fn(
                 name, type_id,
-                crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::len),
+                BuiltinType::View(builtin_types::View::len),
                 stack_addr_type_id,
                 vec![type_id],
             )));

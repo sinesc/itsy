@@ -4,9 +4,10 @@
 
 use crate::frontend::ast::{self, Typeable, Positioned};
 use crate::frontend::resolver::error::{ResolveResult, ResolveError, ResolveErrorKind, OptionToResolveError};
-use crate::shared::meta::{Type, MapType, Array, FunctionKind};
-use crate::shared::typed_ids::TypeId;
+use crate::shared::meta::{Type, MapType, Array, FunctionKind, Callable};
+use crate::shared::typed_ids::{TypeId, ConstantId};
 use crate::shared::MetaContainer;
+use crate::bytecode::builtins::{BuiltinType, builtin_types};
 use super::Resolver;
 
 /// Core binary-operation resolution methods.
@@ -397,7 +398,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Search each constituent trait in a multiple-trait bound (`A + B`) for the named method.
-    fn lookup_trait_bound_method(self: &mut Self, trait_bound_ids: &[TypeId], member_name: &str) -> Option<crate::shared::typed_ids::ConstantId> {
+    fn lookup_trait_bound_method(self: &mut Self, trait_bound_ids: &[TypeId], member_name: &str) -> Option<ConstantId> {
         for trait_id in trait_bound_ids {
             let type_name = self.type_flat_name(*trait_id)?.clone();
             let path = self.make_path(&[ &type_name, member_name ]);
@@ -409,7 +410,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Lookup a method on a concrete type, checking its own methods, trait defaults, and trait-provided methods.
-    fn lookup_type_method(self: &mut Self, owning_type_id: TypeId, member_name: &str) -> Option<crate::shared::typed_ids::ConstantId> {
+    fn lookup_type_method(self: &mut Self, owning_type_id: TypeId, member_name: &str) -> Option<ConstantId> {
         let type_name = self.type_flat_name(owning_type_id)?.clone();
         let path = self.make_path(&[ type_name, member_name.to_string() ]);
         // For trait types, also check the trait's own provided/required methods
@@ -494,7 +495,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Validate that the callee type is callable and return the callable signature.
-    fn validate_callable(self: &mut Self, item: &mut ast::BinaryOp, function_type_id: TypeId) -> ResolveResult<crate::shared::meta::Callable> {
+    fn validate_callable(self: &mut Self, item: &mut ast::BinaryOp, function_type_id: TypeId) -> ResolveResult<Callable> {
         match self.type_by_id(function_type_id).as_callable() {
             Some(callable) => Ok(callable.clone()), //FIXME borrow
             None => {
@@ -505,7 +506,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Resolve the call's return type from the callee signature, propagating `Self` returns.
-    fn resolve_call_return_type(self: &mut Self, item: &mut ast::BinaryOp, func: &crate::shared::meta::Callable, expected_result: Option<TypeId>) -> ResolveResult {
+    fn resolve_call_return_type(self: &mut Self, item: &mut ast::BinaryOp, func: &Callable, expected_result: Option<TypeId>) -> ResolveResult {
         // A trait method declared to return `Self` records its return type as the declaring
         // trait. When invoked on a trait-object receiver whose static type is broader (e.g. a
         // multiple-trait bound `A + B`), propagate the receiver's type to the result so methods
@@ -515,7 +516,7 @@ impl<'ctx> Resolver<'ctx> {
                 .and_then(|e| e.as_constant())
                 .and_then(|c| c.constant_id)
                 .and_then(|cid| self.scopes.constant_function_id(cid))
-                .filter(|&fid| matches!(self.scopes.function_ref(fid).kind, Some(crate::shared::meta::FunctionKind::Method(declaring_id)) if declaring_id == ret_type_id))
+                .filter(|&fid| matches!(self.scopes.function_ref(fid).kind, Some(FunctionKind::Method(declaring_id)) if declaring_id == ret_type_id))
                 .and(item.right.as_argument_list().and_then(|a| a.args.first()))
                 .and_then(|receiver| receiver.type_id(self));
             match receiver_type_id {
@@ -533,7 +534,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Resolve and type-check each call argument against the callee signature.
-    fn resolve_call_arguments(self: &mut Self, item: &mut ast::BinaryOp, func: &crate::shared::meta::Callable, num_args: usize, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> ResolveResult {
+    fn resolve_call_arguments(self: &mut Self, item: &mut ast::BinaryOp, func: &Callable, num_args: usize, callee_constant_id: Option<ConstantId>) -> ResolveResult {
         if func.arg_type_ids.len() != num_args {
             let function_name = format!("{}", item.left.as_expression().ice()?);
             return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_name, func.arg_type_ids.len() as crate::ItemIndex, num_args as crate::ItemIndex), self.module_path));
@@ -568,19 +569,19 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Check whether the given constant id refers to a View::wrap builtin.
-    fn is_view_wrap_builtin(self: &Self, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> bool {
+    fn is_view_wrap_builtin(self: &Self, callee_constant_id: Option<ConstantId>) -> bool {
         let kind = callee_constant_id
             .and_then(|cid| self.scopes.constant_function_id(cid))
             .map(|fid| self.scopes.function_ref(fid).kind)
             .flatten();
-        if let Some(FunctionKind::Builtin(_, crate::bytecode::builtins::BuiltinType::View(v))) = kind {
-            return std::mem::discriminant(&v) == std::mem::discriminant(&crate::bytecode::builtins::builtin_types::View::wrap);
+        if let Some(FunctionKind::Builtin(_, BuiltinType::View(v))) = kind {
+            return std::mem::discriminant(&v) == std::mem::discriminant(&builtin_types::View::wrap);
         }
         false
     }
 
     /// Validate that an array type is a legal backing for a View, and update the view type accordingly.
-    fn validate_view_backing_type(self: &mut Self, item: &impl Positioned, array_type_id: TypeId, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> ResolveResult {
+    fn validate_view_backing_type(self: &mut Self, item: &impl Positioned, array_type_id: TypeId, callee_constant_id: Option<ConstantId>) -> ResolveResult {
         let array_ty = self.type_by_id(array_type_id);
         let Type::Array(Array { type_id: Some(elem_type_id) }) = array_ty else {
             let name = self.type_name(array_type_id);
@@ -611,7 +612,7 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Check if any from_const argument is passed to a mutating parameter.
-    fn check_const_args_to_mutating_params(self: &mut Self, item: &mut ast::BinaryOp, callee_constant_id: Option<crate::shared::typed_ids::ConstantId>) -> ResolveResult {
+    fn check_const_args_to_mutating_params(self: &mut Self, item: &mut ast::BinaryOp, callee_constant_id: Option<ConstantId>) -> ResolveResult {
         if let Some(call_const_id) = callee_constant_id && let Some(callee_func_id) = self.scopes.constant_function_id(call_const_id) {
             let callee = self.scopes.function_ref(callee_func_id);
             if !callee.mutated_params.is_empty() {

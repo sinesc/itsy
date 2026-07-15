@@ -6,11 +6,12 @@
 use crate::prelude::*;
 use crate::frontend::ast::{self, Typeable, Resolvable};
 use crate::frontend::resolver::error::{ResolveResult, ResolveError, ResolveErrorKind, OptionToResolveError};
-use crate::shared::meta::{Type, Enum, EnumVariant, Struct, ViewType, FunctionKind, ConstantValue};
+use crate::shared::meta::{Type, Enum, EnumVariant, Struct, ViewType, FunctionKind, ConstantValue, Array};
 use crate::shared::typed_ids::{TypeId, ConstantId};
 use crate::shared::numeric::Numeric;
 use crate::shared::MetaContainer;
 use crate::VariantIndex;
+use crate::bytecode::builtins::{builtin_types, BuiltinType};
 use super::Resolver;
 
 /// Bookkeeping for a synthesized `Result<T>` data enum, keyed by its (deduplicated) enum type id. Lets
@@ -399,24 +400,18 @@ impl<'ctx> Resolver<'ctx> {
         // View::wrap(array) -> View<T>
         // Takes a reference to an array, returns a view reference
         let wrap_path = self.make_path(&["View", "wrap"]);
-        let array_type_id = self.scopes.insert_anonymous_type(true, crate::shared::meta::Type::Array(crate::shared::meta::Array {
+        let array_type_id = self.scopes.insert_anonymous_type(true, Type::Array(Array {
             type_id: Some(view_ty.backing_element_type_id),
         }));
-        let wrap_const_id = self.insert_builtin_fn("wrap", view_type_id,
-            crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::wrap),
-            view_type_id, vec![array_type_id]);
-        self.scopes.insert_constant(&wrap_path, view_type_id, None, crate::shared::meta::ConstantValue::Function(
-            self.scopes.constant_function_id(wrap_const_id).unwrap()));
+        let wrap_const_id = self.insert_builtin_fn("wrap", view_type_id, BuiltinType::View(builtin_types::View::wrap), view_type_id, vec![array_type_id]);
+        self.scopes.insert_constant(&wrap_path, view_type_id, None, ConstantValue::Function(self.scopes.constant_function_id(wrap_const_id).unwrap()));
 
         // View::new(size) -> View<T>
         // Takes a StackAddress (size), returns a view reference
         let new_path = self.make_path(&["View", "new"]);
         let stack_addr_type_id = self.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap();
-        let new_const_id = self.insert_builtin_fn("new", view_type_id,
-            crate::bytecode::builtins::BuiltinType::View(crate::bytecode::builtins::builtin_types::View::new),
-            view_type_id, vec![stack_addr_type_id]);
-        self.scopes.insert_constant(&new_path, view_type_id, None, crate::shared::meta::ConstantValue::Function(
-            self.scopes.constant_function_id(new_const_id).unwrap()));
+        let new_const_id = self.insert_builtin_fn("new", view_type_id, BuiltinType::View(builtin_types::View::new), view_type_id, vec![stack_addr_type_id]);
+        self.scopes.insert_constant(&new_path, view_type_id, None, ConstantValue::Function(self.scopes.constant_function_id(new_const_id).unwrap()));
     }
 
     /// Resolves a view definition `View<T>` into its synthesized view type.
