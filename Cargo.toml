@@ -19,10 +19,9 @@ members = [ "itsy-derive" ]
 #codegen-units = 1
 
 [features]
-default = [ "compiler", "runtime", "call_function", "derive" ]
+default = [ "compiler", "runtime", "derive" ]
 compiler = [ "nom" ]
 runtime = [ ]
-call_function = [ ]
 debugging = [ ]
 symbols = [ ]
 comments = [ ]
@@ -55,7 +54,7 @@ bench = false
 name = "bench"
 path = "benches/bench.rs"
 harness = false
-required-features = [ "compiler", "runtime", "call_function", "derive" ]
+required-features = [ "compiler", "runtime", "derive" ]
 
 [[example]]
 name = "run"

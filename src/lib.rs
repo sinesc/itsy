@@ -72,7 +72,7 @@ use config_derived::*;
 /// # Calling into the script
 ///
 /// In addition to the Rust functions the script can call, an optional `callables { ... }` block (after
-/// the function definitions, requires the `call_function` feature) declares top-level Itsy functions the
+/// the function definitions) declares top-level Itsy functions the
 /// *host* intends to call. Each declaration generates a typed method on the program's
 /// [`VM`](crate::runtime::VM) via a `<TypeName>Callables` extension trait, marshalling the same
 /// parameter/return types (primitives, `String`, arrays and `#[derive(VMValue)]` structs/enums) in both
@@ -460,7 +460,7 @@ macro_rules! itsy_api {
         // `VM::call_typed`, so structs/enums/arrays (registered through this same API) flow in and out.
         $(
             $crate::paste! {
-                #[cfg(all(feature="runtime", feature="call_function"))]
+                #[cfg(feature="runtime")]
                 $vis trait [< $type_name Callables >] {
                     $(
                         fn $cname(
@@ -471,7 +471,7 @@ macro_rules! itsy_api {
                     )*
                 }
 
-                #[cfg(all(feature="runtime", feature="call_function"))]
+                #[cfg(feature="runtime")]
                 impl [< $type_name Callables >] for $crate::runtime::VM<$type_name, $context_type> {
                     $(
                         #[allow(unused_variables)]

@@ -62,7 +62,6 @@ pub fn optimize<T: VMFunc<T>>(program: Program<T>) -> Program<T> {
     patch_vtable(&mut program, &cumulative_map, optimized_size);
 
     // Patch callable addresses: host_return_addr and each FunctionMeta::addr
-    #[cfg(feature = "call_function")]
     {
         let patch_addr = |orig: StackAddress| -> StackAddress {
             match cumulative_map.binary_search_by_key(&orig, |(orig, _)| *orig) {
