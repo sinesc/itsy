@@ -7,7 +7,7 @@ pub type Context = Vec<ContextElement>;
 
 use itsy::itsy_api;
 
-const TEST_PRELUDE: &str = "use TestFns::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str};";
+pub const TEST_PRELUDE: &str = "use TestFns::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str};";
 
 /// Compare a ContextElement with given value.
 #[allow(dead_code)]
@@ -47,7 +47,7 @@ pub fn assert_one<T>(result: &Context, index: usize, expected: T) where T: Parti
 
 /// Like the [`assert_all`] function, but accepts a bracketed list of expected values that may be of
 /// differing types, e.g. `assert_all!(&result, [ 255u8, -1i32, String::from("x") ]);`. Useful when a test
-/// pushes results of several types into the Context. 
+/// pushes results of several types into the Context.
 #[allow(unused_macros)]
 macro_rules! assert_all {
     ($result:expr, [ $( $expected:expr ),* $(,)? ]) => {{

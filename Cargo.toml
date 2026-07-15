@@ -80,3 +80,7 @@ required-features = [ "runtime" ]
 [[example]]
 name = "dis"
 required-features = [ "compiler", "runtime", "debugging", "symbols" ]
+
+[[test]]
+name = "optimizer"
+required-features = [ "optimizer" ]

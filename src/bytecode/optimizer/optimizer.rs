@@ -11,11 +11,14 @@ mod passes {
     //pub mod store_forward;
 }
 
-use crate::bytecode::opcodes::{OpCodeData, read_opcode_data, write_opcode_data};
+use crate::bytecode::opcodes::write_opcode_data;
 use crate::bytecode::{Program, VMFunc};
 use crate::StackAddress;
 use std::collections::HashSet;
 use std::mem::size_of;
+
+// Re-export for optimizer test consumers
+pub use crate::bytecode::opcodes::{OpCodeData, read_opcode_data};
 
 /// Run peephole optimizations on a compiled program.
 ///
