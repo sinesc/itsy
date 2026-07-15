@@ -180,7 +180,7 @@ impl Display for ResolveError {
             ResolveErrorKind::DivisionByZero => write!(f, "Division by zero in const expression"),
             ResolveErrorKind::ViewNonPrimitiveAccess(ty) => write!(f, "Cannot access non-primitive member `{ty}` through a view"),
             ResolveErrorKind::ViewBackingTypeMismatch(backing, expected) => write!(f, "View backing type `{backing}` is incompatible; expected `{expected}`"),
-            ResolveErrorKind::ViewSizeMismatch(ty, size, elem_size) => write!(f, "View represented type `{ty}` has size {size} which is not divisible by backing element size {elem_size}"),
+            ResolveErrorKind::ViewSizeMismatch(ty, size, elem_size) => write!(f, "The element size of `{ty}` ({size} bytes) is not divisible by element size of the backing array ({elem_size} bytes)"),
             ResolveErrorKind::ViewContainsString(ty) => write!(f, "View represented type `{ty}` transitively contains String, which is not supported"),
             ResolveErrorKind::Internal(msg) => write!(f, "Internal error: {msg}"),
         }

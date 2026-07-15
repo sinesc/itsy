@@ -173,6 +173,9 @@ pub trait MetaContainer {
                 Type::TraitBound(trait_ids) => {
                     trait_ids.iter().map(|&type_id| self.type_name(type_id)).collect::<Vec<_>>().join(" + ")
                 }
+                &Type::View(ref view_ty) => {
+                    format!("View<{}>", self.type_name(view_ty.element_type_id))
+                }
                 _ => "?".to_string()
             }
         }
