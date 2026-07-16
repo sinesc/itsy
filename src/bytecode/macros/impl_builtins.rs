@@ -8,7 +8,7 @@ macro_rules! impl_builtins {
         $vm.stack.push(HeapRef::new(index, 0));
     } };
     (@handle_ret_value $vm:ident, Value, $value:ident, $constructor:ident) => { {
-        use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+        use $crate::bytecode::runtime::stack::StackOp;
         let (_key_ctor, value_ctor) = $crate::bytecode::Constructor::map_sub_constructors(&$vm.stack, $constructor);
         if $crate::bytecode::Constructor::is_primitive(&$vm.stack, value_ctor) {
             let n = $crate::bytecode::Constructor::primitive_size(&$vm.stack, value_ctor);
@@ -513,7 +513,7 @@ macro_rules! impl_builtins {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             #[cfg(feature="runtime")]
             pub(crate) fn exec<T, U>(self: Self, vm: &mut crate::bytecode::runtime::vm::VM<T, U>, constructor: StackAddress, element_constructor: StackAddress) {
-                use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+                use $crate::bytecode::runtime::stack::StackOp;
                 use builtin_functions::*;
                 match self {
                     $( // type
@@ -602,7 +602,7 @@ macro_rules! impl_builtins {
                                 #[allow(unused_variables, unused_imports, non_snake_case)]
                                 #[cfg(feature="runtime")]
                                 pub(super) fn $vname<T, U>(vm: &mut crate::bytecode::runtime::vm::VM<T, U>, /*constructor: StackAddress, element_constructor: StackAddress,*/ $( $varg_name : impl_builtins!(@map_ref_type $varg_type) ),* ) $( -> impl_builtins!(@map_ref_type $vret_type) )? {
-                                    use $crate::bytecode::runtime::{heap::HeapOp, stack::StackOp};
+                                    use $crate::bytecode::runtime::stack::StackOp;
                                     $(
                                         #[allow(dead_code)]
                                         type $vgeneric_name = $vgeneric_type;

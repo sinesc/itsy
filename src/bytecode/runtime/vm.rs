@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex};
-use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapOp, HeapCmp}, error::*}};
+use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor, VMFunc, VMData, runtime::{stack::{Stack, StackOp}, heap::{Heap, HeapCmp}, error::*}};
 use std::any::Any;
 use crate::bytecode::call_function::{ValueKind, FunctionMeta, arg_matches, match_value_kind};
 #[cfg(feature="debugging")]

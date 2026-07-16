@@ -19,7 +19,6 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, FrameAddress};
 use crate::bytecode::{Constructor, HeapRef, HeapRefOp};
-use crate::bytecode::runtime::heap::HeapOp;
 use crate::bytecode::runtime::stack::{StackOp, StackRelativeOp};
 use super::vm::VM;
 
@@ -134,14 +133,16 @@ impl<T, U> VM<T, U> {
     /// opcodes: a cursor below the entries region (e.g. the freshly-cloned `HeapRef`'s offset of 0)
     /// starts at the first entry.
     pub(crate) fn map_iter_advance(self: &Self, idx: StackAddress, cursor: StackAddress) -> Option<(StackAddress, StackAddress)> {
+        use crate::bytecode::runtime::heap::HeapOp;
         let sa = size_of::<StackAddress>() as StackAddress;
         let hr = size_of::<HeapRef>() as StackAddress;
         let base = self.map_entries_offset(idx);
         let n_entries: StackAddress = self.heap.load(idx, sa);
         let entries_end = base + n_entries * 2 * hr;
+        let heap_item = self.heap.item(idx);
         let mut off = if cursor < base { base } else { cursor };
         while off < entries_end {
-            let key: HeapRef = self.heap.read(HeapRef::new(idx, off));
+            let key: HeapRef = heap_item.load(off);
             if key.index() != MAP_EMPTY {
                 return Some((off, off + 2 * hr));
             }

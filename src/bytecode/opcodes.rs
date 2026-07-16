@@ -8,7 +8,7 @@ use crate::{
     StackOffset,
     bytecode::{
         HeapRef, Constructor,
-        runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapOp, HeapCmp}, vm::VMState, map::MAP_HEADER, generator::{GEN_FRAME_OFFSET, GEN_NOT_STARTED, GEN_STATE_OFFSET, GEN_DONE, GEN_RUNNING, GEN_PC_OFFSET, GEN_VALUE_OFFSET, GEN_KEY_OFFSET, GenControl}}
+        runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapCmp, HeapOp}, vm::VMState, map::MAP_HEADER, generator::{GEN_FRAME_OFFSET, GEN_NOT_STARTED, GEN_STATE_OFFSET, GEN_DONE, GEN_RUNNING, GEN_PC_OFFSET, GEN_VALUE_OFFSET, GEN_KEY_OFFSET, GenControl}}
     }
 };
 
@@ -1593,11 +1593,12 @@ impl_opcodes!{
         use crate::bytecode::runtime::stack::StackOffsetOp;
         let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
         let mut item: HeapRef = self.stack.load(top_loc);
-        if item.offset() >= self.heap.item(item.index()).data.len() {
+        let heap_item = self.heap.item(item.index());
+        if item.offset() >= heap_item.data.len() {
             self.pc = exit;
             return;
         }
-        let data: T = self.heap.read(item);
+        let data: T = heap_item.load(item.offset());
         item.add_offset(size_of::<T>() as StackOffset);
         self.stack.store(top_loc, item);
         self.stack.store_fp(element, data);
@@ -1614,12 +1615,13 @@ impl_opcodes!{
         use crate::bytecode::runtime::stack::StackOffsetOp;
         let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
         let mut item: HeapRef = self.stack.load(top_loc);
-        if item.offset() >= self.heap.item(item.index()).data.len() {
+        let heap_item = self.heap.item(item.index());
+        if item.offset() >= heap_item.data.len() {
             self.pc = exit;
             return;
         }
         let cur_index = item.offset() / size_of::<T>() as StackAddress;
-        let data: T = self.heap.read(item);
+        let data: T = heap_item.load(item.offset());
         item.add_offset(size_of::<T>() as StackOffset);
         self.stack.store(top_loc, item);
         self.stack.store_fp(element, data);
@@ -1750,18 +1752,19 @@ impl_opcodes!{
     fn gen_next(&mut self) {
         let gen_ref: HeapRef = self.stack.pop();
         let gen_index = gen_ref.index();
-        if self.heap.item(gen_index).data[GEN_STATE_OFFSET] == GEN_DONE {
+        let gen_item = self.heap.item_mut(gen_index);
+        if gen_item.data[GEN_STATE_OFFSET] == GEN_DONE {
             self.stack.push(0u8); // next() == false
             return;
         }
-        let resume_pc = StackAddress::from_ne_bytes(self.heap.item(gen_index).data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].try_into().unwrap());
-        let frame = self.heap.item(gen_index).data[GEN_FRAME_OFFSET..].to_vec();
+        let resume_pc = StackAddress::from_ne_bytes(gen_item.data[GEN_PC_OFFSET..GEN_PC_OFFSET + size_of::<StackAddress>()].try_into().unwrap());
+        let frame = gen_item.data[GEN_FRAME_OFFSET..].to_vec();
         let caller_sp = self.stack.sp();
         self.gen_control.push(GenControl { caller_fp: self.stack.fp, caller_sp, caller_pc: self.pc, gen_index });
         self.stack.extend_from(&frame);
         self.stack.fp = caller_sp;
         self.pc = resume_pc;
-        self.heap.item_mut(gen_index).data[GEN_STATE_OFFSET] = GEN_RUNNING;
+        gen_item.data[GEN_STATE_OFFSET] = GEN_RUNNING;
     }
 
     /// Suspends the running generator, stashing the yielded value and returning control to the driving `next()` with `true`.
@@ -1841,14 +1844,13 @@ impl_opcodes!{
         let view_ref: HeapRef = self.stack.pop();
         let view_ref_index = view_ref.index();
         let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
-        // validate offset: TODO: if HeapOp was implemented on HeapObject the duplicate lookups via self.heap.item and self.heap.store could be avoided.
         let end = byte_offset as usize + size_of::<T>();
         let heap_item = self.heap.item(view_ref_index);
         if end > heap_item.data.len() {
             self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
             return;
         }
-        let data: T = self.heap.load(view_ref_index, byte_offset);
+        let data: T = heap_item.load(byte_offset);
         self.stack.push(data);
     }
 
@@ -1865,14 +1867,13 @@ impl_opcodes!{
         let view_ref: HeapRef = self.stack.pop();
         let view_ref_index = view_ref.index();
         let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
-        // validate offset: TODO: if HeapOp was implemented on HeapObject the duplicate lookups via self.heap.item and self.heap.store could be avoided.
         let end = byte_offset as usize + size_of::<T>();
-        let heap_item = self.heap.item(view_ref_index);
+        let heap_item = self.heap.item_mut(view_ref_index);
         if end > heap_item.data.len() {
             self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
             return;
         }
-        self.heap.store(view_ref_index, byte_offset, value);
+        heap_item.store(byte_offset, value);
     }
 
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling

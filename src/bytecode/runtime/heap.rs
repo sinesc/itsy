@@ -321,57 +321,34 @@ impl Heap {
     }
 }
 
-/// Generic heap operations.
+/// Generic heap operations on a single heap object.
 pub trait HeapOp<T> {
-    /// Load a value from an heap object.
-    fn load(self: &Self, index: StackAddress, offset: StackAddress) -> T;
-    // Store a value to a heap object.
-    fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: T);
-    // load using a HeapRef
-    fn read(self: &Self, item: HeapRef) -> T {
-        let (index, offset) = item.into();
-        self.load(index, offset)
-    }
-    // store using a HeapRef
-    fn write(self: &mut Self, item: HeapRef, value: T) {
-        let (index, offset) = item.into();
-        self.store(index, offset, value);
-    }
-    /// Reads from the given HeapRef and increments its offset by the number of read bytes.
-    fn read_seq(self: &Self, item: &mut HeapRef) -> T {
-        let result = self.read(*item);
-        item.add_offset(size_of::<T>() as StackOffset);
-        result
-    }
-    /*
-    /// Writes to the given HeapRef and increments its offset by the number of written bytes.
-    fn write_seq(self: &mut Self, item: &mut HeapRef, value: T) {
-        self.write(*item, value);
-        item.add_offset(size_of::<T>() as StackOffset);
-    }
-    */
+    /// Load a value from this heap object at the given offset.
+    fn load(self: &Self, offset: StackAddress) -> T;
+    /// Store a value to this heap object at the given offset.
+    fn store(self: &mut Self, offset: StackAddress, value: T);
 }
 
 macro_rules! impl_heap {
     (single, $type:ident) => (
-        impl HeapOp<$type> for Heap {
-            fn load(self: &Self, index: StackAddress, offset: StackAddress) -> $type {
-                self.objects[index as usize].data[offset as usize] as $type
+        impl HeapOp<$type> for HeapObject {
+            fn load(self: &Self, offset: StackAddress) -> $type {
+                self.data[offset as usize] as $type
             }
-            fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: $type) {
-                self.objects[index as usize].data[offset as usize] = value as u8;
+            fn store(self: &mut Self, offset: StackAddress, value: $type) {
+                self.data[offset as usize] = value as u8;
             }
         }
     );
     (multi, $type:ident) => (
-        impl HeapOp<$type> for Heap {
-            fn load(self: &Self, index: StackAddress, offset: StackAddress) -> $type {
+        impl HeapOp<$type> for HeapObject {
+            fn load(self: &Self, offset: StackAddress) -> $type {
                 let offset = offset as usize;
-                $type::from_ne_bytes(self.objects[index as usize].data[offset..offset + size_of::<$type>()].try_into().unwrap())
+                $type::from_ne_bytes(self.data[offset..offset + size_of::<$type>()].try_into().unwrap())
             }
-            fn store(self: &mut Self, index: StackAddress, offset: StackAddress, value: $type) {
+            fn store(self: &mut Self, offset: StackAddress, value: $type) {
                 let offset = offset as usize;
-                self.objects[index as usize].data[offset..offset + size_of::<$type>()].copy_from_slice(&value.to_ne_bytes());
+                self.data[offset..offset + size_of::<$type>()].copy_from_slice(&value.to_ne_bytes());
             }
         }
     );
@@ -387,6 +364,34 @@ impl_heap!(multi, i32);
 impl_heap!(multi, i64);
 impl_heap!(multi, usize);
 impl_heap!(multi, HeapRef);
+
+/// Heap-level convenience methods that delegate to HeapObject via item()/item_mut().
+impl Heap {
+    /// Load a value from the heap object at `index` and `offset`.
+    pub fn load<T>(self: &Self, index: StackAddress, offset: StackAddress) -> T where HeapObject: HeapOp<T> {
+        self.item(index).load(offset)
+    }
+    /// Store a value to the heap object at `index` and `offset`.
+    pub fn store<T>(self: &mut Self, index: StackAddress, offset: StackAddress, value: T) where HeapObject: HeapOp<T> {
+        self.item_mut(index).store(offset, value);
+    }
+    /// Load a value using a HeapRef (delegates to load).
+    pub fn read<T>(self: &Self, item: HeapRef) -> T where HeapObject: HeapOp<T> {
+        let (index, offset) = item.into();
+        self.item(index).load(offset)
+    }
+    /// Store a value using a HeapRef (delegates to store).
+    pub fn write<T>(self: &mut Self, item: HeapRef, value: T) where HeapObject: HeapOp<T> {
+        let (index, offset) = item.into();
+        self.item_mut(index).store(offset, value);
+    }
+    /// Reads from the given HeapRef and increments its offset by the number of read bytes.
+    pub fn read_seq<T>(self: &Self, item: &mut HeapRef) -> T where HeapObject: HeapOp<T> {
+        let result = self.read(*item);
+        item.add_offset(size_of::<T>() as StackOffset);
+        result
+    }
+}
 
 /// References two elements of a slice mutably
 pub fn index_twice<T>(slice: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {

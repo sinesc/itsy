@@ -50,7 +50,7 @@ pub mod internals {
         #[cfg(feature="runtime")]
         pub mod heap {
             //! Virtual machine heap.
-            pub use crate::bytecode::runtime::heap::{Heap, HeapCmp, HeapOp};
+            pub use crate::bytecode::runtime::heap::{Heap, HeapCmp};
             pub use crate::bytecode::{HeapRef, HeapRefOp};
         }
         pub mod sizes {
