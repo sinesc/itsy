@@ -6,7 +6,7 @@
         "./itsy", "./logs"
     ],
     "rust-analyzer.cargo.features": [
-        "runtime", "compiler", "debugging", "symbols", "call_function", "derive"
+        "runtime", "compiler", "debugging", "symbols", "derive"
     ],
     "rust-analyzer.cargo.noDefaultFeatures": true,
     "markdown.styles": [".vscode/markdown.css"]
