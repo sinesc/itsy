@@ -160,12 +160,12 @@ itsy_api! {
 }
 
 /// Time spent warming up before measurement starts (per case).
-const WARMUP: Duration = Duration::from_millis(150);
+const WARMUP: Duration = Duration::from_millis(500);
 /// Number of measured samples collected per case.
-const SAMPLES: usize = 50;
+const SAMPLES: usize = 100;
 /// A single timed batch must run at least this long, otherwise clock resolution dominates. The
 /// harness auto-calibrates the number of `bench()` calls per batch to reach this.
-const MIN_BATCH_TIME: Duration = Duration::from_micros(500);
+const MIN_BATCH_TIME: Duration = Duration::from_micros(1000);
 /// Safety cap on batch size so a no-op `bench()` can never spin forever during calibration.
 const MAX_BATCH: u64 = 1 << 26;
 
@@ -491,6 +491,23 @@ fn print_table(results: &[Stats]) {
             width = name_width
         );
     }
+
+    // Summary: global average across all cases
+    let n = results.len() as f64;
+    let avg_mean = results.iter().map(|s| s.mean).sum::<f64>() / n;
+    let avg_median = results.iter().map(|s| s.median).sum::<f64>() / n;
+    let avg_min = results.iter().map(|s| s.min).sum::<f64>() / n;
+    let avg_stddev = results.iter().map(|s| s.stddev).sum::<f64>() / n;
+    println!(
+        "{:<width$}  {:>11}  {:>11}  {:>11}  {:>11}  {:>13}",
+        "(global average)",
+        fmt_secs(avg_mean),
+        fmt_secs(avg_median),
+        fmt_secs(avg_min),
+        fmt_secs(avg_stddev),
+        fmt_count(1.0 / avg_mean),
+        width = name_width
+    );
 }
 
 /// Metadata stored in a report header.
