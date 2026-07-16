@@ -236,11 +236,13 @@ impl Heap {
         self.objects[index as usize].implementor_index
     }
     /// Returns a reference to a HeapObject.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn item(self: &Self, index: StackAddress) -> &HeapObject {
         debug_assert_index!(self, index);
         &self.objects[index as usize]
     }
     /// Returns a mutable reference to a HeapObject.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn item_mut(self: &mut Self, index: StackAddress) -> &mut HeapObject {
         debug_assert_index!(self, index);
         &mut self.objects[index as usize]
@@ -332,9 +334,11 @@ pub trait HeapOp<T> {
 macro_rules! impl_heap {
     (single, $type:ident) => (
         impl HeapOp<$type> for HeapObject {
+            #[cfg_attr(not(debug_assertions), inline(always))]
             fn load(self: &Self, offset: StackAddress) -> $type {
                 self.data[offset as usize] as $type
             }
+            #[cfg_attr(not(debug_assertions), inline(always))]
             fn store(self: &mut Self, offset: StackAddress, value: $type) {
                 self.data[offset as usize] = value as u8;
             }
@@ -342,10 +346,12 @@ macro_rules! impl_heap {
     );
     (multi, $type:ident) => (
         impl HeapOp<$type> for HeapObject {
+            #[cfg_attr(not(debug_assertions), inline(always))]
             fn load(self: &Self, offset: StackAddress) -> $type {
                 let offset = offset as usize;
                 $type::from_ne_bytes(self.data[offset..offset + size_of::<$type>()].try_into().unwrap())
             }
+            #[cfg_attr(not(debug_assertions), inline(always))]
             fn store(self: &mut Self, offset: StackAddress, value: $type) {
                 let offset = offset as usize;
                 self.data[offset..offset + size_of::<$type>()].copy_from_slice(&value.to_ne_bytes());
@@ -368,10 +374,12 @@ impl_heap!(multi, HeapRef);
 /// Heap-level convenience methods that delegate to HeapObject via item()/item_mut().
 impl Heap {
     /// Load a value from the heap object at `index` and `offset`.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn load<T>(self: &Self, index: StackAddress, offset: StackAddress) -> T where HeapObject: HeapOp<T> {
         self.item(index).load(offset)
     }
     /// Store a value to the heap object at `index` and `offset`.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn store<T>(self: &mut Self, index: StackAddress, offset: StackAddress, value: T) where HeapObject: HeapOp<T> {
         self.item_mut(index).store(offset, value);
     }
