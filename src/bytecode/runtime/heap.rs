@@ -92,7 +92,7 @@ impl Heap {
     pub fn len(self: &Self) -> StackAddress {
         (self.objects.len() - self.free_small.len() - self.free_medium.len() - self.free_large.len()) as StackAddress
     }
-    /// Number of active heap elements.
+    /// Number of free small, medium and large slots and total free capacity.
     pub fn free(self: &Self) -> (StackAddress, StackAddress, StackAddress, StackAddress) {
         (
             self.free_small.len() as StackAddress,
@@ -220,6 +220,7 @@ impl Heap {
             self.free_large.push(index);
         }
     }
+    /// Returns a free heap slot if available.
     fn find_empty(self: &mut Self, size: StackAddress) -> Option<StackAddress> {
         if size <= Self::MAX_SIZE_SMALL {
             self.free_small.pop()

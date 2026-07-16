@@ -1832,31 +1832,47 @@ impl_opcodes!{
     /// Load a primitive from a view. Pops index and view heap reference, pushes the value.
     /// Computes byte address as `index * stride + offset`.
     fn <
-        view_load8<T: Data8>(stride: FrameAddress, offset: FrameAddress),
-        view_load16<T: Data16>(stride: FrameAddress, offset: FrameAddress),
-        view_load32<T: Data32>(stride: FrameAddress, offset: FrameAddress),
-        view_load64<T: Data64>(stride: FrameAddress, offset: FrameAddress),
+        view_load8<T: Data8>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_load16<T: Data16>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_load32<T: Data32>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_load64<T: Data64>(stride: FrameAddress, offset: FrameAddress) [ check ],
     >(&mut self) {
         let index: StackAddress = self.stack.pop();
         let view_ref: HeapRef = self.stack.pop();
+        let view_ref_index = view_ref.index();
         let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
-        let data: T = self.heap.read(HeapRef::new(view_ref.index(), byte_offset));
+        // validate offset: TODO: if HeapOp was implemented on HeapObject the duplicate lookups via self.heap.item and self.heap.store could be avoided.
+        let end = byte_offset as usize + size_of::<T>();
+        let heap_item = self.heap.item(view_ref_index);
+        if end > heap_item.data.len() {
+            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
+            return;
+        }
+        let data: T = self.heap.load(view_ref_index, byte_offset);
         self.stack.push(data);
     }
 
     /// Store a primitive to a view. Pops value, index, and view heap reference.
     /// Computes byte address as `index * stride + offset`.
     fn <
-        view_store8<T: Data8>(stride: FrameAddress, offset: FrameAddress),
-        view_store16<T: Data16>(stride: FrameAddress, offset: FrameAddress),
-        view_store32<T: Data32>(stride: FrameAddress, offset: FrameAddress),
-        view_store64<T: Data64>(stride: FrameAddress, offset: FrameAddress),
+        view_store8<T: Data8>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_store16<T: Data16>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_store32<T: Data32>(stride: FrameAddress, offset: FrameAddress) [ check ],
+        view_store64<T: Data64>(stride: FrameAddress, offset: FrameAddress) [ check ],
     >(&mut self) {
         let value: T = self.stack.pop();
         let index: StackAddress = self.stack.pop();
         let view_ref: HeapRef = self.stack.pop();
+        let view_ref_index = view_ref.index();
         let byte_offset = (index as usize * stride as usize + offset as usize) as StackAddress;
-        self.heap.write(HeapRef::new(view_ref.index(), byte_offset), value);
+        // validate offset: TODO: if HeapOp was implemented on HeapObject the duplicate lookups via self.heap.item and self.heap.store could be avoided.
+        let end = byte_offset as usize + size_of::<T>();
+        let heap_item = self.heap.item(view_ref_index);
+        if end > heap_item.data.len() {
+            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
+            return;
+        }
+        self.heap.store(view_ref_index, byte_offset, value);
     }
 
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
