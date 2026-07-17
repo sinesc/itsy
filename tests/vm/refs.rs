@@ -140,7 +140,6 @@ fn heap_result() {
 }
 
 #[test]
-#[ignore]
 fn heap_compare() {
     let result = run(stringify!(
         let array = [ 7u8, 7 ];
