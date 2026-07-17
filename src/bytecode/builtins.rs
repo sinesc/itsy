@@ -2202,12 +2202,12 @@ impl_builtins! {
         }
     }
 
-    /// `View<T>`: zero-cost reinterpretation of a byte buffer as elements of type `T`.
+    /// `View<T>` buffer-reinterpretation as elements of type `T`.
     ///
-    /// A `View<T>` provides indexed access (`v[i]`) to a contiguous block of memory,
+    /// A `View<T>` provides indexed access to a contiguous block of memory,
     /// interpreting the raw bytes as elements of type `T`. The underlying storage is an
-    /// array of any integer type (`u8`-`u64`, `i8`-`i64`); the view does not allocate
-    /// its own data. This makes it useful for treating a byte buffer as an array of
+    /// array of any integer type (`u8`-`u64`, `i8`-`i64`). Existing arrays can be reinterpreted via
+    /// `View<T>::wrap()`. This makes it useful for treating a byte buffer as an array of
     /// structs, integers, or floats without copying.
     ///
     /// # Construction
