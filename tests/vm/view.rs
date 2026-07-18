@@ -230,3 +230,143 @@ fn view_wrap_i16_backing_struct() {
     ));
     assert_all!(&result, [1u64, 131073u32, 3u16, 4u8, 0u8]);
 }
+
+#[test]
+fn view_data_enum_compile() {
+    // View<MyDataEnum> compiles and View::new allocates the correct size
+    // (discriminant: 2 bytes + max variant payload: i32 = 4 bytes => packed_size = 6)
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Rect(i32, i32),
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(5);
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [5u64]);
+}
+
+#[test]
+fn view_data_enum_wrap() {
+    // View::wrap on a byte array containing data enum data
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Point,
+        }
+
+        fn main() {
+            // packed_size = 6 (2 discriminant + 4 max payload from Circle(i32))
+            // Element 0: Circle with radius 42
+            // discriminant = 0 (little-endian: 0x00 0x00)
+            // payload = 42 (little-endian: 0x2a 0x00 0x00 0x00)
+            let backing: [u8] = [
+                0x00, 0x00, 0x2a, 0x00, 0x00, 0x00,  // Circle(42)
+            ];
+            let v: View<Shape> = View::wrap(backing);
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [1u64]);
+}
+
+#[test]
+fn view_struct_with_data_enum_field() {
+    // Struct containing a data enum as a field is a valid view element type
+    // packed_size = data_enum_packed_size(6) + i32(4) = 10
+    let result = run(stringify!(
+        enum Status {
+            Active(i32),
+            Idle,
+        }
+
+        struct Entry {
+            status: Status,
+            id: i32,
+        }
+
+        fn main() {
+            let v: View<Entry> = View::new(3);
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [3u64]);
+}
+
+#[test]
+#[should_panic]
+fn view_full_element_struct_error() {
+    // Loading a full struct element from a view should be a compile error
+    run(stringify!(
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        fn main() {
+            let v: View<Point> = View::new(1);
+            let p = v[0];
+        }
+    ));
+}
+
+#[test]
+#[should_panic]
+fn view_full_element_data_enum_error() {
+    // Loading a full data enum element from a view should be a compile error
+    run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            let s = v[0];
+        }
+    ));
+}
+
+#[test]
+fn view_data_enum_match() {
+    // match view[i] on a data enum exercises the dedicated view-match compilation path
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Point,
+        }
+
+        fn main() {
+            // packed_size = 6 (2 discriminant + 4 max payload)
+            // Element 0: Circle(42)
+            let backing: [u8] = [
+                0x00, 0x00, 0x2a, 0x00, 0x00, 0x00,
+            ];
+            let v: View<Shape> = View::wrap(backing);
+
+            match v[0] {
+                Shape::Circle(r) => ret_i32(r),
+                Shape::Point => ret_i32(-1),
+            }
+        }
+    ));
+    assert_all!(&result, [42i32]);
+}
+
+#[test]
+fn view_data_enum_match_all_variants() {
+    // Exhaustive match covering all variants including unit variants
+    let result = run("enum Color { Red(i32), Green(i32), Blue } fn main() { let backing: [u8] = [0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, 0x00, 0xc8, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00]; let v: View<Color> = View::wrap(backing); let r0 = match v[0] { Color::Red(_) => 1i32, Color::Green(_) => 2i32, Color::Blue => 3i32 }; let r1 = match v[1] { Color::Red(_) => 1i32, Color::Green(_) => 2i32, Color::Blue => 3i32 }; let r2 = match v[2] { Color::Red(_) => 1i32, Color::Green(_) => 2i32, Color::Blue => 3i32 }; ret_i32(r0); ret_i32(r1); ret_i32(r2); }");
+    assert_all!(&result, [1i32, 2i32, 3i32]);
+}
+
+#[test]
+fn view_data_enum_match_binding() {
+    // Match binds variant fields and uses them in the arm body
+    let result = run("enum Shape { Circle(i32), Rect(i32, i32), Point } fn main() { let backing: [u8] = [0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]; let v: View<Shape> = View::wrap(backing); let r0 = match v[0] { Shape::Circle(r) => r * 2, Shape::Rect(_, _) => -1, Shape::Point => -2 }; let r1 = match v[1] { Shape::Circle(_) => -1, Shape::Rect(w, h) => w + h, Shape::Point => -2 }; ret_i32(r0); ret_i32(r1); }");
+    assert_all!(&result, [14i32, 7i32]);
+}

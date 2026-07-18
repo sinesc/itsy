@@ -749,7 +749,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         comment!(self, "{}", item);
         let subject_type_id = item.expr.type_id(self).ice()?;
         self.compile_expression(&item.expr)?;
-        self.compile_pattern_bind(subject_type_id, &[], &item.pattern)?;
+        self.compile_pattern_bind(subject_type_id, None, &[], &item.pattern)?;
         self.write_discard(self.ty(&subject_type_id))?;
         Ok(())
     }
@@ -898,7 +898,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
 
     /// Emits code that tests whether the value selected by `access` matches the variant named by `path`, without
     /// consuming the subject. On mismatch a `j0` is emitted and collected in `fail_jumps`.
-    fn compile_variant_tag_test(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], path: &ast::Path, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
+    /// `view_stride` is Some when matching a data enum in a view buffer.
+    fn compile_variant_tag_test(self: &mut Self, subject_type_id: TypeId, view_stride: Option<u16>, access: &[(StackAddress, TypeId)], path: &ast::Path, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
         let value_type_id = self.pattern_value_type(subject_type_id, access);
         let variant_name = &path.segments.last().ice()?.name;
         // extract owned metadata so the enum borrow is released before emitting code
@@ -913,6 +914,14 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             self.write_clone(self.ty(&primitive_type_id));
             self.write_immediate(self.ty(&primitive_type_id), discriminant)?;
             self.write_ceq(self.ty(&primitive_type_id))?;
+        } else if let Some(stride) = view_stride {
+            // view path: read discriminant directly from the view buffer (offset 0, 2 bytes)
+            // clone view_ref + index (16 bytes) so they survive a failed test
+            self.writer.clone(16);
+            self.writer.view_load16(stride, 0);
+            let index_type = Type::unsigned(size_of::<VariantIndex>());
+            self.write_immediate(&index_type, Numeric::Unsigned(variant_index.ice()? as u64))?;
+            self.write_ceq(&index_type)?;
         } else {
             // reference enum: the variant index is the first field of the heap object
             let variant_index = variant_index.ice()?;
@@ -929,7 +938,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     /// Emits non-destructive tests for the given pattern against the value selected by `access` (the empty path
     /// being the subject on top of the stack). Mismatch jumps are collected in `fail_jumps` for the caller to
     /// point at the next arm. Recurses through nested variant/path sub-patterns, navigating across heap boundaries.
-    fn compile_pattern_test(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
+    /// `view_stride` is Some when matching a data enum in a view buffer.
+    fn compile_pattern_test(self: &mut Self, subject_type_id: TypeId, view_stride: Option<u16>, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
         match pattern {
             // wildcard and binding patterns match unconditionally
             ast::Pattern::Wildcard(_) | ast::Pattern::Binding(_) => {},
@@ -961,11 +971,11 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             },
             // a unit variant is matched by its tag
             ast::Pattern::Path(path) => {
-                self.compile_variant_tag_test(subject_type_id, access, path, fail_jumps)?;
+                self.compile_variant_tag_test(subject_type_id, view_stride, access, path, fail_jumps)?;
             },
             // a data variant is matched by its tag and then field-wise against the sub-patterns
             ast::Pattern::VariantTuple(variant) => {
-                self.compile_variant_tag_test(subject_type_id, access, &variant.path, fail_jumps)?;
+                self.compile_variant_tag_test(subject_type_id, view_stride, access, &variant.path, fail_jumps)?;
                 let variant_name = variant.path.segments.last().ice()?.name.clone();
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 let field_type_ids = self.variant_data_fields(value_type_id, &variant_name)?;
@@ -974,7 +984,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     let field_type_id = field_type_ids[index].ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
-                    self.compile_pattern_test(subject_type_id, &element_access, element, fail_jumps)?;
+                    self.compile_pattern_test(subject_type_id, view_stride, &element_access, element, fail_jumps)?;
                 }
             },
             // a struct has no tag; it is matched field-wise against the sub-patterns
@@ -986,7 +996,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     let field_type_id = struct_.type_id(&field_name.name).ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
-                    self.compile_pattern_test(subject_type_id, &element_access, field_pattern, fail_jumps)?;
+                    self.compile_pattern_test(subject_type_id, view_stride, &element_access, field_pattern, fail_jumps)?;
                 }
             },
             // an or-pattern matches if any alternative matches: test each in turn, short-circuiting to the
@@ -998,11 +1008,11 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 for (index, alternative) in or.alternatives.iter().enumerate() {
                     if index == last {
                         // final alternative: its failures are the or-pattern's failures (caller points them at the next arm)
-                        self.compile_pattern_test(subject_type_id, access, alternative, fail_jumps)?;
+                        self.compile_pattern_test(subject_type_id, view_stride, access, alternative, fail_jumps)?;
                     } else {
                         // earlier alternative: on success skip the rest, on failure fall through to the next alternative
                         let mut alternative_fail = Vec::new();
-                        self.compile_pattern_test(subject_type_id, access, alternative, &mut alternative_fail)?;
+                        self.compile_pattern_test(subject_type_id, view_stride, access, alternative, &mut alternative_fail)?;
                         success_jumps.push(self.writer.jmp(123));
                         let next_alternative = self.writer.position();
                         for fail_jump in alternative_fail {
@@ -1022,7 +1032,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
 
     /// Emits code that binds the pattern's variables, reading the selected values out of the subject (the empty
     /// access path being the subject itself). Recurses through nested variant/path sub-patterns.
-    fn compile_pattern_bind(self: &mut Self, subject_type_id: TypeId, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern) -> CompileResult {
+    /// `view_stride` is Some when matching a data enum in a view buffer.
+    fn compile_pattern_bind(self: &mut Self, subject_type_id: TypeId, view_stride: Option<u16>, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern) -> CompileResult {
         match pattern {
             // or-patterns bind nothing (bindings inside them are rejected by the resolver)
             ast::Pattern::Wildcard(_) | ast::Pattern::Literal(_) | ast::Pattern::Path(_) | ast::Pattern::Or(_) | ast::Pattern::Range(_) => {},
@@ -1031,7 +1042,14 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 self.init_state.declare(binding.binding_id);
                 let slot = self.locals.lookup(binding.binding_id);
-                self.write_pattern_value_load(subject_type_id, access)?;
+                if let Some(stride) = view_stride {
+                    // view path: clone view_ref+index so they survive the load, then read from buffer
+                    self.writer.clone(16);
+                    let offset = access.last().map(|&(off, _)| off as u16).unwrap_or(0);
+                    self.compile_view_load_size(self.ty(&value_type_id).primitive_size(), stride, offset)?;
+                } else {
+                    self.write_pattern_value_load(subject_type_id, access)?;
+                }
                 self.write_store(self.ty(&value_type_id), slot, Some(binding.binding_id))?;
                 self.init_state.initialize(binding.binding_id);
             },
@@ -1045,7 +1063,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     let field_type_id = field_type_ids[index].ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
-                    self.compile_pattern_bind(subject_type_id, &element_access, element)?;
+                    self.compile_pattern_bind(subject_type_id, view_stride, &element_access, element)?;
                 }
             },
             // descend into each struct field sub-pattern, binding whatever variables it introduces
@@ -1057,7 +1075,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     let field_type_id = struct_.type_id(&field_name.name).ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
-                    self.compile_pattern_bind(subject_type_id, &element_access, field_pattern)?;
+                    self.compile_pattern_bind(subject_type_id, view_stride, &element_access, field_pattern)?;
                 }
             },
         }
@@ -1066,13 +1084,20 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
 
     /// Compiles a single match arm: tests the pattern, and on match binds its variables, releases the subject
     /// and runs the body. Pattern bindings and body locals share the current branching scope.
-    fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, pattern: &ast::Pattern, block: &ast::Block) -> CompileResult {
+    /// `view_stride` is Some when the subject is a view index on a data enum (no heap object to discard).
+    fn compile_match_arm(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, view_stride: Option<u16>, pattern: &ast::Pattern, block: &ast::Block) -> CompileResult {
         // emit non-destructive match tests; failures jump to the next arm
         let mut fail_jumps = Vec::new();
-        self.compile_pattern_test(subject_type_id, &[], pattern, &mut fail_jumps)?;
+        self.compile_pattern_test(subject_type_id, view_stride, &[], pattern, &mut fail_jumps)?;
         // matched: bind variables (still need the subject), then release the subject and run the body
-        self.compile_pattern_bind(subject_type_id, &[], pattern)?;
-        self.write_discard(self.ty(&subject_type_id))?; // balances the protective increment in compile_match_block
+        self.compile_pattern_bind(subject_type_id, view_stride, &[], pattern)?;
+        if view_stride.is_none() {
+            self.write_discard(self.ty(&subject_type_id))?; // balances the protective increment in compile_match_block
+        } else {
+            // For view subjects, discard the view_ref + index (16 bytes) after binding
+            // so the arm body and result compile with a clean stack.
+            self.writer.discard(16);
+        }
         for statement in block.statements.iter() {
             self.compile_statement(statement)?;
         }
@@ -1098,17 +1123,18 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     }
 
     /// Split match block into recursive tree of A/B branches.
-    fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
+    /// `view_stride` is Some(packed_size) when the subject is a view index on a data enum element.
+    fn compile_match_block_recursive(self: &mut Self, exit_jumps: &mut Vec<StackAddress>, subject_type_id: TypeId, view_stride: Option<u16>, remaining_branches: &[(ast::Pattern, ast::Block)]) -> CompileResult {
         if remaining_branches.len() == 1 {
             self.init_state.push(BranchingKind::Single, BranchingScope::Block); // patterns are required to be exhaustive
-            self.compile_match_arm(exit_jumps, subject_type_id, &remaining_branches[0].0, &remaining_branches[0].1)?;
+            self.compile_match_arm(exit_jumps, subject_type_id, view_stride, &remaining_branches[0].0, &remaining_branches[0].1)?;
             self.init_state.pop();
         } else if remaining_branches.len() > 1 {
             self.init_state.push(BranchingKind::Double, BranchingScope::Block);
             self.init_state.set_path(BranchingPath::A);
-            self.compile_match_arm(exit_jumps, subject_type_id, &remaining_branches[0].0, &remaining_branches[0].1)?;
+            self.compile_match_arm(exit_jumps, subject_type_id, view_stride, &remaining_branches[0].0, &remaining_branches[0].1)?;
             self.init_state.set_path(BranchingPath::B);
-            self.compile_match_block_recursive(exit_jumps, subject_type_id, &remaining_branches[1..])?;
+            self.compile_match_block_recursive(exit_jumps, subject_type_id, view_stride, &remaining_branches[1..])?;
             self.init_state.pop();
         }
         Ok(())
@@ -1118,11 +1144,23 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     fn compile_match_block(self: &mut Self, item: &ast::MatchBlock) -> CompileResult {
         comment!(self, "{}", item);
         let subject_type_id = item.expr.type_id(self).ice()?;
-        self.compile_expression(&item.expr)?;
-        // the subject stays on the stack across the arms; field reads during dispatch don't free it, and the
-        // matching arm discards it (write_discard's Free drops a temporary but leaves a borrowed value to its owner)
+
+        // Check if the subject is a view index expression on a data enum element.
+        // If so, compile the view ref + index and use view-load opcodes for dispatch.
+        let view_stride = self.detect_view_data_enum_subject(&item.expr);
+
+        if let Some(_stride) = view_stride {
+            // View path: compile view ref and index, leaving them on the stack for dispatch.
+            let index_bin = item.expr.as_binary_op().ice()?;
+            self.compile_expression(index_bin.left.as_expression().ice()?)?;  // stack: view_ref
+            self.compile_expression(index_bin.right.as_expression().ice()?)?; // stack: view_ref index
+        } else {
+            // Standard path: compile the subject expression (heap object on stack).
+            self.compile_expression(&item.expr)?;
+        }
+
         let mut exit_jumps = Vec::new();
-        self.compile_match_block_recursive(&mut exit_jumps, subject_type_id, &item.branches)?;
+        self.compile_match_block_recursive(&mut exit_jumps, subject_type_id, view_stride, &item.branches)?;
         // fix branch jump outs
         let exit_target = self.writer.position();
         while let Some(exit_jump) = exit_jumps.pop() {

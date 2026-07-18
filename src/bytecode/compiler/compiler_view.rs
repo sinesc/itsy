@@ -7,7 +7,7 @@ use crate::frontend::ast::{self, Typeable};
 use crate::bytecode::{Constructor, VMFunc, builtins::{Builtin, builtin_types::View}};
 use crate::bytecode::writer::StoreConst;
 use super::{Compiler, CompileResult};
-use super::error::OptionToCompileError;
+use super::error::{OptionToCompileError, CompileError, CompileErrorKind};
 use super::macros::comment;
 
 impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
@@ -35,9 +35,24 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         }
 
         // View index: `view[i]` where the element is primitive
-        if let Some(stride) = compare_type.as_view().map(|v| v.packed_size as u16)
+        if let Some(view_ty) = compare_type.as_view()
             && item.op == Index
         {
+            // Struct and data enum elements cannot be loaded as a whole — users must use field access
+            let elem = self.type_by_id(view_ty.element_type_id);
+            let is_complex = elem.as_struct().is_some()
+                || elem.as_enum().map(|e| e.primitive.is_none()).unwrap_or(false);
+            let stride = view_ty.packed_size as u16;
+            if is_complex {
+                return Err(CompileError::new(
+                    item,
+                    CompileErrorKind::Unsupported(format!(
+                        "cannot load full {} element from view; use field access (e.g. `view[i].field`) instead",
+                        if elem.as_struct().is_some() { "struct" } else { "data enum" }
+                    )),
+                    &self.module_path,
+                ));
+            }
             let result_size = self.ty(item).primitive_size();
             self.compile_expression(item.left.as_expression().ice()?)?;  // stack: view_ref
             self.compile_expression(item.right.as_expression().ice()?)?; // stack: view_ref index
@@ -50,7 +65,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
 
     /// Compile a view element load: `view[index]` where the element is primitive.
     /// The view reference and index are already on the stack.
-    fn compile_view_load_size(self: &mut Self, result_size: u8, stride: u16, field_offset: u16) -> CompileResult {
+    pub(super) fn compile_view_load_size(self: &mut Self, result_size: u8, stride: u16, field_offset: u16) -> CompileResult {
         match result_size {
             1 => self.writer.view_load8(stride, field_offset),
             2 => self.writer.view_load16(stride, field_offset),
@@ -103,6 +118,20 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             _ => Self::ice(&format!("view_store: Unsupported size {}", result_size))?,
         };
         Ok(())
+    }
+
+    /// Check if the match subject is `view[i]` where the view element type is a data enum.
+    /// Returns the view's packed_size as stride if so, None otherwise.
+    pub(super) fn detect_view_data_enum_subject(self: &Self, expr: &ast::Expression) -> Option<u16> {
+        let bin = expr.as_binary_op()?;
+        if bin.op != ast::BinaryOperator::Index {
+            return None;
+        }
+        let left_type = self.ty(&bin.left);
+        let view_ty = left_type.as_view()?;
+        let elem = self.type_by_id(view_ty.element_type_id);
+        // Only data enums (non-primitive enums) need the view-aware match path
+        elem.as_enum().and_then(|e| e.primitive.is_none().then_some(view_ty.packed_size as u16))
     }
 
     /// Walk a BinaryOp chain (Access/AccessWrite nodes) to find the innermost Index/IndexWrite node.

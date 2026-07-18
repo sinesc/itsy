@@ -1553,14 +1553,16 @@ impl<'ctx> Resolver<'ctx> {
                 && matches!(item.path.segments[1].name.as_str(), "new" | "wrap")
             {
                 // Try to determine the View type from turbofish parameter or expected result
-                let view_type_id = item.type_parameter.as_mut()
+                let view_type_id = if let Some(element_id) = item.type_parameter.as_mut()
                     .and_then(|ty| self.resolve_inline_type(ty).ok().flatten())
                     .or(item.type_parameter.as_ref().and_then(|ty| ty.type_id(self)))
-                    .and_then(|element_id| {
-                        // Synthesize the View type from the element type
-                        self.synthesize_view_type(element_id).ok()
-                    })
-                    .or_else(|| expected_result.filter(|t| self.type_by_id(*t).as_view().is_some()));
+                {
+                    // Synthesize the View type from the element type.
+                    // Errors here (e.g. invalid backing type) are propagated — they are real semantic errors.
+                    Some(self.synthesize_view_type(element_id)?)
+                } else {
+                    expected_result.filter(|t| self.type_by_id(*t).as_view().is_some())
+                };
                 if let Some(view_type_id) = view_type_id {
                     let member_name = &item.path.segments[1].name;
                     item.constant_id = self.scopes.constant_id(self.scope_id, member_name, view_type_id);

@@ -318,7 +318,8 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Recursively computes the tightly-packed size of a type in bytes (sum of field sizes for structs,
-    /// primitive size for primitives/enums). Used for view stride calculations.
+    /// primitive size for primitives/enums, discriminant + max variant payload for data enums).
+    /// Used for view stride calculations.
     fn compute_packed_size(self: &Self, type_id: TypeId) -> u8 {
         match self.type_by_id(type_id) {
             ty if ty.is_primitive() => ty.primitive_size(),
@@ -330,31 +331,49 @@ impl<'ctx> Resolver<'ctx> {
                 if let Some((disc_type_id, _)) = e.primitive {
                     self.type_by_id(disc_type_id).primitive_size()
                 } else {
-                    0 // Data enums are not valid for views
+                    // Data enums: discriminant (2 bytes) + max variant payload size
+                    2 + e.variants.iter().map(|(_, v)| {
+                        match v {
+                            EnumVariant::Data(fields) => {
+                                fields.iter().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum::<u8>()
+                            },
+                            EnumVariant::Simple(_) => 0u8,
+                        }
+                    }).max().unwrap_or(0)
                 }
             },
             _ => 0, // Arrays, maps, strings, etc. are not valid for views
         }
     }
 
-    /// Checks whether a type transitively contains String fields. Returns true if the type is clean.
-    fn type_has_no_string_fields(self: &Self, type_id: TypeId, seen: &mut Set<TypeId>) -> bool {
+    /// Checks whether a type's transitive leaf fields are all primitive.
+    /// Data enums are allowed (their variant fields are recursed into);
+    /// Strings and other reference types are not.
+    fn type_has_only_primitive_leaf_fields(self: &Self, type_id: TypeId, seen: &mut Set<TypeId>) -> bool {
         if !seen.insert(type_id) {
             return true; // Already checked, avoid infinite recursion
         }
         match self.type_by_id(type_id) {
             Type::String => false,
             Type::Struct(s) => {
-                s.fields.values().filter_map(|&f| f).all(|fid| self.type_has_no_string_fields(fid, seen))
+                s.fields.values().filter_map(|&f| f).all(|fid| self.type_has_only_primitive_leaf_fields(fid, seen))
             },
             Type::Enum(e) => {
                 if let Some((disc_type_id, _)) = e.primitive {
-                    self.type_has_no_string_fields(disc_type_id, seen)
+                    self.type_has_only_primitive_leaf_fields(disc_type_id, seen)
                 } else {
-                    false // Data enums not supported for views
+                    // Data enum: recurse into all variant fields
+                    e.variants.iter().all(|(_, v)| {
+                        match v {
+                            EnumVariant::Data(fields) => {
+                                fields.iter().filter_map(|&f| f).all(|fid| self.type_has_only_primitive_leaf_fields(fid, seen))
+                            },
+                            EnumVariant::Simple(_) => true,
+                        }
+                    })
                 }
             },
-            _ => true, // Primitives are fine
+            _ => true, // Primitives, arrays, etc. are fine
         }
     }
 
@@ -370,8 +389,8 @@ impl<'ctx> Resolver<'ctx> {
                 "",
             ));
         }
-        // Check for String fields
-        if !self.type_has_no_string_fields(element_type_id, &mut Set::new()) {
+        // Check that all transitive leaf fields are primitive (no Strings, no nested reference types)
+        if !self.type_has_only_primitive_leaf_fields(element_type_id, &mut Set::new()) {
             let name = self.type_name(element_type_id);
             return Err(ResolveError::global(
                 ResolveErrorKind::ViewContainsString(name),
