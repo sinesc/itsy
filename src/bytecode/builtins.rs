@@ -2208,7 +2208,7 @@ impl_builtins! {
     /// interpreting the raw bytes as elements of type `T`. The underlying storage is an
     /// array of any integer type (`u8`-`u64`, `i8`-`i64`). Existing arrays can be reinterpreted via
     /// `View<T>::wrap()`. This makes it useful for treating a byte buffer as an array of
-    /// structs, integers, or floats without copying.
+    /// structs, enums or primitives without copying.
     ///
     /// # Construction
     ///

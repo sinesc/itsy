@@ -13,15 +13,14 @@ pub mod compiler;
 #[cfg(feature="runtime")]
 pub mod runtime;
 pub mod marshal;
-pub mod call_function;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
+use marshal::{FunctionMeta, serialize_function_table, deserialize_function_table};
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
 #[cfg(feature="runtime")]
 use crate::{ItemIndex, bytecode::runtime::{vm::VM, stack::{Stack, StackOp}}};
-use call_function::FunctionMeta;
 #[cfg(feature="compiler")]
 use crate::internals::marshal::{ApiType, ApiTypeDef};
 
@@ -132,7 +131,7 @@ impl<T> Program<T> where T: VMFunc<T> {
             result.extend_from_slice(&descriptor.to_bytes()[..]);
         }
         // save host-call return address and the callable function table
-        call_function::serialize_function_table(self.host_return_addr, &self.functions, &mut result);
+        serialize_function_table(self.host_return_addr, &self.functions, &mut result);
         result
     }
 
@@ -163,7 +162,7 @@ impl<T> Program<T> where T: VMFunc<T> {
             const_descriptors.push(ConstDescriptor::from_bytes(read(&mut program, ConstDescriptor::SERIALIZED_SIZE)?)?);
         }
         // read host-call return address and the callable function table
-        let (host_return_addr, functions) = call_function::deserialize_function_table(&mut program)?;
+        let (host_return_addr, functions) = deserialize_function_table(&mut program)?;
         Some(Self {
             rust_fn: PhantomData,
             instructions,

@@ -38,8 +38,6 @@ mod generators;
 mod closure;
 #[path="vm/suspend.rs"]
 mod suspend;
-#[path="vm/call_function.rs"]
-mod call_function;
 #[cfg(feature="derive")]
 #[path="vm/api_types.rs"]
 mod api_types;

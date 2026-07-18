@@ -60,17 +60,13 @@ impl Display for RuntimeError {
 
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
 
-/// An error reported by [`VM::call_function`](crate::runtime::VM::call_function).
+/// An error reported by [`VM::call_typed`](crate::runtime::VM::call_typed).
 #[derive(Clone, Debug)]
 pub enum CallError {
     /// No top-level function with the given name exists in the program.
     FunctionNotFound(String),
     /// The number of supplied arguments does not match the function's parameter count.
     ArgumentCountMismatch { expected: usize, got: usize },
-    /// The argument at `index` could not be marshalled to the expected Itsy type.
-    ArgumentTypeMismatch { index: usize, expected: &'static str },
-    /// An argument or return type is not yet supported for host calls (e.g. arrays, structs, enums).
-    UnsupportedType { expected: &'static str },
     /// The function triggered a runtime error while executing.
     Runtime(RuntimeError),
 }
@@ -80,11 +76,7 @@ impl Display for CallError {
         match self {
             CallError::FunctionNotFound(name) => write!(f, "No callable function named '{name}'."),
             CallError::ArgumentCountMismatch { expected, got } => write!(f, "Expected {expected} argument(s), got {got}."),
-            CallError::ArgumentTypeMismatch { index, expected } => write!(f, "Argument {index} could not be marshalled to expected type '{expected}'."),
-            CallError::UnsupportedType { expected } => write!(f, "Type '{expected}' is not supported for host calls."),
             CallError::Runtime(err) => write!(f, "Runtime error during call: {err}"),
         }
     }
 }
-
-pub type CallResult<T = Box<dyn std::any::Any>> = Result<T, CallError>;

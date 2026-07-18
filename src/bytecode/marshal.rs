@@ -13,6 +13,9 @@
 //!
 //! [VMValue::Stack] abstracts over both so the `itsy_api!` macro can marshal any type uniformly.
 
+use crate::prelude::*;
+use crate::config::FrameAddress;
+use crate::StackAddress;
 #[cfg(feature = "runtime")]
 use crate::prelude::size_of;
 #[cfg(feature = "runtime")]
@@ -23,6 +26,79 @@ use crate::bytecode::{HeapRef, HeapRefOp};
 use crate::bytecode::runtime::heap::Heap;
 #[cfg(feature = "runtime")]
 use crate::bytecode::runtime::stack::{Stack, StackOp};
+#[cfg(feature = "compiler")]
+use crate::bytecode::{VMFunc, read};
+#[cfg(feature = "compiler")]
+use crate::shared::MetaContainer;
+#[cfg(feature = "compiler")]
+use crate::frontend::{ast, parser::types::ParsedModule};
+#[cfg(feature = "compiler")]
+use crate::bytecode::compiler::{Compiler, error::{CompileResult, OptionToCompileError}};
+
+/// Metadata describing a top-level Itsy function, allowing the host to invoke it by name via
+/// [`VM::call_typed`](crate::runtime::VM::call_typed).
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionMeta {
+    /// Bytecode address of the function's entry point.
+    pub(crate) addr: StackAddress,
+    /// Combined primitive size of all arguments (their on-stack footprint).
+    pub(crate) arg_size: FrameAddress,
+    /// Number of arguments (for argument count validation during host calls).
+    pub(crate) args_count: usize,
+}
+
+/// Serializes the host-call return address and callable function table.
+pub(crate) fn serialize_function_table(host_return_addr: StackAddress, functions: &Map<String, FunctionMeta>, result: &mut Vec<u8>) {
+    result.extend_from_slice(&host_return_addr.to_ne_bytes()[..]);
+    result.extend_from_slice(&functions.len().to_ne_bytes()[..]);
+    for (name, meta) in functions {
+        result.extend_from_slice(&name.len().to_ne_bytes()[..]);
+        result.extend_from_slice(name.as_bytes());
+        result.extend_from_slice(&meta.addr.to_ne_bytes()[..]);
+        result.extend_from_slice(&meta.arg_size.to_ne_bytes()[..]);
+        result.extend_from_slice(&meta.args_count.to_ne_bytes()[..]);
+    }
+}
+
+/// Deserializes the host-call return address and callable function table.
+pub(crate) fn deserialize_function_table(program: &mut &[u8]) -> Option<(StackAddress, Map<String, FunctionMeta>)> {
+    const USIZE: usize = size_of::<usize>();
+    const SA: usize = size_of::<StackAddress>();
+    const FA: usize = size_of::<FrameAddress>();
+    let host_return_addr = StackAddress::from_ne_bytes(read(program, SA)?.try_into().ok()?);
+    let functions_count: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
+    let mut functions: Map<String, FunctionMeta> = Map::new();
+    for _ in 0..functions_count {
+        let name_len: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
+        let name = String::from_utf8(read(program, name_len)?.to_vec()).ok()?;
+        let addr = StackAddress::from_ne_bytes(read(program, SA)?.try_into().ok()?);
+        let arg_size = FrameAddress::from_ne_bytes(read(program, FA)?.try_into().ok()?);
+        let args_count: usize = usize::from_ne_bytes(read(program, USIZE)?.try_into().ok()?);
+        functions.insert(name, FunctionMeta { addr, arg_size, args_count });
+    }
+    Some((host_return_addr, functions))
+}
+
+/// Builds the host-callable function table from all top-level (free) functions in `modules`
+/// so a host can invoke them by name via [`VM::call_typed`](crate::runtime::VM::call_typed).
+/// Methods/trait functions/generators are not top-level and are intentionally excluded.
+pub(crate) fn build_function_table<T>(compiler: &Compiler<T>, modules: &[ParsedModule]) -> CompileResult<Map<String, FunctionMeta>> where T: VMFunc<T>,
+{
+    let mut functions = Map::new();
+    for module in modules {
+        for statement in module.statements() {
+            if let ast::Statement::Function(function) = statement {
+                let function_id = compiler.constant_by_id(function.constant_id.ice()?).value.as_function_id().ice()?;
+                let addr = compiler.functions.get(function_id).ice_msg("Missing function address")?;
+                let func = compiler.function_by_id(function_id);
+                let arg_size = func.arg_size(compiler);
+                let args_count = func.arg_type_ids(compiler).len();
+                functions.insert(function.shared.sig.ident.name.clone(), FunctionMeta { addr, arg_size, args_count });
+            }
+        }
+    }
+    Ok(functions)
+}
 
 /// Compile-time structural description of an API type, used by the resolver to register the type in
 /// the root scope so that scripts and the Rust API agree on its layout.
@@ -361,8 +437,7 @@ where
 
 /// Reads the return value of a host-initiated Itsy call off the stack top and materialises it via
 /// [VMValue::from_stack], then releases the producer's reference-count-0 heap object (a no-op for value
-/// types). Mirrors the String handling in
-/// [`VM::call_function`](crate::runtime::VM::call_function)'s result reading, generalised over [VMValue].
+/// types).
 #[cfg(feature = "runtime")]
 pub fn read_call_return<V>(stack: &Stack, heap: &mut Heap) -> V
 where

@@ -12,8 +12,7 @@ use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
 use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue, UserConstValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}, ast_visitor::AstVisitor, parser::types::ParsedModule};
-use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, ConstDescriptor, builtins::{Builtin, BuiltinType}};
-use crate::bytecode::call_function::build_function_table;
+use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, ConstDescriptor, builtins::{Builtin, BuiltinType}, marshal::build_function_table};
 use stack_frame::{StackFrame, StackFrames};
 use error::{CompileError, CompileErrorKind, CompileResult, OptionToCompileError};
 use placeholder::{LoopControlStack, LoopControl, Functions, ForLoopStack, ForLoopCleanup};
@@ -167,7 +166,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     compiler.write_const_cleanup()?;
 
     // the exit following the entry call doubles as the return target for host-initiated calls
-    // (VM::call_function): a function returning here breaks the exec loop back to the host
+    // (VM::call_typed): a function returning here breaks the exec loop back to the host
     let host_return_addr = compiler.writer.position();
     compiler.writer.exit();
 
@@ -197,7 +196,7 @@ pub fn compile<T>(program: ResolvedProgram<T>) -> CompileResult<Program<T>> wher
     compiler.writer.overwrite(initial_pos, |w| w.call(entry_addr, entry_arg_size));
 
     // build the host-callable function table from all top-level (free) functions so a host can invoke
-    // them by name via VM::call_function (see bytecode::call_function)
+    // them by name via VM::call_typed
     let functions = build_function_table(&compiler, &modules)?;
 
     // return generated program
