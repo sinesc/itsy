@@ -46,9 +46,10 @@ pub enum ApiTypeKind {
         fields: Vec<(&'static str, &'static str)>,
     },
     /// A primitive/C-like enum (no variant carries data), given as `(variant name, discriminant)`
-    /// pairs in declaration order. Marshalled as an `i32` discriminant.
+    /// pairs in declaration order. `discriminant_type` is the Itsy primitive name (e.g. `"i8"`, `"u16"`).
     PrimitiveEnum {
         variants: Vec<(&'static str, i64)>,
+        discriminant_type: &'static str,
     },
     /// A data-carrying enum, given as `(variant name, field type names)` pairs in declaration order.
     /// Variant fields are positional and keep their declaration order (unlike struct fields).

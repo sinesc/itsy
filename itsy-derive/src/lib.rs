@@ -23,7 +23,7 @@ pub fn derive_vmvalue(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
     let result = match &ast.data {
         Data::Struct(data) => impl_struct(&ast.ident, data),
-        Data::Enum(data) => impl_enum(&ast.ident, data),
+        Data::Enum(data) => impl_enum(&ast.ident, data, &ast.attrs),
         Data::Union(_) => Err(syn::Error::new(ast.span(), "#[derive(VMValue)] does not support unions")),
     };
     match result {
@@ -149,20 +149,62 @@ fn impl_struct(ident: &Ident, data: &DataStruct) -> syn::Result<proc_macro2::Tok
 
 /// Generates marshalling for an enum, dispatching to the primitive (value-type) or data-carrying
 /// (reference-type) representation depending on whether any variant carries data.
-fn impl_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::TokenStream> {
+fn impl_enum(ident: &Ident, data: &DataEnum, attrs: &[syn::Attribute]) -> syn::Result<proc_macro2::TokenStream> {
     let is_primitive = data.variants.iter().all(|variant| matches!(variant.fields, Fields::Unit));
     if is_primitive {
-        impl_primitive_enum(ident, data)
+        impl_primitive_enum(ident, data, attrs)
     } else {
         impl_data_enum(ident, data)
     }
 }
 
-/// Generates marshalling for a C-like enum as an `i32` discriminant (a value type).
-fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro2::TokenStream> {
+/// Parse `#[itsy(repr(T))]` to extract the discriminant type name. Defaults to `"i32"`.
+fn parse_repr_type(attrs: &[syn::Attribute]) -> String {
+    for attr in attrs {
+        if !attr.path().is_ident("itsy") {
+            continue;
+        }
+        // Convert the attribute to tokens and look for `repr(type)` pattern
+        let s = quote! { #attr }.to_string();
+        if let Some(start) = s.find("repr") {
+            let rest = &s[start + 4..];
+            if let Some(paren_start) = rest.find('(') {
+                if let Some(paren_end) = rest[paren_start..].find(')') {
+                    let inner = &rest[paren_start + 1..paren_start + paren_end];
+                    let trimmed = inner.trim();
+                    if ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"].contains(&trimmed) {
+                        return trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "i32".to_string()
+}
+
+/// Map an Itsy primitive type name to the corresponding Rust type token.
+fn repr_type_to_rust(name: &str) -> proc_macro2::TokenStream {
+    match name {
+        "i8" => quote! { i8 },
+        "i16" => quote! { i16 },
+        "i32" => quote! { i32 },
+        "i64" => quote! { i64 },
+        "u8" => quote! { u8 },
+        "u16" => quote! { u16 },
+        "u32" => quote! { u32 },
+        "u64" => quote! { u64 },
+        _ => quote! { i32 },
+    }
+}
+
+/// Generates marshalling for a C-like enum (a value type).
+fn impl_primitive_enum(ident: &Ident, data: &DataEnum, attrs: &[syn::Attribute]) -> syn::Result<proc_macro2::TokenStream> {
     let name_str = ident.to_string();
     let variant_idents: Vec<&Ident> = data.variants.iter().map(|v| &v.ident).collect();
     let variant_names: Vec<String> = variant_idents.iter().map(|i| i.to_string()).collect();
+
+    let repr_type_str = parse_repr_type(attrs);
+    let repr_type = repr_type_to_rust(&repr_type_str);
 
     let compiler_impl = quote! {
         #[cfg(feature = "compiler")]
@@ -175,6 +217,7 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
                         name: #name_str,
                         kind: ApiTypeKind::PrimitiveEnum {
                             variants: vec![ #( (#variant_names, #ident::#variant_idents as i64) ),* ],
+                            discriminant_type: #repr_type_str,
                         },
                     })
                 }
@@ -195,26 +238,26 @@ fn impl_primitive_enum(ident: &Ident, data: &DataEnum) -> syn::Result<proc_macro
             use ::itsy::internals::binary::heap::{Heap, HeapRef};
 
             impl VMValue for #ident {
-                type Stack = i32;
-                fn from_stack(_heap: &Heap, raw: i32) -> Self {
-                    #( if raw == #ident::#variant_idents as i32 { return #ident::#variant_idents; } )*
+                type Stack = #repr_type;
+                fn from_stack(_heap: &Heap, raw: #repr_type) -> Self {
+                    #( if raw == #ident::#variant_idents as #repr_type { return #ident::#variant_idents; } )*
                     panic!(concat!("invalid discriminant for enum ", #name_str, ": {}"), raw);
                 }
-                fn to_stack(self, _heap: &mut Heap) -> i32 {
-                    self as i32
+                fn to_stack(self, _heap: &mut Heap) -> #repr_type {
+                    self as #repr_type
                 }
-                fn free_stack(_heap: &mut Heap, _raw: i32) {}
-                fn retain_stack(_heap: &mut Heap, _raw: i32) {}
+                fn free_stack(_heap: &mut Heap, _raw: #repr_type) {}
+                fn retain_stack(_heap: &mut Heap, _raw: #repr_type) {}
             }
 
             impl VMField for #ident {
-                const HEAP_SIZE: usize = <i32 as VMField>::HEAP_SIZE;
+                const HEAP_SIZE: usize = <#repr_type as VMField>::HEAP_SIZE;
                 fn read_field(heap: &Heap, base: HeapRef, offset: usize) -> Self {
-                    let raw = <i32 as VMField>::read_field(heap, base, offset);
+                    let raw = <#repr_type as VMField>::read_field(heap, base, offset);
                     <Self as VMValue>::from_stack(heap, raw)
                 }
                 fn write_field(self, heap: &mut Heap, buf: &mut Vec<u8>) {
-                    <i32 as VMField>::write_field(self as i32, heap, buf);
+                    <#repr_type as VMField>::write_field(self as #repr_type, heap, buf);
                 }
                 fn free_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}
                 fn retain_field(_heap: &mut Heap, _base: HeapRef, _offset: usize) {}

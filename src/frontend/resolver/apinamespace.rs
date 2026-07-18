@@ -75,9 +75,6 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
     }
 
     // pass 2: resolve fields/variants against the now-known set of names
-    let api_discriminant_type_id = *primitives.get(&Type::i32).ice()?;
-    let api_discriminant_size = Type::i32.primitive_size();
-
     for def in &api_type_defs {
         let type_name = ns.qualify(def.name);
         let type_id = scopes.type_id(ScopeId::ROOT, &type_name).ice_msg(&format!("Failed to register API type '{}'", type_name))?;
@@ -91,7 +88,15 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
                 }
                 *scopes.type_mut(type_id) = Type::Struct(Struct { fields: field_map, impl_traits: Map::new() });
             },
-            ApiTypeKind::PrimitiveEnum { variants } => {
+            ApiTypeKind::PrimitiveEnum { variants, discriminant_type } => {
+                let disc_type = match *discriminant_type {
+                    "i8" => Type::i8, "i16" => Type::i16, "i32" => Type::i32, "i64" => Type::i64,
+                    "u8" => Type::u8, "u16" => Type::u16, "u32" => Type::u32, "u64" => Type::u64,
+                    _ => Type::i32,
+                };
+                let disc_type_id = *primitives.get(&disc_type).ice()?;
+                let disc_type_size = disc_type.primitive_size();
+
                 let mut enum_variants = Vec::new();
                 for (name, discriminant) in variants {
                     let discriminant = Numeric::Signed(*discriminant);
@@ -99,7 +104,7 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
                     // C-like enum variant: a constant holding the bare discriminant
                     scopes.insert_constant(&format!("{}::{}", type_name, name), type_id, Some(type_id), ConstantValue::Discriminant(discriminant));
                 }
-                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: Some((api_discriminant_type_id, api_discriminant_size)) });
+                *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: Some((disc_type_id, disc_type_size)) });
             },
             ApiTypeKind::DataEnum { variants } => {
                 let mut enum_variants = Vec::new();

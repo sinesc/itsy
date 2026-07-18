@@ -43,6 +43,15 @@ enum Status {
     NotFound = 404,
 }
 
+// primitive enum with non-default repr type (u8 instead of i32)
+#[derive(VMValue, PartialEq, Debug)]
+#[itsy(repr(u8))]
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
 // data-carrying enum, incl. a unit variant and a String-carrying variant
 #[derive(VMValue, PartialEq, Debug)]
 enum Shape {
@@ -107,6 +116,17 @@ itsy_api! {
         }
         fn classify(&mut context, code: i32) -> Status {
             if code == 200 { Status::Ok } else { Status::NotFound }
+        }
+        // primitive enum with custom repr type (u8)
+        fn color_index(&mut context, c: Color) -> u8 {
+            c as u8
+        }
+        fn next_color(&mut context, c: Color) -> Color {
+            match c {
+                Color::Red => Color::Green,
+                Color::Green => Color::Blue,
+                Color::Blue => Color::Red,
+            }
         }
         // data enums
         fn area(&mut context, s: Shape) -> f64 {
@@ -196,8 +216,8 @@ itsy_api! {
 }
 
 const PRELUDE: &str = "
-    use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, make_range, sum_u16, make_words, join, make_points, points_sum, shapes_area, make_grid, grid_sum, flatten_words, ret_i32, ret_f64, ret_string};
-    use Api::{Point, Person, Line, Direction, Status, Shape, Tagged, Wrap};
+    use Api::{make_point, point_sum, make_person, person_summary, make_line, line_dx, dir_index, opposite, status_code, classify, color_index, next_color, area, make_circle, shape_name, tag_index, make_tagged, wrap_sum, wrap_point, make_range, sum_u16, make_words, join, make_points, points_sum, shapes_area, make_grid, grid_sum, flatten_words, ret_i32, ret_f64, ret_string};
+    use Api::{Point, Person, Line, Direction, Status, Color, Shape, Tagged, Wrap};
 ";
 
 fn run(code: &str) -> Context {
@@ -305,6 +325,19 @@ fn primitive_enum_explicit_discriminants() {
         ret_i32(classify(200) as i32);
     ));
     assert_all(&result, &[404_i32, 200_i32]);
+}
+
+#[test]
+fn primitive_enum_custom_repr() {
+    // Color uses #[itsy(repr(u8))] so it marshals as u8, not i32
+    let result = run(stringify!(
+        ret_i32(color_index(Color::Red) as i32);
+        ret_i32(color_index(Color::Blue) as i32);
+        let c = next_color(Color::Blue);
+        ret_i32(color_index(c) as i32);
+        ret_i32(c as i32);
+    ));
+    assert_all(&result, &[0_i32, 2_i32, 0_i32, 0_i32]);
 }
 
 #[test]

@@ -2521,10 +2521,10 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         Ok(match numeric {
             Numeric::Signed(v) => {
                 match ty {
-                    Type::i8 => self.writer.immediate8(v as u8),
-                    Type::i16 => self.writer.immediate16(v as u16),
-                    Type::i32 => self.writer.immediate32(v as u32),
-                    Type::i64 => self.writer.immediate64(v as u64),
+                    Type::i8 | Type::u8 | Type::bool => self.writer.immediate8(v as u8),
+                    Type::i16 | Type::u16 => self.writer.immediate16(v as u16),
+                    Type::i32 | Type::u32 => self.writer.immediate32(v as u32),
+                    Type::i64 | Type::u64 => self.writer.immediate64(v as u64),
                     _ => Self::ice(&format!("Unexpected signed integer literal type: {:?}", ty))?,
                 }
             },
