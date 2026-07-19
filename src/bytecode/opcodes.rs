@@ -1465,6 +1465,8 @@ impl_opcodes!{
         let element_index: StackAddress = self.stack.pop();
         let mut item: HeapRef = self.stack.pop();
         if !self.check_element_bounds(item, element_index, element_size as StackAddress) {
+            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
+            self.stack.push(HeapRef::new(0, 0)); // keep stack consistent for potential recovery via VM::clear_error
             return;
         }
         item.add_offset(element_index as StackOffset * element_size as StackOffset);
@@ -1557,7 +1559,9 @@ impl_opcodes!{
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
         if !self.check_element_bounds(item, element_index, size_of::<T>() as StackAddress) {
+            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
             self.refcount_value(item, constructor, HeapRefOp::Free);
+            self.stack.push(HeapRef::new(0, 0)); // keep stack consistent for potential recovery via VM::clear_error
             return;
         }
         let data: T = self.heap.read(item.with_offset((size_of::<T>() as StackAddress * element_index) as StackOffset));
@@ -1570,7 +1574,9 @@ impl_opcodes!{
         let element_index: StackAddress = self.stack.pop();
         let item: HeapRef = self.stack.pop();
         if !self.check_element_bounds(item, element_index, size_of::<HeapRef>() as StackAddress) {
+            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
             self.refcount_value(item, constructor, HeapRefOp::Free);
+            self.stack.push(HeapRef::new(0, 0)); // keep stack consistent for potential recovery via VM::clear_error
             return;
         }
         let data: HeapRef = self.heap.read(item.with_offset((size_of::<HeapRef>() as StackAddress * element_index) as StackOffset));
@@ -1726,6 +1732,7 @@ impl_opcodes!{
             },
             None => {
                 self.state = VMState::Error(RuntimeErrorKind::KeyNotFound);
+                self.stack.push(HeapRef::new(0, 0)); // keep stack consistent for potential recovery via VM::clear_error
                 self.refcount_value(map, constructor, HeapRefOp::Free);
             },
         }
@@ -1848,6 +1855,7 @@ impl_opcodes!{
         let heap_item = self.heap.item(view_ref_index);
         if end > heap_item.data.len() {
             self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
+            self.stack.push(0 as T); // keep stack consistent for potential recovery via VM::clear_error
             return;
         }
         let data: T = heap_item.load(byte_offset);

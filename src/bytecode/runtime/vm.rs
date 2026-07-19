@@ -266,17 +266,13 @@ impl<T, U> VM<T, U> {
     /// bytes at `element_index` stays within the heap object referenced by `item`. Otherwise sets the
     /// VM into an `IndexOutOfBounds` error state and returns `false`. Callers must honor the result;
     /// the element opcodes carry the `check` flag so the exec loop halts once the error is set.
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn check_element_bounds(self: &mut Self, item: HeapRef, element_index: StackAddress, element_size: StackAddress) -> bool {
         let len = self.heap.item(item.index()).data.len() as StackAddress;
         let end = item.offset()
             .saturating_add(element_index.saturating_mul(element_size))
             .saturating_add(element_size);
-        if end > len {
-            self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
-            false
-        } else {
-            true
-        }
+        end <= len
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
