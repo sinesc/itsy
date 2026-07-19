@@ -77,7 +77,13 @@ impl<T, U> VM<T, U> {
         self.exec(context);
         match self.state {
             VMState::Terminated if self.heap.len() > 1 => Err(RuntimeError::new(0, RuntimeErrorKind::HeapCorruption, None)),
-            VMState::Error(kind) => Err(RuntimeError::new(self.error_pc, kind, None)),
+            VMState::Error(kind) => {
+                #[cfg(all(feature="debugging", feature="symbols"))]
+                let opcode = self.describe_instruction(self.error_pc).map(|result| result.0);
+                #[cfg(not(all(feature="debugging", feature="symbols")))]
+                let opcode = None;
+                Err(RuntimeError::new(self.error_pc, kind, opcode))
+            },
             VMState::Ready => {
                 let kind = RuntimeErrorKind::UnexpectedReady;
                 self.state = VMState::Error(kind);
@@ -129,7 +135,13 @@ impl<T, U> VM<T, U> {
         // only a clean return to the host halt (Terminated) is a successful call
         match self.state {
             VMState::Terminated => { },
-            VMState::Error(kind) => return Err(CallError::Runtime(RuntimeError::new(self.error_pc, kind, None))),
+            VMState::Error(kind) => {
+                #[cfg(all(feature="debugging", feature="symbols"))]
+                let opcode = self.describe_instruction(self.error_pc).map(|result| result.0);
+                #[cfg(not(all(feature="debugging", feature="symbols")))]
+                let opcode = None;
+                return Err(CallError::Runtime(RuntimeError::new(self.error_pc, kind, opcode)))
+            }
             _ => return Err(CallError::Runtime(RuntimeError::new(self.pc, RuntimeErrorKind::UnexpectedReady, None))),
         }
         // read the result off the stack top, then truncate back to the pre-call stack and restore state

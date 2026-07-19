@@ -96,7 +96,7 @@ macro_rules! impl_opcodes {
         VMState::Error(_) => {
             #[cfg(feature="debugging")]
             {
-                $self.error_pc = $prev_pc - size_of::<OpCodeIndex>(); // opcode was already read
+                $self.error_pc = $prev_pc;
             }
             return;
         },
