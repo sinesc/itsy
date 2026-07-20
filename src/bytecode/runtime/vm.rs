@@ -408,6 +408,157 @@ impl<T, U> VM<T, U> {
         }
     }
 
+    /// Recursively flatten a heap object into a view's backing array using the type's serialized
+    /// constructor. Reads data from the heap and writes it to the view at `view_base_offset`.
+    /// Uses a work stack to avoid Rust recursion.
+    pub(crate) fn heap_to_view_recurse(
+        self: &mut Self,
+        mut constructor_offset: StackAddress,
+        heap_ref: HeapRef,
+        view_index: StackAddress,
+        view_base_offset: StackAddress,
+    ) {
+        // Work item: (constructor_offset, heap_item_index, view_byte_offset)
+        let mut work: Vec<(StackAddress, StackAddress, StackAddress)> = Vec::with_capacity(8);
+        work.push((constructor_offset, heap_ref.index(), view_base_offset));
+
+        while let Some((ctor_offset, item_index, view_offset)) = work.pop() {
+            constructor_offset = ctor_offset;
+            let constructor = Constructor::read_op(&self.stack, &mut constructor_offset);
+            let parsed = Constructor::parse_with(&self.stack, constructor_offset, constructor);
+            constructor_offset = parsed.offset;
+
+            match constructor {
+                Constructor::Primitive => {
+                    let num_bytes = Constructor::read_index(&self.stack, &mut constructor_offset) as usize;
+                    let src = self.heap.item(item_index).data[..num_bytes].to_vec();
+                    let dst_data = &mut self.heap.item_mut(view_index).data;
+                    dst_data[view_offset as usize..view_offset as usize + num_bytes]
+                        .copy_from_slice(&src);
+                }
+                Constructor::Struct => {
+                    let (_implementor_index, num_fields, field_offset) =
+                        Constructor::parse_struct(&self.stack, constructor_offset);
+                    self.heap_to_view_fields(
+                        num_fields, field_offset, item_index, 0,
+                        view_index, view_offset, &mut work,
+                    );
+                }
+                Constructor::Enum => {
+                    // Read discriminant from heap, write to view
+                    let disc_bytes = self.heap.item(item_index).data[0..2].to_vec();
+                    let dst_data = &mut self.heap.item_mut(view_index).data;
+                    dst_data[view_offset as usize..view_offset as usize + 2]
+                        .copy_from_slice(&disc_bytes);
+
+                    let (_implementor_index, _num_variants, variant_table_offset) =
+                        Constructor::parse_struct(&self.stack, constructor_offset);
+                    let variant_index: VariantIndex = u16::from_le_bytes(
+                        disc_bytes.try_into().unwrap()
+                    ) as VariantIndex;
+                    let (num_fields, field_offset) =
+                        Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index as ItemIndex);
+                    // Enum variant fields start at heap offset 2 (after discriminant)
+                    self.heap_to_view_fields(
+                        num_fields, field_offset, item_index, 2,
+                        view_index, view_offset + 2, &mut work,
+                    );
+                }
+                _ => {
+                    panic!("unexpected constructor {:?} in heap_to_view", constructor);
+                }
+            }
+        }
+    }
+
+    /// Flatten enum-variant or struct fields from a heap item into a view slot.
+    fn heap_to_view_fields(
+        self: &mut Self,
+        num_fields: ItemIndex,
+        mut field_offset: StackAddress,
+        heap_item_index: StackAddress,
+        initial_heap_offset: usize,
+        view_index: StackAddress,
+        mut view_byte_offset: StackAddress,
+        work: &mut Vec<(StackAddress, StackAddress, StackAddress)>,
+    ) {
+        let heap_data = self.heap.item(heap_item_index).data.clone();
+        let mut heap_read_offset: usize = initial_heap_offset;
+
+        for _ in 0..num_fields {
+            let field_ctor_offset = field_offset;
+            let field_constructor = Constructor::read_op(&self.stack, &mut field_offset);
+            if field_constructor != Constructor::Primitive {
+                // Reference type: read heap_ref, schedule recursive flatten
+                let field_ref = HeapRef::from_ne_bytes(
+                    heap_data[heap_read_offset..heap_read_offset + 8].try_into().unwrap(),
+                );
+                heap_read_offset += 8;
+                let field_data_size = self.constructor_data_size(field_ctor_offset);
+                work.push((field_ctor_offset, field_ref.index(), view_byte_offset));
+                view_byte_offset += field_data_size as StackAddress;
+                // Advance past this field's constructor (including nested data)
+                field_offset = Constructor::skip(&self.stack, field_ctor_offset);
+            } else {
+                // Primitive: copy bytes directly
+                let num_bytes = Constructor::read_index(&self.stack, &mut field_offset) as usize;
+                let src = heap_data[heap_read_offset..heap_read_offset + num_bytes].to_vec();
+                let dst_data = &mut self.heap.item_mut(view_index).data;
+                dst_data[view_byte_offset as usize..view_byte_offset as usize + num_bytes]
+                    .copy_from_slice(&src);
+                heap_read_offset += num_bytes;
+                view_byte_offset += num_bytes as StackAddress;
+            }
+        }
+    }
+
+    /// Compute the inlined data size (view packed size) for a constructor at the given offset.
+    /// Mirrors the compile-time `compute_packed_size` logic.
+    fn constructor_data_size(self: &Self, mut offset: StackAddress) -> usize {
+        let constructor = Constructor::read_op(&self.stack, &mut offset);
+        let parsed = Constructor::parse_with(&self.stack, offset, constructor);
+        offset = parsed.offset;
+
+        match constructor {
+            Constructor::Primitive => {
+                Constructor::read_index(&self.stack, &mut offset) as usize
+            }
+            Constructor::Struct => {
+                let (_implementor_index, num_fields, field_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                let mut total = 0;
+                let mut foff = field_offset;
+                for _ in 0..num_fields {
+                    let field_size = self.constructor_data_size(foff);
+                    foff = Constructor::skip(&self.stack, foff);
+                    total += field_size;
+                }
+                total
+            }
+            Constructor::Enum => {
+                // Data size = discriminant (2) + max variant payload size
+                let (_implementor_index, num_variants, variant_table_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                let mut max_payload = 0usize;
+                for vi in 0..num_variants {
+                    let (num_fields, field_offset) =
+                        Constructor::parse_variant_table(&self.stack, variant_table_offset, vi as ItemIndex);
+                    let mut variant_size = 0usize;
+                    let mut foff = field_offset;
+                    for _ in 0..num_fields {
+                        variant_size += self.constructor_data_size(foff);
+                        foff = Constructor::skip(&self.stack, foff);
+                    }
+                    if variant_size > max_payload {
+                        max_payload = variant_size;
+                    }
+                }
+                2 + max_payload
+            }
+            _ => 0,
+        }
+    }
+
     /// Compares the targets of two heap references of identical reference type for deep equality, guided by the
     /// type's serialized constructor. Used to implement equality for non-primitive enums.
     pub(crate) fn compare_value(self: &Self, a: HeapRef, b: HeapRef, constructor_offset: StackAddress) -> bool {

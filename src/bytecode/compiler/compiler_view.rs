@@ -2,9 +2,9 @@
 
 use crate::StackAddress;
 use crate::ItemIndex;
-use crate::shared::{MetaContainer, meta::ViewType};
+use crate::shared::{MetaContainer, meta::ViewType, typed_ids::TypeId};
 use crate::frontend::ast::{self, Typeable};
-use crate::bytecode::{Constructor, VMFunc, builtins::{Builtin, builtin_types::View}};
+use crate::bytecode::{Constructor, VMFunc, HeapRefOp, builtins::{Builtin, builtin_types::View}};
 use crate::bytecode::writer::StoreConst;
 use super::{Compiler, CompileResult};
 use super::error::{OptionToCompileError, CompileError, CompileErrorKind};
@@ -76,13 +76,30 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         Ok(())
     }
 
-    /// Compile a view element store: `view[index] = value` where the element is primitive.
+    /// Compile a view element store: `view[index] = value` where the element is primitive or a data enum.
     pub(super) fn compile_view_store_simple(self: &mut Self, bin: &ast::BinaryOp, right: &ast::Expression) -> CompileResult {
-        let stride = self.ty(&bin.left).as_view().ice()?.packed_size as u16;
+        let view_ty = self.ty(&bin.left).as_view().ice()?;
+        let stride = view_ty.packed_size as u16;
+        let elem_type_id = view_ty.element_type_id;
+
+        // Data enum element: unpack the heap object into the view buffer
+        let elem = self.type_by_id(elem_type_id);
+        if let Some(enum_ty) = elem.as_enum() && enum_ty.primitive.is_none() {
+            return self.compile_view_store_data_enum(
+                bin.left.as_expression().ice()?,
+                bin.right.as_expression().ice()?,
+                right,
+                stride,
+                0u16,
+                view_ty.packed_size as u16,
+                elem_type_id,
+            );
+        }
+
+        // Primitive element: direct store
+        comment!(self, "view store");
         let result_size = self.ty(bin).primitive_size();
         let field_offset = 0u16;
-
-        comment!(self, "view store");
         self.compile_expression(bin.left.as_expression().ice()?)?;  // stack: view_ref
         self.compile_expression(bin.right.as_expression().ice()?)?; // stack: view_ref index
         self.compile_expression(right)?;                              // stack: view_ref index value
@@ -156,16 +173,52 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     /// Compile a view access chain store: `view[i].field = value`.
     /// `access_bin` is the Access/AccessWrite BinaryOp, `index_bin` is the inner Index BinaryOp.
     pub(super) fn compile_view_store_chain(self: &mut Self, access_bin: &ast::BinaryOp, index_bin: &ast::BinaryOp, right: &ast::Expression) -> CompileResult {
-        let stride = self.ty(&index_bin.left).as_view().ice()?.packed_size as u16;
+        let view_ty = self.ty(&index_bin.left).as_view().ice()?;
+        let stride = view_ty.packed_size as u16;
         let field_type_id = access_bin.type_id(self).ice()?;
-        let field_size = self.type_by_id(field_type_id).primitive_size();
+        let field_type = self.type_by_id(field_type_id);
         let offset = self.compute_view_chain_offset(access_bin, index_bin)?;
 
+        // data enum field: unpack the heap object into the view buffer
+        if let Some(enum_ty) = field_type.as_enum() && enum_ty.primitive.is_none() {
+            return self.compile_view_store_data_enum(
+                index_bin.left.as_expression().ice()?,
+                index_bin.right.as_expression().ice()?,
+                right,
+                stride,
+                offset,
+                view_ty.packed_size as u16,
+                field_type_id,
+            );
+        }
+
+        // primitive field: direct store
         comment!(self, "view chain store offset={}", offset);
+        let field_size = field_type.primitive_size();
         self.compile_expression(index_bin.left.as_expression().ice()?)?;  // stack: view_ref
         self.compile_expression(index_bin.right.as_expression().ice()?)?; // stack: view_ref index
         self.compile_expression(right)?;                                     // stack: view_ref index value
         self.write_view_store(field_size, stride, offset)?;
+        Ok(())
+    }
+
+    /// Compile a view store for a data enum element or field.
+    fn compile_view_store_data_enum(self: &mut Self, view_expr: &ast::Expression, index_expr: &ast::Expression, right: &ast::Expression, stride: u16, base_offset: u16, _packed_size: u16, enum_type_id: TypeId) -> CompileResult {
+        // Compile RHS (heap_ref), then view_expr and index_expr.
+        // Clone heap_ref so heap_to_view can consume it while the original stays for cleanup.
+        self.compile_expression(right)?;              // stack: heap_ref
+        self.write_cnt(self.type_by_id(enum_type_id), true, HeapRefOp::Inc)?;
+        self.writer.clone(8);                         // stack: heap_ref heap_ref_c
+        self.compile_expression(view_expr)?;          // stack: heap_ref heap_ref_c view_ref
+        self.compile_expression(index_expr)?;         // stack: heap_ref heap_ref_c view_ref index
+
+        let constructor = self.constructor(self.type_by_id(enum_type_id))?;
+        self.writer.heap_to_view(stride, base_offset, constructor); // pops index view_ref heap_ref_c
+                                                              // stack: heap_ref
+
+        // cleanup: decrement heap_ref refcount
+        self.write_cnt(self.type_by_id(enum_type_id), false, HeapRefOp::Dec)?;
+
         Ok(())
     }
 

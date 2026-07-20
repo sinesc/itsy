@@ -370,3 +370,170 @@ fn view_data_enum_match_binding() {
     let result = run("enum Shape { Circle(i32), Rect(i32, i32), Point } fn main() { let backing: [u8] = [0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]; let v: View<Shape> = View::wrap(backing); let r0 = match v[0] { Shape::Circle(r) => r * 2, Shape::Rect(_, _) => -1, Shape::Point => -2 }; let r1 = match v[1] { Shape::Circle(_) => -1, Shape::Rect(w, h) => w + h, Shape::Point => -2 }; ret_i32(r0); ret_i32(r1); }");
     assert_all!(&result, [14i32, 7i32]);
 }
+
+#[test]
+fn view_data_enum_store() {
+    // Assign a data enum value to a view slot, then read it back via match
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Rect(i32, i32),
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(3);
+            v[0] = Shape::Circle(42);
+            v[1] = Shape::Rect(10, 20);
+            v[2] = Shape::Point;
+
+            let r0 = match v[0] {
+                Shape::Circle(r) => r,
+                Shape::Rect(_, _) => -1,
+                Shape::Point => -2,
+            };
+            let r1 = match v[1] {
+                Shape::Circle(_) => -1,
+                Shape::Rect(w, h) => w + h,
+                Shape::Point => -2,
+            };
+            let r2 = match v[2] {
+                Shape::Circle(_) => -1,
+                Shape::Rect(_, _) => -2,
+                Shape::Point => 99,
+            };
+            ret_i32(r0);
+            ret_i32(r1);
+            ret_i32(r2);
+        }
+    ));
+    assert_all!(&result, [42i32, 30i32, 99i32]);
+}
+
+#[test]
+fn view_data_enum_store_unit_variant() {
+    // Assign a unit variant to a view slot
+    let result = run(stringify!(
+        enum Status {
+            Active(i32),
+            Idle,
+        }
+
+        fn main() {
+            let v: View<Status> = View::new(2);
+            v[0] = Status::Idle;
+            v[1] = Status::Active(7);
+
+            let r0 = match v[0] {
+                Status::Active(_) => 1i32,
+                Status::Idle => 0i32,
+            };
+            let r1 = match v[1] {
+                Status::Active(n) => n,
+                Status::Idle => -1i32,
+            };
+            ret_i32(r0);
+            ret_i32(r1);
+        }
+    ));
+    assert_all!(&result, [0i32, 7i32]);
+}
+
+#[test]
+fn view_data_enum_store_overwrite() {
+    // Overwrite a view slot with a different variant
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            v[0] = Shape::Circle(42);
+            // Overwrite with unit variant
+            v[0] = Shape::Point;
+
+            let r = match v[0] {
+                Shape::Circle(_) => 1i32,
+                Shape::Point => 0i32,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all!(&result, [0i32]);
+}
+
+#[test]
+fn view_data_enum_store_from_binding() {
+    // Store a data enum value from a binding (not a literal)
+    let result = run(stringify!(
+        enum Shape {
+            Circle(i32),
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(2);
+            let s: Shape = Shape::Circle(99);
+            v[0] = s;
+            v[1] = Shape::Point;
+
+            let r = match v[0] {
+                Shape::Circle(r) => r,
+                Shape::Point => -1,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all!(&result, [99i32]);
+}
+
+#[test]
+fn view_data_enum_store_struct_field() {
+    // Store a data enum with struct fields to a view
+    // (reading back struct fields from view match is a separate path)
+    let result = run(stringify!(
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        enum Shape {
+            Circle(Point, i32),
+            None,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            v[0] = Shape::Circle(Point { x: 10, y: 20 }, 5);
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [1u64]);
+}
+
+#[test]
+fn view_data_enum_store_nested_data_enum() {
+    // Store a data enum containing another data enum to a view
+    // (reading back nested enums from view match is a separate path)
+    let result = run(stringify!(
+        enum Status {
+            Active(i32),
+            Idle,
+        }
+
+        enum Entry {
+            Item(Status, i32),
+            Empty,
+        }
+
+        fn main() {
+            let v: View<Entry> = View::new(2);
+            v[0] = Entry::Item(Status::Active(42), 7);
+            v[1] = Entry::Empty;
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [2u64]);
+}

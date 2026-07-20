@@ -1884,6 +1884,25 @@ impl_opcodes!{
         heap_item.store(byte_offset, value);
     }
 
+    /// Flatten a heap object (and any nested structs/enums) into a view slot using the type's
+    /// serialized constructor. Pops view_ref and heap_ref; writes flattened data starting at
+    /// `view_ref + index * stride + offset`.
+    fn heap_to_view(&mut self, stride: FrameAddress, offset: FrameAddress, constructor: StackAddress) {
+        let index: StackAddress = self.stack.pop();
+        let view_ref: HeapRef = self.stack.pop();
+        let heap_ref: HeapRef = self.stack.pop();
+
+        let view_index = view_ref.index();
+        let view_byte_base = (index as usize * stride as usize + offset as usize) as StackAddress;
+
+        self.heap_to_view_recurse(
+            constructor,
+            HeapRef::new(heap_ref.index(), 0),
+            view_index,
+            view_byte_base,
+        );
+    }
+
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
     /// run() again. Unlike `exit`, no stack/heap teardown is performed.
     fn suspend(&mut self) [ return ] {
