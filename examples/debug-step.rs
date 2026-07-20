@@ -7,7 +7,8 @@ use std::env;
  * Runs an .itsy source file one instruction at a time and stops after a
  * configurable number of steps or when a runtime error is encountered.
  * After stopping it prints the last N instructions, the total step count,
- * and optionally dumps the stack and/or selected heap items.
+ * the active heap reference indices and reference count and optionally dumps
+ * the stack and/or selected heap items.
  *
  * Usage:
  *   cargo run --example debug-step --features="compiler,runtime,debugging,symbols" -- itsy/examples/helloworld.itsy
@@ -224,12 +225,12 @@ fn main() {
     let active: Vec<String> = vm.heap.data()
         .iter()
         .filter(|&(_, (refs, _))| *refs >= 1)
-        .map(|(idx, _)| idx.to_string())
+        .map(|(idx, (refs, _))| format!("{idx}({refs})"))
         .collect();
     if active.is_empty() {
         println!("Active heap objects: (none)");
     } else {
-        println!("Active heap objects: {}", active.join(" "));
+        println!("Active heap objects: {}", active.join(", "));
     }
     println!();
 
