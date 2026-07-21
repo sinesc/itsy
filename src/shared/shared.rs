@@ -274,6 +274,34 @@ pub trait MetaContainer {
     fn function_by_id(self: &Self, function_id: FunctionId) -> &Function;
     /// Returns a mutable reference to the Function.
     fn function_by_id_mut(self: &mut Self, function_id: FunctionId) -> &mut Function;
+
+    /// Recursively computes the tightly-packed size of a type in bytes.
+    /// For structs: sum of field packed sizes. For data enums: discriminant (2) + max variant payload.
+    /// For primitives: primitive size. Returns 0 for arrays, maps, strings, etc.
+    fn compute_packed_size(self: &Self, type_id: TypeId) -> u8 {
+        use crate::shared::meta::EnumVariant;
+        match self.type_by_id(type_id) {
+            ty if ty.is_primitive() => ty.primitive_size(),
+            Type::Struct(s) => {
+                s.fields.values().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum()
+            },
+            Type::Enum(e) => {
+                if let Some((disc_type_id, _)) = e.primitive {
+                    self.type_by_id(disc_type_id).primitive_size()
+                } else {
+                    2 + e.variants.iter().map(|(_, v)| {
+                        match v {
+                            EnumVariant::Data(fields) => {
+                                fields.iter().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum::<u8>()
+                            },
+                            EnumVariant::Simple(_) => 0u8,
+                        }
+                    }).max().unwrap_or(0)
+                }
+            },
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]

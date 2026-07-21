@@ -979,7 +979,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 let field_type_ids = self.variant_data_fields(value_type_id, &variant_name)?;
                 for (index, element) in variant.elements.iter().enumerate() {
-                    let offset = self.variant_field_offset(&field_type_ids, index)?;
+                    let rel_offset = self.variant_field_offset(&field_type_ids, index, view_stride.is_some())?;
+                    let offset = if view_stride.is_some() {
+                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                    } else {
+                        rel_offset
+                    };
                     let field_type_id = field_type_ids[index].ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
@@ -991,7 +996,16 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
                 for (field_name, field_pattern) in structure.fields.iter() {
-                    let offset = self.compute_member_offset(&struct_, &field_name.name);
+                    let rel_offset = if view_stride.is_some() {
+                        self.compute_struct_member_offset_packed(&struct_, &field_name.name)
+                    } else {
+                        self.compute_member_offset(&struct_, &field_name.name)
+                    };
+                    let offset = if view_stride.is_some() {
+                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                    } else {
+                        rel_offset
+                    };
                     let field_type_id = struct_.type_id(&field_name.name).ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
@@ -1039,17 +1053,29 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             // bind the selected value
             ast::Pattern::Binding(binding) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
+                let value_type = self.ty(&value_type_id);
+                let is_ref_type_with_inlined_view_data = value_type.as_struct().is_some()
+                    || value_type.as_enum().is_some_and(|e| e.primitive.is_none());
+                let primitive_size = value_type.primitive_size();
+                // value_type borrow released at end of scope
                 self.init_state.declare(binding.binding_id);
                 let slot = self.locals.lookup(binding.binding_id);
                 if let Some(stride) = view_stride {
                     // view path: clone view_ref+index so they survive the load, then read from buffer
                     self.writer.clone(16);
                     let offset = access.last().map(|&(off, _)| off as u16).unwrap_or(0);
-                    self.compile_view_load_size(self.ty(&value_type_id).primitive_size(), stride, offset)?;
+                    // For struct/data enum types, materialize inlined view data into heap objects
+                    if is_ref_type_with_inlined_view_data {
+                        let constructor = self.constructor_by_id(value_type_id)?;
+                        self.writer.view_to_heap(stride, offset, constructor);
+                    } else {
+                        self.compile_view_load_size(primitive_size, stride, offset)?;
+                    }
                 } else {
                     self.write_pattern_value_load(subject_type_id, access)?;
                 }
-                self.write_store(self.ty(&value_type_id), slot, Some(binding.binding_id))?;
+                let value_type = self.ty(&value_type_id);
+                self.write_store(value_type, slot, Some(binding.binding_id))?;
                 self.init_state.initialize(binding.binding_id);
             },
             // descend into each field sub-pattern, binding whatever variables it introduces
@@ -1058,7 +1084,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 let field_type_ids = self.variant_data_fields(value_type_id, &variant_name)?;
                 for (index, element) in variant.elements.iter().enumerate() {
-                    let offset = self.variant_field_offset(&field_type_ids, index)?;
+                    let rel_offset = self.variant_field_offset(&field_type_ids, index, view_stride.is_some())?;
+                    let offset = if view_stride.is_some() {
+                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                    } else {
+                        rel_offset
+                    };
                     let field_type_id = field_type_ids[index].ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
@@ -1070,7 +1101,16 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
                 for (field_name, field_pattern) in structure.fields.iter() {
-                    let offset = self.compute_member_offset(&struct_, &field_name.name);
+                    let rel_offset = if view_stride.is_some() {
+                        self.compute_struct_member_offset_packed(&struct_, &field_name.name)
+                    } else {
+                        self.compute_member_offset(&struct_, &field_name.name)
+                    };
+                    let offset = if view_stride.is_some() {
+                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                    } else {
+                        rel_offset
+                    };
                     let field_type_id = struct_.type_id(&field_name.name).ice()?;
                     let mut element_access = access.to_vec();
                     element_access.push((offset, field_type_id));
@@ -1952,6 +1992,11 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         }
     }
 
+    /// Returns the constructor offset for a type by its TypeId.
+    pub(super) fn constructor_by_id(self: &Self, type_id: TypeId) -> CompileResult<StackAddress> {
+        Ok(*self.constructors.get(&type_id).unwrap_or(&0))
+    }
+
     /// Generates an internal compiler error at the given item. Message should not end in a ".".
     fn ice_at<R>(item: &dyn Positioned, message: &str) -> CompileResult<R> {
         #[cfg(feature="ice_panics")]
@@ -1999,6 +2044,19 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             let field_type = self.ty(field_type_id);
             // use reference size for references, otherwise shallow type size
             offset += field_type.primitive_size() as StackAddress;
+        }
+        offset
+    }
+
+    /// Computes struct member offset using packed (inlined) sizes. Used for view contexts
+    /// where structs are stored as flat byte sequences rather than heap references.
+    fn compute_struct_member_offset_packed(self: &Self, struct_: &Struct, member_name: &str) -> StackAddress {
+        let mut offset = 0;
+        for (field_name, field_type_id) in struct_.fields.iter() {
+            if field_name == member_name {
+                break;
+            }
+            offset += self.compute_packed_size(field_type_id.unwrap()) as StackAddress;
         }
         offset
     }
@@ -2376,10 +2434,15 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
     }
 
     /// Computes the byte offset of a data-variant field within its heap object (past the leading variant index).
-    fn variant_field_offset(self: &Self, field_type_ids: &[Option<TypeId>], index: usize) -> CompileResult<StackAddress> {
-        let mut offset = size_of::<VariantIndex>() as StackAddress;
+        fn variant_field_offset(self: &Self, field_type_ids: &[Option<TypeId>], index: usize, in_view: bool) -> CompileResult<StackAddress> {
+        let mut offset = size_of::<VariantIndex>() as StackAddress; // discriminant
         for field_type_id in &field_type_ids[..index] {
-            offset += self.ty(&field_type_id.ice()?).primitive_size() as StackAddress;
+            let fid = field_type_id.ice()?;
+            offset += if in_view {
+                self.compute_packed_size(fid) as StackAddress
+            } else {
+                self.ty(&fid).primitive_size() as StackAddress
+            };
         }
         Ok(offset)
     }

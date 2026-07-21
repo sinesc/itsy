@@ -537,3 +537,102 @@ fn view_data_enum_store_nested_data_enum() {
     ));
     assert_all!(&result, [2u64]);
 }
+
+#[test]
+fn view_data_enum_match_struct_field() {
+    // Match a data enum with struct fields, bind the struct, access its fields
+    let result = run(stringify!(
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        enum Shape {
+            Circle(Point, i32),
+            None,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            v[0] = Shape::Circle(Point { x: 10, y: 20 }, 5);
+
+            let r = match v[0] {
+                Shape::Circle(p, radius) => {
+                    let px = p.x;
+                    let py = p.y;
+                    px + py + radius
+                },
+                Shape::None => -1,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all!(&result, [35i32]);
+}
+
+#[test]
+fn view_data_enum_match_nested_data_enum() {
+    // Match a data enum containing another data enum, bind and match inner enum
+    let result = run(stringify!(
+        enum Status {
+            Active(i32),
+            Idle,
+        }
+
+        enum Entry {
+            Item(Status, i32),
+            Empty,
+        }
+
+        fn main() {
+            let v: View<Entry> = View::new(2);
+            v[0] = Entry::Item(Status::Active(42), 7);
+            v[1] = Entry::Empty;
+
+            let r0 = match v[0] {
+                Entry::Item(s, id) => match s {
+                    Status::Active(val) => val + id,
+                    Status::Idle => -1,
+                },
+                Entry::Empty => -2,
+            };
+
+            let r1 = match v[1] {
+                Entry::Item(_, _) => -1,
+                Entry::Empty => 99,
+            };
+
+            ret_i32(r0);
+            ret_i32(r1);
+        }
+    ));
+    assert_all!(&result, [49i32, 99i32]);
+}
+
+#[test]
+fn view_data_enum_match_struct_destructure() {
+    // Destructure struct directly in match pattern (no materialization needed)
+    let result = run(stringify!(
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        enum Shape {
+            Circle(Point, i32),
+            None,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            v[0] = Shape::Circle(Point { x: 10, y: 20 }, 5);
+
+            let r = match v[0] {
+                Shape::Circle(Point { x, y }, radius) => x + y + radius,
+                Shape::None => -1,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all!(&result, [35i32]);
+}

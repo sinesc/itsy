@@ -181,42 +181,6 @@ impl<T, U> VM<T, U> {
         self.state = VMState::Ready;
         self.gen_control.clear();
     }
-
-    // ---- Option<T> construction helpers ----
-    // These build `Some(T)` / `None` heap objects for use by array/map builtins.
-    // Option<T> is a synthesized mixed enum: variant 0 = Some(T), variant 1 = None.
-    // implementor_index = 0 (Option<T> does not implement any traits).
-
-    /// Builds a `Some(primitive)` heap object: `[variant_tag: u16][payload_bytes]`.
-    /// `payload_bytes` are the raw bytes of the primitive value.
-    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
-    pub(crate) fn option_some_bytes(self: &mut Self, payload_bytes: &[u8]) -> HeapRef {
-        let mut bytes = Vec::with_capacity(2 + payload_bytes.len());
-        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
-        bytes.extend_from_slice(payload_bytes);
-        let index = self.heap.alloc_copy(&bytes, 0);
-        HeapRef::new(index, 0)
-    }
-
-    /// Builds a `Some(ref)` heap object: `[variant_tag: u16][HeapRef_bytes]`.
-    /// The payload `HeapRef` is embedded into the object; its refcount is 0
-    /// (DecNoFree was already called by the caller before embedding).
-    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
-    pub(crate) fn option_some_ref(self: &mut Self, payload: HeapRef) -> HeapRef {
-        let mut bytes = Vec::with_capacity(2 + size_of::<HeapRef>());
-        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
-        bytes.extend_from_slice(&payload.to_ne_bytes());
-        let index = self.heap.alloc_copy(&bytes, 0);
-        HeapRef::new(index, 0)
-    }
-
-    /// Builds a `None` heap object: `[variant_tag: u16]` (variant 1 = None).
-    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
-    pub(crate) fn option_none(self: &mut Self) -> HeapRef {
-        let bytes = (1u16).to_ne_bytes(); // variant 1 = None
-        let index = self.heap.alloc_copy(&bytes, 0);
-        HeapRef::new(index, 0)
-    }
 }
 
 /// Internal VM methods.
@@ -262,6 +226,103 @@ impl<T, U> VM<T, U> {
         Some(constructor_offset)
     }
 
+    /// Compute the inlined data size (view packed size) for a constructor at the given offset.
+    /// Mirrors the compile-time `compute_packed_size` logic.
+    fn constructor_data_size(self: &Self, mut offset: StackAddress) -> usize {
+        let constructor = Constructor::read_op(&self.stack, &mut offset);
+        let parsed = Constructor::parse_with(&self.stack, offset, constructor);
+        offset = parsed.offset;
+
+        match constructor {
+            Constructor::Primitive => {
+                Constructor::read_index(&self.stack, &mut offset) as usize
+            }
+            Constructor::Struct => {
+                let (_implementor_index, num_fields, field_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                let mut total = 0;
+                let mut foff = field_offset;
+                for _ in 0..num_fields {
+                    let field_size = self.constructor_data_size(foff);
+                    foff = Constructor::skip(&self.stack, foff);
+                    total += field_size;
+                }
+                total
+            }
+            Constructor::Enum => {
+                // Data size = discriminant (2) + max variant payload size
+                let (_implementor_index, num_variants, variant_table_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                let mut max_payload = 0usize;
+                for vi in 0..num_variants {
+                    let (num_fields, field_offset) =
+                        Constructor::parse_variant_table(&self.stack, variant_table_offset, vi as ItemIndex);
+                    let mut variant_size = 0usize;
+                    let mut foff = field_offset;
+                    for _ in 0..num_fields {
+                        variant_size += self.constructor_data_size(foff);
+                        foff = Constructor::skip(&self.stack, foff);
+                    }
+                    if variant_size > max_payload {
+                        max_payload = variant_size;
+                    }
+                }
+                2 + max_payload
+            }
+            _ => 0,
+        }
+    }
+
+    /// Compute the total heap data size for a sequence of fields described by constructors starting at field_offset.
+    /// For primitives: sum of byte sizes. For reference types: 8 bytes per field (HeapRef size).
+    fn constructor_fields_data_size(self: &Self, num_fields: ItemIndex, field_offset: StackAddress) -> usize {
+        let mut total = 0usize;
+        let mut foff = field_offset;
+        for _ in 0..num_fields {
+            let field_start = foff;
+            let field_constructor = Constructor::read_op(&self.stack, &mut foff);
+            if field_constructor != Constructor::Primitive {
+                total += 8; // HeapRef
+                foff = Constructor::skip(&self.stack, field_start);
+            } else {
+                total += Constructor::read_index(&self.stack, &mut foff) as usize;
+            }
+        }
+        total
+    }
+
+    /// Compute the heap data size for a constructor (heap layout, not view-packed layout).
+    /// For primitives: byte size. For structs: sum of field heap sizes. For enums: disc (2) + max variant.
+    fn constructor_heap_size(self: &Self, mut offset: StackAddress) -> usize {
+        let constructor = Constructor::read_op(&self.stack, &mut offset);
+        let parsed = Constructor::parse_with(&self.stack, offset, constructor);
+        offset = parsed.offset;
+
+        match constructor {
+            Constructor::Primitive => {
+                Constructor::read_index(&self.stack, &mut offset) as usize
+            }
+            Constructor::Struct => {
+                let (_implementor_index, num_fields, field_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                self.constructor_fields_data_size(num_fields, field_offset)
+            }
+            Constructor::Enum => {
+                let (_implementor_index, num_variants, variant_table_offset) =
+                    Constructor::parse_struct(&self.stack, offset);
+                let mut max_payload = 0usize;
+                for vi in 0..num_variants {
+                    let (num_fields, field_offset) =
+                        Constructor::parse_variant_table(&self.stack, variant_table_offset, vi as ItemIndex);
+                    let size = self.constructor_fields_data_size(num_fields, field_offset);
+                    if size > max_payload { max_payload = size; }
+                }
+                2 + max_payload
+            }
+            _ => 0,
+        }
+    }
+
     /// Bounds-checks an array element access: returns `true` if reading or writing `element_size`
     /// bytes at `element_index` stays within the heap object referenced by `item`. Otherwise sets the
     /// VM into an `IndexOutOfBounds` error state and returns `false`. Callers must honor the result;
@@ -273,6 +334,36 @@ impl<T, U> VM<T, U> {
             .saturating_add(element_index.saturating_mul(element_size))
             .saturating_add(element_size);
         end <= len
+    }
+
+    /// Builds a `Some(primitive)` heap object: `[variant_tag: u16][payload_bytes]`.
+    /// `payload_bytes` are the raw bytes of the primitive value.
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_some_bytes(self: &mut Self, payload_bytes: &[u8]) -> HeapRef {
+        let mut bytes = Vec::with_capacity(2 + payload_bytes.len());
+        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
+        bytes.extend_from_slice(payload_bytes);
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
+    }
+
+    /// Builds a `Some(ref)` heap object: `[variant_tag: u16][HeapRef_bytes]`.
+    /// The payload `HeapRef` is embedded into the object.
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_some_ref(self: &mut Self, payload: HeapRef) -> HeapRef {
+        let mut bytes = Vec::with_capacity(2 + size_of::<HeapRef>());
+        bytes.extend_from_slice(&(0u16).to_ne_bytes()); // variant 0 = Some
+        bytes.extend_from_slice(&payload.to_ne_bytes());
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
+    }
+
+    /// Builds a `None` heap object: `[variant_tag: u16]` (variant 1 = None).
+    /// Returns the `HeapRef` pointing to the new heap object (refcount 0).
+    pub(crate) fn option_none(self: &mut Self) -> HeapRef {
+        let bytes = (1u16).to_ne_bytes(); // variant 1 = None
+        let index = self.heap.alloc_copy(&bytes, 0);
+        HeapRef::new(index, 0)
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
@@ -396,14 +487,7 @@ impl<T, U> VM<T, U> {
 
     /// Recursively flatten a heap object into a view's backing array using the type's serialized
     /// constructor. Reads data from the heap and writes it to the view at `view_base_offset`.
-    /// Uses a work stack to avoid Rust recursion.
-    pub(crate) fn heap_to_view_recurse(
-        self: &mut Self,
-        mut constructor_offset: StackAddress,
-        heap_ref: HeapRef,
-        view_index: StackAddress,
-        view_base_offset: StackAddress,
-    ) {
+    pub(crate) fn heap_to_view_recurse(self: &mut Self, mut constructor_offset: StackAddress, heap_ref: HeapRef, view_index: StackAddress, view_base_offset: StackAddress) {
         // Work item: (constructor_offset, heap_item_index, view_byte_offset)
         let mut work: Vec<(StackAddress, StackAddress, StackAddress)> = Vec::with_capacity(8);
         work.push((constructor_offset, heap_ref.index(), view_base_offset));
@@ -498,50 +582,144 @@ impl<T, U> VM<T, U> {
         }
     }
 
-    /// Compute the inlined data size (view packed size) for a constructor at the given offset.
-    /// Mirrors the compile-time `compute_packed_size` logic.
-    fn constructor_data_size(self: &Self, mut offset: StackAddress) -> usize {
-        let constructor = Constructor::read_op(&self.stack, &mut offset);
-        let parsed = Constructor::parse_with(&self.stack, offset, constructor);
-        offset = parsed.offset;
+    /// Materialize inlined view data into heap objects using the type's serialized constructor.
+    /// Returns the heap_ref of the top-level heap object. Uses a work stack to avoid Rust recursion.
+    pub(crate) fn view_to_heap_recurse(
+        self: &mut Self,
+        mut constructor_offset: StackAddress,
+        view_index: StackAddress,
+        view_base_offset: StackAddress,
+    ) -> HeapRef {
+        // Work item: (constructor_offset, view_byte_offset, parent_heap_item_index, parent_heap_offset)
+        // parent fields are None for the root call.
+        type WorkItem = (StackAddress, StackAddress, Option<(StackAddress, usize)>);
+        let mut work: Vec<WorkItem> = Vec::with_capacity(8);
 
-        match constructor {
-            Constructor::Primitive => {
-                Constructor::read_index(&self.stack, &mut offset) as usize
-            }
-            Constructor::Struct => {
-                let (_implementor_index, num_fields, field_offset) =
-                    Constructor::parse_struct(&self.stack, offset);
-                let mut total = 0;
-                let mut foff = field_offset;
-                for _ in 0..num_fields {
-                    let field_size = self.constructor_data_size(foff);
-                    foff = Constructor::skip(&self.stack, foff);
-                    total += field_size;
+        // Allocate the root heap object (heap layout size, not view-packed size)
+        let root_size = self.constructor_heap_size(constructor_offset);
+        let root_index = self.heap.alloc_place(vec![0u8; root_size], 0);
+
+        work.push((constructor_offset, view_base_offset, None));
+
+        while let Some((ctor_offset, view_offset, parent)) = work.pop() {
+            constructor_offset = ctor_offset;
+            let constructor = Constructor::read_op(&self.stack, &mut constructor_offset);
+            let parsed = Constructor::parse_with(&self.stack, constructor_offset, constructor);
+            constructor_offset = parsed.offset;
+
+            match constructor {
+                Constructor::Primitive => {
+                    let num_bytes = Constructor::read_index(&self.stack, &mut constructor_offset) as usize;
+                    let (parent_index, parent_offset) = parent.unwrap();
+                    let src = self.heap.item(view_index).data[view_offset as usize..view_offset as usize + num_bytes].to_vec();
+                    let dst_data = &mut self.heap.item_mut(parent_index).data;
+                    dst_data[parent_offset..parent_offset + num_bytes].copy_from_slice(&src);
                 }
-                total
-            }
-            Constructor::Enum => {
-                // Data size = discriminant (2) + max variant payload size
-                let (_implementor_index, num_variants, variant_table_offset) =
-                    Constructor::parse_struct(&self.stack, offset);
-                let mut max_payload = 0usize;
-                for vi in 0..num_variants {
+                Constructor::Struct => {
+                    let (_implementor_index, num_fields, field_offset) =
+                        Constructor::parse_struct(&self.stack, constructor_offset);
+                    let struct_size = self.constructor_fields_data_size(num_fields, field_offset);
+                    // For root: use the pre-allocated root object. For nested: allocate new.
+                    let struct_index = if parent.is_none() {
+                        root_index
+                    } else {
+                        self.heap.alloc_place(vec![0u8; struct_size], 0)
+                    };
+                    // Store HeapRef in parent
+                    if let Some((parent_index, parent_offset)) = parent {
+                        let ref_bytes = HeapRef::new(struct_index, 0).to_ne_bytes();
+                        let dst_data = &mut self.heap.item_mut(parent_index).data;
+                        dst_data[parent_offset..parent_offset + 8].copy_from_slice(&ref_bytes);
+                    }
+                    // Schedule field materialization
+                    self.view_to_heap_fields(
+                        num_fields, field_offset, view_index, view_offset,
+                        struct_index, 0, &mut work,
+                    );
+                }
+                Constructor::Enum => {
+                    // Read discriminant from view
+                    let disc_bytes = self.heap.item(view_index).data[view_offset as usize..view_offset as usize + 2].to_vec();
+                    let variant_index: VariantIndex = u16::from_le_bytes(
+                        disc_bytes.clone().try_into().unwrap()
+                    ) as VariantIndex;
+
+                    let (_implementor_index, _num_variants, variant_table_offset) =
+                        Constructor::parse_struct(&self.stack, constructor_offset);
                     let (num_fields, field_offset) =
-                        Constructor::parse_variant_table(&self.stack, variant_table_offset, vi as ItemIndex);
-                    let mut variant_size = 0usize;
-                    let mut foff = field_offset;
-                    for _ in 0..num_fields {
-                        variant_size += self.constructor_data_size(foff);
-                        foff = Constructor::skip(&self.stack, foff);
+                        Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index as ItemIndex);
+
+                    // Allocate enum heap object: discriminant (2) + variant payload
+                    let payload_size = if num_fields > 0 {
+                        self.constructor_fields_data_size(num_fields, field_offset)
+                    } else {
+                        0
+                    };
+                    // For root: use the pre-allocated root object. For nested: allocate new.
+                    let enum_index = if parent.is_none() {
+                        root_index
+                    } else {
+                        self.heap.alloc_place(vec![0u8; 2 + payload_size], 0)
+                    };
+
+                    // Write discriminant
+                    let dst_data = &mut self.heap.item_mut(enum_index).data;
+                    dst_data[0..2].copy_from_slice(&disc_bytes);
+
+                    // Store HeapRef in parent
+                    if let Some((parent_index, parent_offset)) = parent {
+                        let ref_bytes = HeapRef::new(enum_index, 0).to_ne_bytes();
+                        let dst_data = &mut self.heap.item_mut(parent_index).data;
+                        dst_data[parent_offset..parent_offset + 8].copy_from_slice(&ref_bytes);
                     }
-                    if variant_size > max_payload {
-                        max_payload = variant_size;
-                    }
+
+                    // Schedule field materialization (fields start at heap offset 2)
+                    self.view_to_heap_fields(
+                        num_fields, field_offset, view_index, view_offset + 2,
+                        enum_index, 2, &mut work,
+                    );
                 }
-                2 + max_payload
+                _ => {
+                    panic!("unexpected constructor {:?} in view_to_heap", constructor);
+                }
             }
-            _ => 0,
+        }
+
+        HeapRef::new(root_index, 0)
+    }
+
+    /// Materialize enum-variant or struct fields from a view slot into a heap object.
+    fn view_to_heap_fields(
+        self: &mut Self,
+        num_fields: ItemIndex,
+        mut field_offset: StackAddress,
+        view_index: StackAddress,
+        mut view_byte_offset: StackAddress,
+        heap_item_index: StackAddress,
+        initial_heap_offset: usize,
+        work: &mut Vec<(StackAddress, StackAddress, Option<(StackAddress, usize)>)>,
+    ) {
+        let mut heap_write_offset: usize = initial_heap_offset;
+
+        for _ in 0..num_fields {
+            let field_ctor_offset = field_offset;
+            let field_constructor = Constructor::read_op(&self.stack, &mut field_offset);
+            if field_constructor != Constructor::Primitive {
+                // Reference type: schedule recursive materialization
+                work.push((field_ctor_offset, view_byte_offset, Some((heap_item_index, heap_write_offset))));
+                let field_data_size = self.constructor_data_size(field_ctor_offset);
+                view_byte_offset += field_data_size as StackAddress;
+                heap_write_offset += 8; // HeapRef size
+                field_offset = Constructor::skip(&self.stack, field_ctor_offset);
+            } else {
+                // Primitive: copy bytes directly
+                let num_bytes = Constructor::read_index(&self.stack, &mut field_offset) as usize;
+                let src = self.heap.item(view_index).data[view_byte_offset as usize..view_byte_offset as usize + num_bytes].to_vec();
+                let dst_data = &mut self.heap.item_mut(heap_item_index).data;
+                dst_data[heap_write_offset..heap_write_offset + num_bytes].copy_from_slice(&src);
+                view_byte_offset += num_bytes as StackAddress;
+                heap_write_offset += num_bytes;
+            }
         }
     }
 

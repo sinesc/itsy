@@ -1903,6 +1903,19 @@ impl_opcodes!{
         );
     }
 
+    /// Materialize inlined view data into heap objects using the type's serialized constructor.
+    /// Pops view_ref and index; pushes the resulting heap_ref. Refcount starts at 0.
+    fn view_to_heap(&mut self, stride: FrameAddress, offset: FrameAddress, constructor: StackAddress) {
+        let index: StackAddress = self.stack.pop();
+        let view_ref: HeapRef = self.stack.pop();
+
+        let view_index = view_ref.index();
+        let view_byte_base = (index as usize * stride as usize + offset as usize) as StackAddress;
+
+        let heap_ref = self.view_to_heap_recurse(constructor, view_index, view_byte_base);
+        self.stack.push(heap_ref);
+    }
+
     /// Suspend program execution, retaining the stack and heap so the VM can be resumed by calling
     /// run() again. Unlike `exit`, no stack/heap teardown is performed.
     fn suspend(&mut self) [ return ] {

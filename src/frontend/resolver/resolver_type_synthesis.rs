@@ -317,35 +317,6 @@ impl<'ctx> Resolver<'ctx> {
         Ok(())
     }
 
-    /// Recursively computes the tightly-packed size of a type in bytes (sum of field sizes for structs,
-    /// primitive size for primitives/enums, discriminant + max variant payload for data enums).
-    /// Used for view stride calculations.
-    fn compute_packed_size(self: &Self, type_id: TypeId) -> u8 {
-        match self.type_by_id(type_id) {
-            ty if ty.is_primitive() => ty.primitive_size(),
-            Type::Struct(s) => {
-                s.fields.values().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum()
-            },
-            Type::Enum(e) => {
-                // Primitive enums use their discriminant size
-                if let Some((disc_type_id, _)) = e.primitive {
-                    self.type_by_id(disc_type_id).primitive_size()
-                } else {
-                    // Data enums: discriminant (2 bytes) + max variant payload size
-                    2 + e.variants.iter().map(|(_, v)| {
-                        match v {
-                            EnumVariant::Data(fields) => {
-                                fields.iter().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum::<u8>()
-                            },
-                            EnumVariant::Simple(_) => 0u8,
-                        }
-                    }).max().unwrap_or(0)
-                }
-            },
-            _ => 0, // Arrays, maps, strings, etc. are not valid for views
-        }
-    }
-
     /// Checks whether a type's transitive leaf fields are all primitive.
     /// Data enums are allowed (their variant fields are recursed into);
     /// Strings and other reference types are not.
