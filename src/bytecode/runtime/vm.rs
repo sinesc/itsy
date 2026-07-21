@@ -367,6 +367,7 @@ impl<T, U> VM<T, U> {
     }
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
+    #[inline(never)]
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp) {
         match self.resolve_constructor_offset(item, constructor_offset) {
             None => self.heap.ref_item(item.index(), op),
@@ -487,6 +488,7 @@ impl<T, U> VM<T, U> {
 
     /// Recursively flatten a heap object into a view's backing array using the type's serialized
     /// constructor. Reads data from the heap and writes it to the view at `view_base_offset`.
+    #[inline(never)]
     pub(crate) fn heap_to_view_recurse(self: &mut Self, mut constructor_offset: StackAddress, heap_ref: HeapRef, view_index: StackAddress, view_base_offset: StackAddress) {
         // Work item: (constructor_offset, heap_item_index, view_byte_offset)
         let mut work: Vec<(StackAddress, StackAddress, StackAddress)> = Vec::with_capacity(8);
@@ -584,6 +586,7 @@ impl<T, U> VM<T, U> {
 
     /// Materialize inlined view data into heap objects using the type's serialized constructor.
     /// Returns the heap_ref of the top-level heap object. Uses a work stack to avoid Rust recursion.
+    #[inline(never)]
     pub(crate) fn view_to_heap_recurse(
         self: &mut Self,
         mut constructor_offset: StackAddress,
@@ -725,6 +728,7 @@ impl<T, U> VM<T, U> {
 
     /// Compares the targets of two heap references of identical reference type for deep equality, guided by the
     /// type's serialized constructor. Used to implement equality for non-primitive enums.
+    #[inline(never)]
     pub(crate) fn compare_value(self: &Self, a: HeapRef, b: HeapRef, constructor_offset: StackAddress) -> bool {
         // both operands share the static type, so the constructor is resolved via a
         match self.resolve_constructor_offset(a, constructor_offset) {
