@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 #[cfg(feature="runtime")]
-use crate::{StackAddress, ItemIndex, bytecode::{HeapRef, HeapRefOp, Constructor, runtime::{vm::VMState, error::RuntimeErrorKind, heap::HeapOp, map::MAP_EMPTY}}};
+use crate::{StackAddress, ItemIndex, bytecode::{HeapRef, HeapRefOp, Constructor, runtime::{vm::VMState, error::RuntimeErrorKind, heap::HeapOp, vm_map::MAP_EMPTY}}};
 use crate::bytecode::macros::impl_builtins;
 #[cfg(feature="runtime")]
 use std::str::Chars;

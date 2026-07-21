@@ -3,6 +3,6 @@
 pub mod vm;
 pub mod stack;
 pub mod heap;
-pub mod map;
-pub mod generator;
+pub mod vm_map;
+pub mod vm_generator;
 pub mod error;

@@ -6,7 +6,7 @@ use crate::bytecode::{HeapRef, HeapRefOp, Constructor, Program, ConstDescriptor,
 use crate::bytecode::marshal::FunctionMeta;
 #[cfg(feature="debugging")]
 use crate::bytecode::opcodes::OpCode;
-use super::generator::GenControl;
+use super::vm_generator::GenControl;
 
 /// Current state of the vm, checked after each instruction.
 #[derive(Copy, Clone, Debug, PartialEq)]
