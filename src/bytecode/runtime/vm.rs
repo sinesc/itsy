@@ -499,7 +499,13 @@ impl<T, U> VM<T, U> {
             let constructor = Constructor::read_op(&self.stack, &mut constructor_offset);
             let parsed = Constructor::parse_with(&self.stack, constructor_offset, constructor);
             constructor_offset = parsed.offset;
-
+            // Bounds check: ensure the data we're about to write fits in the view's backing array
+            let data_size = self.constructor_data_size(ctor_offset);
+            let view_data_len = self.heap.item(view_index).data.len();
+            if view_offset as usize + data_size > view_data_len {
+                self.state = VMState::Error(RuntimeErrorKind::IndexOutOfBounds);
+                return;
+            }
             match constructor {
                 Constructor::Primitive => {
                     let num_bytes = Constructor::read_index(&self.stack, &mut constructor_offset) as usize;
