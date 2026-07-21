@@ -1983,7 +1983,7 @@ impl_builtins! {
                 let idx = this.index();
                 let hr = size_of::<HeapRef>() as StackAddress;
                 let found = vm.map_find(idx, key, key_ctor);
-                vm.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+                vm.refcount_box(key, key_ctor, HeapRefOp::Free);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
                 match found {
                     Some(e) => {
@@ -2008,7 +2008,7 @@ impl_builtins! {
             fn map_contains_key(&mut vm + constructor, this: Map, key: Key) -> bool {
                 let (key_ctor, _value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
                 let found = vm.map_find(this.index(), key, key_ctor).is_some();
-                vm.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+                vm.refcount_box(key, key_ctor, HeapRefOp::Free);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
                 found
             }
@@ -2024,8 +2024,8 @@ impl_builtins! {
                     let entry_off = vm.map_entries_offset(idx) + e * 2 * hr;
                     let stored_key: HeapRef = vm.heap.read(HeapRef::new(idx, entry_off));
                     let stored_value: HeapRef = vm.heap.read(HeapRef::new(idx, entry_off + hr));
-                    vm.refcount_box_top(stored_key, key_ctor, HeapRefOp::Dec);
-                    vm.refcount_box_top(stored_value, value_ctor, HeapRefOp::Dec);
+                    vm.refcount_box(stored_key, key_ctor, HeapRefOp::Dec);
+                    vm.refcount_box(stored_value, value_ctor, HeapRefOp::Dec);
                     vm.heap.write(HeapRef::new(idx, entry_off), HeapRef::new(MAP_EMPTY, 0));
                     let sa = size_of::<StackAddress>() as StackAddress;
                     let len: StackAddress = vm.heap.load(idx, 0);
@@ -2037,7 +2037,7 @@ impl_builtins! {
                     }
                     vm.map_refill_buckets(idx, key_ctor);
                 }
-                vm.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+                vm.refcount_box(key, key_ctor, HeapRefOp::Free);
                 vm.refcount_value(this, constructor, HeapRefOp::Free);
             }
         }
@@ -2048,8 +2048,8 @@ impl_builtins! {
                 let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&vm.stack, constructor);
                 let idx = this.index();
                 for (key, value) in vm.map_live_entries(idx) {
-                    vm.refcount_box_top(key, key_ctor, HeapRefOp::Dec);
-                    vm.refcount_box_top(value, value_ctor, HeapRefOp::Dec);
+                    vm.refcount_box(key, key_ctor, HeapRefOp::Dec);
+                    vm.refcount_box(value, value_ctor, HeapRefOp::Dec);
                 }
                 let sa = size_of::<StackAddress>() as StackAddress;
                 let entries_off = vm.map_entries_offset(idx);

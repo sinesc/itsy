@@ -37,17 +37,14 @@ pub struct HeapObject {
     implementor_index   : ItemIndex,
     /// Number of references to the heap object.
     refs                : StackAddress,
-    /// Reference epoch. Epochs are used to prevent refcount updates from getting stuck in reference cycles.
-    epoch               : usize,
 }
 
 impl HeapObject {
-    fn new(data: Vec<u8>, implementor_index: ItemIndex, epoch: usize) -> Self {
+    fn new(data: Vec<u8>, implementor_index: ItemIndex) -> Self {
         Self {
             data,
             implementor_index,
             refs: 0,
-            epoch
         }
     }
 }
@@ -59,7 +56,6 @@ pub struct Heap {
     free_small  : Vec<StackAddress>,
     free_medium : Vec<StackAddress>,
     free_large  : Vec<StackAddress>,
-    epoch       : usize,
 }
 
 impl Heap {
@@ -73,7 +69,6 @@ impl Heap {
             free_small  : Vec::with_capacity(256),
             free_medium : Vec::with_capacity(16),
             free_large  : Vec::with_capacity(4),
-            epoch       : 0,
         }
     }
     /// Deallocates freed chunks of memory.
@@ -119,11 +114,6 @@ impl Heap {
             .map(|(i, h)| (i as StackAddress, (h.refs, &h.data)))
             .collect()
     }
-    /// Starts a new reference counting epoch. Epochs are used to avoid revisiting already visited (circular) references.
-    pub fn new_epoch(self: &mut Self) -> usize {
-        self.epoch = self.epoch.wrapping_add(1);
-        self.epoch
-    }
     /// Allocate a heap object with a reference count of 0 and return its index.
     pub fn alloc(self: &mut Self, size_hint: StackAddress, implementor_index: ItemIndex) -> StackAddress {
         if let Some(index) = self.find_empty(size_hint) {
@@ -132,11 +122,10 @@ impl Heap {
             object.data.shrink_to(size_hint as usize);
             object.implementor_index = implementor_index;
             object.refs = 0;
-            object.epoch = self.epoch;
             index
         } else {
             let index = self.objects.len();
-            self.objects.push(HeapObject::new(Vec::with_capacity(size_hint as usize), implementor_index, self.epoch));
+            self.objects.push(HeapObject::new(Vec::with_capacity(size_hint as usize), implementor_index));
             index as StackAddress
         }
     }
@@ -147,11 +136,10 @@ impl Heap {
             object.data = data;
             object.implementor_index = implementor_index;
             object.refs = 0;
-            object.epoch = self.epoch;
             index
         } else {
             let index = self.objects.len();
-            self.objects.push(HeapObject::new(data, implementor_index, self.epoch));
+            self.objects.push(HeapObject::new(data, implementor_index));
             index as StackAddress
         }
     }
@@ -164,18 +152,12 @@ impl Heap {
             object.data.extend_from_slice(data);
             object.implementor_index = implementor_index;
             object.refs = 0;
-            object.epoch = self.epoch;
             index
         } else {
             let index = self.objects.len();
-            self.objects.push(HeapObject::new(data.to_vec(), implementor_index, self.epoch));
+            self.objects.push(HeapObject::new(data.to_vec(), implementor_index));
             index as StackAddress
         }
-    }
-    /// Returns the epoch of the last reference counting operation on the item. Epochs are used to avoid revisiting already visited (circular) references.
-    pub fn item_epoch(self: &Self, index: StackAddress) -> usize {
-        debug_assert_index!(self, index);
-        self.objects[index as usize].epoch
     }
     /// Returns the number of references on the given item.
     pub fn item_refs(self: &Self, index: StackAddress) -> StackAddress {

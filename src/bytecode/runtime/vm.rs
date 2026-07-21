@@ -277,24 +277,17 @@ impl<T, U> VM<T, U> {
 
     /// Updates the refcounts for given heap reference and any nested heap references. Looks up virtual constructor if offset is 0.
     pub(crate) fn refcount_value(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp) {
-        let epoch = self.heap.new_epoch();
-        self.refcount_value_epoch(item, constructor_offset, op, epoch);
-    }
-
-    /// As [`refcount_value`], but reuses an existing refcounting epoch instead of starting a new one.
-    /// Used to descend into nested trait-object (virtual) references while traversing a containing value.
-    pub(crate) fn refcount_value_epoch(self: &mut Self, item: HeapRef, constructor_offset: StackAddress, op: HeapRefOp, epoch: usize) {
         match self.resolve_constructor_offset(item, constructor_offset) {
             None => self.heap.ref_item(item.index(), op),
             Some(mut constructor_offset) => {
                 let constructor = Constructor::read_op(&self.stack, &mut constructor_offset);
-                self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op, epoch);
+                self.refcount_recurse(constructor, HeapRef::new(item.index(), 0), &mut constructor_offset, op);
             }
         }
     }
 
-    /// Support method usd by refcount_value() to allow for reading the type before recursing into the type-constructor.
-    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, constructor_offset: &mut StackAddress, op: HeapRefOp, epoch: usize) {
+    /// Support method used by refcount_value() to allow for reading the type before recursing into the type-constructor.
+    fn refcount_recurse(self: &mut Self, constructor: Constructor, mut item: HeapRef, constructor_offset: &mut StackAddress, op: HeapRefOp) {
         let item_index = item.index();
         let refs = self.heap.item_refs(item_index);
         let recurse = (refs == 1 && (op == HeapRefOp::Dec || op == HeapRefOp::DecNoFree)) || (refs == 0 && (op == HeapRefOp::Inc || op == HeapRefOp::Free));
@@ -319,10 +312,7 @@ impl<T, U> VM<T, U> {
                             // reset offset each iteration to keep referencing the same type for each element but make sure we have advanced once at the end of the loop
                             *constructor_offset = original_constructor_offset;
                             let element: HeapRef = self.heap.read_seq(&mut item);
-                            let element_index = element.index();
-                            if epoch != self.heap.item_epoch(element_index) {
-                                self.refcount_recurse(element_constructor, element, constructor_offset, op, epoch);
-                            }
+                            self.refcount_recurse(element_constructor, element, constructor_offset, op);
                         }
                     } else {
                         // skip primitive num_bytes
@@ -332,7 +322,7 @@ impl<T, U> VM<T, U> {
                 },
                 Constructor::Struct => {
                     let (_implementor_index, num_fields, mut field_offset) = Constructor::parse_struct(&self.stack, parsed.offset);
-                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op, epoch);
+                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op);
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::Enum => {
@@ -341,7 +331,7 @@ impl<T, U> VM<T, U> {
                     assert!(variant_index < num_variants, "Enum object specifies invalid enum variant");
                     // seek to variant offset, read it from constructor and seek to the offset
                     let (num_fields, mut field_offset) = Constructor::parse_variant_table(&self.stack, variant_table_offset, variant_index);
-                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op, epoch);
+                    self.refcount_fields(num_fields, &mut field_offset, &mut item, op);
                     self.heap.ref_item(item_index, op);
                 },
                 Constructor::String => {
@@ -360,7 +350,7 @@ impl<T, U> VM<T, U> {
                     if op == HeapRefOp::Dec || op == HeapRefOp::Free {
                         let value_ctor: StackAddress = self.stack.load(parsed.offset);
                         let key_ctor: StackAddress = self.stack.load(parsed.offset + size_of::<StackAddress>() as StackAddress);
-                        self.refcount_generator_frame(item_index, value_ctor, key_ctor, op, epoch);
+                        self.refcount_generator_frame(item_index, value_ctor, key_ctor, op);
                     }
                     self.heap.ref_item(item_index, op);
                 },
@@ -368,7 +358,7 @@ impl<T, U> VM<T, U> {
                     // trait-object reference: resolve the concrete type's constructor via the object's
                     // implementor index and descend into it. The recursive call performs the single
                     // ref_item for this item; the virtual marker itself carries no inline layout.
-                    self.refcount_value_epoch(HeapRef::new(item_index, 0), 0, op, epoch);
+                    self.refcount_value(HeapRef::new(item_index, 0), 0, op);
                 },
                 Constructor::Map => {
                     // Keys and values are boxed (stored inline as HeapRefs). Refcount each live entry's
@@ -377,8 +367,8 @@ impl<T, U> VM<T, U> {
                     let key_ctor_offset = *constructor_offset;
                     let value_ctor_offset = Constructor::skip(&self.stack, key_ctor_offset);
                     for (key, value) in self.map_live_entries(item_index) {
-                        self.refcount_box(key, key_ctor_offset, op, epoch);
-                        self.refcount_box(value, value_ctor_offset, op, epoch);
+                        self.refcount_box(key, key_ctor_offset, op);
+                        self.refcount_box(value, value_ctor_offset, op);
                     }
                     self.heap.ref_item(item_index, op);
                 },
@@ -391,16 +381,12 @@ impl<T, U> VM<T, U> {
     }
 
     /// Updates the refcounts for a sequence of struct fields or enum-variant fields described by the constructor at field_offset.
-    fn refcount_fields(self: &mut Self, num_fields: ItemIndex, field_offset: &mut StackAddress, item: &mut HeapRef, op: HeapRefOp, epoch: usize) {
+    fn refcount_fields(self: &mut Self, num_fields: ItemIndex, field_offset: &mut StackAddress, item: &mut HeapRef, op: HeapRefOp) {
         for _ in 0..num_fields {
             let field_constructor = Constructor::read_op(&self.stack, field_offset);
             if field_constructor != Constructor::Primitive {
                 let field: HeapRef = self.heap.read_seq(item);
-                let field_index = field.index();
-                if epoch != self.heap.item_epoch(field_index) {
-                    self.refcount_recurse(field_constructor, field, field_offset, op, epoch);
-                    // fixme: skip when epoch matches, constructor_offset will be wrong otherwise
-                }
+                self.refcount_recurse(field_constructor, field, field_offset, op);
             } else {
                 let num_bytes = Constructor::read_index(&self.stack, field_offset) as StackOffset;
                 item.add_offset(num_bytes);

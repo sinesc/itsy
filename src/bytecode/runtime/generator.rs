@@ -108,7 +108,7 @@ impl<T, U> VM<T, U> {
     /// Releases the live heap references held by a generator carrier: the ref-typed slots of its frozen frame plus the yielded value/key in the header.
     /// Skips `Done`/`Running` generators (already released). The header records the const-pool offset of the live-ref-map for the current suspension point;
     /// the map is a `count` followed by `(frame_offset, constructor_offset)` pairs, each non-null reference is refcounted.
-    pub(crate) fn refcount_generator_frame(self: &mut Self, gen_index: StackAddress, value_ctor: StackAddress, key_ctor: StackAddress, op: HeapRefOp, epoch: usize) {
+    pub(crate) fn refcount_generator_frame(self: &mut Self, gen_index: StackAddress, value_ctor: StackAddress, key_ctor: StackAddress, op: HeapRefOp) {
         const REF_SIZE: usize = size_of::<HeapAddress>();
         // collect (reference, constructor_offset) pairs first to release the immutable borrows before refcounting
         let mut live: Vec<(HeapRef, StackAddress)> = Vec::new();
@@ -144,7 +144,7 @@ impl<T, U> VM<T, U> {
             }
         }
         for (reference, constructor_offset) in live {
-            self.refcount_value_epoch(reference, constructor_offset, op, epoch);
+            self.refcount_value(reference, constructor_offset, op);
         }
     }
 }

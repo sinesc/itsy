@@ -1710,7 +1710,7 @@ impl_opcodes!{
         let idx = map.index();
         let hr = size_of::<HeapRef>() as StackAddress;
         let found = self.map_find(idx, key, key_ctor);
-        self.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+        self.refcount_box(key, key_ctor, HeapRefOp::Free);
         match found {
             Some(e) => {
                 let value_off = self.map_entries_offset(idx) + e * 2 * hr + hr;

@@ -93,20 +93,14 @@ impl<T, U> VM<T, U> {
 
     /// Adjusts the refcount of a boxed map key or value. Boxed primitives are leaf heap objects whose
     /// refcount is adjusted directly; boxed reference values are descended into via their constructor.
-    pub(crate) fn refcount_box(self: &mut Self, boxed: HeapRef, box_ctor_offset: StackAddress, op: HeapRefOp, epoch: usize) {
+    pub(crate) fn refcount_box(self: &mut Self, boxed: HeapRef, box_ctor_offset: StackAddress, op: HeapRefOp) {
         let mut o = box_ctor_offset;
         let box_op = Constructor::read_op(&self.stack, &mut o);
         if box_op == Constructor::Primitive {
             self.heap.ref_item(boxed.index(), op);
-        } else if epoch != self.heap.item_epoch(boxed.index()) {
-            self.refcount_value_epoch(boxed, box_ctor_offset, op, epoch);
+        } else {
+            self.refcount_value(boxed, box_ctor_offset, op);
         }
-    }
-
-    /// As [`refcount_box`], starting a fresh refcounting epoch. Used by the standalone map operations.
-    pub(crate) fn refcount_box_top(self: &mut Self, boxed: HeapRef, box_ctor_offset: StackAddress, op: HeapRefOp) {
-        let epoch = self.heap.new_epoch();
-        self.refcount_box(boxed, box_ctor_offset, op, epoch);
     }
 
     /// Pops a boxed key/value off the stack using the given sub-constructor. A primitive is popped as raw
@@ -419,12 +413,12 @@ impl<T, U> VM<T, U> {
             // existing key: replace value (last wins), drop the duplicate lookup key box
             let value_off = self.map_entries_offset(idx) + e * 2 * hr + hr;
             let old_value: HeapRef = self.heap.read(HeapRef::new(idx, value_off));
-            self.refcount_box_top(old_value, value_ctor, if retain { HeapRefOp::Dec } else { HeapRefOp::Free });
+            self.refcount_box(old_value, value_ctor, if retain { HeapRefOp::Dec } else { HeapRefOp::Free });
             self.heap.write(HeapRef::new(idx, value_off), value);
             if retain {
-                self.refcount_box_top(value, value_ctor, HeapRefOp::Inc);
+                self.refcount_box(value, value_ctor, HeapRefOp::Inc);
             }
-            self.refcount_box_top(key, key_ctor, HeapRefOp::Free);
+            self.refcount_box(key, key_ctor, HeapRefOp::Free);
         } else {
             // new key: grow first if needed so the entry hashes into the final table, then append
             let len: StackAddress = self.heap.load(idx, 0);
@@ -440,8 +434,8 @@ impl<T, U> VM<T, U> {
             self.heap.write(HeapRef::new(idx, entry_off), key);
             self.heap.write(HeapRef::new(idx, entry_off + hr), value);
             if retain {
-                self.refcount_box_top(key, key_ctor, HeapRefOp::Inc);
-                self.refcount_box_top(value, value_ctor, HeapRefOp::Inc);
+                self.refcount_box(key, key_ctor, HeapRefOp::Inc);
+                self.refcount_box(value, value_ctor, HeapRefOp::Inc);
             }
             self.heap.store(idx, 0, len + 1);
             self.heap.store(idx, sa, n_entries + 1);
