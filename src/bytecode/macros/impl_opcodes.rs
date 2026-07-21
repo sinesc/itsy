@@ -135,6 +135,7 @@ macro_rules! impl_opcodes {
         $( $( #[ $enum_attr ] )* )?
         pub enum OpCode {
             $(
+                #[allow(unused_attributes)]
                 $( #[ $attr ] )*
                 // single opcode
                 $(
@@ -158,6 +159,7 @@ macro_rules! impl_opcodes {
             #[allow(unused_doc_comments)]
             const fn max() -> OpCode {
                 $(
+                    #[allow(unused_attributes)]
                     $( #[ $attr ] )*
                     // single opcode
                     $(
@@ -183,6 +185,7 @@ macro_rules! impl_opcodes {
             fn try_from(value: OpCodeIndex) -> Result<Self, Self::Error> {
                 match value {
                     $(
+                        #[allow(unused_attributes)]
                         $( #[ $attr ] )*
                         // single opcode
                         $(
@@ -213,6 +216,7 @@ macro_rules! impl_opcodes {
         mod opcodes {
             use super::OpCodeIndex;
             $(
+                #[allow(unused_attributes)]
                 $( #[ $attr ] )*
                 // single opcode
                 $(
@@ -273,6 +277,7 @@ macro_rules! impl_opcodes {
                     #[allow(unused_doc_comments)]
                     match instruction {
                         $(
+                            #[allow(unused_attributes)]
                             $( #[ $attr ] )*
                             // single opcode
                             $(
@@ -329,6 +334,7 @@ macro_rules! impl_opcodes {
                 #[allow(unused_doc_comments)]
                 match instruction {
                     $(
+                        #[allow(unused_attributes)]
                         $( #[ $attr ] )*
                         // single opcode
                         $(
@@ -416,6 +422,7 @@ macro_rules! impl_opcodes {
                             Some((result, position + size))
                         }
                         $(
+                            #[allow(unused_attributes)]
                             $( #[ $attr ] )*
                             // single opcode
                             $(

@@ -1747,6 +1747,7 @@ impl_opcodes!{
     /// Flatten a heap object (and any nested structs/enums) into a view slot using the type's
     /// serialized constructor. Pops view_ref and heap_ref; writes flattened data starting at
     /// `view_ref + index * stride + offset`.
+    #[cold]
     fn heap_to_view(&mut self, stride: FrameAddress, offset: FrameAddress, constructor: StackAddress) {
         let index: StackAddress = self.stack.pop();
         let view_ref: HeapRef = self.stack.pop();
@@ -1765,6 +1766,7 @@ impl_opcodes!{
 
     /// Materialize inlined view data into heap objects using the type's serialized constructor.
     /// Pops view_ref and index; pushes the resulting heap_ref. Refcount starts at 0.
+    #[cold]
     fn view_to_heap(&mut self, stride: FrameAddress, offset: FrameAddress, constructor: StackAddress) {
         let index: StackAddress = self.stack.pop();
         let view_ref: HeapRef = self.stack.pop();
