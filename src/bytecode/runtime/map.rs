@@ -19,8 +19,9 @@
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, ItemIndex, VariantIndex, FrameAddress};
 use crate::bytecode::{Constructor, HeapRef, HeapRefOp};
-use crate::bytecode::runtime::stack::{StackOp, StackRelativeOp};
-use super::vm::VM;
+use crate::bytecode::runtime::stack::{StackOp, StackRelativeOp, StackOffsetOp};
+use crate::bytecode::runtime::error::RuntimeErrorKind;
+use super::vm::{VM, VMState};
 
 /// Header field count (len, n_entries, n_buckets), each StackAddress sized.
 pub(crate) const MAP_HEADER: StackAddress = 3 * size_of::<StackAddress>() as StackAddress;
@@ -444,3 +445,110 @@ impl<T, U> VM<T, U> {
         }
     }
 }
+
+/// Map opcodes
+impl<T, U> VM<T, U> {
+
+    /// Iterates a map's values. Walks the insertion-ordered entries of the map referenced on the stack
+    /// top (skipping tombstones), unboxes the current value into `value`, advances the stored cursor and
+    /// continues; sets the program counter to `exit` (leaving the reference on the stack) once exhausted.
+    pub(crate) fn opcode_map_iter(&mut self, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        let (_key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
+    }
+
+    /// As `opcode_map_iter`, but additionally unboxes the current entry's key into `key`. Used by
+    /// `for k, v in map` to bind both the key and the value.
+    pub(crate) fn opcode_map_iter_kv(&mut self, key: FrameAddress, value: FrameAddress, exit: StackAddress, constructor: StackAddress) {
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let top_loc = self.stack.offset_sp(size_of::<HeapRef>() as StackAddress);
+        let mut item: HeapRef = self.stack.load(top_loc);
+        let idx = item.index();
+        match self.map_iter_advance(idx, item.offset()) {
+            Some((entry_off, next_off)) => {
+                let hr = size_of::<HeapRef>() as StackAddress;
+                let key_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off));
+                let value_box: HeapRef = self.heap.read(HeapRef::new(idx, entry_off + hr));
+                self.map_unbox_to_frame(key_box, key_ctor, key);
+                self.map_unbox_to_frame(value_box, value_ctor, value);
+                item = HeapRef::new(idx, next_off);
+                self.stack.store(top_loc, item);
+            },
+            None => {
+                self.pc = exit;
+            },
+        }
+    }
+
+    /// Allocate a new empty map and push a reference to it.
+    pub(crate) fn opcode_map_new(&mut self) {
+        let sa = size_of::<StackAddress>() as usize;
+        let n_buckets: StackAddress = 8; // MAP_INITIAL_BUCKETS
+        let mut data = vec![0u8; MAP_HEADER as usize + n_buckets as usize * sa];
+        data[2 * sa .. 3 * sa].copy_from_slice(&n_buckets.to_ne_bytes());
+        let index = self.heap.alloc_copy(&data, ItemIndex::MAX);
+        self.stack.push(HeapRef::new(index, 0));
+    }
+
+    /// Append an entry without reference-counting it (used to build map literals). Stack on entry (top first): value, key, map reference.
+    pub(crate) fn opcode_map_append(&mut self, constructor: StackAddress) {
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let value = self.map_box_pop(value_ctor);
+        let key = self.map_box_pop(key_ctor);
+        let map: HeapRef = self.stack.pop();
+        self.map_put(map.index(), key, value, key_ctor, value_ctor, false);
+    }
+
+    /// Looks up `key` in the map and pushes the associated value, trapping with `KeyNotFound` if the
+    /// key is absent. This is the lowering of the map index operator `map[key]` (the fallible `.get`
+    /// returns an `Option` instead). Stack on entry (top first): key, map reference.
+    pub(crate) fn opcode_map_index(&mut self, constructor: StackAddress) {
+        let (key_ctor, value_ctor) = Constructor::map_sub_constructors(&self.stack, constructor);
+        let key = self.map_box_pop(key_ctor);
+        let map: HeapRef = self.stack.pop();
+        let idx = map.index();
+        let hr = size_of::<HeapRef>() as StackAddress;
+        let found = self.map_find(idx, key, key_ctor);
+        self.refcount_box(key, key_ctor, HeapRefOp::Free);
+        match found {
+            Some(e) => {
+                let value_off = self.map_entries_offset(idx) + e * 2 * hr + hr;
+                let value: HeapRef = self.heap.read(HeapRef::new(idx, value_off));
+                if Constructor::is_primitive(&self.stack, value_ctor) {
+                    // primitive value: copy the boxed bytes out before releasing the container
+                    let n = Constructor::primitive_size(&self.stack, value_ctor);
+                    let bytes = self.heap.item(value.index()).data[0..n].to_vec();
+                    self.stack.extend_from(&bytes);
+                    self.refcount_value(map, constructor, HeapRefOp::Free);
+                } else {
+                    // reference value: protect it from being dropped while the container is freed (the
+                    // container still owns it), leaving its refcount net-unchanged for the caller.
+                    self.heap.ref_item(value.index(), HeapRefOp::Inc);
+                    self.refcount_value(map, constructor, HeapRefOp::Free);
+                    self.heap.ref_item(value.index(), HeapRefOp::DecNoFree);
+                    self.stack.push(value);
+                }
+            },
+            None => {
+                self.state = VMState::Error(RuntimeErrorKind::KeyNotFound);
+                self.stack.push(HeapRef::new(0, 0)); // keep stack consistent for potential recovery via VM::clear_error
+                self.refcount_value(map, constructor, HeapRefOp::Free);
+            },
+        }
+    }
+}
+
