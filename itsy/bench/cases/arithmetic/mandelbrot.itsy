@@ -1,0 +1,28 @@
+fn bench() {
+    const rows = 20;
+    const columns = 80;
+    const zoom = 1.0;
+    const center_x = 0.32570659879;
+    const center_y = 0.0470399495155;
+    let x0 = -2.0f64 + ((2.0 + center_x) * (1.0 - zoom));
+    let y0 = -1.4f64 + ((1.4 + center_y) * (1.0 - zoom));
+    const max_depth = 25;
+
+    let y = y0;
+    for _ in 0..rows {
+        let x = x0;
+        for _ in 0..columns {
+            let depth = 0;
+            let r = 0f64;
+            let i = 0f64;
+            while depth < max_depth && 4.0 > r * r + i * i {
+                let i_tmp = i * i;
+                i = r * i * 2.0 + y;
+                r = r * r - i_tmp + x;
+                depth += 1;
+            }
+            x += 4.0 / columns as f64 * zoom;
+        }
+        y += 2.80 / rows as f64 * zoom;
+    }
+}

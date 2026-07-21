@@ -3,11 +3,11 @@
 
 fn bench() {
     let mut acc: i64 = 0;
-    for _ in 0..9500 {
-        let a: i8 = 1;
-        let b: i16 = 1;
-        let c: i32 = 1;
-        let d: i64 = 1;
+    let a: i8 = 1;
+    let b: i16 = 1;
+    let c: i32 = 1;
+    let d: i64 = 1;
+    for _ in 0..12000 {
         acc += (-a) as i64;
         acc += (-b) as i64;
         acc += (-c) as i64;
