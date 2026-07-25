@@ -157,6 +157,7 @@ pub(crate) trait Resolvable: Display {
                     self.check_type_id(container, v.element_type_id, seen)
                     + self.check_type_id(container, v.backing_element_type_id, seen)
                 },
+                Type::HeapRef => Progress::new(1, 1),
             }
         }
     }

@@ -116,6 +116,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     primitives.insert(&Type::f32, scopes.insert_type(Some("f32"), Type::f32));
     primitives.insert(&Type::f64, scopes.insert_type(Some("f64"), Type::f64));
     primitives.insert(&Type::String, scopes.insert_type(Some("String"), Type::String));
+    primitives.insert(&Type::HeapRef, scopes.insert_type(Some("HeapRef"), Type::HeapRef));
 
     // Register intrinsic traits (casts, operators, Error, Index) and the built-in Ordering enum.
     let intrinsic = register_intrinsics(&mut scopes, &primitives)?;
@@ -2087,7 +2088,8 @@ impl<'ctx> Resolver<'ctx> {
             (to_type.is_string() && from_type.is_numeric()) ||
             (to_type.is_integer() && (from_type.is_numeric() || from_type.is_bool() || from_type.is_simple_enum())) ||
             (to_type.is_float() && from_type.is_numeric()) ||
-            (to_type.is_bool() && from_type.is_integer());
+            (to_type.is_bool() && from_type.is_integer()) ||
+            (to_type.is_heap_ref() && from_type.is_ref());
         if is_builtin_cast {
             item.as_cast_mut().ice()?.kind = Some(ast::CastKind::Primitive);
             return Ok(());

@@ -288,6 +288,8 @@ pub enum Type {
     Callable(Callable),
     /// A view type: zero-cost reinterpretation of an integer array's bytes as elements of type `T`.
     View(ViewType),
+    /// Opaque heap reference. Obtained via `expr as HeapRef`. Passable across the Rust API boundary.
+    HeapRef,
 }
 
 impl Debug for Type {
@@ -314,6 +316,7 @@ impl Debug for Type {
             Type::TraitBound(v) => write!(f, "<TraitBound {:?}>", v),
             Type::Callable(v) => write!(f,"{:?}", v),
             Type::View(v) => write!(f, "{:?}", v),
+            Type::HeapRef => write!(f, "HeapRef"),
         }
     }
 }
@@ -342,6 +345,7 @@ impl Display for Type {
             Type::TraitBound(_) => write!(f, "trait bound"),
             Type::Callable(_) => write!(f, "callable"),
             Type::View(_) => write!(f, "view"),
+            Type::HeapRef => write!(f, "HeapRef"),
         }
     }
 }
@@ -401,7 +405,7 @@ impl Type {
             Type::u32 | Type::i32 | Type::f32   => 4,
             Type::u64 | Type::i64 | Type::f64   => 8,
             Type::Enum(Enum { primitive: Some((_, s)), .. }) => *s,
-            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Map(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) | Type::View(_) => size_of::<HeapAddress>() as u8,
+            Type::String | Type::Enum(_) | Type::Struct(_) | Type::Array(_) | Type::Map(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) | Type::View(_) | Type::HeapRef => size_of::<HeapAddress>() as u8,
         }
     }
     /// Returns the type for an unsigned integer of the given byte-size.
@@ -452,6 +456,7 @@ impl Type {
             Type::Enum(Enum { primitive: Some(_), .. }) => false,
             Type::String | Type::Array(_) | Type::Map(_) | Type::Enum(_) | Type::Struct(_) | Type::Trait(_) | Type::TraitBound(_) | Type::Callable(_) => true,
             Type::View(_) => true,
+            Type::HeapRef => false, // opaque type, not heap-managed
             _ => false,
         }
     }
@@ -465,6 +470,10 @@ impl Type {
             Type::Enum(Enum { primitive: Some(_), .. }) => true,
             _ => false,
         }
+    }
+    /// Whether the type is the opaque `HeapRef` type.
+    pub const fn is_heap_ref(self: &Self) -> bool {
+        matches!(self, Type::HeapRef)
     }
     /// Whether the type is unsigned
     pub const fn is_unsigned(self: &Self) -> bool {

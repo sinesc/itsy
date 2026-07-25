@@ -231,6 +231,7 @@ impl_vmtype_builtin!(
     i8 => "i8", i16 => "i16", i32 => "i32", i64 => "i64",
     f32 => "f32", f64 => "f64", bool => "bool",
     String => "String", str => "str",
+    crate::bytecode::HeapRef => "HeapRef",
 );
 
 /// An array maps to an anonymous Itsy `[ element ]` type. It is never registered as a named type (the
@@ -246,6 +247,35 @@ impl<T: VMType> VMType for Vec<T> {
 }
 
 // --- runtime-side built-in marshalling ---
+
+/// `HeapRef` marshals as itself: an 8-byte heap reference on the VM stack.
+/// No refcount change occurs — the HeapRef is a non-owning observation.
+#[cfg(feature = "runtime")]
+impl VMValue for crate::bytecode::HeapRef {
+    type Stack = Self;
+    fn from_stack(_heap: &Heap, raw: Self) -> Self {
+        raw
+    }
+    fn to_stack(self, _heap: &mut Heap) -> Self {
+        self
+    }
+    fn free_stack(_heap: &mut Heap, _raw: Self) {}
+    fn retain_stack(_heap: &mut Heap, _raw: Self) {}
+}
+
+/// `HeapRef` as a field inside a marshalled struct/enum: stored as raw HeapRef bytes.
+#[cfg(feature = "runtime")]
+impl VMField for crate::bytecode::HeapRef {
+    const HEAP_SIZE: usize = size_of::<crate::bytecode::HeapRef>();
+    fn read_field(heap: &Heap, base: crate::bytecode::HeapRef, offset: usize) -> Self {
+        read_heap_ref(heap, base, offset)
+    }
+    fn write_field(self, _heap: &mut Heap, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_ne_bytes());
+    }
+    fn free_field(_heap: &mut Heap, _base: crate::bytecode::HeapRef, _offset: usize) {}
+    fn retain_field(_heap: &mut Heap, _base: crate::bytecode::HeapRef, _offset: usize) {}
+}
 
 /// Returns a byte slice of `len` bytes at `offset` within the heap object referenced by `base`.
 #[cfg(feature = "runtime")]

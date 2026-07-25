@@ -1,4 +1,5 @@
 pub use itsy::{build_str, run as itsy_run, parser::{parse_module, ParsedModule, ParseResult, LinkState}, internals::binary::sizes::STACK_ADDRESS_TYPE, internals::resolved::Type};
+pub use itsy::internals::binary::heap::HeapRef;
 pub use std::{any::Any, fmt::Debug};
 pub use std::{u8, u16, u32, u64, i8, i16, i32, i64, f32, f64};
 
@@ -7,7 +8,7 @@ pub type Context = Vec<ContextElement>;
 
 use itsy::itsy_api;
 
-pub const TEST_PRELUDE: &str = "use TestFns::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str};";
+pub const TEST_PRELUDE: &str = "use TestFns::{ret_u8, ret_u16, ret_u32, ret_u64, ret_i8, ret_i16, ret_i32, ret_i64, ret_f32, ret_f64, ret_bool, ret_string, ret_str, ret_heapref};";
 
 /// Compare a ContextElement with given value.
 #[allow(dead_code)]
@@ -113,6 +114,9 @@ itsy_api! {
         }
         fn ret_str(&mut context, value: str) {
             context.push(Box::new(value.to_string()));
+        }
+        fn ret_heapref(&mut context, value: HeapRef) {
+            context.push(Box::new(value.index()));
         }
     }
 }

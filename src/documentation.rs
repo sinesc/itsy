@@ -19,7 +19,8 @@
 //!
 //! [Result], success-or-error type: `Result<T>` with `Ok(value)` and `Err(error)`.\
 //! [Option], nullable type: `Option<T>` with `Some(value)` and `None`.\
-//! [View], zero-cost byte reinterpretation: `View<T>` wraps an existing `[u8]` buffer or allocates a new one.
+//! [View], zero-cost byte reinterpretation: `View<T>` wraps an existing `[u8]` buffer or allocates a new one.\
+//! [HeapRef], opaque heap reference: obtained via `ref as HeapRef`, passable across the Rust API boundary.
 //!
 //! # Traits
 //!
@@ -134,6 +135,39 @@ pub enum Option { Some(OptionSomeType), None }
 ///
 /// Placeholder-type for the documentation. Not an actual built-in type.
 pub type OptionSomeType = ();
+
+/// Opaque heap reference.
+///
+/// `HeapRef` is an opaque handle to a heap-allocated object. It is obtained by casting any
+/// reference type (struct, data enum, array, map, string, View) to `HeapRef`:
+///
+/// ``` ignore
+/// fn main() {
+///     let arr = [1i32, 2i32, 3i32];
+///     let ref: HeapRef = arr as HeapRef;
+/// }
+/// ```
+///
+/// `HeapRef` has no operations of its own — you cannot index into it, match on it, or
+/// convert it back to its original type. Its sole purpose is to pass heap references across
+/// the Rust API boundary. On the Rust side, a `HeapRef` parameter or return value maps to
+/// `itsy::HeapRef`, which carries the heap object's index and offset.
+///
+/// This is useful when a script manages a buffer (e.g. a `View<T>`) and needs to expose it
+/// to Rust without transferring ownership:
+///
+/// ``` ignore
+/// # fn main() {
+/// let actions: View<i32> = View::new(128);
+/// let ref: HeapRef = actions as HeapRef;
+/// # }
+/// ```
+///
+/// Rust can then read the backing bytes via the VM's heap using the returned `HeapRef`.
+///
+/// Casting a non-reference type (primitive, boolean, simple enum) to `HeapRef` is a compile
+/// error.
+pub type HeapRef = ();
 
 /// Structs: fixed collections of named fields.
 ///

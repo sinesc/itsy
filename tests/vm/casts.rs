@@ -695,6 +695,103 @@ fn to_float_missing_impl_f32() {
     assert!(err.contains("does not implement required trait `ToFloat`"), "unexpected error: {}", err);
 }
 
+// --- HeapRef cast tests ---
+
+#[test]
+fn heapref_cast_from_struct() {
+    let result = run(stringify!(
+        struct Point { x: i32, y: i32 }
+        fn main() {
+            let p = Point { x: 10, y: 20 };
+            let ref: HeapRef = p as HeapRef;
+            ret_heapref(ref);
+        }
+    ));
+    assert_all(&result, &[1usize]); // HeapRef index 1 (0 is the empty root)
+}
+
+#[test]
+#[should_panic]
+fn heapref_cast_from_simple_enum_rejected() {
+    // Simple enums are value types (inline discriminant), not heap references
+    run(stringify!(
+        enum Color { Red, Green, Blue }
+        fn main() {
+            let c = Color::Green;
+            let ref: HeapRef = c as HeapRef;
+        }
+    ));
+}
+
+#[test]
+fn heapref_cast_from_array() {
+    let result = run(stringify!(
+        fn main() {
+            let arr = [1i32, 2i32, 3i32];
+            let ref: HeapRef = arr as HeapRef;
+            ret_heapref(ref);
+        }
+    ));
+    assert_all(&result, &[1usize]);
+}
+
+#[test]
+fn heapref_cast_from_string() {
+    let result = run(stringify!(
+        fn main() {
+            let s = "hello";
+            let ref: HeapRef = s as HeapRef;
+            ret_heapref(ref);
+        }
+    ));
+    assert_all(&result, &[1usize]);
+}
+
+#[test]
+fn heapref_cast_from_view() {
+    let result = run(stringify!(
+        fn main() {
+            let v: View<i32> = View::new(3);
+            let ref: HeapRef = v as HeapRef;
+            ret_heapref(ref);
+        }
+    ));
+    assert_all(&result, &[1usize]);
+}
+
+#[test]
+fn heapref_cast_from_data_enum() {
+    let result = run(stringify!(
+        enum Shape { Circle(i32), Point }
+        fn main() {
+            let s = Shape::Circle(42);
+            let ref: HeapRef = s as HeapRef;
+            ret_heapref(ref);
+        }
+    ));
+    assert_all(&result, &[1usize]);
+}
+
+#[test]
+#[should_panic]
+fn heapref_cast_from_primitive_rejected() {
+    run(stringify!(
+        fn main() {
+            let ref: HeapRef = 42 as HeapRef;
+        }
+    ));
+}
+
+#[test]
+#[should_panic]
+fn heapref_cast_from_bool_rejected() {
+    run(stringify!(
+        fn main() {
+            let ref: HeapRef = true as HeapRef;
+        }
+    ));
+}
+
 // --- regression: existing casts still work ---
 
 #[test]

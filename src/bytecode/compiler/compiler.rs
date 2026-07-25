@@ -2310,6 +2310,11 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
                 *prev_primitive = None;
                 self.store_constructor_view();
             }
+            Type::HeapRef => {
+                *prev_primitive = None;
+                self.writer.store_const(Constructor::Primitive);
+                self.writer.store_const(size_of::<HeapAddress>() as ItemIndex);
+            }
             ty @ _ if ty.is_primitive() => {
                 // try to merge primitive with previous primitive
                 if let Some((offset, len)) = prev_primitive {
@@ -2772,6 +2777,8 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         } else if let Some(Enum { primitive: Some((primitive, _)), .. }) = from.as_enum() {
             let from = self.ty(primitive);
             self.write_cast(from, to)?;
+        } else if from.is_ref() && to.is_heap_ref() {
+            // no-op: reference types are already HeapRefs on the stack
         } else if from != to {
             return Err(CompileError::ice(format!("Unsupported cast from {from:?} to {to:?}")));
         }
