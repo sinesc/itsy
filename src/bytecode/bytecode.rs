@@ -16,13 +16,11 @@ pub mod marshal;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
-use marshal::{FunctionMeta, serialize_function_table, deserialize_function_table};
+use marshal::{FunctionMeta, serialize_function_table, deserialize_function_table, ApiType, ApiTypeDef};
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
 #[cfg(feature="runtime")]
 use crate::{ItemIndex, bytecode::runtime::{vm::VM, stack::{Stack, StackOp}}};
-#[cfg(feature="compiler")]
-use crate::internals::marshal::{ApiType, ApiTypeDef};
 
 /// An internal trait used to make resolver, compiler and VM generic over a user-defined set of Rust functions.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
@@ -30,35 +28,36 @@ pub trait VMFunc<T>: Debug {
     #[doc(hidden)]
     fn from_index(index: RustFnIndex) -> Self;
     #[doc(hidden)]
-    #[cfg(feature="compiler")]
     fn to_index(self: Self) -> RustFnIndex;
     #[doc(hidden)]
-    #[cfg(feature="compiler")]
-    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<ApiType>, Vec<ApiType>)>;
+    fn resolve_info() -> UnorderedMap<&'static str, (RustFnIndex, Option<ApiType>, Vec<ApiType>)> ;
     /// Returns the name given to the API in `itsy_api!`. API types are registered under this namespace
     /// (e.g. `MyAPI::MyStruct`), mirroring how API functions are namespaced.
     #[doc(hidden)]
-    #[cfg(feature="compiler")]
     fn api_name() -> &'static str;
     /// Returns the transitive set of struct/enum types used in the API's function signatures, so the
     /// resolver can register them in the root scope.
     #[doc(hidden)]
-    #[cfg(feature="compiler")]
     fn resolve_types() -> Vec<ApiTypeDef> { Vec::new() }
     /// Returns the top-level Itsy functions the host declared it will call (`callables { ... }`), as
     /// `(name, return type, argument types)`, so the resolver can verify each is defined in the script
     /// with the declared signature.
     #[doc(hidden)]
-    #[cfg(feature="compiler")]
     fn resolve_callables() -> Vec<(&'static str, Option<ApiType>, Vec<ApiType>)> { Vec::new() }
+}
+
+#[cfg(not(feature="runtime"))]
+#[doc(hidden)]
+pub struct VM<T, U> {
+    _t: PhantomData<T>,
+    _u: PhantomData<U>,
 }
 
 /// An internal trait used to make VM generic over a user-defined data context.
 /// Use the `itsy_api!` macro to generate a type implementing `VMData` and `VMFunc`.
 pub trait VMData<T: VMFunc<T>, U> {
     #[doc(hidden)]
-    #[cfg(feature="runtime")]
-    fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U);
+    fn exec(self: Self, vm: &mut VM<T, U>, context: &mut U) where Self: Sized;
 }
 
 /// Const-pool region describing the trait vtable.

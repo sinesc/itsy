@@ -163,7 +163,7 @@ macro_rules! itsy_api {
         $vm.stack.push($crate::internals::binary::heap::HeapRef::new(index, 0));
     } };
     (@handle_ret_value $vm:ident, [ $($inner:tt)+ ], $value:ident) => { {
-        let stack_value = <itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::to_stack($value, &mut $vm.heap);
+        let stack_value = <$crate::itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::to_stack($value, &mut $vm.heap);
         $vm.stack.push(stack_value);
     } };
     (@handle_ret_value $vm:ident, $other:ident, $value:ident) => { {
@@ -172,15 +172,15 @@ macro_rules! itsy_api {
     } };
     // Translate an `itsy_api!` pseudo-type into the concrete Rust type seen by API function bodies.
     // Array types `[ T ]` become `Vec<T>` (recursively); everything else maps to itself.
-    (@vec_type [ $($inner:tt)+ ]) => { ::std::vec::Vec< itsy_api!(@vec_type $($inner)+) > };
+    (@vec_type [ $($inner:tt)+ ]) => { ::std::vec::Vec< $crate::itsy_api!(@vec_type $($inner)+) > };
     (@vec_type $other:ident) => { $other };
     // Compiler: build an ApiType descriptor for the resolver from an `itsy_api!` pseudo-type. Named types
     // resolve their Itsy name via VMType; array types `[ T ]` become ApiType::Array (recursively).
-    (@type_descriptor [ $($inner:tt)+ ]) => { $crate::internals::marshal::ApiType::Array(::std::boxed::Box::new(itsy_api!(@type_descriptor $($inner)+))) };
+    (@type_descriptor [ $($inner:tt)+ ]) => { $crate::internals::marshal::ApiType::Array(::std::boxed::Box::new($crate::itsy_api!(@type_descriptor $($inner)+))) };
     (@type_descriptor $other:ident) => { $crate::internals::marshal::ApiType::Name(<$other as $crate::internals::marshal::VMType>::ITSY_NAME) };
     // Compiler: optional return-type descriptor; absent return type (void) yields None.
     (@ret_descriptor) => { ::std::option::Option::None };
-    (@ret_descriptor $ret_type:tt) => { ::std::option::Option::Some(itsy_api!(@type_descriptor $ret_type)) };
+    (@ret_descriptor $ret_type:tt) => { ::std::option::Option::Some($crate::itsy_api!(@type_descriptor $ret_type)) };
     // VM: Pops an argument and converts some special cases.
     (@handle_param_value $vm:ident, u8) => { $vm.stack.pop() };
     (@handle_param_value $vm:ident, u16) => { $vm.stack.pop() };
@@ -228,11 +228,11 @@ macro_rules! itsy_api {
     (@handle_ref_param_value $vm:ident, bool, $arg_name:ident) => { $arg_name };
     (@handle_ref_param_value $vm:ident, String, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap().to_string() };
     (@handle_ref_param_value $vm:ident, str, $arg_name:ident) => { $vm.heap.string($arg_name).unwrap() };
-    (@handle_ref_param_value $vm:ident, [ $($inner:tt)+ ], $arg_name:ident) => { <itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::from_stack(&$vm.heap, $arg_name) };
+    (@handle_ref_param_value $vm:ident, [ $($inner:tt)+ ], $arg_name:ident) => { <$crate::itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::from_stack(&$vm.heap, $arg_name) };
     (@handle_ref_param_value $vm:ident, $other:ident, $arg_name:ident) => { <$other as $crate::internals::marshal::VMValue>::from_stack(&$vm.heap, $arg_name) };
     // VM: Translate some pseudo-type names to concrete rust types.
     (@handle_ref_param_type str) => { &str }; // FIXME: hack to support &str, see fixmes in main arm. remove these two once fixed
-    (@handle_ref_param_type [ $($inner:tt)+ ]) => { itsy_api!(@vec_type [ $($inner)+ ]) };
+    (@handle_ref_param_type [ $($inner:tt)+ ]) => { $crate::itsy_api!(@vec_type [ $($inner)+ ]) };
     (@handle_ref_param_type $other:ident) => { $other };
     // VM: Generate reference counting code for some pseudo type arguments. Primitives need no cleanup;
     // strings free their temporary heap object; reference types recursively free theirs.
@@ -249,26 +249,26 @@ macro_rules! itsy_api {
     (@handle_ref_param_free $vm:ident, bool, $arg_name:ident) => { };
     (@handle_ref_param_free $vm:ident, String, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
     (@handle_ref_param_free $vm:ident, str, $arg_name:ident) => { $vm.heap.ref_item($arg_name.index(), $crate::internals::binary::heap::HeapRefOp::Free) };
-    (@handle_ref_param_free $vm:ident, [ $($inner:tt)+ ], $arg_name:ident) => { <itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::free_stack(&mut $vm.heap, $arg_name) };
+    (@handle_ref_param_free $vm:ident, [ $($inner:tt)+ ], $arg_name:ident) => { <$crate::itsy_api!(@vec_type [ $($inner)+ ]) as $crate::internals::marshal::VMValue>::free_stack(&mut $vm.heap, $arg_name) };
     (@handle_ref_param_free $vm:ident, $other:ident, $arg_name:ident) => { <$other as $crate::internals::marshal::VMValue>::free_stack(&mut $vm.heap, $arg_name) };
     // VM: Pops arguments in reverse order off the stack (so that it is the correct order for the function call).
     (@load_args_reverse $vm:ident [] $($arg_name:ident $arg_type:tt)*) => {
         $(
-            let $arg_name: itsy_api!(@handle_param_type $arg_type) = itsy_api!(@handle_param_value $vm, $arg_type);
+            let $arg_name: $crate::itsy_api!(@handle_param_type $arg_type) = $crate::itsy_api!(@handle_param_value $vm, $arg_type);
         )*
     };
     (@load_args_reverse $vm:ident [ $first_arg_name:ident $first_arg_type:tt $($rest:tt)* ] $($reversed:tt)*) => {
-        itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
+        $crate::itsy_api!(@load_args_reverse $vm [ $($rest)* ] $first_arg_name $first_arg_type $($reversed)*)
     };
 
     // --- `callables { ... }` support: host-initiated calls into top-level Itsy functions ---
     // Counts callable argument names into a usize.
     (@callable_count) => { 0usize };
-    (@callable_count $head:ident $($rest:ident)*) => { 1usize + itsy_api!(@callable_count $($rest)*) };
+    (@callable_count $head:ident $($rest:ident)*) => { 1usize + $crate::itsy_api!(@callable_count $($rest)*) };
     // The Rust type a callable argument/return value is expressed as on the host side. Reuses the
     // parameter-type mapping (`str` -> `&str`, `[ T ]` -> `Vec<T>`, everything else unchanged).
     (@callable_rust_type) => { () };
-    (@callable_rust_type $ty:tt) => { itsy_api!(@handle_ref_param_type $ty) };
+    (@callable_rust_type $ty:tt) => { $crate::itsy_api!(@handle_ref_param_type $ty) };
     // Push a callable argument onto the stack. Primitives push directly; bool widens to u8; strings are
     // allocated + retained (refcount 1, freed by the callee epilogue); reference types (structs/enums/
     // arrays) go through the VMValue marshalling helper.
@@ -319,7 +319,7 @@ macro_rules! itsy_api {
         result
     } };
     (@callable_read $stack:ident, $heap:ident, [ $($inner:tt)+ ]) => {
-        $crate::internals::marshal::read_call_return::<itsy_api!(@vec_type [ $($inner)+ ])>($stack, $heap)
+        $crate::internals::marshal::read_call_return::<$crate::itsy_api!(@vec_type [ $($inner)+ ])>($stack, $heap)
     };
     (@callable_read $stack:ident, $heap:ident, $other:ident) => {
         $crate::internals::marshal::read_call_return::<$other>($stack, $heap)
@@ -361,7 +361,6 @@ macro_rules! itsy_api {
         }
 
         impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
-            #[cfg(feature="compiler")]
             fn to_index(self: Self) -> $crate::internals::binary::sizes::RustFnIndex {
                 self as $crate::internals::binary::sizes::RustFnIndex
             }
@@ -375,50 +374,45 @@ macro_rules! itsy_api {
                 }
             }
             #[allow(unused_mut)]
-            #[cfg(feature="compiler")]
             fn resolve_info() -> ::std::collections::HashMap<&'static str, ($crate::internals::binary::sizes::RustFnIndex, ::std::option::Option<$crate::internals::marshal::ApiType>, Vec<$crate::internals::marshal::ApiType>)> {
                 let mut map = ::std::collections::HashMap::new();
                 $(
-                    map.insert(concat!(stringify!($type_name), "::", stringify!($name)), ($type_name::$name.to_index(), itsy_api!(@ret_descriptor $($ret_type)?), vec![ $( itsy_api!(@type_descriptor $arg_type) ),* ]));
+                    map.insert(concat!(stringify!($type_name), "::", stringify!($name)), ($type_name::$name.to_index(), $crate::itsy_api!(@ret_descriptor $($ret_type)?), vec![ $( $crate::itsy_api!(@type_descriptor $arg_type) ),* ]));
                 )*
                 map
             }
-            #[cfg(feature="compiler")]
             fn api_name() -> &'static str {
                 stringify!($type_name)
             }
             #[allow(unused_mut)]
-            #[cfg(feature="compiler")]
             fn resolve_types() -> Vec<$crate::internals::marshal::ApiTypeDef> {
                 let mut defs = Vec::new();
                 $(
-                    $( <itsy_api!(@vec_type $arg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
-                    $( <itsy_api!(@vec_type $ret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
+                    $( <$crate::itsy_api!(@vec_type $arg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
+                    $( <$crate::itsy_api!(@vec_type $ret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
                 )*
                 // Types referenced only by `callables` signatures must also be registered so scripts can
                 // name them in the functions the host calls into.
                 $(
                     $(
-                        $( <itsy_api!(@vec_type $carg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
-                        $( <itsy_api!(@vec_type $cret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
+                        $( <$crate::itsy_api!(@vec_type $carg_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )*
+                        $( <$crate::itsy_api!(@vec_type $cret_type) as $crate::internals::marshal::VMType>::collect_type_defs(&mut defs); )?
                     )*
                 )?
                 defs
             }
             #[allow(unused_mut)]
-            #[cfg(feature="compiler")]
             fn resolve_callables() -> Vec<(&'static str, ::std::option::Option<$crate::internals::marshal::ApiType>, Vec<$crate::internals::marshal::ApiType>)> {
                 let mut list = Vec::new();
                 $(
                     $(
-                        list.push((stringify!($cname), itsy_api!(@ret_descriptor $($cret_type)?), vec![ $( itsy_api!(@type_descriptor $carg_type) ),* ]));
+                        list.push((stringify!($cname), $crate::itsy_api!(@ret_descriptor $($cret_type)?), vec![ $( $crate::itsy_api!(@type_descriptor $carg_type) ),* ]));
                     )*
                 )?
                 list
             }
         }
 
-        #[cfg(feature="runtime")]
         impl $crate::internals::binary::VMData<$type_name, $context_type> for $type_name {
             #[allow(unused_variables, unused_assignments, unused_imports)]
             fn exec(self: Self, vm: &mut $crate::runtime::VM<$type_name, $context_type>, context: &mut $context_type) {
@@ -428,24 +422,24 @@ macro_rules! itsy_api {
                         $type_name::$name => {
                             let $context_name = context;
                             // Load arguments. For references this loads the HeapRef. We'll need it later to handle refcounts.
-                            itsy_api!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
+                            $crate::itsy_api!(@load_args_reverse vm [ $( $arg_name $arg_type )* ]);
                             // Run code.
                             let ret = {
                                 // Shadow HeapRef arguments with actual argument value.
                                 $(
-                                    let $arg_name: itsy_api!(@handle_ref_param_type $arg_type) = itsy_api!(@handle_ref_param_value vm, $arg_type, $arg_name);
+                                    let $arg_name: $crate::itsy_api!(@handle_ref_param_type $arg_type) = $crate::itsy_api!(@handle_ref_param_value vm, $arg_type, $arg_name);
                                 )*
                                 $( let $vm_name = &mut *vm; )?
                                 $code
                             };
                             // Handle refcounting.
                             $(
-                                itsy_api!(@handle_ref_param_free vm, $arg_type, $arg_name);
+                                $crate::itsy_api!(@handle_ref_param_free vm, $arg_type, $arg_name);
                             )*
                             // Set return value, if any.
                             $(
-                                let ret_typed: itsy_api!(@vec_type $ret_type) = ret;
-                                itsy_api!(@handle_ret_value vm, $ret_type, ret_typed);
+                                let ret_typed: $crate::itsy_api!(@vec_type $ret_type) = ret;
+                                $crate::itsy_api!(@handle_ret_value vm, $ret_type, ret_typed);
                             )?
                         },
                     )*
@@ -466,8 +460,8 @@ macro_rules! itsy_api {
                         fn $cname(
                             self: &mut Self,
                             context: &mut $context_type
-                            $( , $carg_name: itsy_api!(@callable_rust_type $carg_type) )*
-                        ) -> ::std::result::Result< itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError >;
+                            $( , $carg_name: $crate::itsy_api!(@callable_rust_type $carg_type) )*
+                        ) -> ::std::result::Result< $crate::itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError >;
                     )*
                 }
 
@@ -478,21 +472,21 @@ macro_rules! itsy_api {
                         fn $cname(
                             self: &mut Self,
                             context: &mut $context_type
-                            $( , $carg_name: itsy_api!(@callable_rust_type $carg_type) )*
-                        ) -> ::std::result::Result< itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError > {
+                            $( , $carg_name: $crate::itsy_api!(@callable_rust_type $carg_type) )*
+                        ) -> ::std::result::Result< $crate::itsy_api!(@callable_rust_type $($cret_type)?), $crate::runtime::CallError > {
                             self.call_typed(
                                 context,
                                 stringify!($cname),
-                                itsy_api!(@callable_count $( $carg_name )*),
+                                $crate::itsy_api!(@callable_count $( $carg_name )*),
                                 #[allow(unused_variables, unused_imports)]
                                 |stack, heap| {
                                     use $crate::internals::binary::stack::StackOp;
-                                    $( itsy_api!(@callable_push stack, heap, $carg_type, $carg_name); )*
+                                    $( $crate::itsy_api!(@callable_push stack, heap, $carg_type, $carg_name); )*
                                 },
                                 #[allow(unused_variables, unused_imports)]
                                 |stack, heap| {
                                     use $crate::internals::binary::stack::StackOp;
-                                    itsy_api!(@callable_read stack, heap, $($cret_type)?)
+                                    $crate::itsy_api!(@callable_read stack, heap, $($cret_type)?)
                                 },
                             )
                         }

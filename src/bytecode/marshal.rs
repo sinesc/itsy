@@ -16,24 +16,19 @@
 use crate::prelude::*;
 use crate::config::FrameAddress;
 use crate::StackAddress;
+#[cfg(feature = "compiler")]
+use crate::frontend::ast;
 #[cfg(feature = "runtime")]
 use crate::prelude::size_of;
 #[cfg(feature = "runtime")]
-use crate::{ItemIndex, VariantIndex};
-#[cfg(feature = "runtime")]
-use crate::bytecode::{HeapRef, HeapRefOp};
-#[cfg(feature = "runtime")]
-use crate::bytecode::runtime::heap::Heap;
-#[cfg(feature = "runtime")]
-use crate::bytecode::runtime::stack::{Stack, StackOp};
+use crate::{ItemIndex, VariantIndex, bytecode::{HeapRef, HeapRefOp, runtime::heap::Heap, runtime::stack::{Stack, StackOp}}};
+use crate::bytecode::read;
 #[cfg(feature = "compiler")]
-use crate::bytecode::{VMFunc, read};
+use crate::bytecode::{VMFunc, compiler::{Compiler, error::{CompileResult, OptionToCompileError}}};
 #[cfg(feature = "compiler")]
 use crate::shared::MetaContainer;
 #[cfg(feature = "compiler")]
-use crate::frontend::{ast, parser::types::ParsedModule};
-#[cfg(feature = "compiler")]
-use crate::bytecode::compiler::{Compiler, error::{CompileResult, OptionToCompileError}};
+use crate::frontend::parser::types::ParsedModule;
 
 /// Metadata describing a top-level Itsy function, allowing the host to invoke it by name via
 /// [`VM::call_typed`](crate::runtime::VM::call_typed).
@@ -82,6 +77,7 @@ pub(crate) fn deserialize_function_table(program: &mut &[u8]) -> Option<(StackAd
 /// Builds the host-callable function table from all top-level (free) functions in `modules`
 /// so a host can invoke them by name via [`VM::call_typed`](crate::runtime::VM::call_typed).
 /// Methods/trait functions/generators are not top-level and are intentionally excluded.
+#[cfg(feature = "compiler")]
 pub(crate) fn build_function_table<T>(compiler: &Compiler<T>, modules: &[ParsedModule]) -> CompileResult<Map<String, FunctionMeta>> where T: VMFunc<T>,
 {
     let mut functions = Map::new();
@@ -102,7 +98,6 @@ pub(crate) fn build_function_table<T>(compiler: &Compiler<T>, modules: &[ParsedM
 
 /// Compile-time structural description of an API type, used by the resolver to register the type in
 /// the root scope so that scripts and the Rust API agree on its layout.
-#[cfg(feature = "compiler")]
 #[derive(Clone, Debug)]
 pub struct ApiTypeDef {
     /// Itsy type name.
@@ -112,7 +107,6 @@ pub struct ApiTypeDef {
 }
 
 /// The structure of an [ApiTypeDef].
-#[cfg(feature = "compiler")]
 #[derive(Clone, Debug)]
 pub enum ApiTypeKind {
     /// A struct with named fields, given as `(field name, field type name)` pairs. Order is irrelevant;
@@ -137,7 +131,6 @@ pub enum ApiTypeKind {
 /// Structural description of a type appearing in an API function's argument or return position. Unlike
 /// [ApiTypeDef] (which describes a named struct/enum to register), this describes how to *refer* to a
 /// type, supporting arrays (`[ T ]`) which are anonymous and resolved structurally by the resolver.
-#[cfg(feature = "compiler")]
 #[derive(Clone, Debug)]
 pub enum ApiType {
     /// A named type, referenced by its Itsy name (a primitive, `String`, or a registered struct/enum).
@@ -150,7 +143,7 @@ pub enum ApiType {
 ///
 /// Implemented (with the default no-op bodies) for primitives, `String` and `str`; derived for
 /// `#[derive(VMValue)]` types.
-#[cfg(feature = "compiler")]
+#[allow(dead_code)]
 pub trait VMType {
     /// The Itsy type name this Rust type maps to.
     const ITSY_NAME: &'static str;
@@ -212,9 +205,8 @@ pub trait VMField: Sized {
     fn retain_field(heap: &mut Heap, base: HeapRef, offset: usize);
 }
 
-// --- compiler-side built-in type registrations ---
+// --- built-in type registrations ---
 
-#[cfg(feature = "compiler")]
 macro_rules! impl_vmtype_builtin {
     ($($t:ty => $name:literal),* $(,)?) => {
         $(
@@ -225,7 +217,6 @@ macro_rules! impl_vmtype_builtin {
     };
 }
 
-#[cfg(feature = "compiler")]
 impl_vmtype_builtin!(
     u8 => "u8", u16 => "u16", u32 => "u32", u64 => "u64",
     i8 => "i8", i16 => "i16", i32 => "i32", i64 => "i64",
@@ -238,7 +229,6 @@ impl_vmtype_builtin!(
 /// resolver creates it structurally from the [ApiType] descriptor), so `ITSY_NAME` is a placeholder and
 /// `itsy_type_def` yields nothing; `collect_type_defs` only forwards to the element type so that custom
 /// element types still get registered.
-#[cfg(feature = "compiler")]
 impl<T: VMType> VMType for Vec<T> {
     const ITSY_NAME: &'static str = "[ ]";
     fn collect_type_defs(out: &mut Vec<ApiTypeDef>) {

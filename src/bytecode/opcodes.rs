@@ -1,11 +1,12 @@
 //! Opcode definitions. Implemented on Writer/VM.
 
 use crate::prelude::*;
-use crate::{FrameAddress, StackAddress, ItemIndex, HeapAddress};
+use crate::{FrameAddress, StackAddress, ItemIndex};
 use crate::bytecode::{HeapRefOp, builtins::Builtin, macros::impl_opcodes};
 #[cfg(feature="runtime")]
 use crate::{
     StackOffset,
+    HeapAddress,
     bytecode::{
         HeapRef,
         runtime::{error::RuntimeErrorKind, stack::{StackOp, StackRelativeOp}, heap::{HeapCmp, HeapOp}, vm::VMState}
