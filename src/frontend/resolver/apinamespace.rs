@@ -67,7 +67,7 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
         let type_name = ns.qualify(def.name);
         if scopes.type_id(ScopeId::ROOT, &type_name).is_none() {
             let placeholder = match &def.kind {
-                ApiTypeKind::Struct { .. } => Type::Struct(Struct { fields: Map::new(), impl_traits: Map::new() }),
+                ApiTypeKind::Struct { .. } => Type::Struct(Struct { fields: Vec::new(), impl_traits: Map::new() }),
                 ApiTypeKind::PrimitiveEnum { .. } | ApiTypeKind::DataEnum { .. } => Type::Enum(Enum { variants: Vec::new(), impl_traits: Map::new(), primitive: None }),
             };
             scopes.insert_type(Some(&type_name), placeholder);
@@ -80,13 +80,13 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
         let type_id = scopes.type_id(ScopeId::ROOT, &type_name).ice_msg(&format!("Failed to register API type '{}'", type_name))?;
         match &def.kind {
             ApiTypeKind::Struct { fields } => {
-                let mut field_map = Map::new();
+                let mut field_vec = Vec::new();
                 for (field_name, field_type_name) in fields {
                     let field_type_id = scopes.type_id(ScopeId::ROOT, &ns.qualify(field_type_name))
                         .ice_msg(&format!("Unknown type '{}' encountered in field '{}' of API type '{}'", field_type_name, field_name, def.name))?;
-                    field_map.insert(field_name.to_string(), Some(field_type_id));
+                    field_vec.push((field_name.to_string(), Some(field_type_id)));
                 }
-                *scopes.type_mut(type_id) = Type::Struct(Struct { fields: field_map, impl_traits: Map::new() });
+                *scopes.type_mut(type_id) = Type::Struct(Struct { fields: field_vec, impl_traits: Map::new() });
             },
             ApiTypeKind::PrimitiveEnum { variants, discriminant_type } => {
                 let disc_type = match *discriminant_type {

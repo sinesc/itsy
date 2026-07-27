@@ -246,7 +246,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         for &node in chain.iter().rev() {
             if let Some(member) = node.right.as_member() {
                 let struct_ty = self.type_by_id(current_type_id).as_struct().ice()?;
-                let field_type_id = struct_ty.fields.get(&member.ident.name).ice()?.ice()?;
+                let field_type_id = struct_ty.fields.iter().find(|(name, _)| name == &member.ident.name).map(|(_, ty)| *ty).ice()?.ice()?;
                 offset += self.compute_member_offset(struct_ty, &member.ident.name) as u16;
                 current_type_id = field_type_id;
             }

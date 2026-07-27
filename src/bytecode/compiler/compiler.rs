@@ -1682,7 +1682,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                         self.compile_expression(field)?;
                     }
                     let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type, got something else")?;
-                    let size = struct_ty.fields.iter().fold(0, |acc, f| acc + self.ty(f.1).primitive_size() as StackAddress);
+                    let size = struct_ty.fields.iter().filter_map(|(_, f)| *f).fold(0, |acc, fid| acc + self.type_by_id(fid).primitive_size() as StackAddress);
                     let type_id = item.type_id(self).ice()?;
                     self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
                 }

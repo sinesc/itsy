@@ -759,7 +759,7 @@ impl<'ctx> Resolver<'ctx> {
             self.resolve_inline_type(field)?;
         }
         // assemble type field list
-        let fields: Map<_, _> = item.fields.iter()
+        let fields: Vec<_> = item.fields.iter()
             .map(|(field_name, field)| (field_name.clone(), field.type_id(self)))
             .collect();
         // insert or update type
@@ -1252,7 +1252,7 @@ impl<'ctx> Resolver<'ctx> {
 
         // resolve closed over bindings
         if item.struct_type_id.is_none() {
-            let closure_type_ids: Map<_, _> = item.required_bindings.iter().map(|&b| ("".to_string(), self.binding_by_id(b).type_id)).collect();
+            let closure_type_ids: Vec<_> = item.required_bindings.iter().map(|&b| ("".to_string(), self.binding_by_id(b).type_id)).collect();
             if closure_type_ids.iter().all(|t| t.1.is_some()) {
                 //let mangled_type_name = format!("{}::{}", &self.module_path, &item.shared.sig.ident.name);
                 let type_id = self.scopes.insert_type(None, Type::Struct(Struct { fields: closure_type_ids, impl_traits: Map::new() }));

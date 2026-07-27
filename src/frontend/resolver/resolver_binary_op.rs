@@ -430,7 +430,9 @@ impl<'ctx> Resolver<'ctx> {
         match self.type_by_id(left_type_id) {
             Type::Struct(struct_) => {
                 let field = item.right.as_member_mut().ice_msg("Member access using a non-field")?;
-                let field_type_id = *struct_.fields.get(&field.ident.name).usr(Some(field), ResolveErrorKind::UndefinedMember(field.ident.name.clone()))?;
+                let field_type_id = struct_.fields.iter().find(|(name, _)| name == &field.ident.name)
+                    .map(|(_, ty)| *ty)
+                    .usr(Some(field), ResolveErrorKind::UndefinedMember(field.ident.name.clone()))?;
                 if let Some(field_type_id) = field_type_id {
                     self.set_type_id(field, field_type_id)?;
                 }

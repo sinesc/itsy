@@ -92,17 +92,19 @@ impl Enum {
 /// Information about a struct in a resolved program.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Struct {
-    pub fields: Map<String, Option<TypeId>>,
+    /// Fields in declaration order (not alphabetical). Preserving order is required
+    /// for correct offset computation in view access and struct layout.
+    pub fields: Vec<(String, Option<TypeId>)>,
     pub impl_traits: Map<TypeId, ImplTrait>,
 }
 
 impl Struct {
     /// Returns the TypeId for given field name.
     pub fn type_id(self: &Self, field: &str) -> Option<TypeId> {
-        *self.fields.get(field).expect("Field not found")
+        self.fields.iter().find(|(name, _)| name == field).expect("Field not found").1
     }
     pub fn has_field(self: &Self, field: &str) -> bool {
-        self.fields.contains_key(field)
+        self.fields.iter().any(|(name, _)| name == field)
     }
 }
 
@@ -538,7 +540,7 @@ impl Type {
     /// Returns a list of type ids contained within this type.
     pub fn contained_type_ids(self: &Self) -> Vec<TypeId> {
         match self {
-            Type::Struct(structure) => structure.fields.values().filter_map(|&f| f).collect(),
+            Type::Struct(structure) => structure.fields.iter().filter_map(|(_, ty)| *ty).collect(),
             Type::Enum(enumeration) => enumeration.variants.iter()
                 .filter_map(|(_, variant)| variant.as_data())
                 .flatten()

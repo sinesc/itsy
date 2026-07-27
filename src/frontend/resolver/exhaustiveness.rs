@@ -91,7 +91,7 @@ fn ctor_fields(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCtor) -> 
             Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
             _ => Vec::new(),
         },
-        MatchCtor::Struct => meta.type_by_id(type_id).as_struct().map_or_else(Vec::new, |struct_| struct_.fields.values().cloned().collect()),
+        MatchCtor::Struct => meta.type_by_id(type_id).as_struct().map_or_else(Vec::new, |struct_| struct_.fields.iter().map(|(_, ty)| *ty).collect()),
     }
 }
 
@@ -120,7 +120,7 @@ fn specialize_row<'a>(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCt
         Some(Pattern::Struct(structure)) => match ctor {
             // struct has a single constructor; reorder the named field sub-patterns into canonical field order
             MatchCtor::Struct => meta.type_by_id(type_id).as_struct().map_or_else(Vec::new, |struct_| {
-                struct_.fields.keys().map(|field_name| structure.fields.iter().find(|(name, _)| &name.name == field_name).map(|(_, pattern)| pattern)).collect()
+                struct_.fields.iter().map(|(field_name, _)| structure.fields.iter().find(|(name, _)| &name.name == field_name).map(|(_, pattern)| pattern)).collect()
             }),
             _ => return None,
         },
@@ -178,7 +178,7 @@ fn ctor_to_string(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCtor, 
             let type_name = meta.type_name(type_id);
             match meta.type_by_id(type_id).as_struct() {
                 Some(struct_) => {
-                    let fields = struct_.fields.keys().zip(sub_witness).map(|(name, pattern)| format!("{}: {}", name, pattern)).collect::<Vec<_>>().join(", ");
+                    let fields = struct_.fields.iter().map(|(name, _)| name.as_str()).zip(sub_witness).map(|(name, pattern)| format!("{}: {}", name, pattern)).collect::<Vec<_>>().join(", ");
                     format!("{} {{ {} }}", type_name, fields)
                 },
                 None => "_".to_string(),

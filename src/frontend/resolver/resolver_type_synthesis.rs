@@ -116,10 +116,10 @@ impl<'ctx> Resolver<'ctx> {
     /// generators (same key/value) dedupe to a single type id, like `Result<T>`. The frozen frame the
     /// carrier will hold at runtime is *not* modelled as typed fields here - that stays opaque bytes.
     fn synthesize_generator_type(self: &mut Self, key_type_id: Option<TypeId>, value_type_id: TypeId) -> TypeId {
-        let mut fields = Map::new();
-        fields.insert("$value".to_string(), Some(value_type_id));
+        let mut fields = Vec::new();
+        fields.push(("$value".to_string(), Some(value_type_id)));
         if let Some(key_type_id) = key_type_id {
-            fields.insert("$key".to_string(), Some(key_type_id));
+            fields.push(("$key".to_string(), Some(key_type_id)));
         }
         let ty = Type::Struct(Struct { fields, impl_traits: Map::new() });
         self.scopes.insert_anonymous_type(true, ty)
@@ -327,7 +327,7 @@ impl<'ctx> Resolver<'ctx> {
         match self.type_by_id(type_id) {
             Type::String => false,
             Type::Struct(s) => {
-                s.fields.values().filter_map(|&f| f).all(|fid| self.type_has_only_primitive_leaf_fields(fid, seen))
+                s.fields.iter().filter_map(|(_, f)| *f).all(|fid| self.type_has_only_primitive_leaf_fields(fid, seen))
             },
             Type::Enum(e) => {
                 if let Some((disc_type_id, _)) = e.primitive {

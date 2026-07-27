@@ -120,11 +120,11 @@ pub trait MetaContainer {
     /// `type_name` render them legibly (see `synthesize_generator_type`).
     fn generator_signature(self: &Self, type_id: TypeId) -> Option<(Option<TypeId>, TypeId)> {
         if let Type::Struct(Struct { fields, .. }) = self.type_by_id(type_id) {
-            let value_type_id = (*fields.get("$value")?)?;
+            let value_type_id = fields.iter().find(|(name, _)| name == "$value").and_then(|(_, ty)| *ty)?;
             match fields.len() {
                 1 => Some((None, value_type_id)),
                 2 => {
-                    let key_type_id = (*fields.get("$key")?)?;
+                    let key_type_id = fields.iter().find(|(name, _)| name == "$key").and_then(|(_, ty)| *ty)?;
                     Some((Some(key_type_id), value_type_id))
                 },
                 _ => None,
@@ -283,7 +283,7 @@ pub trait MetaContainer {
         match self.type_by_id(type_id) {
             ty if ty.is_primitive() => ty.primitive_size(),
             Type::Struct(s) => {
-                s.fields.values().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum()
+                s.fields.iter().filter_map(|(_, f)| *f).map(|fid| self.compute_packed_size(fid)).sum()
             },
             Type::Enum(e) => {
                 if let Some((disc_type_id, _)) = e.primitive {
