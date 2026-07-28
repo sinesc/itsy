@@ -58,4 +58,4 @@ fn main() {
 
 **Crate reference:** [here](https://docs.rs/itsy/)\
 **Standard library/builtins reference** Linked on the index page of the above crate documentation.\
-**Language reference:** non-existent, some differences listed [here](doc/differences.md), syntax is essentially Rust without lifetimes and generics.
+**Language reference:** non-existent, some differences listed [here](doc/differences.md), cheat sheet [here](doc/itsy-101.md), syntax is essentially Rust without lifetimes and generics.
