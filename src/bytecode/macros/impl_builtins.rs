@@ -305,6 +305,7 @@ macro_rules! impl_builtins {
             )+
         }
 
+        /// Builtin type (e.g. Array, String). Generated via the impl_builtins! macro from defined builtin types.
         #[cfg(feature="compiler")]
         #[derive(Copy, Clone, Debug, PartialEq)]
         pub enum BuiltinType {

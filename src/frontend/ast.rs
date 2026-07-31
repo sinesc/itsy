@@ -377,6 +377,7 @@ macro_rules! impl_matchall {
     };
 }
 
+/// Type of an unconditional control flow interruption.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ControlFlowType {
     Break,
@@ -741,6 +742,7 @@ impl Positioned for Signature {
 }
 
 
+/// Common function and closure properties.
 #[derive(Debug, Clone)]
 pub struct FunctionShared {
     pub position: Position,

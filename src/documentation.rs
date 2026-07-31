@@ -307,8 +307,8 @@ pub type HeapRef = ();
 ///
 /// # Recursion
 ///
-/// A struct cannot contain a field of its own type (direct or indirect) because that would make it
-/// infinitely sized. Use arrays or other container types to build recursive data structures.
+/// A struct cannot contain a field of its own type (direct or indirect) because this would allow reference cycles.
+/// Use e.g. an index into an array of the struct to build recursive data structures.
 pub mod structs { }
 
 /// Enums: disjoint unions with named variants.
@@ -434,8 +434,8 @@ pub mod structs { }
 ///
 /// # Recursion
 ///
-/// An enum cannot have a data variant that carries the enum itself by value, as that would make
-/// it infinitely sized. Use arrays or other container types for recursive data structures.
+/// An enum cannot have a data variant that carries the enum itself (direct or indirect) because this would allow reference cycles.
+/// Use e.g. an index into an array of the enum to build recursive data structures.
 pub mod enums { }
 
 /// User-defined traits: shared behavior for structs and enums.
