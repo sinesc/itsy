@@ -647,17 +647,27 @@ fn function(i: Input) -> Output<Function> {
         )(i)
     }
     fn signature(i: Input) -> Output<Signature> {
-        map(
+        let j = i.clone();
+        map_result(
             tuple((
-                terminated(opt(keyword("pub")), check_flags(keyword("fn"), |s| if s.in_function { Some(ParseErrorKind::IllegalFunctionDef) } else { None })),
-                terminated(ident, punct("(")), terminated(separated_list0(punct(","), parameter), punct(")")), opt(function_return_part)
+                opt(keyword("pub")),
+                keyword("fn"),
+                terminated(ident, punct("(")),
+                terminated(separated_list0(punct(","), parameter), punct(")")),
+                opt(function_return_part)
             )),
-            |sig| Signature {
-                ident   : sig.1,
-                params    : sig.2,
-                ret     : if let Some(sig_ty) = sig.3 { Some(sig_ty) } else { None },
-                vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
-            },
+            move |sig| {
+                // Only reject named function definitions inside functions (anonymous fn(...) is OK)
+                if j.flags().in_function {
+                    return Err(Failure { input: j.clone(), kind: ParseErrorKind::IllegalFunctionDef });
+                }
+                Ok(Signature {
+                    ident   : sig.2,
+                    params    : sig.3,
+                    ret     : if let Some(sig_ty) = sig.4 { Some(sig_ty) } else { None },
+                    vis     : if sig.0.is_some() { Visibility::Public } else { Visibility::Private },
+                })
+            }
         )(i)
     }
     let position = i.position();
@@ -2018,9 +2028,12 @@ fn const_def_function(i: Input) -> Output<ConstDef> {
 }
 
 /// Matches a statement.
+/// Includes module-level constructs so their `check_flags` can produce clear
+/// "not allowed here" errors instead of generic syntax errors.
 fn statement(i: Input) -> Output<Statement> {
     let j = i.clone();
     let output = alt((
+        // Function-level statements
         map(use_decl, |m| Statement::UseDecl(m)),
         map(snap(let_pattern), |m| Statement::LetPattern(m)),
         map(let_binding,|m| Statement::LetBinding(m)),
@@ -2035,6 +2048,17 @@ fn statement(i: Input) -> Output<Statement> {
         map(suspend_statement, |m| Statement::Suspend(m)),
         map(block, |m| Statement::Block(m)),
         map(snap(terminated(expression, punct(";"))), |m| Statement::Expression(m)),
+        // Module-level constructs (will fail with specific errors via check_flags)
+        alt((
+            map(module_decl, |m| Statement::Module(m)),
+            map(function, |m| Statement::Function(m)),
+            map(struct_def, |m| Statement::StructDef(m)),
+            map(enum_def, |m| Statement::EnumDef(m)),
+            map(trait_impl_block,|m| Statement::ImplBlock(m)),
+            map(impl_block,|m| Statement::ImplBlock(m)),
+            map(trait_def, |m| Statement::TraitDef(m)),
+            map(const_def, |m| Statement::ConstDef(m)),
+        )),
     ))(i);
     if let Ok((_, s)) = &output {
         if s.identify_control_flow(true).is_some() {
@@ -2045,8 +2069,11 @@ fn statement(i: Input) -> Output<Statement> {
 }
 
 /// Matches language items that are allowed in the root scope of a module.
+/// Includes function-level constructs so their `check_flags` can produce clear
+/// "not allowed here" errors instead of generic syntax errors.
 fn root_items(i: Input) -> Output<Statement> {
     alt((
+        // Module-level items
         map(use_decl, |m| Statement::UseDecl(m)),
         map(module_decl, |m| Statement::Module(m)),
         map(function, |m| Statement::Function(m)),
@@ -2056,6 +2083,19 @@ fn root_items(i: Input) -> Output<Statement> {
         map(impl_block,|m| Statement::ImplBlock(m)),
         map(trait_def, |m| Statement::TraitDef(m)),
         map(const_def, |m| Statement::ConstDef(m)),
+        // Function-level constructs (will fail with specific errors via check_flags)
+        map(snap(let_pattern), |m| Statement::LetPattern(m)),
+        map(let_binding,|m| Statement::LetBinding(m)),
+        map(if_block, |m| Statement::IfBlock(m)),
+        for_loop,
+        map(while_loop, |m| Statement::WhileLoop(m)),
+        map(return_statement, |m| Statement::Return(m)),
+        map(yield_statement, |m| Statement::Yield(m)),
+        map(break_statement, |m| Statement::Break(m)),
+        map(continue_statement, |m| Statement::Continue(m)),
+        map(suspend_statement, |m| Statement::Suspend(m)),
+        map(block, |m| Statement::Block(m)),
+        map(snap(terminated(expression, punct(";"))), |m| Statement::Expression(m)),
     ))(i)
 }
 
