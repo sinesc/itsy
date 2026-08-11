@@ -585,7 +585,6 @@ impl Resolvable for UseDecl {
 pub struct LetBinding {
     pub position    : Position,
     pub ident       : Ident,
-    pub mutable     : bool,
     pub expr        : Option<Expression>,
     pub ty          : Option<InlineType>,
     pub binding_id  : BindingId,

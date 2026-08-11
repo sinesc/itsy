@@ -15,7 +15,7 @@ fn setup() -> [ Big ] {
 }
 
 fn bench(arr: [ Big ]) {
-    let mut sum: i64 = 0;
+    let sum: i64 = 0;
     for s in arr {
         sum += s.x;
         sum += s.y;

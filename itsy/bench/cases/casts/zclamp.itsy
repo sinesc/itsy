@@ -2,7 +2,7 @@
 // Exercises: zclampi8, zclampi16, zclampi32, zclampi64, zclampf32, zclampf64
 
 fn bench() {
-    let mut acc: u64 = 0;
+    let acc: u64 = 0;
     for _ in 0..2750 {
         let a: i8 = -1;
         let b: i16 = -1;

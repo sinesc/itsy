@@ -10,7 +10,7 @@ fn setup() -> [ i32 ] {
 }
 
 fn bench(arr: [ i32 ]) {
-    let mut sum = 0;
+    let sum = 0;
     for v in arr {
         sum += v;
     }

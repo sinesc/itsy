@@ -682,7 +682,7 @@ fn map_grown_then_iterated() {
         for i in 0u64..12u64 {
             m[i] = i;
         }
-        let mut sum = 0u64;
+        let sum = 0u64;
         for k, _ in m {
             sum += k;
         }
@@ -746,7 +746,7 @@ fn for_in_map_insert_during_iteration_is_snapshot() {
     // iteration: only the keys present at loop entry are visited
     let result = run(stringify!(
         let m = [ 1u64 => 10u64, 2u64 => 20u64 ];
-        let mut count = 0u64;
+        let count = 0u64;
         for k, _ in m {
             m[k + 100u64] = 0u64;
             count += 1u64;

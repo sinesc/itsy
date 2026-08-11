@@ -3,7 +3,7 @@ use crate::util::*;
 #[test]
 fn compound_i8() {
     let result = run(stringify!(
-        let mut x = 1;
+        let x = 1;
         x += 1;
         ret_i8(x);
         x *= 6;
@@ -21,7 +21,7 @@ fn compound_i8() {
 #[test]
 fn compound_i64() {
     let result = run(stringify!(
-        let mut x = 10000000000;
+        let x = 10000000000;
         x += 1;
         ret_i64(x);
         x *= 6;
@@ -39,7 +39,7 @@ fn compound_i64() {
 #[test]
 fn compound_f64() {
     let result = run(stringify!(
-        let mut x = 1.000001;
+        let x = 1.000001;
         x += 1.0;
         ret_f64(x);
         x *= 6.0;

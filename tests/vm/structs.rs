@@ -135,7 +135,7 @@ fn member_assign_primitive() {
             ob: Inner,
         }
         fn main() {
-            let mut x: Outer = Outer {
+            let x: Outer = Outer {
                 oa: 0,
                 ob: Inner {
                     ia: 0,

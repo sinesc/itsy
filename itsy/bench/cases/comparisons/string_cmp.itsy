@@ -2,7 +2,7 @@
 // Exercises: string_ceq, string_cneq, string_clt, string_clte, string_cgt, string_cgte
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..1900 {
         let a = "hello";
         let b = "hello";

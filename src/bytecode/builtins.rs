@@ -58,7 +58,7 @@ impl_builtins! {
     ///
     /// ``` ignore
     /// # fn main() {
-    /// let mut names = [ ];
+    /// let names = [ ];
     /// names.push("Alice");
     /// names.push("Bob");
     /// for name in names {
@@ -82,7 +82,7 @@ impl_builtins! {
     ///
     /// ``` ignore
     /// # fn main() {
-    /// let mut items: [ String ];
+    /// let items: [ String ];
     /// items = [ "first", "second" ];
     /// for item in items {
     ///     println("{item}");
@@ -1904,7 +1904,7 @@ impl_builtins! {
     ///
     /// ``` ignore
     /// # fn main() {
-    /// let mut scores = [ => ];
+    /// let scores = [ => ];
     /// scores.insert("Alice", 100);
     /// scores.insert("Bob", 200);
     /// for name, score in scores {
@@ -1931,7 +1931,7 @@ impl_builtins! {
     ///
     /// ``` ignore
     /// # fn main() {
-    /// let mut data: [ String => u64 ];
+    /// let data: [ String => u64 ];
     /// data = [ "x" => 10, "y" => 20 ];
     /// for key, value in data {
     ///     println("{key}={value}");
@@ -2151,7 +2151,7 @@ impl_builtins! {
     ///
     /// ``` ignore
     /// fn count_up(n: i32) -> Generator<i32> {
-    ///     let mut i = 0;
+    /// let i = 0;
     ///     while i < n {
     ///         yield i;
     ///         i += 1;

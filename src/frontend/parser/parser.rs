@@ -600,14 +600,13 @@ fn function_inferrable_parameter_list(i: Input) -> Output<Vec<LetBinding>> {
     fn parameter(i: Input) -> Output<LetBinding> {
         let position = i.position();
         map(
-            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)))),
+            tuple((var_decl, opt(preceded(punct(":"), inline_type)))),
             move |tuple| LetBinding {
                 position    : position,
-                binding_id  : tuple.1.binding_id,
-                ident       : tuple.1.ident,
+                binding_id  : tuple.0.binding_id,
+                ident       : tuple.0.ident,
                 expr        : None,
-                mutable     : tuple.0.is_some(),
-                ty          : tuple.2,
+                ty          : tuple.1,
             }
         )(i)
     }
@@ -637,14 +636,13 @@ fn function(i: Input) -> Output<Function> {
     fn parameter(i: Input) -> Output<LetBinding> {
         let position = i.position();
         map(
-            tuple((opt(keyword("mut")), var_decl, punct(":"), inline_type)),
+            tuple((var_decl, punct(":"), inline_type)),
             move |tuple| LetBinding {
                 position    : position,
-                binding_id  : tuple.1.binding_id,
-                ident       : tuple.1.ident,
+                binding_id  : tuple.0.binding_id,
+                ident       : tuple.0.ident,
                 expr        : None,
-                mutable     : tuple.0.is_some(),
-                ty          : Some(tuple.3),
+                ty          : Some(tuple.2),
             }
         )(i)
     }
@@ -1706,18 +1704,31 @@ fn assignment(i: Input) -> Output<Assignment> {
 /// Matches a let binding.
 fn let_binding(i: Input) -> Output<LetBinding> {
     let position = i.position();
-    map(
+    let j = i.clone();
+    map_result(
         preceded(
             check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
-            tuple((opt(keyword("mut")), var_decl, opt(preceded(punct(":"), inline_type)), opt(preceded(punct("="), expression)), punct(";")))
+            tuple((
+                // Reject `let mut` — all bindings are mutable
+                opt(keyword("mut")),
+                var_decl,
+                opt(preceded(punct(":"), inline_type)),
+                opt(preceded(punct("="), expression)),
+                punct(";"),
+            ))
         ),
-        move |m| LetBinding {
-            position    : position.clone(),
-            binding_id  : m.1.binding_id,
-            ident       : m.1.ident,
-            mutable     : m.0.is_some(),
-            expr        : m.3,
-            ty          : m.2,
+        move |m| {
+            if m.0.is_some() {
+                Err(Failure { input: j.clone(), kind: ParseErrorKind::LetMutNotSupported })
+            } else {
+                Ok(LetBinding {
+                    position    : position.clone(),
+                    binding_id  : m.1.binding_id,
+                    ident       : m.1.ident,
+                    expr        : m.3,
+                    ty          : m.2,
+                })
+            }
         }
     )(i)
 }
@@ -1904,7 +1915,7 @@ fn for_loop(i: Input) -> Output<Statement> {
         ),
         move |(key, value, expr, block, for_scope_id)| {
             let let_binding = |decl: VarDecl| LetBinding {
-                position, binding_id: decl.binding_id, ident: decl.ident, mutable: true, expr: None, ty: None,
+                position, binding_id: decl.binding_id, ident: decl.ident, expr: None, ty: None,
             };
             // Map the parsed `for <key>[, <value>]` bindings onto the value/key slots, dropping blanks.
             let (iter, iter_key) = match value {

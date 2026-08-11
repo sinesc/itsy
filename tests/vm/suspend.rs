@@ -51,7 +51,7 @@ fn suspend_then_resume_retains_stack_and_heap() {
 #[test]
 fn suspend_multiple_times() {
     let mut vm = build_vm("
-        let mut i = 0u8;
+        let i = 0u8;
         while i < 3 {
             ret_u8(i);
             suspend;

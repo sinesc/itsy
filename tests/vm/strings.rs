@@ -113,7 +113,7 @@ fn string_concat() {
 #[test]
 fn string_compound_concat() {
     let result = run(stringify!(
-        let mut result = "Hello";
+        let result = "Hello";
         result += "World";
         ret_bool(result == "HelloWorld");
         ret_bool(result != "Something else");
@@ -129,7 +129,7 @@ fn string_compound_heap_concat() {
             s: String
         }
         fn main() {
-            let mut result = Test { s: "Hello" };
+            let result = Test { s: "Hello" };
             result.s += "World";
             ret_bool(result.s == "HelloWorld");
             ret_bool(result.s != "Something else");

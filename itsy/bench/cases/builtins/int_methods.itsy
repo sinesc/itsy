@@ -2,7 +2,7 @@
 // Exercises: call_builtin (Integer variants)
 
 fn bench() {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     for _ in 0..6000 {
         acc += (-5i32).abs() as i64;
         acc += (3i32).pow(2) as i64;

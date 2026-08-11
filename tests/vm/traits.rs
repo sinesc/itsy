@@ -206,7 +206,7 @@ fn trait_object_nested_in_composites() {
             ret_string(zoo.animals[1].speak());
 
             // bare heterogeneous trait-object array, grown via push
-            let mut zs: [ Animal ] = [ Dog { name: "B" } ];
+            let zs: [ Animal ] = [ Dog { name: "B" } ];
             zs.push(Cat { lives: 7 });
             ret_string(zs[0].speak());
             ret_string(zs[1].speak());

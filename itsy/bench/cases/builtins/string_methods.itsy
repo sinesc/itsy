@@ -2,7 +2,7 @@
 // Exercises: call_builtin (String variants)
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..900 {
         count += "hello world".len();
         let s = "hello world".slice(0, 5);

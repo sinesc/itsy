@@ -14,12 +14,12 @@ fn setup() -> [ HasString ] {
 }
 
 fn bench(arr: [ HasString ]) {
-    let mut count = 0;
+    let count = 0;
     for item in arr {
         if item.s == "42" { count += 1; }
     }
     // Exercise heap_putx_replace by mutating a field
-    let mut hs = HasString { s: "hello" };
+    let hs = HasString { s: "hello" };
     hs.s = "world";
     let _ = hs.s;
     let _ = count;

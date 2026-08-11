@@ -375,7 +375,7 @@ fn for_in_array_index_value_snapshot_len() {
     // extend the loop; the bound index and value reflect the snapshot
     let result = run(stringify!(
         let a = [ 1u64, 2u64, 3u64 ];
-        let mut count = 0u64;
+        let count = 0u64;
         for k, v in a {
             a.push(v + 100u64);
             count += 1u64;

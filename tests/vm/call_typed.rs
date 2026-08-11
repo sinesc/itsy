@@ -117,24 +117,24 @@ const SCRIPT: &str = "
     }
     fn divide(a: i32, b: i32) -> i32 { a / b }
     fn make_points(n: i32) -> [ Point ] {
-        let mut result = [ ];
-        let mut i = 0;
+        let result = [ ];
+        let i = 0;
         while i < n { result.push(Point { x: i, y: i * 2 }); i += 1; }
         result
     }
     fn sum(values: [ i32 ]) -> i32 {
-        let mut total = 0;
+        let total = 0;
         for v in values { total += v; }
         total
     }
     fn range(n: i32) -> [ i32 ] {
-        let mut result = [ ];
-        let mut i = 0;
+        let result = [ ];
+        let i = 0;
         while i < n { result.push(i); i += 1; }
         result
     }
     fn points_sum(ps: [ Point ]) -> i32 {
-        let mut total = 0;
+        let total = 0;
         for p in ps { total += p.x + p.y; }
         total
     }

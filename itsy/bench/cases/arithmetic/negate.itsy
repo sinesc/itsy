@@ -2,7 +2,7 @@
 // Exercises: negs8, negs16, negs32, negs64
 
 fn bench() {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     let a: i8 = 1;
     let b: i16 = 1;
     let c: i32 = 1;

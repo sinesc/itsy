@@ -228,7 +228,7 @@ pub type HeapRef = ();
 /// let p = Point { x: 1, y: 2 };
 /// print("{p.x}, {p.y}");   // 1, 2
 ///
-/// let mut p2 = Point { x: 1, y: 2 };
+/// let p2 = Point { x: 1, y: 2 };
 /// p2.x = 10;
 /// # }
 /// ```
@@ -619,7 +619,7 @@ pub mod traits { }
 /// }
 ///
 /// # fn main() {
-/// let mut v = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 };  // Vec2 { x: 4, y: 6 }
+/// let v = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 };  // Vec2 { x: 4, y: 6 }
 /// v += Vec2 { x: 1, y: 1 };                               // Vec2 { x: 5, y: 7 }  (uses Add)
 /// let scaled = v * Vec2 { x: 2, y: 2 };                   // Vec2 { x: 10, y: 14 }
 /// # }
@@ -1103,7 +1103,7 @@ pub mod intrinsic_traits {
 ///
 /// ``` ignore
 /// fn squares(n: i32) -> Generator<i32> {
-///     let mut i = 1;
+///     let i = 1;
 ///     while i <= n {
 ///         yield i * i;   // hand out one value, then suspend
 ///         i += 1;
@@ -1122,7 +1122,7 @@ pub mod intrinsic_traits {
 ///
 /// ``` ignore
 /// fn until_zero(values: [i32]) -> Generator<i32> {
-///     let mut i = 0;
+///     let i = 0;
 ///     while i < values.len() {
 ///         if values[i] == 0 {
 ///             return;        // stop the generator (no value)
@@ -1144,7 +1144,7 @@ pub mod intrinsic_traits {
 ///
 /// ``` ignore
 /// fn enumerate(items: [String]) -> Generator<i32, String> {
-///     let mut i = 0;
+///     let i = 0;
 ///     while i < items.len() {
 ///         yield i as i32, items[i];
 ///         i += 1;
@@ -1159,9 +1159,9 @@ pub mod intrinsic_traits {
 /// iteration:
 ///
 /// ``` ignore
-/// # fn squares(n: i32) -> Generator<i32> { let mut i = 1; while i <= n { yield i * i; i += 1; } }
+/// # fn squares(n: i32) -> Generator<i32> { let i = 1; while i <= n { yield i * i; i += 1; } }
 /// # fn enumerate(items: [String]) -> Generator<i32, String> {
-/// #     let mut i = 0;
+/// #     let i = 0;
 /// #     while i < items.len() { yield i as i32, items[i]; i += 1; }
 /// # }
 /// # fn main() {
@@ -1188,8 +1188,8 @@ pub mod intrinsic_traits {
 ///
 /// ``` ignore
 /// fn fib() -> Generator<u64> {
-///     let mut a = 0u64;
-///     let mut b = 1u64;
+///     let a = 0u64;
+///     let b = 1u64;
 ///     while true {
 ///         yield a;
 ///         let next = a + b;
@@ -1200,7 +1200,7 @@ pub mod intrinsic_traits {
 ///
 /// # fn main() {
 /// let g = fib();
-/// let mut n = 0;
+/// let n = 0;
 /// while n < 10 && g.next() {
 ///     print("{g.value()} ");              // 0 1 1 2 3 5 8 13 21 34
 ///     n += 1;

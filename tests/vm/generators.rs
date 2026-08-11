@@ -33,7 +33,7 @@ fn value_generator_manual_drive() {
 fn generator_with_args_and_locals() {
     let result = run(stringify!(
         fn range(start: i32, count: i32) -> Generator<i32> {
-            let mut i = 0;
+            let i = 0;
             while i < count {
                 yield start + i;
                 i += 1;
@@ -149,7 +149,7 @@ fn generator_never_yields() {
         }
         fn main() {
             let g = empty(false);
-            let mut count = 0;
+            let count = 0;
             while g.next() { count += 1; }
             ret_i32(count);
         }
@@ -200,7 +200,7 @@ fn keyed_generator_mixed_sizes() {
 fn keyed_generator_args_and_locals() {
     let result = run(stringify!(
         fn enumerate(start: i32, count: i32) -> Generator<i32, i32> {
-            let mut i = 0;
+            let i = 0;
             while i < count {
                 yield i, start + i * 10;
                 i += 1;
@@ -330,7 +330,7 @@ fn for_loop_continue() {
 fn for_loop_nested_generators() {
     let result = run(stringify!(
         fn count(n: i32) -> Generator<i32> {
-            let mut i = 0;
+            let i = 0;
             while i < n {
                 yield i;
                 i += 1;
@@ -354,7 +354,7 @@ fn for_loop_empty_generator() {
             if go { yield 1; }
         }
         fn main() {
-            let mut count = 0;
+            let count = 0;
             for _v in empty(false) {
                 count += 1;
             }
@@ -427,7 +427,7 @@ fn drop_suspended_releases_ref_local() {
     let result = run(stringify!(
         fn gen() -> Generator<i32> {
             let arr = [10, 20, 30];
-            let mut i = 0;
+            let i = 0;
             while i < 3 { yield arr[i]; i += 1; }
         }
         fn main() {
@@ -446,7 +446,7 @@ fn drop_not_started_releases_ref_args() {
     // released when the generator is dropped.
     let result = run(stringify!(
         fn gen(data: [i32]) -> Generator<i32> {
-            let mut i = 0;
+            let i = 0;
             while i < 3 { yield data[i]; i += 1; }
         }
         fn main() {
@@ -464,7 +464,7 @@ fn for_loop_break_releases_ref_local() {
     let result = run(stringify!(
         fn gen() -> Generator<i32> {
             let arr = [10, 20, 30, 40];
-            let mut i = 0;
+            let i = 0;
             while i < 4 { yield arr[i]; i += 1; }
         }
         fn main() {
@@ -513,7 +513,7 @@ fn full_consumption_with_refs_no_double_free() {
         }
         fn main() {
             let g = gen([1, 2]);
-            let mut sum = 0;
+            let sum = 0;
             while g.next() { sum += g.value(); }
             ret_i32(sum);
         }
@@ -586,7 +586,7 @@ fn interleaved_generators_with_refs_partial() {
     let result = run(stringify!(
         fn gen(base: i32) -> Generator<i32> {
             let arr = [base, base + 1, base + 2];
-            let mut i = 0;
+            let i = 0;
             while i < 3 { yield arr[i]; i += 1; }
         }
         fn main() {
@@ -650,7 +650,7 @@ fn string_value_generator_manual_drive() {
 fn array_value_generator_manual_drive() {
     let result = run(stringify!(
         fn rows() -> Generator<[i32]> {
-            let mut i = 0;
+            let i = 0;
             while i < 3 {
                 yield [i, i * i];
                 i += 1;
@@ -762,7 +762,7 @@ fn for_loop_break_ref_value() {
     // breaking out leaves the generator suspended holding a ref value: heap-clean drop
     let result = run(stringify!(
         fn rows() -> Generator<[i32]> {
-            let mut i = 0;
+            let i = 0;
             while i < 5 { yield [i]; i += 1; }
         }
         fn main() {
@@ -827,7 +827,7 @@ fn full_consumption_ref_value_no_double_free() {
         }
         fn main() {
             let g = gen();
-            let mut sum = 0;
+            let sum = 0;
             while g.next() { sum += g.value()[0]; }
             ret_i32(sum);
         }

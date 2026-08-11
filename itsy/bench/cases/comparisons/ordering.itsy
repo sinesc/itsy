@@ -2,7 +2,7 @@
 // Exercises: clt*, clte*, cgt*, cgte* (all numeric types)
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..1500 {
         let a: i8 = 1;
         let b: i8 = 2;

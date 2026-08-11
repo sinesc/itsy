@@ -15,7 +15,7 @@ fn setup() -> [ Small ] {
 }
 
 fn bench(arr: [ Small ]) {
-    let mut sum = 0;
+    let sum = 0;
     for s in arr {
         sum += s.a as i32;
         sum += s.b as i32;

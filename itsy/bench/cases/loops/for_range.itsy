@@ -1,7 +1,7 @@
 // Summation over a `for` range loop.
 
 fn bench() {
-    let mut sum: i64 = 0;
+    let sum: i64 = 0;
     for i in 0..50000 {
         sum += i as i64;
     }

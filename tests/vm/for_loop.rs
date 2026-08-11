@@ -74,7 +74,7 @@ fn for_in_inference_let() {
 #[test]
 fn for_in_inference_assign() {
     let result = run(stringify!(
-        let mut y;
+        let y;
         for x in 1..4 {
             y = x * 2;
             ret_u8(y);

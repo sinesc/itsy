@@ -3,7 +3,7 @@
 //            f32_to_i64, f64_to_i64, f32_to_u64, f64_to_u64
 
 fn bench() {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     for _ in 0..4300 {
         let a: i64 = 42;
         let b: u64 = 42;

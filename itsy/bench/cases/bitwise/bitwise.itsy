@@ -2,7 +2,7 @@
 // Exercises: bitands*, bitandu*, bitors*, bitoru*, bitxors*, bitxoru*, bitnots*, bitnotu*
 
 fn bench() {
-    let mut acc: u64 = 0;
+    let acc: u64 = 0;
     for _ in 0..1100 {
         let a: i8 = 0x7F;
         let b: i8 = 0x0F;

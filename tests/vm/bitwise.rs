@@ -149,7 +149,7 @@ fn logical_operators_still_parse() {
 #[test]
 fn compound_assign_var() {
     let result = run(stringify!(
-        let mut x = 12u8;   // 1100
+        let x = 12u8;   // 1100
         x &= 10;            // & 1010 -> 1000 = 8
         ret_u8(x);
         x |= 1;             // | 0001 -> 1001 = 9
@@ -167,7 +167,7 @@ fn compound_assign_var() {
 #[test]
 fn compound_assign_shift_amount_type() {
     let result = run(stringify!(
-        let mut x = 1u32;
+        let x = 1u32;
         let by = 4u8;
         x <<= by;
         ret_u32(x);
@@ -178,7 +178,7 @@ fn compound_assign_shift_amount_type() {
 #[test]
 fn compound_assign_array_element() {
     let result = run(stringify!(
-        let mut a = [ 12u8, 10 ];
+        let a = [ 12u8, 10 ];
         a[0] &= 10;     // 1100 & 1010 -> 1000 = 8
         a[1] |= 1;      // 1010 | 0001 -> 1011 = 11
         ret_u8(a[0]);

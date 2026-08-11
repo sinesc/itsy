@@ -45,7 +45,7 @@ impl Scopes {
         Scopes {
             aliases         : UnorderedMap::new(),
             types           : Repository::new(),
-            bindings        : binding_map.into_iter().map(|binding_id| (binding_id, Binding { mutable: true, type_id: None, constant_id: None })).collect(),
+            bindings        : binding_map.into_iter().map(|binding_id| (binding_id, Binding { type_id: None, constant_id: None })).collect(),
             constants       : Repository::new(),
             functions       : Vec::new(),
             scopefunction   : UnorderedMap::new(),

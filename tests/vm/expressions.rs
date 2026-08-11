@@ -179,7 +179,7 @@ fn unary_op() {
 #[test]
 fn assign_stack_target() {
     let result = run(stringify!(
-        let mut value = 1u8;
+        let value = 1u8;
         let values = [ 0u8, 10 ];
         value = 2;
         ret_u8(value);
@@ -373,7 +373,7 @@ fn assignment_result_type_mismatch_rejected() {
     // an assignment is a void expression; using its result where a value is expected must be rejected
     let err = build_err(stringify!(
         fn main() {
-            let mut a = 0;
+            let a = 0;
             let x: bool = a = 5;
         }
     ));

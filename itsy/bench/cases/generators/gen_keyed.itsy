@@ -2,7 +2,7 @@
 // Exercises: gen_yield_kv, gen_key
 
 fn pairs(start: i32, end: i32) -> Generator<u64, i32> {
-    let mut i = start;
+    let i = start;
     while i < end {
         yield i as u64, i;
         i += 1;
@@ -10,7 +10,7 @@ fn pairs(start: i32, end: i32) -> Generator<u64, i32> {
 }
 
 fn bench() {
-    let mut sum = 0;
+    let sum = 0;
     for _ in 0..6 {
         let g = pairs(0, 900);
         while g.next() {

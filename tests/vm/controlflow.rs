@@ -23,7 +23,7 @@ fn recursion() {
 #[test]
 fn branching() {
     let result = run(stringify!(
-        let mut x = 1;
+        let x = 1;
         let y = 2;
         while x <= 3 {
             if x < y {
@@ -301,7 +301,7 @@ fn uninitialized_read_in_else_branch_rejected() {
     let err = build_err(stringify!(
         fn main() {
             let x = true;
-            let mut v: i32;
+            let v: i32;
             if x {
                 v = 1;
             } else if v == 0 {
@@ -333,7 +333,7 @@ fn initialized_before_if_else_both_branches_ok() {
     // this used to be falsely rejected as uninitialized (InitState shadowing bug)
     let result = run(stringify!(
         let x = true;
-        let mut v = 0;
+        let v = 0;
         if x {
             v = 1;
         } else {
@@ -349,7 +349,7 @@ fn initialized_before_if_else_read_both_branches_ok() {
     // variable initialized before if/else, read in both branches, written only in if
     let result = run(stringify!(
         let x = false;
-        let mut v = 42;
+        let v = 42;
         if x {
             v = 1;
         } else if v == 42 {

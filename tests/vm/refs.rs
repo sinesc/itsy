@@ -67,7 +67,7 @@ fn assign_heap_index_target() {
 #[test]
 fn assign_heap_var_target() {
     let result = run(stringify!(
-        let mut values = [ 5u8, 6 ];
+        let values = [ 5u8, 6 ];
         let morevalues = [ [ 15u8, 16 ], [ 12, 13 ] ];
         values = [ 7u8, 8 ];
         ret_u8(values[1]);
@@ -98,7 +98,7 @@ fn heap_return() {
             return x.b;
         }
         fn main() {
-            let mut y = test();
+            let y = test();
             ret_u32(y.c);
             y.c += 1;
             ret_u32(y.c);
@@ -120,7 +120,7 @@ fn heap_result() {
             b: Inner,
         }
         fn main() {
-            let mut y = {
+            let y = {
                 let x = Outer {
                     a: 11,
                     b: Inner {

@@ -2,7 +2,7 @@
 // Exercises: i64_to_string, u64_to_string, f32_to_string, f64_to_string
 
 fn bench() {
-    let mut s = "";
+    let s = "";
     for i in 0..2400 {
         let a: i64 = i as i64;
         let b: u64 = i as u64;

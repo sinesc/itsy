@@ -7,7 +7,7 @@ fn add_u8(a: u8, b: u8) -> u8 { a + b }
 fn add_u16(a: u16, b: u16) -> u16 { a + b }
 
 fn bench() {
-    let mut acc: u64 = 0;
+    let acc: u64 = 0;
     for _ in 0..8000 {
         acc += get_u8() as u64;
         acc += get_u16() as u64;

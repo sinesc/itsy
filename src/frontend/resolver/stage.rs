@@ -22,7 +22,7 @@ impl Stage {
     }
     /// First structural pass completed: a binding has now had a chance to resolve from its own
     /// declaration, so it may be pinned to a (concrete) type expected by one of its uses. Kept before
-    /// `infer_literals` so a genuinely usage-typed binding (e.g. `let mut y;`) still constrains numeric
+    /// `infer_literals` so a genuinely usage-typed binding (e.g. `let y;`) still constrains numeric
     /// literals before they fall back to their default types.
     pub fn infer_from_usage(self: &Self) -> bool {
         self.0 >= 1

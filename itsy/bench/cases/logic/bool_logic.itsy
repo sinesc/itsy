@@ -2,7 +2,7 @@
 // Exercises: and, or, not, j0_nc, jn0_nc, jn0sa_nc
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..9000 {
         let a = true;
         let b = true;

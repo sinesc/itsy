@@ -2,7 +2,7 @@
 // Exercises: shls*, shlu*, shrs*, shru*
 
 fn bench() {
-    let mut acc: u64 = 0;
+    let acc: u64 = 0;
     for _ in 0..1700 {
         let a: i8 = 1;
         let b: i8 = 4;

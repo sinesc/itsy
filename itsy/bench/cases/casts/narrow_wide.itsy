@@ -3,7 +3,7 @@
 //            extendu8, extendu16, extendu32, extends8, extends16, extends32
 
 fn bench() {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     for i in 0..2700 {
         let a: u64 = i as u64;
         let b: i64 = i as i64;

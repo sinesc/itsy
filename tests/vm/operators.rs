@@ -88,7 +88,7 @@ fn compound_assign_variable() {
         impl Add for N { fn add(self: Self, rhs: Self) -> Self { N { v: self.v + rhs.v } } }
         impl Mul for N { fn mul(self: Self, rhs: Self) -> Self { N { v: self.v * rhs.v } } }
         fn main() {
-            let mut a = N { v: 5 };
+            let a = N { v: 5 };
             a += N { v: 3 };
             ret_i64(a.v);
             a *= N { v: 4 };
@@ -105,7 +105,7 @@ fn compound_assign_field() {
         struct Holder { n: N }
         impl Sub for N { fn sub(self: Self, rhs: Self) -> Self { N { v: self.v - rhs.v } } }
         fn main() {
-            let mut h = Holder { n: N { v: 50 } };
+            let h = Holder { n: N { v: 50 } };
             h.n -= N { v: 8 };
             ret_i64(h.n.v);
         }
@@ -192,7 +192,7 @@ fn missing_impl_compound() {
     let err = build_err(stringify!(
         struct N { v: i64 }
         fn main() {
-            let mut a = N { v: 1 };
+            let a = N { v: 1 };
             a += N { v: 2 };
             ret_i64(a.v);
         }
@@ -323,7 +323,7 @@ fn numeric_unaffected() {
         fn main() {
             ret_i64(2 + 3 * 4 - 1);
             ret_string("a" + "b" + "c");
-            let mut x = 10;
+            let x = 10;
             x += 5;
             ret_i64(x);
         }
@@ -377,7 +377,7 @@ fn bitwise_compound_assign_variable() {
         impl BitOr for N { fn bitor(self: Self, rhs: Self) -> Self { N { v: self.v | rhs.v } } }
         impl BitXor for N { fn bitxor(self: Self, rhs: Self) -> Self { N { v: self.v ^ rhs.v } } }
         fn main() {
-            let mut a = N { v: 15 };
+            let a = N { v: 15 };
             a &= N { v: 10 };
             ret_i64(a.v);
             a |= N { v: 5 };
@@ -396,7 +396,7 @@ fn shift_compound_assign_variable() {
         impl Shl for N { fn shl(self: Self, rhs: i64) -> Self { N { v: self.v << rhs } } }
         impl Shr for N { fn shr(self: Self, rhs: i64) -> Self { N { v: self.v >> rhs } } }
         fn main() {
-            let mut a = N { v: 1 };
+            let a = N { v: 1 };
             a <<= 3;
             ret_i64(a.v);
             a >>= 2;
@@ -415,7 +415,7 @@ fn bitwise_on_builtin_integers() {
             ret_i64(12 ^ 10);
             ret_i64(1 << 4);
             ret_i64(16 >> 2);
-            let mut x: i64 = 15;
+            let x: i64 = 15;
             x &= 10;
             ret_i64(x);
             x |= 5;

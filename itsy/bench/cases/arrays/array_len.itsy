@@ -10,7 +10,7 @@ fn setup() -> [ i32 ] {
 }
 
 fn bench(arr: [ i32 ]) {
-    let mut total = 0;
+    let total = 0;
     for _ in 0..28500 {
         total += arr.len();
     }

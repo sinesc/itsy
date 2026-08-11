@@ -2,7 +2,7 @@
 // Exercises: map_new, map_append, map_index, map_iter, map_iter_kv
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..425 {
         let m = [ "a" => 1i32, "b" => 2i32, "c" => 3i32 ];
         count += m["a"];

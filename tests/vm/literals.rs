@@ -97,7 +97,7 @@ fn negated_min_fits_typed() {
 #[test]
 fn in_range_and_arithmetic() {
     let result = run(stringify!(
-        let mut sum = 0u32;
+        let sum = 0u32;
         for i in 0x0..0x4 { sum += i; }     // 0+1+2+3 = 6
         ret_u32(sum);
         ret_u32(0xf0 + 0x0f);               // 255

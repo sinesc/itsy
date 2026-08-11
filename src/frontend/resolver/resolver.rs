@@ -1467,7 +1467,7 @@ impl<'ctx> Resolver<'ctx> {
         // error further downstream. So defer adoption to a later stage and let declaration-derived types
         // win: traits until infer_as_concrete (a concrete implementor may still turn up), concrete types
         // until infer_from_usage (one structural pass on, but still ahead of literal defaulting so a
-        // genuinely usage-typed binding like `let mut y;` keeps constraining numeric literals).
+        // genuinely usage-typed binding like `let y;` keeps constraining numeric literals).
         if item.type_id(self).is_none() {
             if let Some(expected_result) = expected_result {
                 let ready = if self.type_by_id(expected_result).is_trait_object() {
@@ -1737,9 +1737,7 @@ impl<'ctx> Resolver<'ctx> {
                 // check if this binding's name refers to a constant in scope
                 if self.binding_by_id(binding.binding_id).constant_id.is_none() {
                     if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &binding.ident.name, TypeId::VOID) {
-                        let binding_info = self.binding_by_id(binding.binding_id);
                         *self.binding_by_id_mut(binding.binding_id) = Binding {
-                            mutable: binding_info.mutable,
                             type_id: binding.type_id(self),
                             constant_id: Some(constant_id),
                         };

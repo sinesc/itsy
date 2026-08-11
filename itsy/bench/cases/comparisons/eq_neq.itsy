@@ -2,7 +2,7 @@
 // Exercises: ceq8, ceq16, ceq32, ceq64, cneq8, cneq16, cneq32, cneq64 (and float variants)
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..1900 {
         let a: i8 = 1;
         let b: i8 = 2;

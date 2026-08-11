@@ -7,7 +7,7 @@ struct Point {
 }
 
 fn bench() {
-    let mut count = 0;
+    let count = 0;
     for _ in 0..3312 {
         let p1 = Point { x: 1, y: 2 };
         let p2 = Point { x: 1, y: 2 };

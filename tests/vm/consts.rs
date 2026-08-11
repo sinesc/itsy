@@ -491,7 +491,7 @@ fn const_in_for_loop() {
 #[test]
 fn const_in_while_loop() {
     let result = run(stringify!(
-        let mut count = 0u32;
+        let count = 0u32;
         while count < 1 {
             const VAL = 33u32;
             ret_u32(VAL);
@@ -1204,7 +1204,7 @@ fn const_mutation_in_function() {
 fn const_as_index_offset() {
     let result = run(stringify!(
         const I = 0u64;
-        let mut arr = [1u32];
+        let arr = [1u32];
         arr[I] = 2;
         ret_u32(arr[0]);
     ));
@@ -1248,7 +1248,7 @@ fn const_nonmutating_method_get() {
 #[test]
 fn nonconst_binding_mutation() {
     let result = run(stringify!(
-        let mut arr = [1u32];
+        let arr = [1u32];
         arr.push(2);
         ret_u64(arr.len());
     ));
@@ -1259,7 +1259,7 @@ fn nonconst_binding_mutation() {
 #[test]
 fn nonconst_variable_reassign() {
     let result = run(stringify!(
-        let mut x = 1u32;
+        let x = 1u32;
         x = 2;
         ret_u32(x);
     ));
