@@ -7,8 +7,9 @@ use crate::frontend::ast::FunctionShared;
 /// Information about a binding in a resolved program.
 #[derive(Debug)]
 pub struct Binding {
-    pub mutable: bool,
-    pub type_id: Option<TypeId>,
+    pub mutable     : bool,
+    pub type_id     : Option<TypeId>,
+    pub constant_id : Option<ConstantId>,
 }
 
 /// Value of a user-defined `const` declaration.

@@ -466,7 +466,7 @@ impl<'ctx> Resolver<'ctx> {
                         constant = Some(
                             ast::Constant {
                                 position: member.position,
-                                path: ast::Path { position: member.ident.position, segments: vec![ member.ident.clone() ]},
+                                path: ast::Path { position: member.ident.position, segments: vec![ member.ident.clone() ], constant_id: None },
                                 constant_id: member.constant_id,
                                 type_parameter: None,
                             }
@@ -505,14 +505,19 @@ impl<'ctx> Resolver<'ctx> {
 
     /// Returns whether the (possibly nested) pattern introduces any variable binding. Used to reject bindings
     /// inside or-patterns, which would need consistent names/types across all alternatives (not yet supported).
-    fn pattern_introduces_binding(pattern: &ast::Pattern) -> bool {
+    /// Checks if a pattern introduces a binding that is not a constant reference.
+    /// Used to validate or-patterns (which don't allow real bindings).
+    fn pattern_introduces_real_binding(self: &Self, pattern: &ast::Pattern) -> bool {
         use ast::Pattern;
         match pattern {
-            Pattern::Binding(_) => true,
+            Pattern::Binding(binding) => {
+                // if the binding refers to a constant, it's not a real binding
+                self.binding_by_id(binding.binding_id).constant_id.is_none()
+            },
             Pattern::Wildcard(_) | Pattern::Literal(_) | Pattern::Path(_) | Pattern::Range(_) => false,
-            Pattern::VariantTuple(variant) => variant.elements.iter().any(Self::pattern_introduces_binding),
-            Pattern::Struct(structure) => structure.fields.iter().any(|(_, field)| Self::pattern_introduces_binding(field)),
-            Pattern::Or(or) => or.alternatives.iter().any(Self::pattern_introduces_binding),
+            Pattern::VariantTuple(variant) => variant.elements.iter().any(|e| Self::pattern_introduces_real_binding(self, e)),
+            Pattern::Struct(structure) => structure.fields.iter().any(|(_, field)| Self::pattern_introduces_real_binding(self, field)),
+            Pattern::Or(or) => or.alternatives.iter().any(|a| Self::pattern_introduces_real_binding(self, a)),
         }
     }
 
@@ -939,7 +944,7 @@ impl<'ctx> Resolver<'ctx> {
                             // If the impl const has no explicit type, infer it from the trait const
                             if const_def.ty.is_none() {
                                 const_def.ty = Some(ast::InlineType::TypeName(ast::TypeName {
-                                    path:    ast::Path { position: const_def.position, segments: vec![] },
+                                    path:    ast::Path { position: const_def.position, segments: vec![], constant_id: None },
                                     type_id: Some(trait_const_type_id),
                                 }));
                             }
@@ -1689,21 +1694,56 @@ impl<'ctx> Resolver<'ctx> {
         use ast::Pattern;
         match item {
             Pattern::Wildcard(_) => {},
-            // a qualified path names a unit variant (or constant); nothing to bind, validity is checked below
+            // a path names a unit variant or a constant; resolve and validate
             Pattern::Path(path) => {
-                if let Some(subject_type_id) = subject_type_id {
-                    let variant_name = &path.segments.last().ice()?.name;
-                    if let Some(enum_) = self.type_by_id(subject_type_id).as_enum() {
-                        if enum_.variant_index(variant_name).is_none() {
-                            return Err(ResolveError::new(path, ResolveErrorKind::UndefinedMember(variant_name.clone()), self.module_path));
+                // first try to resolve as a constant
+                if path.constant_id.is_none() {
+                    let resolved_segments: Vec<String> = path.segments.iter().enumerate().map(|(i, seg)| {
+                        if i == 0 {
+                            self.scopes.alias(self.scope_id, &seg.name)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| seg.name.clone())
+                        } else {
+                            seg.name.clone()
+                        }
+                    }).collect();
+                    let path_str = self.make_path(&resolved_segments);
+                    path.constant_id = self.scopes.constant_id(self.scope_id, &path_str, TypeId::VOID);
+                    // for qualified paths like Enum::Variant, also try with the type as owner
+                    if path.constant_id.is_none() && resolved_segments.len() >= 2 {
+                        if let Some(type_id) = self.scopes.type_id(self.scope_id, &resolved_segments[0]) {
+                            path.constant_id = self.scopes.constant_id(self.scope_id, &path_str, type_id);
+                        }
+                    }
+                }
+                // if not a constant, validate as an enum variant
+                if path.constant_id.is_none() {
+                    if let Some(subject_type_id) = subject_type_id {
+                        let variant_name = &path.segments.last().ice()?.name;
+                        if let Some(enum_) = self.type_by_id(subject_type_id).as_enum() {
+                            if enum_.variant_index(variant_name).is_none() {
+                                return Err(ResolveError::new(path, ResolveErrorKind::UndefinedMember(variant_name.clone()), self.module_path));
+                            }
                         }
                     }
                 }
             },
-            // a single identifier binds the entire matched value
+            // a single identifier binds the entire matched value;
+            // if the name also refers to a constant, record that so the compiler can treat it as a constant reference
             Pattern::Binding(binding) => {
                 if let Some(subject_type_id) = subject_type_id {
                     self.set_type_id(binding, subject_type_id)?;
+                }
+                // check if this binding's name refers to a constant in scope
+                if self.binding_by_id(binding.binding_id).constant_id.is_none() {
+                    if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &binding.ident.name, TypeId::VOID) {
+                        let binding_info = self.binding_by_id(binding.binding_id);
+                        *self.binding_by_id_mut(binding.binding_id) = Binding {
+                            mutable: binding_info.mutable,
+                            type_id: binding.type_id(self),
+                            constant_id: Some(constant_id),
+                        };
+                    }
                 }
                 if self.stage.must_resolve() && binding.type_id(self).is_none() {
                     return Err(ResolveError::new(binding, ResolveErrorKind::CannotResolve(binding.ident.to_string()), self.module_path));
@@ -1784,15 +1824,17 @@ impl<'ctx> Resolver<'ctx> {
             },
             // an or-pattern matches if any alternative matches; each is resolved against the same subject type
             Pattern::Or(or) => {
-                // bindings inside an or-pattern would need consistent names/types across all alternatives, which
-                // is not yet supported; reject them so a matched alternative never leaves a binding half-defined
-                for alternative in or.alternatives.iter() {
-                    if Self::pattern_introduces_binding(alternative) {
-                        return Err(ResolveError::new(alternative, ResolveErrorKind::InvalidOperation("Bindings are not allowed inside an or-pattern".to_string()), self.module_path));
-                    }
-                }
+                // resolve each alternative first
                 for alternative in or.alternatives.iter_mut() {
                     self.resolve_pattern(alternative, subject_type_id)?;
+                }
+                // bindings inside an or-pattern would need consistent names/types across all alternatives, which
+                // is not yet supported; reject them so a matched alternative never leaves a binding half-defined
+                // (but allow bindings that refer to constants, since they don't actually introduce new bindings)
+                for alternative in or.alternatives.iter() {
+                    if Self::pattern_introduces_real_binding(self, alternative) {
+                        return Err(ResolveError::new(alternative, ResolveErrorKind::InvalidOperation("Bindings are not allowed inside an or-pattern".to_string()), self.module_path));
+                    }
                 }
             },
         }

@@ -10,7 +10,7 @@ mod compiler_view;
 use crate::config::FrameAddress;
 use crate::{prelude::*, HeapAddress};
 use crate::{StackAddress, ItemIndex, VariantIndex};
-use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue, UserConstValue}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
+use crate::shared::{MetaContainer, numeric::Numeric, meta::{Type, ImplTrait, Struct, Array, Enum, Function, FunctionKind, Binding, Constant, ConstantValue, UserConstValue, EnumVariant}, typed_ids::{BindingId, FunctionId, TypeId, ConstantId}};
 use crate::frontend::{ast::{self, Typeable, TypeName, ControlFlow, Positioned}, resolver::resolved::{ResolvedProgram, Resolved}, ast_visitor::AstVisitor, parser::types::ParsedModule};
 use crate::bytecode::{Constructor, GEN_PRIMITIVE_CTOR, Writer, StoreConst, Program, VMFunc, HeapRefOp, ConstDescriptor, builtins::{Builtin, BuiltinType}, marshal::build_function_table};
 use stack_frame::{StackFrame, StackFrames};
@@ -755,9 +755,17 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
 
     /// Compiles the given variable.
     fn compile_variable(self: &mut Self, item: &ast::Variable) -> CompileResult {
-        comment!(self, "variable {}", item);
-        let load_index = self.load_variable(item)?;
-        self.write_load(self.ty(item), load_index)?;
+        let binding = self.binding_by_id(item.binding_id);
+        // if this binding refers to a constant, compile as a constant instead of loading from the stack
+        if let Some(constant_id) = binding.constant_id {
+            comment!(self, "constant {}", item);
+            let type_id = item.type_id(self).ice()?;
+            self.compile_constant_value(constant_id, type_id)?;
+        } else {
+            comment!(self, "variable {}", item);
+            let load_index = self.load_variable(item)?;
+            self.write_load(self.ty(item), load_index)?;
+        }
         Ok(())
     }
 
@@ -835,6 +843,68 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                         Self::ice(&format!("Unresolved const type"))?
                     },
                 }
+            },
+        }
+        Ok(())
+    }
+
+    /// Compiles the value of a constant onto the stack, given its constant_id and the expected type.
+    fn compile_constant_value(self: &mut Self, constant_id: ConstantId, expected_type_id: TypeId) -> CompileResult {
+        let constant = self.resolved.constant(constant_id);
+        let ty = self.ty(&expected_type_id);
+
+        match &constant.value {
+            ConstantValue::Discriminant(numeric) => {
+                let enumeration = self.ty(&expected_type_id).as_enum().ice()?;
+                match enumeration.primitive {
+                    Some((primitive_type_id, _)) => {
+                        let primitive_type = self.ty(&primitive_type_id);
+                        self.write_immediate(primitive_type, *numeric)?;
+                    },
+                    None => {
+                        // find variant index by matching discriminant value
+                        let variant_index = enumeration.variants.iter().position(|(_, v)| {
+                            if let EnumVariant::Simple(Some(d)) = v { d == numeric } else { false }
+                        }).ice()?;
+                        let implementor_index = *self.trait_implementor_indices.get(&expected_type_id).unwrap_or(&0);
+                        let index_type = Type::unsigned(size_of::<VariantIndex>());
+                        self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
+                        self.writer.upload(index_type.primitive_size() as StackAddress, implementor_index);
+                    },
+                }
+            },
+            ConstantValue::UserConst(user_const) => {
+                match user_const {
+                    UserConstValue::HeapRef(offset) => {
+                        self.writer.load_pool(*offset);
+                    },
+                    UserConstValue::Bool(b) => {
+                        self.write_immediate(ty, Numeric::Unsigned(*b as u64))?;
+                    },
+                    UserConstValue::Numeric(n) => {
+                        let write_ty = if let Type::Enum(e) = ty {
+                            if let Some((primitive_type_id, _)) = e.primitive {
+                                self.ty(&primitive_type_id)
+                            } else {
+                                ty
+                            }
+                        } else {
+                            ty
+                        };
+                        self.write_immediate(write_ty, *n)?;
+                    },
+                    UserConstValue::String(s) => {
+                        let string_const = self.writer.const_len();
+                        self.writer.store_const(s.as_str());
+                        self.writer.upload_const(string_const, ItemIndex::MAX);
+                    },
+                    UserConstValue::Unresolved => {
+                        Self::ice(&format!("Unresolved const type"))?;
+                    },
+                }
+            },
+            ConstantValue::Function(_) => {
+                Self::ice(&"Function constant in pattern match")?;
             },
         }
         Ok(())
@@ -940,8 +1010,18 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
     /// `view_stride` is Some when matching a data enum in a view buffer.
     fn compile_pattern_test(self: &mut Self, subject_type_id: TypeId, view_stride: Option<u16>, access: &[(StackAddress, TypeId)], pattern: &ast::Pattern, fail_jumps: &mut Vec<StackAddress>) -> CompileResult {
         match pattern {
-            // wildcard and binding patterns match unconditionally
-            ast::Pattern::Wildcard(_) | ast::Pattern::Binding(_) => {},
+            // wildcard patterns match unconditionally
+            ast::Pattern::Wildcard(_) => {},
+            // binding patterns: if the binding refers to a constant, compare against it; otherwise match unconditionally
+            ast::Pattern::Binding(binding) => {
+                if let Some(constant_id) = self.binding_by_id(binding.binding_id).constant_id {
+                    let value_type_id = self.pattern_value_type(subject_type_id, access);
+                    self.write_pattern_value_load(subject_type_id, access)?;
+                    self.compile_constant_value(constant_id, value_type_id)?;
+                    self.write_ceq(self.ty(&value_type_id))?;
+                    fail_jumps.push(self.writer.j0(123));
+                }
+            },
             // a literal is matched by comparing the selected value against it
             ast::Pattern::Literal(literal) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
@@ -968,9 +1048,25 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 }
                 fail_jumps.push(self.writer.j0(123));
             },
-            // a unit variant is matched by its tag
+            // a path: either a constant (compare against its value) or a unit variant (compare against its tag)
             ast::Pattern::Path(path) => {
-                self.compile_variant_tag_test(subject_type_id, view_stride, access, path, fail_jumps)?;
+                if let Some(constant_id) = path.constant_id {
+                    let constant = self.resolved.constant(constant_id);
+                    // enum variant discriminants must use variant tag comparison; other constants use value comparison
+                    if matches!(constant.value, ConstantValue::Discriminant(_)) {
+                        self.compile_variant_tag_test(subject_type_id, view_stride, access, path, fail_jumps)?;
+                    } else {
+                        // constant pattern: compare the selected value against the constant's value
+                        let value_type_id = self.pattern_value_type(subject_type_id, access);
+                        self.write_pattern_value_load(subject_type_id, access)?;
+                        self.compile_constant_value(constant_id, value_type_id)?;
+                        self.write_ceq(self.ty(&value_type_id))?;
+                        fail_jumps.push(self.writer.j0(123));
+                    }
+                } else {
+                    // unit variant pattern: compare against the variant tag
+                    self.compile_variant_tag_test(subject_type_id, view_stride, access, path, fail_jumps)?;
+                }
             },
             // a data variant is matched by its tag and then field-wise against the sub-patterns
             ast::Pattern::VariantTuple(variant) => {

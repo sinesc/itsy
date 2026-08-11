@@ -427,8 +427,9 @@ impl AsRef<str> for Ident {
 /// A path to an item, e.g. `path::to::item`.
 #[derive(Debug, Clone)]
 pub struct Path {
-    pub position: Position,
-    pub segments: Vec<Ident>,
+    pub position    : Position,
+    pub segments    : Vec<Ident>,
+    pub constant_id : Option<ConstantId>,
 }
 
 impl_positioned!(Path);
@@ -864,7 +865,7 @@ impl TypeName {
     }
     pub fn from_str(name: &str, position: Position) -> Self {
         TypeName {
-            path    : Path { segments: vec! [ Ident { position: position, name: name.to_string() } ], position: position },
+            path    : Path { segments: vec! [ Ident { position: position, name: name.to_string() } ], position: position, constant_id: None },
             type_id : None,
         }
     }

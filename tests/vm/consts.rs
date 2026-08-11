@@ -1297,3 +1297,103 @@ fn const_method_call_read() {
     ));
     assert_all(&result, &[42u32]);
 }
+
+// Match pattern using a single-segment constant reference
+#[test]
+fn match_pattern_constant_reference() {
+    let result = run(stringify!(
+        const A: u8 = 1;
+        const B: u8 = 2;
+        const C: u8 = 3;
+        fn main() {
+            let x = B;
+            ret_u8(match x {
+                A => 10,
+                B => 20,
+                C => 30,
+                _ => 0,
+            });
+        }
+    ));
+    assert_all(&result, &[20u8]);
+}
+
+// Using the same constant in both the pattern and the arm body
+#[test]
+fn match_pattern_and_body_same_constant() {
+    let result = run(stringify!(
+        const VAL: u16 = 42;
+        fn main() {
+            let x = VAL;
+            ret_u16(match x {
+                VAL => VAL * 2,
+                _ => 0,
+            });
+        }
+    ));
+    assert_all(&result, &[84u16]);
+}
+
+// Or-pattern with constant references
+#[test]
+fn match_or_pattern_constants() {
+    let result = run(stringify!(
+        const A: u8 = 1;
+        const B: u8 = 2;
+        const C: u8 = 3;
+        fn main() {
+            ret_u8(match A { A | B => 10, C => 20, _ => 0 });
+            ret_u8(match B { A | B => 10, C => 20, _ => 0 });
+            ret_u8(match C { A | B => 10, C => 20, _ => 0 });
+        }
+    ));
+    assert_all(&result, &[10u8, 10u8, 20u8]);
+}
+
+// Match pattern constant with multiple uses in arm body
+#[test]
+fn match_pattern_constant_multiple_uses_in_body() {
+    let result = run(stringify!(
+        const ET_DUAL: u16 = 5;
+        struct Powerup { weapon_type: u16 }
+        fn main() {
+            let x = ET_DUAL;
+            let p = match x {
+                ET_DUAL => Powerup { weapon_type: ET_DUAL },
+                _ => Powerup { weapon_type: 0 },
+            };
+            ret_u16(p.weapon_type);
+        }
+    ));
+    assert_all(&result, &[5u16]);
+}
+
+// Match pattern with constant doesn't shadow outer variable of same name (no shadowing possible for consts)
+#[test]
+fn match_pattern_constant_no_shadow() {
+    let result = run(stringify!(
+        const X: u32 = 100;
+        fn main() {
+            ret_u32(match X {
+                X => X,  // both X's refer to the constant
+                _ => 0,
+            });
+        }
+    ));
+    assert_all(&result, &[100u32]);
+}
+
+// Real bindings (not constant references) in or-patterns should still be rejected
+#[test]
+fn match_or_pattern_real_binding_rejected() {
+    let err = build_err(stringify!(
+        fn main() {
+            let x: u8 = 1;
+            match x {
+                a | b => {},  // a and b are new bindings, not constants
+                _ => {},
+            }
+        }
+    ));
+    assert!(err.contains("Bindings are not allowed inside an or-pattern"), "unexpected error: {}", err);
+}

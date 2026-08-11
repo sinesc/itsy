@@ -698,6 +698,7 @@ impl<'ctx> Resolver<'ctx> {
                     ast::Ident { position, name: "Ordering".to_string() },
                     ast::Ident { position, name: variant_name.to_string() },
                 ],
+                constant_id: None,
             },
             constant_id: Some(constant_id),
             type_parameter: None,

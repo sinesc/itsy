@@ -173,7 +173,7 @@ fn var_decl(i: Input) -> Output<VarDecl> {
 /// Matches a path.
 fn path(i: Input) -> Output<Path> {
     let position = i.position();
-    map(separated_list1(punct("::"), ident), move |name| Path { position, segments: name })(i)
+    map(separated_list1(punct("::"), ident), move |name| Path { position, segments: name, constant_id: None })(i)
 }
 
 /// Matches a path with optional turbofish type parameter on the first segment.
@@ -199,7 +199,7 @@ fn path_turbofish(i: Input) -> Output<(Path, Option<InlineType>)> {
     // Parse remaining ::segments
     let (rest, mut segments) = many0(preceded(punct("::"), ident))(rest)?;
     segments.insert(0, first);
-    Ok((rest, (Path { position, segments }, type_param)))
+    Ok((rest, (Path { position, segments, constant_id: None }, type_param)))
 }
 
 // Matches a module declaration, e.g. `mod mymodule;`.
@@ -1626,7 +1626,7 @@ fn assignment(i: Input) -> Output<Assignment> {
                 Expression::Constant(Constant {
                     position    : var_position,
                     constant_id : None,
-                    path        : Path { segments: vec![ m ], position: var_position },
+                    path        : Path { segments: vec![ m ], position: var_position, constant_id: None },
                     type_parameter: None,
                 })
             }
@@ -1806,7 +1806,7 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
     fn path_call_expr(position: Position, name: &str, args: Vec<Expression>) -> Expression {
         let callee = Expression::Constant(Constant {
             position,
-            path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ] },
+            path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ], constant_id: None },
             constant_id: None,
             type_parameter: None,
         });
@@ -1828,7 +1828,7 @@ fn build_try_desugar(position: Position, input: &Input, inner: Expression) -> Ex
     let err_binding = bind(TRY_ERR);
     let variant_pattern = |name: &str, bind_name: &str, binding_id| Pattern::VariantTuple(VariantTuplePattern {
         position,
-        path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ] },
+        path: Path { position, segments: vec![ Ident { position, name: name.to_string() } ], constant_id: None },
         elements: vec![ Pattern::Binding(BindingPattern { position, ident: Ident { position, name: bind_name.to_string() }, binding_id }) ],
     });
     // Ok(try$ok) => try$ok
