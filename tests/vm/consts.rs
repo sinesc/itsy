@@ -1170,56 +1170,6 @@ fn const_mutation_index_assign_map() {
     ));
 }
 
-// Mutating method (push) on a const array
-#[test]
-#[should_panic(expected = "Cannot call mutating method `push()` on const `A`")]
-fn const_mutation_method_push() {
-    run(stringify!(
-        const A: [u32] = [];
-        A.push(1);
-    ));
-}
-
-// Mutating method (pop) on a const array
-#[test]
-#[should_panic(expected = "Cannot call mutating method `pop()` on const `A`")]
-fn const_mutation_method_pop() {
-    run(stringify!(
-        const A = [1u32];
-        A.pop();
-    ));
-}
-
-// Mutating method (remove) on a const array
-#[test]
-#[should_panic(expected = "Cannot call mutating method `remove()` on const `A`")]
-fn const_mutation_method_remove() {
-    run(stringify!(
-        const A = [1u32];
-        A.remove(0);
-    ));
-}
-
-// Mutating method (clear) on a const array
-#[test]
-#[should_panic(expected = "Cannot call mutating method `clear()` on const `A`")]
-fn const_mutation_method_clear() {
-    run(stringify!(
-        const A = [1u32];
-        A.clear();
-    ));
-}
-
-// Mutating method (insert) on a const map
-#[test]
-#[should_panic(expected = "Cannot call mutating method `insert()` on const `M`")]
-fn const_mutation_method_insert_map() {
-    run(stringify!(
-        const M: [String => u32] = [ => ];
-        M.insert("a", 1);
-    ));
-}
-
 // Function-level const mutation
 #[test]
 #[should_panic(expected = "Cannot assign to const `X`")]
@@ -1244,35 +1194,7 @@ fn const_mutation_in_function() {
 //     ));
 // }
 
-// Mutation through const-derived binding (push)
-// The error reports the variable name `arr` since that's the const-derived binding being mutated
-#[test]
-#[should_panic(expected = "Cannot call mutating method `push()` on const `arr`")]
-fn const_mutation_through_binding_push() {
-    run(stringify!(
-        const A = [1u32];
-        let mut arr = A;
-        arr.push(2);
-    ));
-}
-
-// Index assignment through const-derived binding
-// The error reports the variable name `arr` since that's the const-derived binding being mutated
-#[test]
-#[should_panic(expected = "Cannot assign to const `arr`")]
-fn const_mutation_through_binding_index() {
-    run(stringify!(
-        const A = [1u32];
-        let mut arr = A;
-        arr[0] = 2;
-    ));
-}
-
-// =============================================================================
-// Const mutation prevention - positive tests (should work)
-// =============================================================================
-
-// Const as index offset (const is used as index, not mutated)
+// Const as index offset
 #[test]
 fn const_as_index_offset() {
     let result = run(stringify!(
@@ -1295,7 +1217,7 @@ fn const_readonly_access() {
     assert_all(&result, &[1u32]);
 }
 
-// Non-mutating methods on const (len)
+// Read array length from const
 #[test]
 fn const_nonmutating_method_len() {
     let result = run(stringify!(
@@ -1306,7 +1228,7 @@ fn const_nonmutating_method_len() {
     assert_all(&result, &[3u64]);
 }
 
-// Non-mutating methods on const (get) - get returns Option<T>, use match to extract
+// Read element from const array via get
 #[test]
 fn const_nonmutating_method_get() {
     let result = run(stringify!(
@@ -1317,7 +1239,7 @@ fn const_nonmutating_method_get() {
     assert_all(&result, &[1u32]);
 }
 
-// Non-const binding mutation (should still work)
+// Mutation of non-const binding
 #[test]
 fn nonconst_binding_mutation() {
     let result = run(stringify!(
@@ -1328,7 +1250,7 @@ fn nonconst_binding_mutation() {
     assert_all(&result, &[2u64]);
 }
 
-// Reassignment of non-const variable (should still work)
+// Reassignment of non-const variable
 #[test]
 fn nonconst_variable_reassign() {
     let result = run(stringify!(
@@ -1339,78 +1261,10 @@ fn nonconst_variable_reassign() {
     assert_all(&result, &[2u32]);
 }
 
-// =============================================================================
-// Const immutability: conditional assignment taint (issue 1)
-// =============================================================================
+
 
 #[test]
-#[should_panic(expected = "Cannot assign to const")]
-fn const_mutation_conditional_assign() {
-    run(stringify!(
-        struct S { val: u8 }
-        const C = S { val: 1 };
-        fn main() {
-            let x = S { val: 0 };
-            if true { x = C; }
-            x.val = 5;
-        }
-    ));
-}
-
-#[test]
-#[should_panic(expected = "Cannot assign to const")]
-fn const_mutation_conditional_assign_else() {
-    run(stringify!(
-        struct S { val: u8 }
-        const C = S { val: 1 };
-        fn main() {
-            let x = S { val: 0 };
-            if false { x = S { val: 2 }; } else { x = C; }
-            x.val = 5;
-        }
-    ));
-}
-
-// =============================================================================
-// Const immutability: function parameter mutation (issue 2)
-// =============================================================================
-
-#[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_mutating_param_field() {
-    run(stringify!(
-        struct S { val: u8 }
-        const C = S { val: 1 };
-        fn f(v: S) { v.val = 7; }
-        fn main() { f(C); }
-    ));
-}
-
-#[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_mutating_param_nested_field() {
-    run(stringify!(
-        struct Inner { val: u8 }
-        struct Outer { inner: Inner }
-        const C = Outer { inner: Inner { val: 1 } };
-        fn f(v: Outer) { v.inner.val = 7; }
-        fn main() { f(C); }
-    ));
-}
-
-#[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_mutating_param_compound_assign() {
-    run(stringify!(
-        struct S { val: u32 }
-        const C = S { val: 1 };
-        fn f(v: S) { v.val += 1; }
-        fn main() { f(C); }
-    ));
-}
-
-#[test]
-fn const_arg_nonmutating_param() {
+fn const_arg_read_param() {
     let result = run(stringify!(
         struct S { val: u32 }
         const C = S { val: 42 };
@@ -1421,18 +1275,7 @@ fn const_arg_nonmutating_param() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_multi_param_first_mutated() {
-    run(stringify!(
-        struct S { val: u8 }
-        const C = S { val: 1 };
-        fn f(a: S, b: S) { a.val = 7; }
-        fn main() { f(C, S { val: 0 }); }
-    ));
-}
-
-#[test]
-fn const_arg_multi_param_second_not_mutated() {
+fn const_arg_mutate_other_param() {
     let result = run(stringify!(
         struct S { val: u32 }
         const C = S { val: 99 };
@@ -1443,20 +1286,7 @@ fn const_arg_multi_param_second_not_mutated() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_method_self_mutated() {
-    run(stringify!(
-        struct S { val: u8 }
-        const C = S { val: 1 };
-        impl S {
-            fn mutate(self: Self) { self.val = 7; }
-        }
-        fn main() { C.mutate(); }
-    ));
-}
-
-#[test]
-fn const_arg_method_self_not_mutated() {
+fn const_method_call_read() {
     let result = run(stringify!(
         struct S { val: u32 }
         const C = S { val: 42 };
@@ -1466,16 +1296,4 @@ fn const_arg_method_self_not_mutated() {
         fn main() { ret_u32(C.read()); }
     ));
     assert_all(&result, &[42u32]);
-}
-
-#[test]
-#[should_panic(expected = "Cannot pass const value to mutating parameter")]
-fn const_arg_method_call_mutated_via_push() {
-    // Mutation via method call (push) on a parameter, not via assignment
-    run(stringify!(
-        struct S { val: u8 }
-        const C = [ S { val: 1 } ];
-        fn f(a: [ S ]) { a.push(S { val: 7 }); }
-        fn main() { f(C); }
-    ));
 }

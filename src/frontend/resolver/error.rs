@@ -31,10 +31,6 @@ pub enum ResolveErrorKind {
     AssignToImmutable,
     /// Attempted to assign to a const binding. String is the const name.
     AssignToConst(String),
-    /// Attempted to call a mutating method on a const value. First string is the const name, second is the method name.
-    MutateConst(String, String),
-    /// A const value was passed to a function parameter that mutates its argument.
-    ConstArgToMutatingParam(String, usize),
     /// Duplicate discriminant.
     DuplicateVariantValue(Numeric),
     /// Enum variant value is not an integer.
@@ -153,8 +149,6 @@ impl Display for ResolveError {
             ResolveErrorKind::MutabilityEscalation => write!(f, "Cannot re-bind immutable reference as mutable"),
             ResolveErrorKind::AssignToImmutable => write!(f, "Cannot assign to immutable binding"),
             ResolveErrorKind::AssignToConst(name) => write!(f, "Cannot assign to const `{name}`"),
-            ResolveErrorKind::MutateConst(name, method) => write!(f, "Cannot call mutating method `{method}()` on const `{name}`"),
-            ResolveErrorKind::ConstArgToMutatingParam(func, param) => write!(f, "Cannot pass const value to mutating parameter {param} of `{func}`"),
             ResolveErrorKind::UndefinedFunction(func) => write!(f, "Undefined function `{func}`"),
             ResolveErrorKind::UndefinedType(t) => write!(f, "Undefined type `{t}`"),
             ResolveErrorKind::UndefinedItem(i) => write!(f, "Undefined item `{i}`"),

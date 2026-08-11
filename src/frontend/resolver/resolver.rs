@@ -1299,11 +1299,6 @@ impl<'ctx> Resolver<'ctx> {
             item.function_id = Some(function_id);
             self.scopes.scope_set_function_id(self.scope_id, function_id);
         }
-        // Collect which parameters are mutated in the body
-        let function_id = item.function_id.ice()?;
-        let param_binding_ids: Vec<BindingId> = item.shared.sig.params.iter().map(|p| p.binding_id).collect();
-        let mutated = self.collect_mutated_param_indices(item.shared.block.as_ref().ice()?, &param_binding_ids);
-        self.scopes.function_mut(function_id).mutated_params = mutated;
 
         self.scope_id = parent_scope_id;
 
@@ -1359,13 +1354,6 @@ impl<'ctx> Resolver<'ctx> {
             let function_id = self.scopes.constant_function_id(constant_id).ice()?;
             let ret_type = self.scopes.function_ref(function_id).ret_type_id(self);
             if let Some(block) = &mut item.shared.block {
-                // Collect which parameters are mutated BEFORE resolve_block,
-                // because method calls are rewritten (Access -> Constant) during resolution
-                // and the MutationCollector needs the original AST structure.
-                let param_binding_ids: Vec<BindingId> = item.shared.sig.params.iter().map(|p| p.binding_id).collect();
-                let mutated = self.collect_mutated_param_indices(block, &param_binding_ids);
-                self.scopes.function_mut(function_id).mutated_params = mutated;
-
                 self.resolve_block(block, ret_type)?;
             }
         }
@@ -2010,12 +1998,6 @@ impl<'ctx> Resolver<'ctx> {
                     Some(left_type_id) // Self
                 };
                 self.resolve_expression(&mut assignment.right, rhs_expected)?;
-                // Propagate from_const to the assignment target if RHS references a user const
-                if self.expr_references_user_const(&assignment.right) {
-                    if let Some(target_binding_id) = resolver_const_eval::extract_root_binding_id(&assignment.left) {
-                        self.scopes.binding_mut(target_binding_id).from_const = true;
-                    }
-                }
                 if let Some(right_type_id) = assignment.right.type_id(self) {
                     if !matches!(base_op, Shl | Shr) {
                         self.check_type_accepted_for(assignment, right_type_id, left_type_id)?; // rhs must be Self
@@ -2033,12 +2015,6 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
         self.resolve_expression(&mut assignment.right, if shift_assign { None } else { left_type_id })?;
-        // Propagate from_const to the assignment target if RHS references a user const
-        if self.expr_references_user_const(&assignment.right) {
-            if let Some(target_binding_id) = resolver_const_eval::extract_root_binding_id(&assignment.left) {
-                self.scopes.binding_mut(target_binding_id).from_const = true;
-            }
-        }
         let right_type_id = assignment.right.type_id(self);
         // if the target's type can't be determined on its own, infer it from the value instead (e.g. an
         // untyped array's element type, or an uninitialized binding learned from what is assigned to it)
@@ -2171,14 +2147,6 @@ impl<'ctx> Resolver<'ctx> {
                 self.set_type_id(item, expr_type_id)?;
             }
         };
-        // Track whether this binding was initialized from a user const expression.
-        // This lets us reject mutation of const-derived data through variable bindings.
-        // Done after the block above so that mutable borrows of item.expr have ended.
-        if let Some(expr) = &item.expr {
-            if self.expr_references_user_const(expr) {
-                self.scopes.binding_mut(item.binding_id).from_const = true;
-            }
-        }
 
         // check binding is resolved. Resolvable (via resolved_or_err) does not do this for us. (TODO/FIXME)
         if self.stage.must_resolve() {

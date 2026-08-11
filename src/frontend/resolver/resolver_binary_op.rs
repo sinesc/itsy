@@ -460,24 +460,6 @@ impl<'ctx> Resolver<'ctx> {
         let call_func = item.left.as_expression_mut().ice()?;
         self.resolve_expression(call_func, None)?;
 
-        // Check for mutating method calls on const receivers BEFORE the method call rewrite,
-        // because after the rewrite the Access is replaced with a Constant and the receiver
-        // is moved to the argument list, making the check impossible.
-        let mutating_on_const = if let Some(binary_op) = call_func.as_binary_op()
-            && binary_op.op == ast::BinaryOperator::Access
-            && let Some(member) = binary_op.right.as_member()
-            && Self::is_mutating_method(&member.ident.name)
-            && let ast::BinaryOperand::Expression(ref receiver) = binary_op.left
-            && let Some(const_name) = self.find_const_in_receiver_chain(receiver)
-        {
-            Some((const_name, member.ident.name.clone()))
-        } else {
-            None
-        };
-        if let Some((const_name, method_name)) = mutating_on_const {
-            return Err(ResolveError::new(item, ResolveErrorKind::MutateConst(const_name, method_name), self.module_path));
-        }
-
         let call_args = item.right.as_argument_list_mut().ice()?;
         self.try_infer_array_element_from_builtin_args(call_func, call_args)?;
         self.try_infer_map_types_from_builtin_args(call_func, call_args)?;
@@ -490,7 +472,6 @@ impl<'ctx> Resolver<'ctx> {
             let func = self.validate_callable(item, function_type_id)?;
             self.resolve_call_return_type(item, &func, expected_result)?;
             self.resolve_call_arguments(item, &func, num_args, callee_constant_id)?;
-            self.check_const_args_to_mutating_params(item, callee_constant_id)?;
         }
 
         self.apply_expected_result_type(item, expected_result)
@@ -609,27 +590,6 @@ impl<'ctx> Resolver<'ctx> {
             }
             // Update the backing element type to match the actual array
             self.type_by_id_mut(view_type_id).as_view_mut().ice()?.backing_element_type_id = *elem_type_id;
-        }
-        Ok(())
-    }
-
-    /// Check if any from_const argument is passed to a mutating parameter.
-    fn check_const_args_to_mutating_params(self: &mut Self, item: &mut ast::BinaryOp, callee_constant_id: Option<ConstantId>) -> ResolveResult {
-        if let Some(call_const_id) = callee_constant_id && let Some(callee_func_id) = self.scopes.constant_function_id(call_const_id) {
-            let callee = self.scopes.function_ref(callee_func_id);
-            if !callee.mutated_params.is_empty() {
-                let arguments = item.right.as_argument_list().ice()?;
-                for (arg_index, arg_expr) in arguments.args.iter().enumerate() {
-                    if callee.mutated_params.contains(&arg_index) && self.expr_references_user_const(arg_expr) {
-                        let func_name = item.left.as_expression().ice()?.as_constant().ice()?.path.to_string(0);
-                        return Err(ResolveError::new(
-                            item,
-                            ResolveErrorKind::ConstArgToMutatingParam(func_name, arg_index),
-                            self.module_path,
-                        ));
-                    }
-                }
-            }
         }
         Ok(())
     }
