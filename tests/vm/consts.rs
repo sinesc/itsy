@@ -1119,55 +1119,60 @@ fn const_mutation_direct_reassign() {
     ));
 }
 
-// Index assignment on a const array
+// Index assignment on a const array: with new const semantics (binding immutable,
+// inner data mutable), mutating elements through a const is allowed.
 #[test]
-#[should_panic(expected = "Cannot assign to const `A`")]
 fn const_mutation_index_assign_array() {
-    run(stringify!(
+    let result = run(stringify!(
         const A = [1u32];
         A[0] = 2;
+        ret_u32(A[0]);
     ));
+    assert_all(&result, &[2u32]);
 }
 
-// Field assignment on a const struct (skipped - Itsy parser doesn't support field reassignment syntax)
-// #[test]
-// #[should_panic(expected = "Cannot assign to const `S`")]
-// fn const_mutation_field_assign() {
-//     run(stringify!(
-//         struct Point { x: u32 }
-//         const S = Point { x: 0 };
-//         S.x = 1;
-//     ));
-// }
+// Field assignment on a const struct: mutating fields through a const is allowed.
+#[test]
+fn const_mutation_field_assign() {
+    let result = run(stringify!(
+        fn main() { S.x = 1; ret_u32(S.x); }
+        struct Point { x: u32 }
+        const S = Point { x: 0 };
+    ));
+    assert_all(&result, &[1u32]);
+}
 
 // Nested index assignment on a const array
 #[test]
-#[should_panic(expected = "Cannot assign to const `A`")]
 fn const_mutation_nested_index_assign() {
-    run(stringify!(
+    let result = run(stringify!(
         const A = [[1u32]];
         A[0][0] = 2;
+        ret_u32(A[0][0]);
     ));
+    assert_all(&result, &[2u32]);
 }
 
 // Compound assignment on a const array
 #[test]
-#[should_panic(expected = "Cannot assign to const `A`")]
 fn const_mutation_compound_assign() {
-    run(stringify!(
+    let result = run(stringify!(
         const A = [1u32];
         A[0] += 1;
+        ret_u32(A[0]);
     ));
+    assert_all(&result, &[2u32]);
 }
 
 // Index assignment on a const map
 #[test]
-#[should_panic(expected = "Cannot assign to const `M`")]
 fn const_mutation_index_assign_map() {
-    run(stringify!(
+    let result = run(stringify!(
         const M = ["a" => 1u32];
         M["a"] = 2;
+        ret_u32(M["a"]);
     ));
+    assert_all(&result, &[2u32]);
 }
 
 // Function-level const mutation

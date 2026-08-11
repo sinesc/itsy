@@ -383,14 +383,17 @@ impl<'ctx> Resolver<'ctx> {
         patcher.walk_block(block);
     }
 
-    /// Walk the receiver chain of an expression looking for user const references.
-    /// Returns the first const name found, or None.
+    /// Check if the given expression is a direct user const reference.
     ///
-    /// Only walks the receiver/base of each access operation. The index/key side of `[]` is NOT
-    /// part of the receiver chain. For example, `arr[MY_INDEX] = value` should be allowed
-    /// (`MY_INDEX` is used as an offset, not mutated), but `MY_CONST[i] = value` should be rejected.
+    /// With the new `const` semantics (binding is immutable, inner data is mutable), we only
+    /// reject direct reassignment of the const binding itself. Mutating fields or elements
+    /// through a const is allowed: `const S = Struct { x: 1 }; S.x = 2` is OK.
+    ///
+    /// Only walks through unary ops and casts (which don't change the identity of the target).
+    /// Field/index accesses are NOT recursed into — they represent mutation of inner data,
+    /// not reassignment of the binding.
     pub(crate) fn find_const_in_receiver_chain(self: &Self, expr: &ast::Expression) -> Option<String> {
-        use ast::{Expression, BinaryOperand};
+        use ast::Expression;
         match expr {
             Expression::Constant(c) => {
                 if let Some(constant_id) = c.constant_id {
@@ -406,20 +409,16 @@ impl<'ctx> Resolver<'ctx> {
             }
             Expression::BinaryOp(bo) => {
                 match bo.op {
-                    // For access/index operations, only recurse into the left (receiver) side
+                    // Field/index access through a const represents mutation of inner data,
+                    // not reassignment of the binding. With new const semantics, this is allowed.
                     ast::BinaryOperator::Index
                     | ast::BinaryOperator::IndexWrite
                     | ast::BinaryOperator::Access
-                    | ast::BinaryOperator::AccessWrite => {
-                        if let BinaryOperand::Expression(ref left) = bo.left {
-                            self.find_const_in_receiver_chain(left)
-                        } else {
-                            None
-                        }
-                    }
+                    | ast::BinaryOperator::AccessWrite => None,
                     _ => None, // other operators shouldn't appear in receiver chains
                 }
             }
+            // Unary ops and casts don't change the identity of the target
             Expression::UnaryOp(u) => self.find_const_in_receiver_chain(&u.expr),
             Expression::Cast(c) => self.find_const_in_receiver_chain(&c.expr),
             _ => None,
