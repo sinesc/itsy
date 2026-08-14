@@ -1747,17 +1747,17 @@ impl<'ctx> Resolver<'ctx> {
             Pattern::Wildcard(_) => {},
             // a path names a unit variant or a constant; resolve and validate
             Pattern::Path(path) => {
+                let resolved_segments: Vec<String> = path.segments.iter().enumerate().map(|(i, seg)| {
+                    if i == 0 {
+                        self.scopes.alias(self.scope_id, &seg.name)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| seg.name.clone())
+                    } else {
+                        seg.name.clone()
+                    }
+                }).collect();
                 // first try to resolve as a constant
                 if path.constant_id.is_none() {
-                    let resolved_segments: Vec<String> = path.segments.iter().enumerate().map(|(i, seg)| {
-                        if i == 0 {
-                            self.scopes.alias(self.scope_id, &seg.name)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| seg.name.clone())
-                        } else {
-                            seg.name.clone()
-                        }
-                    }).collect();
                     let path_str = self.make_path(&resolved_segments);
                     path.constant_id = self.scopes.constant_id(self.scope_id, &path_str, TypeId::VOID);
                     // for qualified paths like Enum::Variant, also try with the type as owner
@@ -1770,6 +1770,21 @@ impl<'ctx> Resolver<'ctx> {
                 // if not a constant, validate as an enum variant
                 if path.constant_id.is_none() {
                     if let Some(subject_type_id) = subject_type_id {
+                        // for qualified paths (2+ segments), validate the type portion resolves to the subject type
+                        if resolved_segments.len() >= 2 {
+                            let type_segments = &resolved_segments[..resolved_segments.len() - 1];
+                            let type_path = self.make_path(type_segments);
+                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                                if path_type_id != subject_type_id {
+                                    return Err(ResolveError::new(path, ResolveErrorKind::InvalidOperation(
+                                        format!("Variant pattern type '{}' does not match subject type {}",
+                                            type_path, self.type_name(subject_type_id))
+                                    ), self.module_path));
+                                }
+                            } else {
+                                return Err(ResolveError::new(path, ResolveErrorKind::CannotResolve(type_path), self.module_path));
+                            }
+                        }
                         let variant_name = &path.segments.last().ice()?.name;
                         if let Some(enum_) = self.type_by_id(subject_type_id).as_enum() {
                             if enum_.variant_index(variant_name).is_none() {
@@ -1815,15 +1830,54 @@ impl<'ctx> Resolver<'ctx> {
             // a data variant matches a variant tag and recurses into its fields
             Pattern::VariantTuple(variant) => {
                 if let Some(subject_type_id) = subject_type_id {
+                    // first, confirm the subject is actually an enum
+                    let enum_ = match self.type_by_id(subject_type_id).as_enum() {
+                        Some(e) => e,
+                        None => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Cannot match variant pattern against non-enum type {}", self.type_name(subject_type_id))), self.module_path)),
+                    };
+
+                    // validate the path: for 2+ segment paths the type portion (all segments except the last
+                    // variant name) must resolve to the subject type; single-segment paths are rejected
+                    // (no type qualifier) except for bare `Some(..)`, `Ok(..)`, and `Err(..)` which are
+                    // data variants of built-in `Option<T>` and `Result<E>`, analogous to bare `None`
+                    let is_bare_option_or_result = variant.path.segments.len() == 1
+                        && matches!(variant.path.segments[0].name.as_str(), "Some" | "Ok" | "Err");
+                    if variant.path.segments.len() >= 2 || is_bare_option_or_result {
+                        if !is_bare_option_or_result {
+                            // build the type path from all segments except the last (variant name)
+                            let type_segments: Vec<String> = variant.path.segments.iter().take(variant.path.segments.len() - 1).enumerate().map(|(i, seg)| {
+                                if i == 0 {
+                                    self.scopes.alias(self.scope_id, &seg.name)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| seg.name.clone())
+                                } else {
+                                    seg.name.clone()
+                                }
+                            }).collect();
+                            let type_path = self.make_path(&type_segments);
+                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                                if path_type_id != subject_type_id {
+                                    return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(
+                                        format!("Variant pattern type '{}' does not match subject type {}",
+                                            type_path, self.type_name(subject_type_id))
+                                    ), self.module_path));
+                                }
+                            } else {
+                                return Err(ResolveError::new(variant, ResolveErrorKind::CannotResolve(type_path), self.module_path));
+                            }
+                        }
+                    } else {
+                        return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(
+                            format!("Variant pattern must be qualified with the enum type name, e.g. `Enum::Variant(..)`")
+                        ), self.module_path));
+                    }
+
                     let variant_name = variant.path.segments.last().ice()?.name.clone();
                     // pull the variant's field types out of the enum (cloned to release the immutable borrow before recursing)
-                    let field_type_ids = match self.type_by_id(subject_type_id).as_enum() {
-                        Some(enum_) => match enum_.variants.iter().find(|(name, _)| name == &variant_name) {
-                            Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
-                            Some((_, EnumVariant::Simple(_))) => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Enum variant '{}' carries no data", variant_name)), self.module_path)),
-                            None => return Err(ResolveError::new(variant, ResolveErrorKind::UndefinedMember(variant_name), self.module_path)),
-                        },
-                        None => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Cannot match variant pattern against non-enum type {}", self.type_name(subject_type_id))), self.module_path)),
+                    let field_type_ids = match enum_.variants.iter().find(|(name, _)| name == &variant_name) {
+                        Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
+                        Some((_, EnumVariant::Simple(_))) => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Enum variant '{}' carries no data", variant_name)), self.module_path)),
+                        None => return Err(ResolveError::new(variant, ResolveErrorKind::UndefinedMember(variant_name), self.module_path)),
                     };
                     if field_type_ids.len() != variant.elements.len() {
                         return Err(ResolveError::new(variant, ResolveErrorKind::NumberOfArguments(variant.path.to_string(0), field_type_ids.len() as ItemIndex, variant.elements.len() as ItemIndex), self.module_path));
@@ -1841,6 +1895,28 @@ impl<'ctx> Resolver<'ctx> {
             // a struct matches field-wise against the sub-patterns; all fields must be present
             Pattern::Struct(structure) => {
                 if let Some(subject_type_id) = subject_type_id {
+                    // validate the path: the full path must resolve to the subject type
+                    let resolved_segments: Vec<String> = structure.path.segments.iter().enumerate().map(|(i, seg)| {
+                        if i == 0 {
+                            self.scopes.alias(self.scope_id, &seg.name)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| seg.name.clone())
+                        } else {
+                            seg.name.clone()
+                        }
+                    }).collect();
+                    let type_path = self.make_path(&resolved_segments);
+                    if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                        if path_type_id != subject_type_id {
+                            return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
+                                format!("Struct pattern type '{}' does not match subject type {}",
+                                    type_path, self.type_name(subject_type_id))
+                            ), self.module_path));
+                        }
+                    } else {
+                        return Err(ResolveError::new(structure, ResolveErrorKind::CannotResolve(type_path), self.module_path));
+                    }
+
                     // clone the struct metadata to release the immutable borrow before recursing
                     let struct_ = match self.type_by_id(subject_type_id).as_struct() {
                         Some(struct_) => struct_.clone(),
