@@ -510,3 +510,18 @@ fn recursive_struct_mutual_rejected() {
     ));
     assert!(err.contains("Recursive type"), "unexpected error: {}", err);
 }
+
+#[test]
+fn empty_struct() {
+    // structs with zero fields are valid unit-like types
+    let result = run(stringify!(
+        struct Unit {}
+        fn main() {
+            let u = Unit {};
+            let v = Unit {};
+            ret_bool(u == v);
+            ret_bool(u != v);
+        }
+    ));
+    assert_all(&result, &[true, false]);
+}

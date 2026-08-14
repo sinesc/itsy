@@ -440,7 +440,7 @@ fn struct_def(i: Input) -> Output<StructDef> {
     }
     fn fields(i: Input) -> Output<Vec<(String, InlineType)>> {
         map(
-            separated_list1(punct(","), field),
+            separated_list0(punct(","), field),
             |list| {
                 list.into_iter().map(|item| (item.0, item.1)).collect()
             }
@@ -1145,7 +1145,7 @@ fn struct_literal(i: Input) -> Output<Literal> {
     }
     fn fields(i: Input) -> Output<UnorderedMap<String, Expression>> {
         map(
-            separated_list1(punct(","), field),
+            separated_list0(punct(","), field),
             |list| {
                 list.into_iter().map(|item| (item.0, item.1)).collect()
             }
