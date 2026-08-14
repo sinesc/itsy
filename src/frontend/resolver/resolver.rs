@@ -295,6 +295,19 @@ impl<'ctx> Resolver<'ctx> {
         }
     }
 
+    /// Like check_type_accepted_for, but uses lenient checking for trait acceptance during early
+    /// resolution stages. Used for function call arguments where impl blocks might appear later.
+    fn check_type_accepted_for_lenient(self: &Self, item: &impl Positioned, given_type_id: TypeId, accepted_type_id: TypeId) -> ResolveResult  {
+        if !self.type_accepted_for(given_type_id, accepted_type_id) && !self.lenient_trait_acceptance(given_type_id, accepted_type_id) {
+            let name_given = self.type_name(given_type_id);
+            let name_accepted = self.type_name(accepted_type_id);
+            let error_kind = ResolveErrorKind::TypeMismatch(name_given, name_accepted);
+            Err(ResolveError::new(item, error_kind, self.module_path))
+        } else {
+            Ok(())
+        }
+    }
+
     /// If `expected_result` is a trait (object) type that every one of the given branch types satisfies
     /// and that is not already their common type, returns it as the type a branching expression (`if` /
     /// `match`) should collapse to. Returns `None` when there is nothing to collapse to, in which case the
@@ -315,11 +328,32 @@ impl<'ctx> Resolver<'ctx> {
         if branch_type_ids.iter().all(|&type_id| type_id == branch_type_ids[0]) {
             return None;
         }
+        // strict check: all branches must genuinely implement the trait
         if branch_type_ids.iter().all(|&type_id| self.type_accepted_for(type_id, expected)) {
             Some(expected)
         } else {
             None
         }
+    }
+
+    /// Lenient trait acceptance check for use during early resolution stages.
+    /// Returns true if a struct/enum with no registered impl traits should be tentatively
+    /// accepted where a trait is expected. This allows impl blocks that appear later in
+    /// the file to be registered before the type check is re-evaluated on a subsequent pass.
+    fn lenient_trait_acceptance(self: &Self, given_type_id: TypeId, trait_type_id: TypeId) -> bool {
+        if self.stage.must_exist() {
+            return false;
+        }
+        let given_ty = self.type_by_id(given_type_id);
+        let trait_ty = self.type_by_id(trait_type_id);
+        // Only allow lenient acceptance for structs/enums that:
+        // 1. Are defined (have a flat name)
+        // 2. Have no impl traits registered yet (impl blocks might not be processed)
+        // 3. The expected type is a trait
+        matches!(given_ty, Type::Struct(_) | Type::Enum(_))
+            && trait_ty.is_trait_object()
+            && self.type_flat_name(given_type_id).is_some()
+            && given_ty.impl_trait_ids().map_or(true, |mut ids| ids.next().is_none())
     }
 
     /// Whether a type id and all of its inner types are fully known (no still-inferring array element,
@@ -387,7 +421,7 @@ impl<'ctx> Resolver<'ctx> {
             }
         } else {
             match (item.type_id(self), expected_result) {
-                (Some(item_type_id), Some(expected_result)) => self.check_type_accepted_for(item, item_type_id, expected_result),
+                (Some(item_type_id), Some(expected_result)) => self.check_type_accepted_for_lenient(item, item_type_id, expected_result),
                 _ => Ok(()),
             }
         }
@@ -1611,6 +1645,23 @@ impl<'ctx> Resolver<'ctx> {
                 // otherwise the else branch must be acceptable for the if branch's type
                 if let Some(trait_type_id) = self.branch_collapse_target(expected_result, &[ if_type_id, else_type_id ]) {
                     item.coerced_type_id = Some(trait_type_id);
+                } else if let Some(trait_type_id) = expected_result.filter(|&tid| self.type_by_id(tid).is_trait_object()) {
+                    // if collapse failed and a trait is expected, check each branch against the trait
+                    // to give a better error message
+                    if !self.type_accepted_for(if_type_id, trait_type_id) {
+                        let name = self.type_name(if_type_id);
+                        let trait_name = self.type_name(trait_type_id);
+                        return Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(name, trait_name), self.module_path));
+                    }
+                    if !self.type_accepted_for(else_type_id, trait_type_id) {
+                        let name = self.type_name(else_type_id);
+                        let trait_name = self.type_name(trait_type_id);
+                        return Err(ResolveError::new(item, ResolveErrorKind::TypeMismatch(name, trait_name), self.module_path));
+                    }
+                    // both branches implement the trait but have different concrete types;
+                    // this shouldn't happen if branch_collapse_target worked correctly,
+                    // but fall back to the original check
+                    self.check_type_accepted_for(item, else_type_id, if_type_id)?;
                 } else {
                     self.check_type_accepted_for(item, else_type_id, if_type_id)?;
                 }
@@ -2345,7 +2396,7 @@ impl<'ctx> Resolver<'ctx> {
 
         // apply expected type if known
         if let Some(expected_type_id) = expected_type_id {
-            self.validate_expected_container_type(item, expected_type_id, |ty| ty.as_array().is_some())?;
+            self.validate_expected_container_type(item, expected_type_id, true)?;
         }
 
         // if we have a type for the array, check if we also have an inner type. if so we want to apply it to all contained literals later.
@@ -2375,6 +2426,17 @@ impl<'ctx> Resolver<'ctx> {
             }
         }
 
+        // if we still don't have an element type but the expected type is a fully-resolved array,
+        // use its element type. this handles empty arrays and forward-referenced types that become
+        // available on a later resolution pass.
+        if elements_type_id.is_none() {
+            if let Some(expected_type_id) = expected_type_id {
+                if let &Type::Array(Array { type_id: Some(expected_element_type_id), .. }) = self.type_by_id(expected_type_id) {
+                    elements_type_id = Some(expected_element_type_id);
+                }
+            }
+        }
+
         // synthesize the type if not yet created, otherwise propagate the inferred element type
         if type_id.is_none() {
             let new_type_id = self.scopes.insert_type(None, Type::Array(Array { type_id: elements_type_id }));
@@ -2394,7 +2456,7 @@ impl<'ctx> Resolver<'ctx> {
 
         // apply expected type if known
         if let Some(expected_type_id) = expected_type_id {
-            self.validate_expected_container_type(item, expected_type_id, |ty| ty.as_map().is_some())?;
+            self.validate_expected_container_type(item, expected_type_id, false)?;
         }
 
         // if we have a type for the map, pick up its known key/value types to apply to the entries

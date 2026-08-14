@@ -533,10 +533,15 @@ impl<'ctx> Resolver<'ctx> {
             let actual_type_id = arguments.args[index].type_id(self);
             // infer arguments
             if actual_type_id.is_none() && expected_type_id.is_some() {
-                if let ast::Expression::Constant(x) = &arguments.args[index] {
-                    if x.constant_id.is_none() {
-                        continue; // FIXME: omfg, get this out of here
-                    }
+                // TODO: why is this here?
+                if let ast::Expression::Constant(c) = &arguments.args[index] && c.constant_id.is_none() {
+                    continue;
+                }
+                // don't infer types for struct literals with explicit type names; their type comes from the struct definition, not the expected type.
+                // this allows forward-referenced structs to resolve correctly on later passes.
+                // TODO: this should probably be checked in other places as well
+                if matches!(&arguments.args[index], ast::Expression::Literal(lit) if matches!(lit.value, ast::LiteralValue::Struct(_)) && lit.type_name.is_some()) {
+                    continue;
                 }
                 self.set_type_id(&mut arguments.args[index], expected_type_id.ice()?)?;
             } else if is_view_wrap && index == 0 {
@@ -545,7 +550,7 @@ impl<'ctx> Resolver<'ctx> {
                     self.validate_view_backing_type(&arguments.args[index], actual_type_id, callee_constant_id)?;
                 }
             } else if let (Some(actual_type_id), Some(expected_type_id)) = (actual_type_id, expected_type_id) {
-                self.check_type_accepted_for(&arguments.args[index], actual_type_id, expected_type_id)?;
+                self.check_type_accepted_for_lenient(&arguments.args[index], actual_type_id, expected_type_id)?;
             }
         }
         Ok(())

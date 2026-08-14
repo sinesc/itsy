@@ -791,3 +791,81 @@ fn match_collapse_ignores_diverging_arm() {
     )));
     assert_all(&result, &[ 105i64, 207i64, 100i64 ]);
 }
+
+#[test]
+fn trait_impl_forward_ref_main_before_all() {
+    // main appears before trait, structs, and impl blocks
+    let result = run(stringify!(
+        fn main() {
+            let collection: [ WhoAmI ] = [];
+            collection.push(A { data: 123 });
+            collection.push(B { data: 456 });
+            ret_i64(collection[0].print());
+            ret_i64(collection[1].print());
+        }
+        trait WhoAmI {
+            fn print(self: Self) -> i64;
+        }
+        struct A { data: u8 }
+        impl WhoAmI for A {
+            fn print(self: Self) -> i64 { self.data as i64 * 10 }
+        }
+        struct B { data: u16 }
+        impl WhoAmI for B {
+            fn print(self: Self) -> i64 { self.data as i64 * 20 }
+        }
+    ));
+    assert_all(&result, &[ 1230i64, 9120i64 ]);
+}
+
+#[test]
+fn trait_impl_forward_ref_main_after_trait() {
+    // main appears after trait but before structs and impl blocks
+    let result = run(stringify!(
+        trait WhoAmI {
+            fn print(self: Self) -> i64;
+        }
+        fn main() {
+            let collection: [ WhoAmI ] = [];
+            collection.push(A { data: 123 });
+            collection.push(B { data: 456 });
+            ret_i64(collection[0].print());
+            ret_i64(collection[1].print());
+        }
+        struct A { data: u8 }
+        impl WhoAmI for A {
+            fn print(self: Self) -> i64 { self.data as i64 * 10 }
+        }
+        struct B { data: u16 }
+        impl WhoAmI for B {
+            fn print(self: Self) -> i64 { self.data as i64 * 20 }
+        }
+    ));
+    assert_all(&result, &[ 1230i64, 9120i64 ]);
+}
+
+#[test]
+fn trait_impl_forward_ref_main_after_structs() {
+    // main appears after trait and structs but before impl blocks
+    let result = run(stringify!(
+        trait WhoAmI {
+            fn print(self: Self) -> i64;
+        }
+        struct A { data: u8 }
+        struct B { data: u16 }
+        fn main() {
+            let collection: [ WhoAmI ] = [];
+            collection.push(A { data: 123 });
+            collection.push(B { data: 456 });
+            ret_i64(collection[0].print());
+            ret_i64(collection[1].print());
+        }
+        impl WhoAmI for A {
+            fn print(self: Self) -> i64 { self.data as i64 * 10 }
+        }
+        impl WhoAmI for B {
+            fn print(self: Self) -> i64 { self.data as i64 * 20 }
+        }
+    ));
+    assert_all(&result, &[ 1230i64, 9120i64 ]);
+}

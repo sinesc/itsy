@@ -277,8 +277,48 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Validate that `expected_type_id` matches the container kind, and apply it to `item`.
-    pub(super) fn validate_expected_container_type(self: &mut Self, item: &mut ast::Literal, expected_type_id: TypeId, is_container: impl FnOnce(&Type) -> bool) -> ResolveResult<()> {
-        if is_container(self.type_by_id(expected_type_id)) {
+    /// The `expected_is_array` parameter indicates whether we expect an array (true) or map (false).
+    pub(super) fn validate_expected_container_type(self: &mut Self, item: &mut ast::Literal, expected_type_id: TypeId, expected_is_array: bool) -> ResolveResult<()> {
+        let expected_ty = self.type_by_id(expected_type_id);
+        let expected_is_container = if expected_is_array {
+            expected_ty.as_array().is_some()
+        } else {
+            expected_ty.as_map().is_some()
+        };
+        if expected_is_container {
+            // if the item already has an incomplete container type (e.g. from a previous resolution
+            // pass where inner types were not yet known), update its inner types instead of
+            // checking for exact equality. this allows forward-referenced types to resolve correctly.
+            if let Some(existing_type_id) = item.type_id(self) {
+                let existing_ty = self.type_by_id(existing_type_id);
+                if matches!(existing_ty, Type::Array(_) | Type::Map(_)) && expected_is_container {
+                    // both are containers of the same kind; propagate expected type's inner types
+                    // to the existing container type instead of replacing it entirely
+                    match (existing_ty, expected_ty) {
+                        (Type::Array(_), Type::Array(expected_arr)) => {
+                            let expected_element = expected_arr.type_id;
+                            let existing_arr_mut = self.type_by_id_mut(existing_type_id).as_array_mut().ice()?;
+                            if existing_arr_mut.type_id.is_none() && expected_element.is_some() {
+                                existing_arr_mut.type_id = expected_element;
+                                return Ok(());
+                            }
+                        },
+                        (Type::Map(_), Type::Map(expected_map)) => {
+                            let expected_key = expected_map.key_type_id;
+                            let expected_value = expected_map.value_type_id;
+                            let existing_map_mut = self.type_by_id_mut(existing_type_id).as_map_mut().ice()?;
+                            if existing_map_mut.key_type_id.is_none() && expected_key.is_some() {
+                                existing_map_mut.key_type_id = expected_key;
+                            }
+                            if existing_map_mut.value_type_id.is_none() && expected_value.is_some() {
+                                existing_map_mut.value_type_id = expected_value;
+                            }
+                            return Ok(());
+                        },
+                        _ => {}
+                    }
+                }
+            }
             self.set_type_id(item, expected_type_id)
         } else {
             let expected_name = self.type_name(expected_type_id);
