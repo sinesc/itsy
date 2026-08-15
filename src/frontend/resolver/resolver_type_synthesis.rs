@@ -51,8 +51,8 @@ impl<'ctx> Resolver<'ctx> {
     fn synthesize_result_type(self: &mut Self, ok_type_id: TypeId) -> TypeId {
         let error_trait_type_id = self.error_trait_type_id;
         let variants = vec![
-            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ])),
-            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ])),
+            ("Ok".to_string(), EnumVariant::Data(vec![ Some(ok_type_id) ], None)),
+            ("Err".to_string(), EnumVariant::Data(vec![ Some(error_trait_type_id) ], None)),
         ];
         // primitive: None -> data-carrying (heap) enum, like a source enum with data variants
         let ty = Type::Enum(Enum { primitive: None, variants, impl_traits: Map::new() });
@@ -81,7 +81,7 @@ impl<'ctx> Resolver<'ctx> {
     /// created and recorded in `option_types`.
     pub(crate) fn synthesize_option_type(self: &mut Self, some_type_id: TypeId) -> TypeId {
         let variants = vec![
-            ("Some".to_string(), EnumVariant::Data(vec![ Some(some_type_id) ])),
+            ("Some".to_string(), EnumVariant::Data(vec![ Some(some_type_id) ], None)),
             ("None".to_string(), EnumVariant::Simple(None)),
         ];
         // primitive: None -> data-carrying (heap) enum, since the Some variant carries data
@@ -376,7 +376,7 @@ impl<'ctx> Resolver<'ctx> {
                     // Data enum: recurse into all variant fields
                     e.variants.iter().all(|(_, v)| {
                         match v {
-                            EnumVariant::Data(fields) => {
+                            EnumVariant::Data(fields, _) => {
                                 fields.iter().filter_map(|&f| f).all(|fid| self.type_has_only_primitive_leaf_fields(fid, seen))
                             },
                             EnumVariant::Simple(_) => true,

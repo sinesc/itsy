@@ -49,13 +49,23 @@ pub struct Constant {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EnumVariant {
     Simple(Option<Numeric>),
-    Data(Vec<Option<TypeId>>),
+    /// Data-carrying variant. The `Vec<Option<TypeId>>` holds field types in canonical order.
+    /// The `Option<Vec<String>>` is `None` for tuple variants and `Some(field_names)` for struct variants,
+    /// mapping each index to its field name.
+    Data(Vec<Option<TypeId>>, Option<Vec<String>>),
 }
 
 impl EnumVariant {
     pub fn as_data(self: &Self) -> Option<&Vec<Option<TypeId>>> {
         match self {
-            Self::Data(d) => Some(d),
+            Self::Data(d, _) => Some(d),
+            _ => None,
+        }
+    }
+    /// Returns the field names for struct variants, or `None` for tuple/simple variants.
+    pub fn as_field_names(self: &Self) -> Option<&Vec<String>> {
+        match self {
+            Self::Data(_, names) => names.as_ref(),
             _ => None,
         }
     }

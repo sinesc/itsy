@@ -165,7 +165,7 @@ pub(crate) trait Resolvable: Display {
     fn check_enum_variant(self: &Self, container: &impl MetaContainer, variant: &EnumVariant, seen: &mut Set<TypeId>) -> Progress {
         match variant {
             EnumVariant::Simple(_) => Progress::new(1, 1),
-            EnumVariant::Data(opt_type_ids) => {
+            EnumVariant::Data(opt_type_ids, _) => {
                 opt_type_ids.iter()
                     .map(|opt_type_id| opt_type_id.map_or(Progress::new(0, 1), |type_id| self.check_type_id(container, type_id, seen)))
                     .fold(Progress::zero(), |acc, a| acc + a)
@@ -1088,11 +1088,12 @@ impl_resolvable!(ViewDef {
 });
 
 
-/// The kind of a variant, either `Simple` (without associated data) or `Data`.
+/// The kind of a variant, either `Simple` (without associated data), `Data` (tuple-style) or `Struct` (named fields).
 #[derive(Debug, Clone)]
 pub enum VariantKind {
     Simple(Option<ConstantId>, Option<Literal>),
     Data(Option<ConstantId>, Vec<InlineType>),
+    Struct(Option<ConstantId>, UnorderedMap<String, InlineType>),
 }
 
 impl Resolvable for VariantKind {
@@ -1102,6 +1103,12 @@ impl Resolvable for VariantKind {
                 let mut result = Vec::new();
                 result.append(&mut impl_resolvable!(@append *constant_id, ConstantId));
                 result.append(&mut impl_resolvable!(@append fields, ItemList));
+                return result;
+            },
+            VariantKind::Struct(constant_id, fields) => {
+                let mut result = Vec::new();
+                result.append(&mut impl_resolvable!(@append *constant_id, ConstantId));
+                result.append(&mut impl_resolvable!(@append fields, ItemMap));
                 return result;
             },
             VariantKind::Simple(constant_id, literal) => {
@@ -1119,6 +1126,7 @@ impl Display for VariantKind {
         match self {
             Self::Simple(_, opt_lit) => if let Some(l) = opt_lit { write!(f, "{}", l) } else { write!(f, "") },
             Self::Data(_, inlines) => write!(f, "{}", inlines.iter().map(|i| format!("{}", i)).collect::<Vec<String>>().join(", ")),
+            Self::Struct(_, fields) => write!(f, "{{ {} }}", fields.iter().map(|(n, t)| format!("{}: {}", n, t)).collect::<Vec<String>>().join(", ")),
         }
     }
 }

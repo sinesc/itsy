@@ -88,7 +88,7 @@ fn ctor_fields(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCtor) -> 
     match ctor {
         MatchCtor::Bool(_) => Vec::new(),
         MatchCtor::Variant(index) => match meta.type_by_id(type_id).as_enum().and_then(|enum_| enum_.variants.get(*index)) {
-            Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
+            Some((_, EnumVariant::Data(field_type_ids, _))) => field_type_ids.clone(),
             _ => Vec::new(),
         },
         MatchCtor::Struct => meta.type_by_id(type_id).as_struct().map_or_else(Vec::new, |struct_| struct_.fields.iter().map(|(_, ty)| *ty).collect()),
@@ -122,6 +122,22 @@ fn specialize_row<'a>(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCt
             MatchCtor::Struct => meta.type_by_id(type_id).as_struct().map_or_else(Vec::new, |struct_| {
                 struct_.fields.iter().map(|(field_name, _)| structure.fields.iter().find(|(name, _)| &name.name == field_name).map(|(_, pattern)| pattern)).collect()
             }),
+            // struct variant pattern: check if the variant matches and reorder fields into canonical order
+            MatchCtor::Variant(index) => {
+                let enum_ = meta.type_by_id(type_id).as_enum();
+                let variant_name = structure.path.segments.last().map(|s| &s.name);
+                if let Some((_, v)) = enum_.and_then(|e| e.variants.get(*index)).filter(|(name, _)| Some(name.as_str()) == variant_name.map(|s| s.as_str())) {
+                    if let Some(field_names) = v.as_field_names() {
+                        field_names.iter().map(|field_name| {
+                            structure.fields.iter().find(|(name, _)| &name.name == field_name).map(|(_, pattern)| pattern)
+                        }).collect()
+                    } else {
+                        return None; // not a struct variant
+                    }
+                } else {
+                    return None;
+                }
+            },
             _ => return None,
         },
         // or-patterns at the head are flattened away by expand_or_heads before specialization is reached
@@ -169,7 +185,15 @@ fn ctor_to_string(meta: &impl MetaContainer, type_id: TypeId, ctor: &MatchCtor, 
             let enum_ = meta.type_by_id(type_id).as_enum();
             let type_name = meta.type_name(type_id);
             match enum_.and_then(|enum_| enum_.variants.get(*index)) {
-                Some((name, EnumVariant::Data(_))) => format!("{}::{}({})", type_name, name, sub_witness.join(", ")),
+                Some((name, EnumVariant::Data(_, Some(field_names)))) => {
+                    // struct variant
+                    let fields = field_names.iter().zip(sub_witness).map(|(name, pattern)| format!("{}: {}", name, pattern)).collect::<Vec<_>>().join(", ");
+                    format!("{}::{} {{{}}}", type_name, name, fields)
+                },
+                Some((name, EnumVariant::Data(_, None))) => {
+                    // tuple variant
+                    format!("{}::{}({})", type_name, name, sub_witness.join(", "))
+                },
                 Some((name, _)) => format!("{}::{}", type_name, name),
                 None => "_".to_string(),
             }

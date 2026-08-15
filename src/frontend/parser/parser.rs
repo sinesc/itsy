@@ -381,10 +381,27 @@ fn enum_def(i: Input) -> Output<EnumDef> {
             pair(
             ident,
             alt((
+                // Struct variant: VariantName { field: Type, field2: Type }
+                map(
+                    delimited(
+                        punct("{"),
+                        pair(
+                            separated_list0(punct(","), pair(ident, pair(punct(":"), inline_type))),
+                            opt(punct(","))
+                        ),
+                        punct("}")
+                    ),
+                    move |(fields, _)| {
+                        let fields = fields.into_iter().map(|(name, (_, ty))| (name.name, ty)).collect();
+                        VariantKind::Struct(None, fields)
+                    }
+                ),
+                // Tuple variant: VariantName(Type1, Type2)
                 map(
                     delimited(punct("("), separated_list0(punct(","), inline_type), preceded(opt(punct(",")), punct(")"))),
                     move |fields| VariantKind::Data(None, fields)
                 ),
+                // Simple variant: VariantName or VariantName = value
                 map(
                     opt(preceded(punct("="), numeric_literal)),
                     move |variant_value| VariantKind::Simple(None, variant_value)
@@ -409,7 +426,7 @@ fn enum_def(i: Input) -> Output<EnumDef> {
             let mut have_value = false;
             for variant in &pair.1.2 {
                 match &variant.kind {
-                    VariantKind::Data(_, _) => have_data = true,
+                    VariantKind::Data(_, _) | VariantKind::Struct(_, _) => have_data = true,
                     VariantKind::Simple(_, d) if d.is_some() => have_value = true,
                     _ => {}
                 }

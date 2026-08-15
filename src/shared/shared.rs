@@ -89,7 +89,7 @@ pub trait MetaContainer {
     /// flat name; this structural check lets `type_name` render it legibly in diagnostics.
     fn result_ok_type_id(self: &Self, type_id: TypeId) -> Option<TypeId> {
         if let Type::Enum(Enum { primitive: None, variants, .. }) = self.type_by_id(type_id) {
-            if let [(ok_name, EnumVariant::Data(ok_fields)), (err_name, EnumVariant::Data(err_fields))] = &variants[..] {
+            if let [(ok_name, EnumVariant::Data(ok_fields, _)), (err_name, EnumVariant::Data(err_fields, _))] = &variants[..] {
                 if ok_name == "Ok" && err_name == "Err" && ok_fields.len() == 1 && err_fields.len() == 1 {
                     if let Some(err_type_id) = err_fields[0] {
                         // the Err payload is fixed to the built-in `Error` trait
@@ -105,7 +105,7 @@ pub trait MetaContainer {
     /// If the given type is a compiler-synthesized `Option<T>` enum, returns the `Some` payload type `T`.
     fn option_some_type_id(self: &Self, type_id: TypeId) -> Option<TypeId> {
         if let Type::Enum(Enum { primitive: None, variants, .. }) = self.type_by_id(type_id) {
-            if let [(some_name, EnumVariant::Data(some_fields)), (none_name, EnumVariant::Simple(_))] = &variants[..] {
+            if let [(some_name, EnumVariant::Data(some_fields, _)), (none_name, EnumVariant::Simple(_))] = &variants[..] {
                 if some_name == "Some" && none_name == "None" && some_fields.len() == 1 {
                     return some_fields[0];
                 }
@@ -291,7 +291,7 @@ pub trait MetaContainer {
                 } else {
                     2 + e.variants.iter().map(|(_, v)| {
                         match v {
-                            EnumVariant::Data(fields) => {
+                            EnumVariant::Data(fields, _) => {
                                 fields.iter().filter_map(|&f| f).map(|fid| self.compute_packed_size(fid)).sum::<u8>()
                             },
                             EnumVariant::Simple(_) => 0u8,

@@ -125,7 +125,7 @@ pub(super) fn insert<T: VMFunc<T>>(scopes: &mut Scopes, primitives: &HashMap<&Ty
                         }
                         // data variant: a constructor function tagged with its variant index
                         scopes.insert_function(&path, Some(type_id), field_type_ids.clone(), Some(FunctionKind::Variant(type_id, index as VariantIndex)));
-                        enum_variants.push((name.to_string(), EnumVariant::Data(field_type_ids)));
+                        enum_variants.push((name.to_string(), EnumVariant::Data(field_type_ids, None)));
                     }
                 }
                 *scopes.type_mut(type_id) = Type::Enum(Enum { variants: enum_variants, impl_traits: Map::new(), primitive: None });

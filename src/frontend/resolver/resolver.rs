@@ -843,7 +843,17 @@ impl<'ctx> Resolver<'ctx> {
                         self.resolve_inline_type(field)?;
                         field_type_ids.push(field.type_id(self));
                     }
-                    variants.push((variant.ident.name.clone(), EnumVariant::Data(field_type_ids)));
+                    variants.push((variant.ident.name.clone(), EnumVariant::Data(field_type_ids, None)));
+                },
+                ast::VariantKind::Struct(_, fields) => {
+                    let mut field_type_ids = Vec::new();
+                    let mut field_names = Vec::new();
+                    for (name, field) in fields.iter_mut() {
+                        self.resolve_inline_type(field)?;
+                        field_names.push(name.clone());
+                        field_type_ids.push(field.type_id(self));
+                    }
+                    variants.push((variant.ident.name.clone(), EnumVariant::Data(field_type_ids, Some(field_names))));
                 },
                 ast::VariantKind::Simple(_, value_literal) => {
                     if let Some(value_literal) = value_literal {
@@ -918,13 +928,24 @@ impl<'ctx> Resolver<'ctx> {
                             *constant_id = Some(self.scopes.insert_function(&path, Some(type_id), arg_type_ids, Some(kind)));
                         }
                     },
+                    ast::VariantKind::Struct(constant_id @ None, fields) => {
+                        // struct variant: arguments are in the same canonical order as stored in the enum metadata
+                        let field_names: Vec<_> = fields.keys().cloned().collect();
+                        let arg_type_ids: Vec<_> = field_names.iter().map(|name| fields.get(name).unwrap().type_id(self)).collect::<Vec<_>>();
+                        if arg_type_ids.iter().all(|t| t.is_some()) {
+                            let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
+                            let kind = FunctionKind::Variant(item.type_id.ice()?, index as VariantIndex);
+                            *constant_id = Some(self.scopes.insert_function(&path, Some(type_id), arg_type_ids, Some(kind)));
+                        }
+                    },
                     ast::VariantKind::Simple(constant_id, _) => {
                         let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
                         let variants = &self.type_by_id_mut(type_id).as_enum_mut().ice()?.variants;
                         let discriminant = variants[index].1.as_simple().ice()?;
                         *constant_id = Some(self.scopes.insert_constant(&path, type_id, Some(type_id), ConstantValue::Discriminant(discriminant)));
                     },
-                    _ => { },
+                    // already resolved
+                    ast::VariantKind::Data(Some(_), _) | ast::VariantKind::Struct(Some(_), _) => { },
                 }
             }
         }
@@ -1875,7 +1896,7 @@ impl<'ctx> Resolver<'ctx> {
                     let variant_name = variant.path.segments.last().ice()?.name.clone();
                     // pull the variant's field types out of the enum (cloned to release the immutable borrow before recursing)
                     let field_type_ids = match enum_.variants.iter().find(|(name, _)| name == &variant_name) {
-                        Some((_, EnumVariant::Data(field_type_ids))) => field_type_ids.clone(),
+                        Some((_, EnumVariant::Data(field_type_ids, _))) => field_type_ids.clone(),
                         Some((_, EnumVariant::Simple(_))) => return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(format!("Enum variant '{}' carries no data", variant_name)), self.module_path)),
                         None => return Err(ResolveError::new(variant, ResolveErrorKind::UndefinedMember(variant_name), self.module_path)),
                     };
@@ -1892,53 +1913,124 @@ impl<'ctx> Resolver<'ctx> {
                     }
                 }
             },
-            // a struct matches field-wise against the sub-patterns; all fields must be present
+            // a struct or struct-variant pattern matches field-wise against the sub-patterns
             Pattern::Struct(structure) => {
                 if let Some(subject_type_id) = subject_type_id {
-                    // validate the path: the full path must resolve to the subject type
-                    let resolved_segments: Vec<String> = structure.path.segments.iter().enumerate().map(|(i, seg)| {
-                        if i == 0 {
-                            self.scopes.alias(self.scope_id, &seg.name)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| seg.name.clone())
+                    // check if subject is an enum with a struct variant
+                    let is_enum_struct_variant = if let Some(enum_) = self.type_by_id(subject_type_id).as_enum() {
+                        // validate the path: for 2+ segment paths the type portion (all segments except the last
+                        // variant name) must resolve to the subject type
+                        if structure.path.segments.len() >= 2 {
+                            let type_segments: Vec<String> = structure.path.segments.iter().take(structure.path.segments.len() - 1).enumerate().map(|(i, seg)| {
+                                if i == 0 {
+                                    self.scopes.alias(self.scope_id, &seg.name)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| seg.name.clone())
+                                } else {
+                                    seg.name.clone()
+                                }
+                            }).collect();
+                            let type_path = self.make_path(&type_segments);
+                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                                if path_type_id != subject_type_id {
+                                    return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
+                                        format!("Struct variant pattern type '{}' does not match subject type {}",
+                                            type_path, self.type_name(subject_type_id))
+                                    ), self.module_path));
+                                }
+                            } else {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::CannotResolve(type_path), self.module_path));
+                            }
                         } else {
-                            seg.name.clone()
-                        }
-                    }).collect();
-                    let type_path = self.make_path(&resolved_segments);
-                    if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
-                        if path_type_id != subject_type_id {
                             return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
-                                format!("Struct pattern type '{}' does not match subject type {}",
-                                    type_path, self.type_name(subject_type_id))
-                            ), self.module_path));
+                                "Struct variant pattern must be qualified with the enum type name, e.g. `Enum::Variant { ... }`".to_string()), self.module_path));
+                        }
+
+                        let variant_name = structure.path.segments.last().ice_msg("No variant name")?.name.clone();
+                        // check if this variant is a struct variant (has field names)
+                        enum_.variants.iter().find(|(name, _)| name == &variant_name)
+                            .and_then(|(_, v)| v.as_data().zip(v.as_field_names()))
+                            .is_some()
+                    } else {
+                        false
+                    };
+
+                    if is_enum_struct_variant {
+                        let variant_name = structure.path.segments.last().ice()?.name.clone();
+                        let enum_ = self.type_by_id(subject_type_id).as_enum().ice_msg("Expected enum type")?;
+                        let (field_type_ids, field_names) = enum_.variants.iter().find(|(name, _)| name == &variant_name)
+                            .and_then(|(_, v)| v.as_data().cloned().zip(v.as_field_names().cloned()))
+                            .ice_msg(&format!("Struct variant '{}' not found or is not a struct variant", variant_name))?;
+
+                        // build a map from field name to (index, type_id) for validation
+                        let field_map: Map<String, (usize, Option<TypeId>)> = field_names.iter().zip(field_type_ids.iter()).enumerate()
+                            .map(|(i, (name, ty))| (name.clone(), (i, *ty))).collect();
+
+                        // reject unknown fields
+                        for (field_name, _) in structure.fields.iter() {
+                            if !field_map.contains_key(&field_name.name) {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::UndefinedMember(field_name.name.clone()), self.module_path));
+                            }
+                        }
+                        // each field may be matched at most once; without a trailing `..` every field is also
+                        // required, so a missing field (count 0) is an error unless rest-syntax was given
+                        for field_name in field_names.iter() {
+                            let count = structure.fields.iter().filter(|(name, _)| &name.name == field_name).count();
+                            if count > 1 || (count == 0 && !structure.rest) {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Struct variant pattern must match field '{}' exactly once", field_name)), self.module_path));
+                            }
+                        }
+                        for (field_name, field_pattern) in structure.fields.iter_mut() {
+                            let field_type_id = field_map.get(&field_name.name).ice_msg(&format!("Field '{}' not found", field_name.name)).unwrap().1;
+                            self.resolve_pattern(field_pattern, field_type_id)?;
                         }
                     } else {
-                        return Err(ResolveError::new(structure, ResolveErrorKind::CannotResolve(type_path), self.module_path));
-                    }
+                        // regular struct type pattern
+                        // validate the path: the full path must resolve to the subject type
+                        let resolved_segments: Vec<String> = structure.path.segments.iter().enumerate().map(|(i, seg)| {
+                            if i == 0 {
+                                self.scopes.alias(self.scope_id, &seg.name)
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| seg.name.clone())
+                            } else {
+                                seg.name.clone()
+                            }
+                        }).collect();
+                        let type_path = self.make_path(&resolved_segments);
+                        if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                            if path_type_id != subject_type_id {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
+                                    format!("Struct pattern type '{}' does not match subject type {}",
+                                        type_path, self.type_name(subject_type_id))
+                                ), self.module_path));
+                            }
+                        } else {
+                            return Err(ResolveError::new(structure, ResolveErrorKind::CannotResolve(type_path), self.module_path));
+                        }
 
-                    // clone the struct metadata to release the immutable borrow before recursing
-                    let struct_ = match self.type_by_id(subject_type_id).as_struct() {
-                        Some(struct_) => struct_.clone(),
-                        None => return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Cannot match struct pattern against non-struct type {}", self.type_name(subject_type_id))), self.module_path)),
-                    };
-                    // reject unknown fields
-                    for (field_name, _) in structure.fields.iter() {
-                        if !struct_.has_field(&field_name.name) {
-                            return Err(ResolveError::new(structure, ResolveErrorKind::UndefinedMember(field_name.name.clone()), self.module_path));
+                        // clone the struct metadata to release the immutable borrow before recursing
+                        let struct_ = match self.type_by_id(subject_type_id).as_struct() {
+                            Some(struct_) => struct_.clone(),
+                            None => return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Cannot match struct pattern against non-struct type {}", self.type_name(subject_type_id))), self.module_path)),
+                        };
+                        // reject unknown fields
+                        for (field_name, _) in structure.fields.iter() {
+                            if !struct_.has_field(&field_name.name) {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::UndefinedMember(field_name.name.clone()), self.module_path));
+                            }
                         }
-                    }
-                    // each field may be matched at most once; without a trailing `..` every field is also
-                    // required, so a missing field (count 0) is an error unless rest-syntax was given
-                    for (struct_field, _) in struct_.fields.iter() {
-                        let count = structure.fields.iter().filter(|(name, _)| &name.name == struct_field).count();
-                        if count > 1 || (count == 0 && !structure.rest) {
-                            return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Struct pattern must match field '{}' exactly once", struct_field)), self.module_path));
+                        // each field may be matched at most once; without a trailing `..` every field is also
+                        // required, so a missing field (count 0) is an error unless rest-syntax was given
+                        for (struct_field, _) in struct_.fields.iter() {
+                            let count = structure.fields.iter().filter(|(name, _)| &name.name == struct_field).count();
+                            if count > 1 || (count == 0 && !structure.rest) {
+                                return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(format!("Struct pattern must match field '{}' exactly once", struct_field)), self.module_path));
+                            }
                         }
-                    }
-                    for (field_name, field_pattern) in structure.fields.iter_mut() {
-                        let field_type_id = struct_.type_id(&field_name.name);
-                        self.resolve_pattern(field_pattern, field_type_id)?;
+                        for (field_name, field_pattern) in structure.fields.iter_mut() {
+                            let field_type_id = struct_.type_id(&field_name.name);
+                            self.resolve_pattern(field_pattern, field_type_id)?;
+                        }
                     }
                 } else {
                     // subject type unknown this pass; still recurse so nested patterns get a chance to make progress
@@ -2446,19 +2538,62 @@ impl<'ctx> Resolver<'ctx> {
 
         // resolve type from name
         let type_name = item.type_name.as_mut().ice()?;
-        let type_id = self.resolve_type_name(type_name, None)?;
 
-        // resolve fields from field definition
-        if let Some(type_id) = type_id {
-            self.set_type_id(item, type_id)?;
-            let struct_def = self.type_by_id(type_id).as_struct().usr(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()))?.clone();
-            let struct_ = item.value.as_struct_mut().ice()?;
-            for (name, field) in &mut struct_.fields {
-                if !struct_def.has_field(name) {
-                    return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(name.clone()), self.module_path));
+        // check if this is a struct enum variant (e.g. `Enum::Variant { field: value }`)
+        let is_struct_variant = if type_name.path.segments.len() >= 2 {
+            let type_segments: Vec<String> = type_name.path.segments.iter().take(type_name.path.segments.len() - 1).map(|s| s.name.clone()).collect();
+            let type_path = self.make_path(&type_segments);
+            let variant_name = type_name.path.segments.last().map(|s| &s.name);
+            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                if let Some(enum_) = self.type_by_id(path_type_id).as_enum() {
+                    enum_.variants.iter().find(|(name, _)| Some(name.as_str()) == variant_name.map(|s| s.as_str()))
+                        .and_then(|(_, v)| v.as_field_names())
+                        .map(|field_names| (path_type_id, field_names.clone()))
+                } else {
+                    None
                 }
-                self.resolve_expression(field, struct_def.type_id(name))?;
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some((type_id, field_names)) = is_struct_variant {
+            // struct enum variant
+            // clone variant name before borrowing item mutably
+            let variant_name = type_name.path.segments.last().map(|s| s.name.clone());
+            // set type_name's type_id so it is considered resolved (Test::Variant is not a real type)
+            type_name.type_id = Some(type_id);
+            self.set_type_id(item, type_id)?;
+            let struct_ = item.value.as_struct_mut().ice()?;
+            let field_types = self.type_by_id(type_id).as_enum().ice_msg("Expected enum type")?
+                .variants.iter().find(|(name, _)| Some(name.as_str()) == variant_name.as_deref())
+                .and_then(|(_, v)| v.as_data().cloned())
+                .ice_msg("Struct variant not found")?;
+            // build name -> type_id map
+            let field_type_map: Map<String, Option<TypeId>> = field_names.iter().zip(field_types.iter()).map(|(n, t)| (n.clone(), *t)).collect();
+            for (name, field) in &mut struct_.fields {
+                let field_type_id = *field_type_map.get(name).ice_msg(&format!("Field '{}' not found", name))?;
+                self.resolve_expression(field, field_type_id)?;
                 self.types_resolved(field, None)?;
+            }
+        } else if type_name.path.segments.len() < 2 {
+            // regular struct literal (single-segment path) - resolve normally
+            let type_id = self.resolve_type_name(type_name, None)?;
+
+            // resolve fields from field definition
+            if let Some(type_id) = type_id {
+                self.set_type_id(item, type_id)?;
+                let struct_def = self.type_by_id(type_id).as_struct().usr(Some(item), ResolveErrorKind::Internal("Tried to resolve a struct but got different type".to_string()))?.clone();
+                let struct_ = item.value.as_struct_mut().ice()?;
+                for (name, field) in &mut struct_.fields {
+                    if !struct_def.has_field(name) {
+                        return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(name.clone()), self.module_path));
+                    }
+                    self.resolve_expression(field, struct_def.type_id(name))?;
+                    self.types_resolved(field, None)?;
+                }
             }
         }
 

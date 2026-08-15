@@ -1087,25 +1087,61 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     self.compile_pattern_test(subject_type_id, view_stride, &element_access, element, fail_jumps)?;
                 }
             },
-            // a struct has no tag; it is matched field-wise against the sub-patterns
+            // a struct or struct-variant pattern matches field-wise against the sub-patterns
             ast::Pattern::Struct(structure) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
-                let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
-                for (field_name, field_pattern) in structure.fields.iter() {
-                    let rel_offset = if view_stride.is_some() {
-                        self.compute_struct_member_offset_packed(&struct_, &field_name.name)
-                    } else {
-                        self.compute_member_offset(&struct_, &field_name.name)
-                    };
-                    let offset = if view_stride.is_some() {
-                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
-                    } else {
-                        rel_offset
-                    };
-                    let field_type_id = struct_.type_id(&field_name.name).ice()?;
-                    let mut element_access = access.to_vec();
-                    element_access.push((offset, field_type_id));
-                    self.compile_pattern_test(subject_type_id, view_stride, &element_access, field_pattern, fail_jumps)?;
+                // check if this is a struct enum variant pattern
+                let is_enum_struct_variant = if let Some(enum_) = self.ty(&value_type_id).as_enum() {
+                    let variant_name = structure.path.segments.last().map(|s| &s.name);
+                    enum_.variants.iter().find(|(name, _)| Some(name.as_str()) == variant_name.map(|x| x.as_str()))
+                        .and_then(|(_, v)| v.as_field_names())
+                        .is_some()
+                } else {
+                    false
+                };
+
+                if is_enum_struct_variant {
+                    // struct enum variant pattern
+                    let enum_ = self.ty(&value_type_id).as_enum().ice_msg("Expected enum type")?;
+                    let variant_name = structure.path.segments.last().ice_msg("No variant name")?.name.clone();
+                    let (field_type_ids, field_names) = enum_.variants.iter().find(|(name, _)| name == &variant_name)
+                        .and_then(|(_, v)| v.as_data().cloned().zip(v.as_field_names().cloned()))
+                        .ice_msg(&format!("Struct variant '{}' not found", variant_name))?;
+                    // build name -> (index, type_id) map
+                    let field_map: Map<String, (usize, TypeId)> = field_names.iter().zip(field_type_ids.iter()).enumerate()
+                        .filter_map(|(i, (name, ty))| ty.map(|t| (name.clone(), (i, t)))).collect();
+
+                    for (field_name, field_pattern) in structure.fields.iter() {
+                        let (index, field_type_id) = field_map.get(&field_name.name).ice_msg(&format!("Field '{}' not found", field_name.name))?;
+                        let rel_offset = self.variant_field_offset(&field_type_ids, *index, view_stride.is_some())?;
+                        let offset = if view_stride.is_some() {
+                            access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                        } else {
+                            rel_offset
+                        };
+                        let mut element_access = access.to_vec();
+                        element_access.push((offset, *field_type_id));
+                        self.compile_pattern_test(subject_type_id, view_stride, &element_access, field_pattern, fail_jumps)?;
+                    }
+                } else {
+                    // regular struct pattern
+                    let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
+                    for (field_name, field_pattern) in structure.fields.iter() {
+                        let rel_offset = if view_stride.is_some() {
+                            self.compute_struct_member_offset_packed(&struct_, &field_name.name)
+                        } else {
+                            self.compute_member_offset(&struct_, &field_name.name)
+                        };
+                        let offset = if view_stride.is_some() {
+                            access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                        } else {
+                            rel_offset
+                        };
+                        let field_type_id = struct_.type_id(&field_name.name).ice()?;
+                        let mut element_access = access.to_vec();
+                        element_access.push((offset, field_type_id));
+                        self.compile_pattern_test(subject_type_id, view_stride, &element_access, field_pattern, fail_jumps)?;
+                    }
                 }
             },
             // an or-pattern matches if any alternative matches: test each in turn, short-circuiting to the
@@ -1195,22 +1231,55 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             // descend into each struct field sub-pattern, binding whatever variables it introduces
             ast::Pattern::Struct(structure) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
-                let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
-                for (field_name, field_pattern) in structure.fields.iter() {
-                    let rel_offset = if view_stride.is_some() {
-                        self.compute_struct_member_offset_packed(&struct_, &field_name.name)
-                    } else {
-                        self.compute_member_offset(&struct_, &field_name.name)
-                    };
-                    let offset = if view_stride.is_some() {
-                        access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
-                    } else {
-                        rel_offset
-                    };
-                    let field_type_id = struct_.type_id(&field_name.name).ice()?;
-                    let mut element_access = access.to_vec();
-                    element_access.push((offset, field_type_id));
-                    self.compile_pattern_bind(subject_type_id, view_stride, &element_access, field_pattern)?;
+                // check if this is a struct enum variant pattern
+                let is_enum_struct_variant = if let Some(enum_) = self.ty(&value_type_id).as_enum() {
+                    let variant_name = structure.path.segments.last().map(|s| &s.name);
+                    enum_.variants.iter().find(|(name, _)| Some(name.as_str()) == variant_name.map(|x| x.as_str()))
+                        .and_then(|(_, v)| v.as_field_names())
+                        .is_some()
+                } else {
+                    false
+                };
+
+                if is_enum_struct_variant {
+                    let enum_ = self.ty(&value_type_id).as_enum().ice_msg("Expected enum type")?;
+                    let variant_name = structure.path.segments.last().ice_msg("No variant name")?.name.clone();
+                    let (field_type_ids, field_names) = enum_.variants.iter().find(|(name, _)| name == &variant_name)
+                        .and_then(|(_, v)| v.as_data().cloned().zip(v.as_field_names().cloned()))
+                        .ice_msg(&format!("Struct variant '{}' not found", variant_name))?;
+                    let field_map: Map<String, (usize, TypeId)> = field_names.iter().zip(field_type_ids.iter()).enumerate()
+                        .filter_map(|(i, (name, ty))| ty.map(|t| (name.clone(), (i, t)))).collect();
+
+                    for (field_name, field_pattern) in structure.fields.iter() {
+                        let (index, field_type_id) = field_map.get(&field_name.name).ice_msg(&format!("Field '{}' not found", field_name.name))?;
+                        let rel_offset = self.variant_field_offset(&field_type_ids, *index, view_stride.is_some())?;
+                        let offset = if view_stride.is_some() {
+                            access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                        } else {
+                            rel_offset
+                        };
+                        let mut element_access = access.to_vec();
+                        element_access.push((offset, *field_type_id));
+                        self.compile_pattern_bind(subject_type_id, view_stride, &element_access, field_pattern)?;
+                    }
+                } else {
+                    let struct_ = self.ty(&value_type_id).as_struct().ice()?.clone();
+                    for (field_name, field_pattern) in structure.fields.iter() {
+                        let rel_offset = if view_stride.is_some() {
+                            self.compute_struct_member_offset_packed(&struct_, &field_name.name)
+                        } else {
+                            self.compute_member_offset(&struct_, &field_name.name)
+                        };
+                        let offset = if view_stride.is_some() {
+                            access.last().map(|&(off, _)| off).unwrap_or(0) + rel_offset
+                        } else {
+                            rel_offset
+                        };
+                        let field_type_id = struct_.type_id(&field_name.name).ice()?;
+                        let mut element_access = access.to_vec();
+                        element_access.push((offset, field_type_id));
+                        self.compile_pattern_bind(subject_type_id, view_stride, &element_access, field_pattern)?;
+                    }
                 }
             },
         }
@@ -1761,26 +1830,62 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 }
             },
             LiteralValue::Struct(struct_literal) => {
-                let struct_def = ty.as_struct().ice_msg("Expected struct, got something else")?;
-                // collect fields first to avoid borrow checker
-                let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
-
-                if item.value.is_const_serializable() {
-                    // all fields are primitive - hoist to const pool
-                    let const_offset = self.store_const_primitive_struct(&fields, item)?;
-                    // emit upload_const - const_offset points to the size on the stack
-                    let type_id = item.type_id(self).ice()?;
-                    let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
-                    self.writer.upload_const(const_offset, implementor_index);
+                // check if this is a struct enum variant (e.g. `Enum::Variant { field: value }`)
+                let is_enum_struct_variant = if let Some(enum_) = ty.as_enum() {
+                    // the type_name path should be Enum::VariantName
+                    let variant_name = item.type_name.as_ref().and_then(|tn| tn.path.segments.last()).map(|s| s.name.as_str());
+                    enum_.variants.iter().enumerate()
+                        .find_map(|(i, (name, v))| {
+                            if Some(name.as_str()) == variant_name {
+                                v.as_field_names().map(|fnames| (i as VariantIndex, fnames.clone(), v.as_data().cloned()))
+                            } else {
+                                None
+                            }
+                        })
                 } else {
-                    // at least one field is non-constant - use existing push-then-upload path
+                    None
+                };
+
+                if let Some((variant_index, field_names, variant_field_types)) = is_enum_struct_variant {
+                    // collect fields in canonical order
+                    let mut fields = Vec::new();
+                    for name in &field_names {
+                        fields.push(struct_literal.fields.get(name).ice_msg(&format!("Missing struct variant field '{}'", name))?);
+                    }
+
+                    // compile like a variant constructor: push variant index, then fields, then upload
+                    let index_type = Type::unsigned(size_of::<VariantIndex>());
+                    self.write_immediate(&index_type, Numeric::Unsigned(variant_index as u64))?;
                     for field in &fields {
                         self.compile_expression(field)?;
                     }
-                    let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type, got something else")?;
-                    let size = struct_ty.fields.iter().filter_map(|(_, f)| *f).fold(0, |acc, fid| acc + self.type_by_id(fid).primitive_size() as StackAddress);
                     let type_id = item.type_id(self).ice()?;
-                    self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                    // compute actual size from variant fields
+                    let variant_field_types = variant_field_types.ice_msg("Expected data variant")?;
+                    let size: StackAddress = variant_field_types.iter().filter_map(|&f| f).fold(0, |acc, fid| acc + self.type_by_id(fid).primitive_size() as StackAddress);
+                    self.writer.upload(size + index_type.primitive_size() as StackAddress, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                } else {
+                    let struct_def = ty.as_struct().ice_msg("Expected struct, got something else")?;
+                    // collect fields first to avoid borrow checker
+                    let fields: Vec<_> = struct_def.fields.iter().map(|(name, _)| struct_literal.fields.get(name).expect("Missing struct field")).collect();
+
+                    if item.value.is_const_serializable() {
+                        // all fields are primitive - hoist to const pool
+                        let const_offset = self.store_const_primitive_struct(&fields, item)?;
+                        // emit upload_const - const_offset points to the size on the stack
+                        let type_id = item.type_id(self).ice()?;
+                        let implementor_index = *self.trait_implementor_indices.get(&type_id).unwrap_or(&0);
+                        self.writer.upload_const(const_offset, implementor_index);
+                    } else {
+                        // at least one field is non-constant - use existing push-then-upload path
+                        for field in &fields {
+                            self.compile_expression(field)?;
+                        }
+                        let struct_ty = self.ty(item).as_struct().ice_msg("Expected struct type, got something else")?;
+                        let size = struct_ty.fields.iter().filter_map(|(_, f)| *f).fold(0, |acc, fid| acc + self.type_by_id(fid).primitive_size() as StackAddress);
+                        let type_id = item.type_id(self).ice()?;
+                        self.writer.upload(size, *self.trait_implementor_indices.get(&type_id).unwrap_or(&0));
+                    }
                 }
             },
         }
