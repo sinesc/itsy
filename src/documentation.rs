@@ -13,7 +13,7 @@
 //! [Arrays](crate::documentation::Array), variable-length lists of values of the same type: `[ v, ... ]`.\
 //! [Maps](crate::documentation::Map), variable-length associations of keys to values: `[ k => v, ... ]`.\
 //! [Structs](crate::documentation::structs), products of multiple types: `struct { field1: Type1, ... }`.\
-//! [Enums](crate::documentation::enums), disjoint unions (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), ... }`.
+//! [Enums](crate::documentation::enums), disjoint unions (one of n variants, variants can carry data): `enum { A, B(p1, p2, ...), C { f1: T1, f2: T2, ... }, ... }`.
 //!
 //! # Special purpose container
 //!
@@ -314,7 +314,8 @@ pub mod structs { }
 /// Enums: disjoint unions with named variants.
 ///
 /// An enum represents a value that is exactly one of several possible *variants*. Variants can be
-/// simple (unit variants, like tags) or can carry data (data variants).
+/// simple (unit variants, like tags), carry positional data (tuple variants), or carry named data
+/// (struct variants).
 ///
 /// # Defining an enum
 ///
@@ -341,9 +342,44 @@ pub mod structs { }
 /// # fn main() { }
 /// ```
 ///
+/// # Struct variants
+///
+/// Variants can also carry *named* fields, written in braces like a struct. Any mix of unit,
+/// tuple, and struct variants is allowed:
+///
+/// ``` ignore
+/// enum Shape {
+///     Circle { radius: i32 },
+///     Rect { width: i32, height: i32 },
+///     Unknown,
+/// }
+/// # fn main() { }
+/// ```
+///
+/// Field order in the definition is part of the variant's value layout. A struct-variant value is
+/// constructed either with a named-field literal (all fields required, in any order):
+///
+/// ``` ignore
+/// # enum Shape { Circle { radius: i32 }, Rect { width: i32, height: i32 } }
+/// # fn main() {
+/// let r = Shape::Rect { width: 3, height: 4 };
+/// let s = Shape::Rect { height: 4, width: 3 };  // same value as `r`
+/// # }
+/// ```
+///
+/// or positionally, in definition order:
+///
+/// ``` ignore
+/// # enum Shape { Circle { radius: i32 }, Rect { width: i32, height: i32 } }
+/// # fn main() {
+/// let r = Shape::Rect(3, 4);  // same value as `Shape::Rect { width: 3, height: 4 }`
+/// # }
+/// ```
+///
 /// # Constructing enum values
 ///
-/// Use `EnumName::Variant` for unit variants and `EnumName::Variant(value)` for data variants:
+/// Use `EnumName::Variant` for unit variants, `EnumName::Variant(value)` for tuple variants, and
+/// `EnumName::Variant { field: value, ... }` for struct variants:
 ///
 /// ``` ignore
 /// # enum Direction { North, East, South, West }
@@ -400,6 +436,35 @@ pub mod structs { }
 ///     Shape::Circle(r) => print("circle radius {r}"),
 ///     Shape::Square(s) => print("square side {s}"),
 ///     Shape::Rect(w, h) => print("rect {w}x{h}"),
+/// }
+/// # }
+/// ```
+///
+/// Struct-variant patterns name the fields to bind and use a trailing `..` to ignore the rest:
+///
+/// ``` ignore
+/// # enum Shape { Circle { radius: i32 }, Rect { width: i32, height: i32 } }
+/// # fn main() {
+/// # let shape = Shape::Rect { width: 3, height: 4 };
+/// match shape {
+///     Shape::Rect { width: w, height: h, .. } => print("rect {w}x{h}"),
+///     Shape::Circle { radius: 5, .. } => print("big circle"),
+///     Shape::Circle { radius, .. } => print("circle radius {radius}"),
+/// }
+/// # }
+/// ```
+///
+/// Literal sub-patterns test a field against a constant, which lets one arm cover only part of a
+/// variant's values; a non-matching value falls through to a later arm:
+///
+/// ``` ignore
+/// # enum Shape { Circle { radius: i32 }, Rect { width: i32, height: i32 } }
+/// # fn main() {
+/// # let shape = Shape::Rect { width: 4, height: 4 };
+/// match shape {
+///     Shape::Rect { width: 4, height: 4, .. } => print("square"),
+///     Shape::Rect { .. } => print("rectangle"),
+///     Shape::Circle { .. } => print("circle"),
 /// }
 /// # }
 /// ```

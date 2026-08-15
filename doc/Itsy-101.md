@@ -82,22 +82,34 @@ enum Color { Red, Green, Blue }
 
 ### Data enums
 
-Variant fields are bare types, **not** named parameters:
+Tuple variants take bare types as positional fields:
 
 ```itsy
-// CORRECT
 enum Command {
     Move(f32, f32),
     Stop,
 }
+```
 
-// WRONG — named fields are not supported
-enum Command {
-    Move(dx: f32, dy: f32),
+Struct variants take named fields in braces:
+
+```itsy
+enum Shape {
+    Rect { w: f32, h: f32 },
+    Circle { r: f32 },
 }
 ```
 
-Construct with `Command::Move(1.0, 2.0)`. Match with `match` (exhaustive).
+Construct with `Command::Move(1.0, 2.0)`, `Shape::Rect { w: 1.0, h: 2.0 }` or positionally `Shape::Rect(1.0, 2.0)`. Match with `match` (exhaustive); struct-variant arms use field patterns with a `..` rest:
+
+```itsy
+let area = match shape {
+    Shape::Rect { w, h, .. } => w * h,
+    Shape::Circle { r, .. } => 3.14 * r * r,
+};
+```
+
+Field order is part of the value layout — positional construction and heap offsets follow declaration order.
 
 ### Arrays
 
@@ -309,7 +321,7 @@ fn main() {
 |-------|-----|
 | No `let` outside functions | Move all bindings into `fn main()` |
 | No `usize` | Use `u64` for all indexing |
-| Enum variant fields have no names | `Variant(i32, f32)` not `Variant(x: i32, y: f32)` |
+| Named variant fields need braces | `Variant { x: i32, y: i32 }` not `Variant(x: i32, y: i32)` |
 | Literals default to `i32` | Cast explicitly when required: `5 as u32` |
 | `while true` needs fallback | Add `return` after the loop |
 | View/array indexing needs `u64` | Cast: `arr[idx as u64]` |
