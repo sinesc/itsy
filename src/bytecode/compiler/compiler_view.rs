@@ -1,7 +1,8 @@
 //! View type compilation support.
 
-use crate::StackAddress;
-use crate::ItemIndex;
+use crate::{StackAddress, ItemIndex, HeapAddress};
+use crate::config::FrameAddress;
+use crate::prelude::size_of;
 use crate::shared::{MetaContainer, meta::ViewType, typed_ids::TypeId};
 use crate::frontend::ast::{self, Typeable};
 use crate::bytecode::{Constructor, VMFunc, HeapRefOp, builtins::{Builtin, builtin_types::View}};
@@ -208,7 +209,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         // Clone heap_ref so heap_to_view can consume it while the original stays for cleanup.
         self.compile_expression(right)?;              // stack: heap_ref
         self.write_cnt(self.type_by_id(enum_type_id), true, HeapRefOp::Inc)?;
-        self.writer.clone(8);                         // stack: heap_ref heap_ref_c
+        self.writer.clone(size_of::<HeapAddress>() as FrameAddress); // stack: heap_ref heap_ref_c
         self.compile_expression(view_expr)?;          // stack: heap_ref heap_ref_c view_ref
         self.compile_expression(index_expr)?;         // stack: heap_ref heap_ref_c view_ref index
 

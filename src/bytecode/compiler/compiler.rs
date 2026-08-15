@@ -985,8 +985,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             self.write_ceq(self.ty(&primitive_type_id))?;
         } else if let Some(stride) = view_stride {
             // view path: read discriminant directly from the view buffer (offset 0, 2 bytes)
-            // clone view_ref + index (16 bytes) so they survive a failed test
-            self.writer.clone(16);
+            // clone view_ref + index so they survive a failed test
+            self.writer.clone((size_of::<HeapAddress>() + size_of::<StackAddress>()) as FrameAddress);
             self.writer.view_load16(stride, 0);
             let index_type = Type::unsigned(size_of::<VariantIndex>());
             self.write_immediate(&index_type, Numeric::Unsigned(variant_index.ice()? as u64))?;
@@ -1196,7 +1196,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 let slot = self.locals.lookup(binding.binding_id);
                 if let Some(stride) = view_stride {
                     // view path: clone view_ref+index so they survive the load, then read from buffer
-                    self.writer.clone(16);
+                    self.writer.clone((size_of::<HeapAddress>() + size_of::<StackAddress>()) as FrameAddress);
                     let offset = access.last().map(|&(off, _)| off as u16).unwrap_or(0);
                     // For struct/data enum types, materialize inlined view data into heap objects
                     if is_ref_type_with_inlined_view_data {
@@ -1305,9 +1305,9 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             self.write_cnt(self.ty(&subject_type_id), true, HeapRefOp::Dec)?;
             self.writer.discard(self.ty(&subject_type_id).primitive_size() as FrameAddress);
         } else {
-            // For view subjects, discard the view_ref + index (16 bytes) after binding
+            // For view subjects, discard the view_ref + index after binding
             // so the arm body and result compile with a clean stack.
-            self.writer.discard(16);
+            self.writer.discard((size_of::<HeapAddress>() + size_of::<StackAddress>()) as FrameAddress);
         }
         for statement in block.statements.iter() {
             self.compile_statement(statement)?;
@@ -2946,8 +2946,8 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             let value_type = self.ty(&value_type_id);
             let is_inlined = value_type.as_struct().is_some()
                 || value_type.as_enum().is_some_and(|e| e.primitive.is_none());
-            // clone view_ref + index (16 bytes) so they survive the load
-            self.writer.clone(16);
+            // clone view_ref + index so they survive the load
+            self.writer.clone((size_of::<HeapAddress>() + size_of::<StackAddress>()) as FrameAddress);
             if is_inlined {
                 let constructor = self.constructor_by_id(value_type_id)?;
                 self.writer.view_to_heap(stride, offset, constructor);
