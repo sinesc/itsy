@@ -636,3 +636,156 @@ fn view_data_enum_match_struct_destructure() {
     ));
     assert_all!(&result, [35i32]);
 }
+
+#[test]
+fn view_struct_variant_compile() {
+    // View<Shape> where Shape has struct variants: stride is discriminant (2 bytes) + max variant
+    // payload (Rect { w: i32, h: i32 } = 8 bytes => packed size 10)
+    let result = run(stringify!(
+        enum Shape {
+            Circle { r: i32 },
+            Rect { w: i32, h: i32 },
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(5);
+            ret_u64(v.len());
+        }
+    ));
+    assert_all!(&result, [5u64]);
+}
+
+#[test]
+fn view_struct_variant_store_and_match() {
+    // Storing struct variants into view slots, then matching each slot: the struct-variant arms are
+    // gated on the tag, so a Rect slot must not fall into the Circle arm
+    let result = run(stringify!(
+        enum Shape {
+            Circle { r: i32 },
+            Rect { w: i32, h: i32 },
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(3);
+            v[0] = Shape::Circle { r: 42 };
+            v[1] = Shape::Rect { w: 10, h: 20 };
+            v[2] = Shape::Point;
+
+            let r0 = match v[0] {
+                Shape::Circle { r } => r,
+                Shape::Rect { .. } => -1,
+                Shape::Point => -2,
+            };
+            let r1 = match v[1] {
+                Shape::Circle { .. } => -1,
+                Shape::Rect { w, h } => w + h,
+                Shape::Point => -2,
+            };
+            let r2 = match v[2] {
+                Shape::Circle { .. } => -1,
+                Shape::Rect { .. } => -2,
+                Shape::Point => 99,
+            };
+            ret_i32(r0);
+            ret_i32(r1);
+            ret_i32(r2);
+        }
+    ));
+    assert_all(&result, &[ 42i32, 30, 99 ]);
+}
+
+#[test]
+fn view_struct_variant_wrap() {
+    // View::wrap over a hand-built buffer: each 10-byte slot is [2-byte tag][payload]
+    let result = run("enum Shape { Circle { r: i32 }, Rect { w: i32, h: i32 }, Point } fn main() { let backing: [u8] = [0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; let v: View<Shape> = View::wrap(backing); let r0 = match v[0] { Shape::Circle { r } => r, Shape::Rect { .. } => -1, Shape::Point => -2 }; let r1 = match v[1] { Shape::Circle { .. } => -1, Shape::Rect { w, h } => w + h, Shape::Point => -2 }; let r2 = match v[2] { Shape::Circle { .. } => -1, Shape::Rect { .. } => -2, Shape::Point => 99 }; ret_i32(r0); ret_i32(r1); ret_i32(r2); }");
+    assert_all(&result, &[ 100i32, 30, 99 ]);
+}
+
+#[test]
+fn view_struct_variant_store_overwrite() {
+    // Overwriting a view slot with a different variant leaves the tag in the right state
+    let result = run(stringify!(
+        enum Shape {
+            Circle { r: i32 },
+            Rect { w: i32, h: i32 },
+            Point,
+        }
+
+        fn main() {
+            let v: View<Shape> = View::new(1);
+            v[0] = Shape::Rect { w: 10, h: 20 };
+            // Overwrite with a smaller variant: the tag must flip to Point
+            v[0] = Shape::Point;
+            let r = match v[0] {
+                Shape::Circle { .. } => 1i32,
+                Shape::Rect { .. } => 2i32,
+                Shape::Point => 3i32,
+            };
+            ret_i32(r);
+        }
+    ));
+    assert_all(&result, &[ 3i32 ]);
+}
+
+#[test]
+fn view_struct_variant_mixed_field_sizes() {
+    // fields of different primitive sizes pack tightly in the view slot (2 + 8 + 2 = 12 bytes)
+    let result = run(stringify!(
+        enum E { A { big: i64, small: u16 }, B }
+
+        fn main() {
+            let v: View<E> = View::new(1);
+            v[0] = E::A { big: 42, small: 7 };
+            let r = match v[0] {
+                E::A { big, small } => big + small as i64,
+                E::B => -1,
+            };
+            ret_bool(match v[0] {
+                E::A { big: 42, small: 7 } => true,
+                E::A { .. } => false,
+                E::B => false,
+            });
+            ret_i64(r);
+        }
+    ));
+    assert_all!(&result, [ true, 49i64 ]);
+}
+
+#[test]
+fn view_struct_variant_range_and_inlined_field_patterns() {
+    // range patterns and literal sub-patterns against inlined nested-struct fields in view-backed
+    // struct-variant elements; the test values must be read from the view buffer, not the heap
+    let result = run(stringify!(
+        struct Inner { a: i32, b: i32 }
+        enum E { A { big: i64, inner: Inner, s: u16 }, B }
+        fn main() {
+            let v: View<E> = View::new(2);
+            v[0] = E::A { big: 42, inner: Inner { a: 3, b: 4 }, s: 7 };
+            v[1] = E::B;
+            ret_i32(match v[0] {
+                E::A { big: 40..50, .. } => 1,
+                E::A { .. } => 0,
+                E::B => -1,
+            });
+            ret_i32(match v[0] {
+                E::A { inner: Inner { a: 3, b: 4 }, .. } => 1,
+                E::A { inner: Inner { a: 3, b: 99 }, .. } => 2,
+                E::A { .. } => 0,
+                E::B => -1,
+            });
+            ret_i32(match v[0] {
+                E::A { big, inner: Inner { a, .. }, .. } => big as i32 + a,
+                E::A { .. } => 0,
+                E::B => -1,
+            });
+            ret_i32(match v[1] {
+                E::A { .. } => 0,
+                E::B => -1,
+            });
+            ret_i32(99);
+        }
+    ));
+    assert_all!(&result, [ 1i32, 1i32, 45i32, -1i32, 99i32 ]);
+}

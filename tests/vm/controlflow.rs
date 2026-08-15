@@ -877,3 +877,24 @@ fn assign_if_else_block_with_local() {
     ));
     assert_all(&result, &[ " ".to_string() ]);
 }
+
+#[test]
+fn match_wrapped_in_expression_operators() {
+    // regression: a match expression wrapped in a cast, unary op or binary op must still have its
+    // arm bindings allocated stack frame slots (previously panicked with "Unknown local binding")
+    let result = run(stringify!(
+        enum E { A(i32), B }
+        fn main() {
+            let e = E::A(7);
+            let r = (match e { E::A(x) => x + 1, E::B => 0 }) as i32;
+            ret_i32(r);
+            let s = -(match e { E::A(x) => x, E::B => 0 });
+            ret_i32(s);
+            let t = (match e { E::A(x) => x, E::B => 0 }) + 2;
+            ret_i32(t);
+            let u = ((match e { E::A(x) => x, E::B => 0 }) as u16) as u32;
+            ret_i32(u as i32);
+        }
+    ));
+    assert_all(&result, &[ 8i32, -7i32, 9i32, 7i32 ]);
+}
