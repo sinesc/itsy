@@ -1016,7 +1016,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             ast::Pattern::Binding(binding) => {
                 if let Some(constant_id) = self.binding_by_id(binding.binding_id).constant_id {
                     let value_type_id = self.pattern_value_type(subject_type_id, access);
-                    self.write_pattern_value_load(subject_type_id, access)?;
+                    self.write_pattern_test_load(subject_type_id, view_stride, access)?;
                     self.compile_constant_value(constant_id, value_type_id)?;
                     self.write_ceq(self.ty(&value_type_id))?;
                     fail_jumps.push(self.writer.j0(123));
@@ -1025,7 +1025,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             // a literal is matched by comparing the selected value against it
             ast::Pattern::Literal(literal) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
-                self.write_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_test_load(subject_type_id, view_stride, access)?;
                 self.compile_literal(literal)?;
                 self.write_ceq(self.ty(&value_type_id))?;
                 fail_jumps.push(self.writer.j0(123));
@@ -1034,12 +1034,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
             ast::Pattern::Range(range) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 // lower bound: value >= lo
-                self.write_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_test_load(subject_type_id, view_stride, access)?;
                 self.compile_literal(&range.lo)?;
                 self.write_cgte(self.ty(&value_type_id))?;
                 fail_jumps.push(self.writer.j0(123));
                 // upper bound: value <= hi (inclusive) or value < hi (exclusive)
-                self.write_pattern_value_load(subject_type_id, access)?;
+                self.write_pattern_test_load(subject_type_id, view_stride, access)?;
                 self.compile_literal(&range.hi)?;
                 if range.inclusive {
                     self.write_clte(self.ty(&value_type_id))?;
@@ -1058,7 +1058,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     } else {
                         // constant pattern: compare the selected value against the constant's value
                         let value_type_id = self.pattern_value_type(subject_type_id, access);
-                        self.write_pattern_value_load(subject_type_id, access)?;
+                        self.write_pattern_test_load(subject_type_id, view_stride, access)?;
                         self.compile_constant_value(constant_id, value_type_id)?;
                         self.write_ceq(self.ty(&value_type_id))?;
                         fail_jumps.push(self.writer.j0(123));
@@ -1087,7 +1087,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                     self.compile_pattern_test(subject_type_id, view_stride, &element_access, element, fail_jumps)?;
                 }
             },
-            // a struct or struct-variant pattern matches field-wise against the sub-patterns
+            // a struct or struct-variant pattern matches field-wise against the sub-patterns; a struct
+            // variant is additionally gated on its variant tag, like a tuple variant
             ast::Pattern::Struct(structure) => {
                 let value_type_id = self.pattern_value_type(subject_type_id, access);
                 // check if this is a struct enum variant pattern
@@ -1101,7 +1102,8 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
                 };
 
                 if is_enum_struct_variant {
-                    // struct enum variant pattern
+                    // struct enum variant pattern: test the variant tag first, then the field sub-patterns
+                    self.compile_variant_tag_test(subject_type_id, view_stride, access, &structure.path, fail_jumps)?;
                     let enum_ = self.ty(&value_type_id).as_enum().ice_msg("Expected enum type")?;
                     let variant_name = structure.path.segments.last().ice_msg("No variant name")?.name.clone();
                     let (field_type_ids, field_names) = enum_.variants.iter().find(|(name, _)| name == &variant_name)
@@ -1296,7 +1298,12 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         // matched: bind variables (still need the subject), then release the subject and run the body
         self.compile_pattern_bind(subject_type_id, view_stride, &[], pattern)?;
         if view_stride.is_none() {
-            self.write_discard(self.ty(&subject_type_id))?; // balances the protective increment in compile_match_block
+            // Release the subject: Dec undoes the protective increment from compile_match_block.
+            // For a fresh temporary subject (refcount 1 after the increment) this recursively frees
+            // the subject and every field not claimed by a pattern binding; for a borrowed subject
+            // (e.g. a local) it just drops the increment, leaving the value with its owner.
+            self.write_cnt(self.ty(&subject_type_id), true, HeapRefOp::Dec)?;
+            self.writer.discard(self.ty(&subject_type_id).primitive_size() as FrameAddress);
         } else {
             // For view subjects, discard the view_ref + index (16 bytes) after binding
             // so the arm body and result compile with a clean stack.
@@ -1361,6 +1368,16 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         } else {
             // Standard path: compile the subject expression (heap object on stack).
             self.compile_expression(&item.expr)?;
+            // The subject may be a fresh temporary with refcount 0, in which case its fields are
+            // refcount 0 too and considered owned exclusively by the subject (released by its
+            // recursive Free). Pattern tests compare field values with opcodes (e.g. string_ceq)
+            // that Free their operands, which would release still-owned fields and leave the
+            // subject's later recursive free with a dangling sub-reference. Materialize the
+            // subject so every field holds at least one reference and the test's Free is a
+            // no-op; the matched arm releases the subject with Dec (see compile_match_arm).
+            if self.ty(&subject_type_id).is_ref() {
+                self.write_cnt(self.ty(&subject_type_id), true, HeapRefOp::Inc)?;
+            }
         }
 
         let mut exit_jumps = Vec::new();
@@ -2282,22 +2299,24 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             self.create_stack_frame_exp(&assignment.left, frame)?;
             self.create_stack_frame_exp(&assignment.right, frame)?;
         } else if let ast::Expression::BinaryOp(binary_op) = expression {
-            if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.left {
-                self.create_stack_frame_block(block, frame)?;
+            // walk both operands: a match (or block) can appear as any operand, not just blocks
+            if let Some(left) = binary_op.left.as_expression() {
+                self.create_stack_frame_exp(left, frame)?;
             }
             if binary_op.op == ast::BinaryOperator::Call {
                 for arg in &binary_op.right.as_argument_list().ice()?.args {
                     self.create_stack_frame_exp(arg, frame)?;
                 }
-            } else {
-                if let ast::BinaryOperand::Expression(ast::Expression::Block(block)) = &binary_op.right {
-                    self.create_stack_frame_block(block, frame)?;
-                }
+            } else if let Some(right) = binary_op.right.as_expression() {
+                self.create_stack_frame_exp(right, frame)?;
             }
         } else if let ast::Expression::UnaryOp(unary_op) = expression {
-            if let ast::Expression::Block(block) = &unary_op.expr {
-                self.create_stack_frame_block(block, frame)?;
-            }
+            self.create_stack_frame_exp(&unary_op.expr, frame)?;
+        } else if let ast::Expression::Cast(cast) = expression {
+            self.create_stack_frame_exp(&cast.expr, frame)?;
+        } else if let ast::Expression::ViewAccess(view_access) = expression {
+            self.create_stack_frame_exp(&view_access.view_expr, frame)?;
+            self.create_stack_frame_exp(&view_access.index_expr, frame)?;
         } else if let ast::Expression::IfBlock(if_block) = expression {
             self.create_stack_frame_block(&if_block.if_block, frame)?;
             if let Some(block) = &if_block.else_block {
@@ -2909,6 +2928,34 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
         for &(offset, field_type_id) in access {
             self.writer.offsetx_16(offset as FrameAddress);
             self.write_heap_fetch(self.ty(&field_type_id))?;
+        }
+        Ok(())
+    }
+
+    /// Emits a non-destructive load of the value selected by `access` for a pattern *test* (the
+    /// value is consumed by the following comparison). For heap subjects this is a raw fetch, which
+    /// is safe because the subject's protective increment keeps every field's refcount at least 1,
+    /// so the comparison's Free of its operands is a no-op for subject-owned values. For view
+    /// subjects the value must be read from the view buffer: primitive fields are loaded directly,
+    /// and inlined struct/enum fields are materialized into fresh heap objects (refcount 0) owned
+    /// by the comparison, whose Free then releases them.
+    fn write_pattern_test_load(self: &mut Self, subject_type_id: TypeId, view_stride: Option<u16>, access: &[(StackAddress, TypeId)]) -> CompileResult {
+        if let Some(stride) = view_stride {
+            let offset = access.last().map(|&(off, _)| off as u16).unwrap_or(0);
+            let value_type_id = self.pattern_value_type(subject_type_id, access);
+            let value_type = self.ty(&value_type_id);
+            let is_inlined = value_type.as_struct().is_some()
+                || value_type.as_enum().is_some_and(|e| e.primitive.is_none());
+            // clone view_ref + index (16 bytes) so they survive the load
+            self.writer.clone(16);
+            if is_inlined {
+                let constructor = self.constructor_by_id(value_type_id)?;
+                self.writer.view_to_heap(stride, offset, constructor);
+            } else {
+                self.compile_view_load_size(value_type.primitive_size(), stride, offset)?;
+            }
+        } else {
+            self.write_pattern_value_load(subject_type_id, access)?;
         }
         Ok(())
     }

@@ -929,9 +929,8 @@ impl<'ctx> Resolver<'ctx> {
                         }
                     },
                     ast::VariantKind::Struct(constant_id @ None, fields) => {
-                        // struct variant: arguments are in the same canonical order as stored in the enum metadata
-                        let field_names: Vec<_> = fields.keys().cloned().collect();
-                        let arg_type_ids: Vec<_> = field_names.iter().map(|name| fields.get(name).unwrap().type_id(self)).collect::<Vec<_>>();
+                        // struct variant: arguments are in source order, the same canonical order as stored in the enum metadata
+                        let arg_type_ids: Vec<_> = fields.iter().map(|(_, ty)| ty.type_id(self)).collect::<Vec<_>>();
                         if arg_type_ids.iter().all(|t| t.is_some()) {
                             let path = self.make_path(&[ &item.ident.name, &variant.ident.name ]);
                             let kind = FunctionKind::Variant(item.type_id.ice()?, index as VariantIndex);
@@ -2428,6 +2427,14 @@ impl<'ctx> Resolver<'ctx> {
         };
         self.resolve_expression(&mut item.expr, hint)?;
         let subject_type_id = item.expr.type_id(self);
+        // a struct pattern against an enum subject is a struct-variant pattern, which is refutable: the
+        // value may hold a different variant. reject it like any other enum pattern (the structural
+        // check above cannot tell, since the same syntax is irrefutable against a struct subject).
+        if let Some(subject_type_id) = subject_type_id {
+            if self.type_by_id(subject_type_id).as_enum().is_some() && matches!(item.pattern, ast::Pattern::Struct(_)) {
+                return Err(ResolveError::new(&item.pattern, ResolveErrorKind::InvalidOperation("Refutable enum pattern not allowed in let binding".to_string()), self.module_path));
+            }
+        }
         self.resolve_pattern(&mut item.pattern, subject_type_id)?;
         self.resolved(item)
     }
@@ -2574,6 +2581,9 @@ impl<'ctx> Resolver<'ctx> {
             // build name -> type_id map
             let field_type_map: Map<String, Option<TypeId>> = field_names.iter().zip(field_types.iter()).map(|(n, t)| (n.clone(), *t)).collect();
             for (name, field) in &mut struct_.fields {
+                if !field_type_map.contains_key(name) {
+                    return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(name.clone()), self.module_path));
+                }
                 let field_type_id = *field_type_map.get(name).ice_msg(&format!("Field '{}' not found", name))?;
                 self.resolve_expression(field, field_type_id)?;
                 self.types_resolved(field, None)?;

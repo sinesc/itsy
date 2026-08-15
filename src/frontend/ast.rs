@@ -1089,11 +1089,13 @@ impl_resolvable!(ViewDef {
 
 
 /// The kind of a variant, either `Simple` (without associated data), `Data` (tuple-style) or `Struct` (named fields).
+/// Struct-variant fields keep their source order: the order is part of the variant's value layout (heap offsets,
+/// positional constructor arguments), so it must not depend on hash-map iteration order.
 #[derive(Debug, Clone)]
 pub enum VariantKind {
     Simple(Option<ConstantId>, Option<Literal>),
     Data(Option<ConstantId>, Vec<InlineType>),
-    Struct(Option<ConstantId>, UnorderedMap<String, InlineType>),
+    Struct(Option<ConstantId>, Vec<(String, InlineType)>),
 }
 
 impl Resolvable for VariantKind {
@@ -1108,7 +1110,7 @@ impl Resolvable for VariantKind {
             VariantKind::Struct(constant_id, fields) => {
                 let mut result = Vec::new();
                 result.append(&mut impl_resolvable!(@append *constant_id, ConstantId));
-                result.append(&mut impl_resolvable!(@append fields, ItemMap));
+                result.append(&mut impl_resolvable!(@append fields, ItemList1));
                 return result;
             },
             VariantKind::Simple(constant_id, literal) => {
