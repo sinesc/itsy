@@ -33,6 +33,7 @@ pub mod internals {
     }
     pub mod marshal {
         //! Support for custom types in Itsy API signatures.
+        pub use crate::bytecode::marshal::ConstValue;
         #[cfg(feature="compiler")]
         pub use crate::bytecode::marshal::{VMType, ApiTypeDef, ApiTypeKind, ApiType};
         #[cfg(feature="runtime")]

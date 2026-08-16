@@ -139,6 +139,16 @@ pub enum ApiType {
     Array(Box<ApiType>),
 }
 
+/// Value of a primitive constant defined in `itsy_api!`. Integers widen losslessly into
+/// `i64`/`u64` and `f32` into `f64`, so every supported constant type round-trips exactly.
+#[derive(Clone, Debug)]
+pub enum ConstValue {
+    Bool(bool),
+    Signed(i64),
+    Unsigned(u64),
+    Float(f64),
+}
+
 /// Provides the resolver with the Itsy type definition for a Rust type appearing in an API signature.
 ///
 /// Implemented (with the default no-op bodies) for primitives, `String` and `str`; derived for

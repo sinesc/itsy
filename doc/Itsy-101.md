@@ -304,6 +304,9 @@ use MyApi::{print, get_value, set_flag};
 ```
 The namespace must match the Rust `itsy_api!` type name exactly (`MyApi`, not `Api`).
 
+`itsy_api!` primitive constants are namespaced the same way (e.g. `MyApi::CURSOR_LEFT`) and can be
+imported, used in match patterns and const expressions like any other constant.
+
 ### suspend
 
 Yields control back to the host, preserving VM state (stack + heap). Only inside functions:

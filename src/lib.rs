@@ -91,6 +91,40 @@ use config_derived::*;
 /// let commands = vm.update(&mut context, input, 0.016).unwrap();
 /// ```
 ///
+/// # Constants
+///
+/// Primitive constants (`u8`..`u64`, `i8`..`i64`, `f32`, `f64`, `bool`) declared before the function
+/// definitions are shared between Rust and the script: the script references them namespaced under
+/// the API type (e.g. `MyAPI::CURSOR_LEFT`), and Rust code accesses them as associated constants of
+/// the generated type (the same `MyAPI::CURSOR_LEFT`). Values must be Rust const expressions. This is
+/// a convenient way to keep magic numbers (e.g. key definitions) in one place:
+///
+/// ```
+/// use itsy::{itsy_api, build_str, runtime::VM};
+///
+/// itsy_api!(MyAPI<()> {
+///     const CURSOR_LEFT: u8 = 1;
+///     const CURSOR_RIGHT: u8 = 2;
+///     fn is_key_pressed(&mut context, key: u8) -> bool {
+///         key == MyAPI::CURSOR_LEFT
+///     }
+/// });
+///
+/// fn main() {
+///     // Rust-side access to the same definition.
+///     assert_eq!(MyAPI::CURSOR_RIGHT, 2);
+///
+///     let program = build_str::<MyAPI>(stringify!(
+///         fn main() {
+///             MyAPI::is_key_pressed(MyAPI::CURSOR_LEFT);
+///         }
+///     )).unwrap();
+///
+///     let mut vm = VM::new(program);
+///     vm.run(&mut ()).unwrap();
+/// }
+/// ```
+///
 /// # Examples
 ///
 /// The following example defines a few Rust functions and calls them from itsy code.
@@ -181,6 +215,21 @@ macro_rules! itsy_api {
     // Compiler: optional return-type descriptor; absent return type (void) yields None.
     (@ret_descriptor) => { ::std::option::Option::None };
     (@ret_descriptor $ret_type:tt) => { ::std::option::Option::Some($crate::itsy_api!(@type_descriptor $ret_type)) };
+    // Constants: encode a `itsy_api!` constant value as an exact ConstValue. Integers widen to
+    // i64/u64, f32 to f64 (both lossless). Parenthesised so binary operators in $value keep their
+    // precedence (e.g. `1 << 4` must not become `1 << (4 as u64)`).
+    (@const_value u8, $value:expr) => { $crate::internals::marshal::ConstValue::Unsigned(($value) as u64) };
+    (@const_value u16, $value:expr) => { $crate::internals::marshal::ConstValue::Unsigned(($value) as u64) };
+    (@const_value u32, $value:expr) => { $crate::internals::marshal::ConstValue::Unsigned(($value) as u64) };
+    (@const_value u64, $value:expr) => { $crate::internals::marshal::ConstValue::Unsigned(($value) as u64) };
+    (@const_value i8, $value:expr) => { $crate::internals::marshal::ConstValue::Signed(($value) as i64) };
+    (@const_value i16, $value:expr) => { $crate::internals::marshal::ConstValue::Signed(($value) as i64) };
+    (@const_value i32, $value:expr) => { $crate::internals::marshal::ConstValue::Signed(($value) as i64) };
+    (@const_value i64, $value:expr) => { $crate::internals::marshal::ConstValue::Signed(($value) as i64) };
+    (@const_value f32, $value:expr) => { $crate::internals::marshal::ConstValue::Float(($value) as f64) };
+    (@const_value f64, $value:expr) => { $crate::internals::marshal::ConstValue::Float(($value) as f64) };
+    (@const_value bool, $value:expr) => { $crate::internals::marshal::ConstValue::Bool($value) };
+    (@const_value $other:ident, $value:expr) => { compile_error!("itsy_api! constants must be primitive (u8..u64, i8..i64, f32, f64, bool) types") };
     // VM: Pops an argument and converts some special cases.
     (@handle_param_value $vm:ident, u8) => { $vm.stack.pop() };
     (@handle_param_value $vm:ident, u16) => { $vm.stack.pop() };
@@ -328,14 +377,19 @@ macro_rules! itsy_api {
     // Main definition block
     (
         $(#[$globalmeta:meta])*
-        $vis:vis $type_name:ident < $context_type:ty > { $(
-            $( #[ $attr:meta ] )*
-            // FIXME: ret_type is simple ident only (ambiguity issues)
-            // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
-            // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
-            // components using push down accumulation to transform them into a non-ambiguous format
-            fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $arg_type:tt )* ) $( -> $ret_type:tt )? $code:block
-        )*
+        $vis:vis $type_name:ident < $context_type:ty > {
+            // Primitive constants (must precede the function definitions): available from Itsy code as
+            // e.g. `MyAPI::CURSOR_LEFT` and from Rust code as the generated enum's associated constant.
+            // Value must be a Rust const expression.
+            $( const $pre_cname:ident : $pre_ctype:tt = $pre_cval:expr ; )*
+            $(
+                $( #[ $attr:meta ] )*
+                // FIXME: ret_type is simple ident only (ambiguity issues)
+                // FIXME: arg_type accepts & for everything and doesn't validate whether that type supports it. matching $($arg_type:tt)+ caused ambiguity when multiple args were present
+                // this could probably be solved by capturing all args via ( $($args:tt)+ ) and then using an incremental tt muncher to capture the individual
+                // components using push down accumulation to transform them into a non-ambiguous format
+                fn $name:tt ( & mut $context_name:ident $( , & mut $vm_name:ident )? $( , $arg_name:ident : $arg_type:tt )* ) $( -> $ret_type:tt )? $code:block
+            )*
         $(
             // Optional block declaring top-level Itsy functions the host intends to call into. Arg/return
             // types must be registered API types (or primitives/String/arrays) so the script and host
@@ -358,6 +412,13 @@ macro_rules! itsy_api {
             )*
             #[doc(hidden)]
             _dummy
+        }
+
+        // Constants become associated constants on the generated type (enums don't allow associated
+        // items in their body), available in Rust code as e.g. `MyAPI::CURSOR_LEFT`. The script is the
+        // primary consumer, so constants unused by Rust code must not trigger dead_code.
+        impl $type_name {
+            $( #[allow(dead_code)] pub const $pre_cname: $pre_ctype = $pre_cval; )*
         }
 
         impl $crate::internals::binary::VMFunc<$type_name> for $type_name {
@@ -409,6 +470,15 @@ macro_rules! itsy_api {
                         list.push((stringify!($cname), $crate::itsy_api!(@ret_descriptor $($cret_type)?), vec![ $( $crate::itsy_api!(@type_descriptor $carg_type) ),* ]));
                     )*
                 )?
+                list
+            }
+            #[allow(unused_mut)]
+            fn resolve_constants() -> Vec<(&'static str, $crate::internals::marshal::ApiType, $crate::internals::marshal::ConstValue)> {
+                let mut list = Vec::new();
+                // The value is re-evaluated here rather than read through the associated constant:
+                // a same-named enum variant would shadow the constant, and `Self::NAME as u64` on a
+                // variant would silently yield the discriminant instead of the constant's value.
+                $( list.push((stringify!($pre_cname), $crate::itsy_api!(@type_descriptor $pre_ctype), $crate::itsy_api!(@const_value $pre_ctype, $pre_cval))); )*
                 list
             }
         }

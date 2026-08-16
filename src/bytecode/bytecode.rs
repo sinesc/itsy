@@ -16,7 +16,7 @@ pub mod marshal;
 
 use crate::prelude::*;
 use crate::{StackAddress, StackOffset, HeapAddress, HEAP_OFFSET_BITS, RustFnIndex};
-use marshal::{FunctionMeta, serialize_function_table, deserialize_function_table, ApiType, ApiTypeDef};
+use marshal::{FunctionMeta, serialize_function_table, deserialize_function_table, ApiType, ApiTypeDef, ConstValue};
 #[cfg(feature="compiler")]
 use writer::{Writer, StoreConst};
 #[cfg(feature="runtime")]
@@ -44,6 +44,10 @@ pub trait VMFunc<T>: Debug {
     /// with the declared signature.
     #[doc(hidden)]
     fn resolve_callables() -> Vec<(&'static str, Option<ApiType>, Vec<ApiType>)> { Vec::new() }
+    /// Returns the primitive constants defined in `itsy_api!` as `(name, type, value)`. The resolver
+    /// registers them under the API namespace (e.g. `MyAPI::CURSOR_LEFT`) so scripts can reference them.
+    #[doc(hidden)]
+    fn resolve_constants() -> Vec<(&'static str, ApiType, ConstValue)> { Vec::new() }
 }
 
 #[cfg(not(feature="runtime"))]

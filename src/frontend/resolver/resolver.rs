@@ -24,6 +24,7 @@ use crate::shared::meta::{Array, MapType, Struct, Enum, EnumVariant, Trait, Impl
 use crate::shared::typed_ids::{BindingId, ScopeId, TypeId, ConstantId, FunctionId};
 use crate::shared::numeric::Numeric;
 use crate::bytecode::VMFunc;
+use crate::bytecode::marshal::{ApiType, ConstValue};
 use crate::frontend::resolver::resolver_intrinsic::{IntrinsicCast, IntrinsicOp, IntrinsicUnaryOp, IntrinsicIndex, OrderingInfo, register_intrinsics};
 use crate::frontend::resolver::resolver_type_synthesis::{ResultTypeInfo, OptionTypeInfo};
 
@@ -120,7 +121,6 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
 
     // Register intrinsic traits (casts, operators, Error, Index) and the built-in Ordering enum.
     let intrinsic = register_intrinsics(&mut scopes, &primitives)?;
-    let intrinsic_trait_names = intrinsic.trait_names;
     let intrinsic_casts = intrinsic.casts;
     let intrinsic_ops = intrinsic.ops;
     let intrinsic_unary_ops = intrinsic.unary_ops;
@@ -149,6 +149,36 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         scopes.insert_function(name, ret_type, arg_type_id?, Some(FunctionKind::Rust(index)));
     }
 
+    // insert rust constants into root scope, namespaced under the API typename like rust functions
+    for (name, api_type, value) in T::resolve_constants() {
+        let type_name = match api_type {
+            ApiType::Name(type_name) => type_name,
+            ApiType::Array(_) => {
+                return Err(ResolveError::global(ResolveErrorKind::InvalidOperation(format!("API constant '{}' must be a primitive type", name)), ""));
+            },
+        };
+        let primitive = match type_name {
+            "u8" => Type::u8, "u16" => Type::u16, "u32" => Type::u32, "u64" => Type::u64,
+            "i8" => Type::i8, "i16" => Type::i16, "i32" => Type::i32, "i64" => Type::i64,
+            "f32" => Type::f32, "f64" => Type::f64, "bool" => Type::bool,
+            _ => {
+                return Err(ResolveError::global(ResolveErrorKind::InvalidOperation(format!("API constant '{}' must be a primitive type, got '{}'", name, type_name)), ""));
+            },
+        };
+        let type_id = *primitives.get(&primitive).ice()?;
+        let user_value = match value {
+            ConstValue::Bool(value) => UserConstValue::Bool(value),
+            ConstValue::Signed(value) => UserConstValue::Numeric(Numeric::Signed(value)),
+            ConstValue::Unsigned(value) => UserConstValue::Numeric(Numeric::Unsigned(value)),
+            ConstValue::Float(value) => UserConstValue::Numeric(Numeric::Float(value)),
+        };
+        let path = format!("{}::{}", T::api_name(), name);
+        if scopes.constant_id(ScopeId::ROOT, &path, TypeId::VOID).is_some() {
+            return Err(ResolveError::global(ResolveErrorKind::InvalidOperation(format!("duplicate definition of '{}'", path)), ""));
+        }
+        scopes.insert_constant(&path, TypeId::VOID, Some(type_id), ConstantValue::UserConst(user_value));
+    }
+
     // create scopes for each module, import builtin types into module namespace
     for module in &mut program.modules {
         let module_path = module.path.clone() + "::";
@@ -159,7 +189,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             }
         }
         // make intrinsic traits (e.g. `ToString`) visible in every module, like the primitives above
-        for name in &intrinsic_trait_names {
+        for name in &intrinsic.trait_names {
             scopes.insert_alias(module.scope_id, name, &(module_path.clone() + name));
         }
     }

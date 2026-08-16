@@ -41,6 +41,8 @@ mod suspend;
 #[cfg(feature="derive")]
 #[path="vm/api_types.rs"]
 mod api_types;
+#[path="vm/api_constants.rs"]
+mod api_constants;
 #[cfg(feature="derive")]
 #[path="vm/call_typed.rs"]
 mod call_typed;
