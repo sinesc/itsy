@@ -2118,8 +2118,10 @@ fn root_items(i: Input) -> Output<Statement> {
 
 /// Parses Itsy source code into a program AST structure.
 pub fn parse_module(link_state: &mut LinkState, src: &str, module_path: &str) -> ParseResult<ParsedModule> {
-    let input = Input::new(src, replace(link_state, LinkState::new()));
+    // the module scope pushed by with_scope() below is assigned the next free scope id from the
+    // incoming link state, so capture it before the state is swapped into the input
     let module_scope_id = link_state.next_scope_id;
+    let input = Input::new(src, replace(link_state, LinkState::new()));
     let result = all_consuming(preceded(space0, with_scope(ScopeKind::Module, many0(root_items))))(input.clone());
     *link_state = input.take_linkstate();
     match result {

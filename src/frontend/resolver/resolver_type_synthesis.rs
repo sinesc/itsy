@@ -428,8 +428,9 @@ impl<'ctx> Resolver<'ctx> {
         let view_ty = self.type_by_id(view_type_id).as_view().ice().unwrap();
 
         // View::wrap(array) -> View<T>
-        // Takes a reference to an array, returns a view reference
-        let wrap_path = self.make_path(&["View", "wrap"]);
+        // Takes a reference to an array, returns a view reference. `View` is a global builtin
+        // namespace, so the name is not module-qualified.
+        let wrap_path = "View::wrap".to_string();
         let array_type_id = self.scopes.insert_anonymous_type(true, Type::Array(Array {
             type_id: Some(view_ty.backing_element_type_id),
         }));
@@ -438,7 +439,7 @@ impl<'ctx> Resolver<'ctx> {
 
         // View::new(size) -> View<T>
         // Takes a StackAddress (size), returns a view reference
-        let new_path = self.make_path(&["View", "new"]);
+        let new_path = "View::new".to_string();
         let stack_addr_type_id = self.primitive_type_id(crate::STACK_ADDRESS_TYPE).unwrap();
         let new_const_id = self.insert_builtin_fn("new", view_type_id, BuiltinType::View(builtin_types::View::new), view_type_id, vec![stack_addr_type_id]);
         self.scopes.insert_constant(&new_path, view_type_id, None, ConstantValue::Function(self.scopes.constant_function_id(new_const_id).unwrap()));

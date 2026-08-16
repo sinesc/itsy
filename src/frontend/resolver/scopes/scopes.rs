@@ -53,9 +53,9 @@ impl Scopes {
         }
     }
 
-    /// Returns the parent scope id of the given scope id.
+    /// Returns the parent scope id of the given scope id. A scope without a recorded parent is the root.
     fn parent_id(self: &Self, scope_id: ScopeId) -> Option<ScopeId> {
-        let parent_scope_id = self.parent_map[&scope_id];
+        let parent_scope_id = *self.parent_map.get(&scope_id)?;
         if parent_scope_id == scope_id { None } else { Some(parent_scope_id) }
     }
 

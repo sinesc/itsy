@@ -58,6 +58,9 @@ pub(crate) struct Resolver<'ctx> {
     ordering        : OrderingInfo,
     /// Paths of known modules in the program.
     module_paths    : &'ctx Set<String>,
+    /// Top-level item names defined directly in each module (used to keep reference resolution from
+    /// falling back to broader namespaces when the name is locally defined in the current module).
+    module_local_names : &'ctx UnorderedMap<String, Set<String>>,
     /// Current module base path.
     module_path     : &'ctx str,
 }
@@ -197,6 +200,29 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
     // assemble set of module paths to check use declarations against
     let module_paths = program.modules().map(|m| m.path.clone()).collect::<Set<_>>();
 
+    // top-level item names defined directly in each module (functions, types, consts, submodules).
+    // a name locally defined in the current module shadows same-named items in broader namespaces
+    // (e.g. root), and may simply not be registered yet on an early resolution pass, so reference
+    // resolution must not fall back to broader namespaces for such names.
+    let mut module_local_names: UnorderedMap<String, Set<String>> = UnorderedMap::new();
+    for module in &program.modules {
+        let names = module_local_names.entry(module.path.clone()).or_insert_with(Set::new);
+        for statement in module.statements() {
+            let name = match statement {
+                ast::Statement::Function(f) => Some(f.shared.sig.ident.name.clone()),
+                ast::Statement::StructDef(s) => Some(s.ident.name.clone()),
+                ast::Statement::EnumDef(e) => Some(e.ident.name.clone()),
+                ast::Statement::TraitDef(t) => Some(t.ident.name.clone()),
+                ast::Statement::ConstDef(c) => Some(c.ident.name.clone()),
+                ast::Statement::Module(m) => Some(m.name().to_string()),
+                _ => None,
+            };
+            if let Some(name) = name {
+                names.insert(name);
+            }
+        }
+    }
+
     // repeatedly try to resolve items until no more progress is made
     let mut now_resolved = Progress::zero();
     let mut prev_resolved;
@@ -217,6 +243,7 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
             option_types    : &mut option_types,
             ordering        : ordering_info,
             module_paths    : &module_paths,
+            module_local_names : &module_local_names,
             module_path     : "",
         };
 
@@ -475,47 +502,110 @@ impl<'ctx> Resolver<'ctx> {
     }
 
     /// Returns an absolute path built from current module and additional path segments.
+    /// Used to construct the storage name of items defined in the current module. A first segment
+    /// that is already an absolute path (e.g. a type's flat name like `mymod::MyStruct` or an
+    /// alias-resolved target like `MyAPI::println`) is not re-qualified with the current module.
     fn make_path<T: AsRef<str>>(self: &Self, parts: &[ T ]) -> String {
         let parts_str = parts_to_path(&parts);
-        if self.module_path == "" || parts_str == "Self"  {
+        if self.module_path == "" || parts_str == "Self" {
+            parts_str
+        } else if parts[0].as_ref().contains("::") {
             parts_str
         } else {
             self.module_path.to_string() + "::" + &parts_str
         }
     }
 
+    /// Returns the candidate absolute names a reference resolves to, most specific first: the current
+    /// module's namespace (`mymod::a::b`), then each ancestor module's namespace, then the root
+    /// namespace (`a::b`). In the root module only the bare name is a candidate. If the raw first
+    /// segment names an item defined at the top level of the current module, only the fully
+    /// qualified candidate is returned: a local definition shadows same-named items in broader
+    /// namespaces and may simply not be registered yet on this resolution pass.
+    fn reference_candidates(self: &Self, raw_first_segment: &str, parts: &[ String ]) -> Vec<String> {
+        let base = parts_to_path(&parts);
+        if self.module_path == "" {
+            return vec![ base ];
+        }
+        if self.module_local_names.get(self.module_path).map_or(false, |names| names.contains(raw_first_segment)) {
+            return vec![ self.module_path.to_string() + "::" + &base ];
+        }
+        let mut candidates = Vec::new();
+        let mut prefix = self.module_path.to_string();
+        while !prefix.is_empty() {
+            candidates.push(prefix.clone() + "::" + &base);
+            match prefix.rfind("::") {
+                Some(index) => prefix.truncate(index),
+                None => prefix.clear(),
+            }
+        }
+        candidates.push(base);
+        candidates
+    }
+
+    /// Alias-resolves the first path segment of a reference (so `use`-imported names and `Self`
+    /// resolve to their absolute targets) and returns it together with the rest of the segments.
+    fn resolve_reference_segments<T: AsRef<str>>(self: &Self, segments: &[ T ]) -> Vec<String> {
+        let mut parts: Vec<String> = vec![ self.scopes.alias(self.scope_id, segments[0].as_ref()).map(|s| s.to_string()).unwrap_or_else(|| segments[0].as_ref().to_string()) ];
+        for segment in &segments[1..] {
+            parts.push(segment.as_ref().to_string());
+        }
+        parts
+    }
+
+    /// Resolves a constant reference: alias-resolves the first path segment, then looks the constant
+    /// up in each candidate namespace (see [reference_candidates]).
+    fn constant_by_reference<T: AsRef<str>>(self: &Self, segments: &[ T ], owning_type_id: TypeId) -> Option<ConstantId> {
+        let parts = self.resolve_reference_segments(&segments);
+        for candidate in self.reference_candidates(segments[0].as_ref(), &parts) {
+            if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &candidate, owning_type_id) {
+                return Some(constant_id);
+            }
+        }
+        None
+    }
+
+    /// Resolves a type reference like [constant_by_reference]: alias-resolves the first path segment,
+    /// then looks the type up in each candidate namespace.
+    fn type_by_reference<T: AsRef<str>>(self: &Self, segments: &[ T ]) -> Option<TypeId> {
+        let parts = self.resolve_reference_segments(&segments);
+        for candidate in self.reference_candidates(segments[0].as_ref(), &parts) {
+            if let Some(type_id) = self.scopes.type_id(self.scope_id, &candidate) {
+                return Some(type_id);
+            }
+        }
+        None
+    }
+
     /// Resolves a constant name to a constant.
     fn try_resolve_constant_enum(self: &mut Self, item: &mut ast::Constant) -> Option<ConstantId> {
 
-        let enum_info = if item.path.segments.len() > 1 {
-            // "Enum::Test" -> drop Test, then alias-resolve Enum to e.g. MyModule::Enum
-            let type_name = item.path.to_string(-1);
-            let variant_name = item.path.segments[item.path.segments.len() - 1].name.clone();
-            Some((self.scopes.alias(self.scope_id, &type_name).map(|a| a.to_string()).unwrap_or_else(|| self.make_path(&[ type_name ])), variant_name))
-        } else {
+        let enum_info: Option<(Vec<String>, String)> = if item.path.segments.len() > 1 {
+            // "Enum::Test" -> drop Test, then resolve the type portion (e.g. MyModule::Enum)
+            let type_segments: Vec<String> = item.path.segments.iter().take(item.path.segments.len() - 1).map(|seg| seg.name.clone()).collect();
+            Some((type_segments, item.path.segments[item.path.segments.len() - 1].name.clone()))
+        } else if let Some(qualified_item) = self.scopes.alias(self.scope_id, &item.path.to_string(0)) {
             // "Test" -> alias-resolve to MyModule::Enum::Test, then drop Test.
-            let alias = item.path.to_string(0);
-            if let Some(qualified_item) = self.scopes.alias(self.scope_id, &alias) {
-                let mut qualified = path_to_parts(qualified_item);
-                qualified.pop();
-                Some((parts_to_path(&qualified), alias.clone()))
-            } else {
-                None
-            }
-        };
-        if let Some((type_name, variant_name)) = enum_info {
-            if let Some(type_id) = self.scopes.type_id(self.scope_id, &type_name) {
-                let qualified_name = type_name + "::" + &variant_name;
-                // unit variants are constants owned by the enum type; data-variant constructors are
-                // functions owned by VOID (see insert_function). Try both so the leading path segment
-                // (e.g. a `use`-aliased API/module namespace) is resolved for either kind.
-                self.scopes.constant_id(self.scope_id, &qualified_name, type_id)
-                    .or_else(|| self.scopes.constant_id(self.scope_id, &qualified_name, TypeId::VOID))
-            } else {
-                None
-            }
+            let qualified = path_to_parts(qualified_item);
+            (qualified.len() > 1).then(|| (qualified[..qualified.len() - 1].to_vec(), qualified[qualified.len() - 1].clone()))
         } else {
             None
+        };
+        match enum_info {
+            Some((type_segments, variant_name)) => {
+                if let Some(type_id) = self.type_by_reference(&type_segments) {
+                    let mut full_segments = type_segments;
+                    full_segments.push(variant_name.clone());
+                    // unit variants are constants owned by the enum type; data-variant constructors are
+                    // functions owned by VOID (see insert_function). Try both so the leading path segment
+                    // (e.g. a `use`-aliased API/module namespace) is resolved for either kind.
+                    self.constant_by_reference(&full_segments, type_id)
+                        .or_else(|| self.constant_by_reference(&full_segments, TypeId::VOID))
+                } else {
+                    None
+                }
+            },
+            None => None,
         }
     }
 
@@ -637,19 +727,18 @@ impl<'ctx> Resolver<'ctx> {
         }
     }
 
-    /// Resolves use declarations.
+    /// Resolves use declarations. Paths are resolved like regular references (see [constant_by_reference]):
+    /// the current module's namespace first, then broader namespaces up to root.
     fn resolve_use_decl(self: &mut Self, item: &mut ast::UseDecl) -> ResolveResult  {
         let mut unresolved = None;
         for (name, &mut (ref path, ref mut resolved)) in &mut item.mapping.iter_mut().filter(|(_, (_, r))| !r) {
+            let path_segments: Vec<&str> = path.split("::").collect();
             if self.module_paths.contains(path) {
                 *resolved = true;
                 self.scopes.insert_alias(self.scope_id, path, name);
-            } else if let Some(_) = self.scopes.type_id(self.scope_id, path) { // FIXME scopes.type_id() considers aliases, probably shouldn't do that here
+            } else if self.type_by_reference(&path_segments).is_some() || self.constant_by_reference(&path_segments, TypeId::VOID).is_some() {
                 *resolved = true;
                 self.scopes.insert_alias(self.scope_id, path, name);
-            } else if let Some(_) = self.scopes.constant_id(self.scope_id, path, TypeId::VOID) { // FIXME: same as type_id, should not consider aliases
-                self.scopes.insert_alias(self.scope_id, path, name);
-                *resolved = true;
             } else if unresolved == None {
                 unresolved = Some(path.clone());
             }
@@ -774,7 +863,7 @@ impl<'ctx> Resolver<'ctx> {
             return Ok(item.type_id);
         }
         if item.type_id.is_none() {
-            item.type_id = self.scopes.type_id(self.scope_id, &self.make_path(&item.path.segments));
+            item.type_id = self.type_by_reference(&item.path.segments);
         }
         if let (Some(item_type_id), Some(expected_result)) = (item.type_id, expected_result) {
             self.check_type_accepted_for(item, item_type_id, expected_result)?;
@@ -860,7 +949,7 @@ impl<'ctx> Resolver<'ctx> {
         });
 
         let discriminant_type_id = if let Some(named_type) = simple_type_name {
-            named_type.type_id.or(self.scopes.type_id(self.scope_id, &self.make_path(&named_type.path.segments))).ice_msg("Invalid variant type")?
+            named_type.type_id.or_else(|| self.type_by_reference(&named_type.path.segments)).ice_msg("Invalid variant type")?
         } else {
             self.primitive_type_id(Type::i32)?
         };
@@ -1164,8 +1253,10 @@ impl<'ctx> Resolver<'ctx> {
 
             // Insert placeholder constant (value will be filled by the impl)
             if item.constant_id.is_none() {
+                // the prefix is the impl/trait target's flat name, which is already an absolute
+                // path (module-qualified if the type is module-local), so join it directly
                 let name = if let Some(prefix) = type_name_prefix {
-                    self.make_path(&[prefix, &item.ident.name])
+                    prefix.to_string() + "::" + &item.ident.name
                 } else {
                     self.make_path(&[&item.ident.name])
                 };
@@ -1196,9 +1287,11 @@ impl<'ctx> Resolver<'ctx> {
             expr.type_id(self)
         };
 
-        // Build the name: qualified for impl/trait consts, bare for module-level consts
+        // Build the name: qualified for impl/trait consts, bare for module-level consts.
+        // the prefix is the impl/trait target's flat name, which is already an absolute path
+        // (module-qualified if the type is module-local), so join it directly
         let name = if let Some(prefix) = type_name_prefix {
-            self.make_path(&[prefix, &item.ident.name])
+            prefix.to_string() + "::" + &item.ident.name
         } else {
             self.make_path(&[&item.ident.name])
         };
@@ -1416,7 +1509,9 @@ impl<'ctx> Resolver<'ctx> {
             // function/method switch
             let (function_kind, qualified, alias) = if let Some(type_id) = struct_scope {
                 let type_name = self.type_flat_name(type_id).ice()?;
-                let path = self.make_path(&[ type_name, &item.shared.sig.ident.name ]);
+                // the type's flat name is already an absolute path (module-qualified if the type is
+                // module-local), so join the member directly
+                let path = type_name.to_string() + "::" + &item.shared.sig.ident.name;
                 if item.shared.sig.params.len() == 0 || item.shared.sig.params[0].ident.name != "self" { // FIXME ugh
                     let alias = self.make_path(&[ "Self", &item.shared.sig.ident.name ]);
                     (FunctionKind::Function, path, Some(alias))
@@ -1579,24 +1674,16 @@ impl<'ctx> Resolver<'ctx> {
         }
         // resolve constant
         if item.constant_id.is_none() {
-            // Resolve `Self` alias for the first path segment so that `Self::CONST` resolves to `TypeName::CONST`.
-            let resolved_segments: Vec<String> = item.path.segments.iter().enumerate().map(|(i, seg)| {
-                if i == 0 {
-                    self.scopes.alias(self.scope_id, &seg.name)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| seg.name.clone())
-                } else {
-                    seg.name.clone()
-                }
-            }).collect();
-            let path = self.make_path(&resolved_segments);
+            // Alias-resolve the first path segment so that `Self::CONST` resolves to `TypeName::CONST`
+            // and `use`-imported names resolve to their absolute targets.
+            let resolved_segments = self.resolve_reference_segments(&item.path.segments);
 
             // try module-level consts, then try the type's own id (impl block consts)
-            item.constant_id = self.scopes.constant_id(self.scope_id, &path, TypeId::VOID);
-            if item.constant_id.is_none() && resolved_segments.len() >= 2 {
+            item.constant_id = self.constant_by_reference(&item.path.segments, TypeId::VOID);
+            if item.constant_id.is_none() && item.path.segments.len() >= 2 {
                 // For `TypeName::CONST`, also try looking up with the type as the owner
-                if let Some(type_id) = self.scopes.type_id(self.scope_id, &resolved_segments[0]) {
-                    item.constant_id = self.scopes.constant_id(self.scope_id, &path, type_id);
+                if let Some(type_id) = self.type_by_reference(&item.path.segments[..1]) {
+                    item.constant_id = self.constant_by_reference(&item.path.segments, type_id);
                 }
             }
 
@@ -1609,8 +1696,8 @@ impl<'ctx> Resolver<'ctx> {
 
             // check builtin functions
             if item.constant_id.is_none() && item.path.segments.len() == 2 {
-                if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &item.path.segments[0]) {
-                    if let Some(constant_id) = self.try_create_scalar_builtin(&item.path.segments[1].name, type_id)? {
+                if let Some(type_id) = self.scopes.type_id(ScopeId::ROOT, &resolved_segments[0]) {
+                    if let Some(constant_id) = self.try_create_scalar_builtin(&resolved_segments[1], type_id)? {
                         item.constant_id = Some(constant_id);
                     }
                 }
@@ -1797,23 +1884,13 @@ impl<'ctx> Resolver<'ctx> {
             Pattern::Wildcard(_) => {},
             // a path names a unit variant or a constant; resolve and validate
             Pattern::Path(path) => {
-                let resolved_segments: Vec<String> = path.segments.iter().enumerate().map(|(i, seg)| {
-                    if i == 0 {
-                        self.scopes.alias(self.scope_id, &seg.name)
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| seg.name.clone())
-                    } else {
-                        seg.name.clone()
-                    }
-                }).collect();
                 // first try to resolve as a constant
                 if path.constant_id.is_none() {
-                    let path_str = self.make_path(&resolved_segments);
-                    path.constant_id = self.scopes.constant_id(self.scope_id, &path_str, TypeId::VOID);
+                    path.constant_id = self.constant_by_reference(&path.segments, TypeId::VOID);
                     // for qualified paths like Enum::Variant, also try with the type as owner
-                    if path.constant_id.is_none() && resolved_segments.len() >= 2 {
-                        if let Some(type_id) = self.scopes.type_id(self.scope_id, &resolved_segments[0]) {
-                            path.constant_id = self.scopes.constant_id(self.scope_id, &path_str, type_id);
+                    if path.constant_id.is_none() && path.segments.len() >= 2 {
+                        if let Some(type_id) = self.type_by_reference(&path.segments[..path.segments.len() - 1]) {
+                            path.constant_id = self.constant_by_reference(&path.segments, type_id);
                         }
                     }
                 }
@@ -1821,10 +1898,9 @@ impl<'ctx> Resolver<'ctx> {
                 if path.constant_id.is_none() {
                     if let Some(subject_type_id) = subject_type_id {
                         // for qualified paths (2+ segments), validate the type portion resolves to the subject type
-                        if resolved_segments.len() >= 2 {
-                            let type_segments = &resolved_segments[..resolved_segments.len() - 1];
-                            let type_path = self.make_path(type_segments);
-                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                        if path.segments.len() >= 2 {
+                            let type_path = parts_to_path(&path.segments[..path.segments.len() - 1]);
+                            if let Some(path_type_id) = self.type_by_reference(&path.segments[..path.segments.len() - 1]) {
                                 if path_type_id != subject_type_id {
                                     return Err(ResolveError::new(path, ResolveErrorKind::InvalidOperation(
                                         format!("Variant pattern type '{}' does not match subject type {}",
@@ -1895,17 +1971,8 @@ impl<'ctx> Resolver<'ctx> {
                     if variant.path.segments.len() >= 2 || is_bare_option_or_result {
                         if !is_bare_option_or_result {
                             // build the type path from all segments except the last (variant name)
-                            let type_segments: Vec<String> = variant.path.segments.iter().take(variant.path.segments.len() - 1).enumerate().map(|(i, seg)| {
-                                if i == 0 {
-                                    self.scopes.alias(self.scope_id, &seg.name)
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| seg.name.clone())
-                                } else {
-                                    seg.name.clone()
-                                }
-                            }).collect();
-                            let type_path = self.make_path(&type_segments);
-                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                            let type_path = variant.path.to_string(-1);
+                            if let Some(path_type_id) = self.type_by_reference(&variant.path.segments[..variant.path.segments.len() - 1]) {
                                 if path_type_id != subject_type_id {
                                     return Err(ResolveError::new(variant, ResolveErrorKind::InvalidOperation(
                                         format!("Variant pattern type '{}' does not match subject type {}",
@@ -1950,17 +2017,8 @@ impl<'ctx> Resolver<'ctx> {
                         // validate the path: for 2+ segment paths the type portion (all segments except the last
                         // variant name) must resolve to the subject type
                         if structure.path.segments.len() >= 2 {
-                            let type_segments: Vec<String> = structure.path.segments.iter().take(structure.path.segments.len() - 1).enumerate().map(|(i, seg)| {
-                                if i == 0 {
-                                    self.scopes.alias(self.scope_id, &seg.name)
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| seg.name.clone())
-                                } else {
-                                    seg.name.clone()
-                                }
-                            }).collect();
-                            let type_path = self.make_path(&type_segments);
-                            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                            let type_path = structure.path.to_string(-1);
+                            if let Some(path_type_id) = self.type_by_reference(&structure.path.segments[..structure.path.segments.len() - 1]) {
                                 if path_type_id != subject_type_id {
                                     return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
                                         format!("Struct variant pattern type '{}' does not match subject type {}",
@@ -2016,17 +2074,8 @@ impl<'ctx> Resolver<'ctx> {
                     } else {
                         // regular struct type pattern
                         // validate the path: the full path must resolve to the subject type
-                        let resolved_segments: Vec<String> = structure.path.segments.iter().enumerate().map(|(i, seg)| {
-                            if i == 0 {
-                                self.scopes.alias(self.scope_id, &seg.name)
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| seg.name.clone())
-                            } else {
-                                seg.name.clone()
-                            }
-                        }).collect();
-                        let type_path = self.make_path(&resolved_segments);
-                        if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+                        let type_path = structure.path.to_string(0);
+                        if let Some(path_type_id) = self.type_by_reference(&structure.path.segments) {
                             if path_type_id != subject_type_id {
                                 return Err(ResolveError::new(structure, ResolveErrorKind::InvalidOperation(
                                     format!("Struct pattern type '{}' does not match subject type {}",
@@ -2578,10 +2627,8 @@ impl<'ctx> Resolver<'ctx> {
 
         // check if this is a struct enum variant (e.g. `Enum::Variant { field: value }`)
         let is_struct_variant = if type_name.path.segments.len() >= 2 {
-            let type_segments: Vec<String> = type_name.path.segments.iter().take(type_name.path.segments.len() - 1).map(|s| s.name.clone()).collect();
-            let type_path = self.make_path(&type_segments);
             let variant_name = type_name.path.segments.last().map(|s| &s.name);
-            if let Some(path_type_id) = self.scopes.type_id(self.scope_id, &type_path) {
+            if let Some(path_type_id) = self.type_by_reference(&type_name.path.segments[..type_name.path.segments.len() - 1]) {
                 if let Some(enum_) = self.type_by_id(path_type_id).as_enum() {
                     enum_.variants.iter().find(|(name, _)| Some(name.as_str()) == variant_name.map(|s| s.as_str()))
                         .and_then(|(_, v)| v.as_field_names())
@@ -2618,8 +2665,8 @@ impl<'ctx> Resolver<'ctx> {
                 self.resolve_expression(field, field_type_id)?;
                 self.types_resolved(field, None)?;
             }
-        } else if type_name.path.segments.len() < 2 {
-            // regular struct literal (single-segment path) - resolve normally
+        } else {
+            // regular struct literal (not an enum variant) - resolve the type (single or multi-segment path)
             let type_id = self.resolve_type_name(type_name, None)?;
 
             // resolve fields from field definition

@@ -146,6 +146,64 @@ pub fn run(code: &str) -> Context {
     context
 }
 
+/// Run itsy code split across multiple modules. `files` maps module paths (the root module is `""`)
+/// to source code. Submodules are loaded on demand by the module path, mirroring `build()`.
+#[allow(dead_code)]
+pub fn run_modules(files: std::collections::BTreeMap<&str, &str>) -> Context {
+    let parsed = match itsy::parser::parse(|module_path, state| {
+        match files.get(module_path) {
+            Some(source) => parse_module(state, source, module_path),
+            None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("module '{}' not found", module_path)).into()),
+        }
+    }) {
+        Ok(parsed) => parsed,
+        Err(err) => panic!("{} in module {}.", err, err.module_path()),
+    };
+    let resolved = match itsy::resolver::resolve::<TestFns>(parsed, "main") {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            let loc = err.loc(files.get(err.module_path()).copied().unwrap_or_default());
+            panic!("{} in line {}, column {} in module {}.", err, loc.0, loc.1, err.module_path());
+        }
+    };
+    let program = match itsy::compiler::compile(resolved) {
+        Ok(program) => program,
+        Err(err) => panic!("{}", err),
+    };
+    let mut context = Vec::new();
+    match itsy_run(program, &mut context) {
+        Ok(_) => {},
+        Err(err) => {
+            panic!("{}", err);
+        }
+    }
+    context
+}
+
+/// Build an itsy program split across multiple modules that is expected to fail, returning the formatted error message.
+#[allow(dead_code)]
+pub fn build_modules_err(files: std::collections::BTreeMap<&str, &str>) -> String {
+    let parsed = match itsy::parser::parse(|module_path, state| {
+        match files.get(module_path) {
+            Some(source) => parse_module(state, source, module_path),
+            None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("module '{}' not found", module_path)).into()),
+        }
+    }) {
+        Ok(parsed) => parsed,
+        Err(err) => return format!("{} in module {}.", err, err.module_path()),
+    };
+    match itsy::resolver::resolve::<TestFns>(parsed, "main") {
+        Ok(resolved) => match itsy::compiler::compile(resolved) {
+            Ok(_) => panic!("expected build to fail, but it succeeded"),
+            Err(err) => format!("{}", err),
+        },
+        Err(err) => {
+            let loc = err.loc(files.get(err.module_path()).copied().unwrap_or_default());
+            format!("{} in line {}, column {} in module {}.", err, loc.0, loc.1, err.module_path())
+        },
+    }
+}
+
 /// Build a bit of itsy code that is expected to fail and return the formatted error message.
 #[allow(dead_code)]
 pub fn build_err(code: &str) -> String {

@@ -54,3 +54,5 @@ mod int_methods;
 mod consts;
 #[path="vm/view.rs"]
 mod view;
+#[path="vm/modules.rs"]
+mod modules;

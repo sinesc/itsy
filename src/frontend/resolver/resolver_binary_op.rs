@@ -401,7 +401,8 @@ impl<'ctx> Resolver<'ctx> {
     fn lookup_trait_bound_method(self: &mut Self, trait_bound_ids: &[TypeId], member_name: &str) -> Option<ConstantId> {
         for trait_id in trait_bound_ids {
             let type_name = self.type_flat_name(*trait_id)?.clone();
-            let path = self.make_path(&[ &type_name, member_name ]);
+            // the type's flat name is already an absolute path, so join the member directly
+            let path = type_name + "::" + member_name;
             if let Some(constant_id) = self.scopes.constant_id(self.scope_id, &path, *trait_id) {
                 return Some(constant_id);
             }
@@ -412,7 +413,8 @@ impl<'ctx> Resolver<'ctx> {
     /// Lookup a method on a concrete type, checking its own methods, trait defaults, and trait-provided methods.
     fn lookup_type_method(self: &mut Self, owning_type_id: TypeId, member_name: &str) -> Option<ConstantId> {
         let type_name = self.type_flat_name(owning_type_id)?.clone();
-        let path = self.make_path(&[ type_name, member_name.to_string() ]);
+        // the type's flat name is already an absolute path, so join the member directly
+        let path = type_name + "::" + member_name;
         // For trait types, also check the trait's own provided/required methods
         let trait_method_id = self.type_by_id(owning_type_id).as_trait().and_then(|trt| {
             trt.provided.get(member_name).copied()
