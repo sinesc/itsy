@@ -136,3 +136,65 @@ fn undefined_identifier_in_submodule() {
     ]));
     assert!(err.contains("nosuch"), "unexpected error: {}", err);
 }
+
+
+/// A struct method in the root module can call a provided (default) trait method.
+#[test]
+fn impl_calls_provided_method_root() {
+    let result = run(stringify!(
+        trait T { fn a(self: Self) -> u8; fn b(self: Self) -> u8 { 7 } }
+        struct S { v: u8 }
+        impl T for S { fn a(self: Self) -> u8 { self.b() } }
+        fn main() { TestFns::ret_u8(S { v: 0 }.a()); }
+    ));
+    assert_all(&result, &[7u8]);
+}
+
+/// A struct method in a submodule can call a provided (default) trait method
+/// of a trait defined in the same module.
+#[test]
+fn impl_in_submodule_calls_provided_method() {
+    let result = run_modules(files(&[
+        ("", "mod sub; fn main() { TestFns::ret_u8(sub::S { v: 0 }.a()); }"),
+        ("sub", "trait T { fn a(self: Self) -> u8; fn b(self: Self) -> u8 { 7 } } struct S { v: u8 } impl T for S { fn a(self: Self) -> u8 { self.b() } }"),
+    ]));
+    assert_all(&result, &[7u8]);
+}
+
+/// A struct method in a submodule can call a provided (default) trait method
+/// of a trait defined in its PARENT module: the impl must register on the struct
+/// (and thus expose the provided method) even though the trait lives in another module.
+#[test]
+fn impl_in_child_module_calls_provided_method_of_parent_trait() {
+    let result = run_modules(files(&[
+        ("", "mod outer; fn main() { TestFns::ret_u8(outer::inner::S { v: 0 }.a()); }"),
+        ("outer", "mod inner; trait T { fn a(self: Self) -> u8; fn b(self: Self) -> u8 { 7 } }"),
+        ("outer::inner", "struct S { v: u8 } impl T for S { fn a(self: Self) -> u8 { self.b() } }"),
+    ]));
+    assert_all(&result, &[7u8]);
+}
+
+/// A struct's own method in a submodule can call a trait-provided method of a trait
+/// from an ANCESTOR module, even when the trait impl block comes after the plain impl
+/// within the submodule (the member access must survive the first resolution pass).
+#[test]
+fn plain_method_in_child_calls_provided_method_of_ancestor_trait() {
+    let result = run_modules(files(&[
+        ("", "mod outer; fn main() { TestFns::ret_u8(outer::inner::S { v: 0 }.m()); }"),
+        ("outer", "mod inner; trait T { fn p(self: Self) -> u8 { 7 } }"),
+        ("outer::inner", "struct S { v: u8 } impl S { fn m(self: Self) -> u8 { self.p() } } impl T for S { }"),
+    ]));
+    assert_all(&result, &[7u8]);
+}
+
+/// Sibling modules: `a` uses a trait from `b` (which is loaded after `a`), so the impl
+/// cannot register on the first pass; the member access must resolve on a later pass.
+#[test]
+fn sibling_module_trait_loaded_after_user() {
+    let result = run_modules(files(&[
+        ("", "mod a; mod b; fn main() { TestFns::ret_u8(a::S { v: 0 }.m()); }"),
+        ("a", "struct S { v: u8 } impl S { fn m(self: Self) -> u8 { self.p() } } impl b::T for S { }"),
+        ("b", "trait T { fn p(self: Self) -> u8 { 3 } }"),
+    ]));
+    assert_all(&result, &[3u8]);
+}

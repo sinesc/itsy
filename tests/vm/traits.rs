@@ -869,3 +869,56 @@ fn trait_impl_forward_ref_main_after_structs() {
     ));
     assert_all(&result, &[ 1230i64, 9120i64 ]);
 }
+
+/// An impl block that appears before the trait definition in the same module: on the first
+/// resolution pass the trait is not yet registered, so `self.q()` on a struct receiver must
+/// stay unresolved instead of raising a hard error; a later pass resolves it once the trait
+/// and the impl have been registered.
+#[test]
+fn impl_before_trait_definition_same_module() {
+    let result = run(stringify!(
+        struct S { v: u8 }
+        impl T for S { fn p(self: Self) -> u8 { self.q() } }
+        trait T { fn p(self: Self) -> u8; fn q(self: Self) -> u8 { 7 } }
+        fn main() { ret_u8(S { v: 0 }.p()); }
+    ));
+    assert_all(&result, &[7u8]);
+}
+
+/// A struct method that calls a trait-provided method whose impl block appears later in
+/// the same module must resolve on a later pass rather than erroring on the first.
+#[test]
+fn method_caller_before_impl_same_module() {
+    let result = run(stringify!(
+        struct S { v: u8 }
+        impl S { fn m(self: Self) -> u8 { self.added() } }
+        impl T for S { fn added(self: Self) -> u8 { 9 } }
+        trait T { fn added(self: Self) -> u8; }
+        fn main() { ret_u8(S { v: 0 }.m()); }
+    ));
+    assert_all(&result, &[9u8]);
+}
+
+/// A trait's provided (default) method may call another provided method declared later in the
+/// same trait. On the first resolution pass the callee's entry in the trait's `provided` map is
+/// still `None` (the map is only filled after all the trait's functions have been attempted), so
+/// the `self.b()` access must be left unresolved instead of hard-erroring; a later pass finds the
+/// callee once it has been registered. Regression test for bug2.md (same root cause as the
+/// cross-module trait-impl deferral fix: the non-struct receiver arm of `resolve_access_struct_field` used to raise `UndefinedMethod` immediately).
+#[test]
+fn provided_method_calls_later_provided_method() {
+    let result = run(stringify!(
+        trait T {
+            fn a(self: Self) -> u8 {
+                self.b()
+            }
+            fn b(self: Self) -> u8 {
+                7
+            }
+        }
+        struct S { v: u8 }
+        impl T for S { }
+        fn main() { ret_u8(S { v: 0 }.a()); }
+    ));
+    assert_all(&result, &[7u8]);
+}

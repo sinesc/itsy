@@ -525,3 +525,15 @@ fn empty_struct() {
     ));
     assert_all(&result, &[true, false]);
 }
+
+/// Accessing a member that is neither a field nor a trait method is still reported,
+/// but only after resolution has stalled (early passes leave it unresolved so that a
+/// trait impl registered later can still provide the method).
+#[test]
+fn undefined_struct_member_access_errors() {
+    let err = build_err(stringify!(
+        struct S { x: u8 }
+        fn main() { let s = S { x: 1 }; ret_u8(s.nope); }
+    ));
+    assert!(err.contains("nope"), "unexpected error: {}", err);
+}

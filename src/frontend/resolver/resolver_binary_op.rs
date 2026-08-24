@@ -432,9 +432,16 @@ impl<'ctx> Resolver<'ctx> {
         match self.type_by_id(left_type_id) {
             Type::Struct(struct_) => {
                 let field = item.right.as_member_mut().ice_msg("Member access using a non-field")?;
+                // the member may not be a struct field but a method provided by a trait impl
+                // that is not registered yet (e.g. the trait is declared in another module or
+                // later in this one); leave the access unresolved so a later pass can retry,
+                // and only report it once resolution is stuck
+                if !struct_.has_field(&field.ident.name) && self.stage.must_resolve() {
+                    return Err(ResolveError::new(field, ResolveErrorKind::UndefinedMember(field.ident.name.clone()), self.module_path));
+                }
                 let field_type_id = struct_.fields.iter().find(|(name, _)| name == &field.ident.name)
                     .map(|(_, ty)| *ty)
-                    .usr(Some(field), ResolveErrorKind::UndefinedMember(field.ident.name.clone()))?;
+                    .flatten();
                 if let Some(field_type_id) = field_type_id {
                     self.set_type_id(field, field_type_id)?;
                 }
@@ -444,6 +451,11 @@ impl<'ctx> Resolver<'ctx> {
                 // the array/map inner types are not yet resolved
             },
             _ => {
+                // like for structs, a trait impl registered on a later pass may still provide
+                // this method; only report it once resolution is stuck
+                if !self.stage.must_resolve() {
+                    return Ok(());
+                }
                 let member = item.right.as_member().ice_msg("Member access using a non-member")?;
                 let member_name = member.ident.name.clone();
                 let type_name = self.type_name(left_type_id);
