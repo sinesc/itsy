@@ -293,6 +293,19 @@ pub fn resolve<T>(mut program: ParsedProgram, entry_function: &str) -> ResolveRe
         }
     }
 
+    // Reject const definitions whose value never settled: their initializers form a (mutual)
+    // recursion cycle. Trait required consts (declared without a default value) are the only
+    // user constants expected to still hold an Unresolved value at this point.
+    let trait_required_consts = scopes.trait_required_const_ids();
+    for (constant_id, constant) in scopes.constant_items() {
+        if matches!(constant.value, ConstantValue::UserConst(UserConstValue::Unresolved))
+            && !trait_required_consts.contains(&constant_id)
+        {
+            let name = scopes.constant_name(constant_id).unwrap_or("<unknown>").to_string();
+            return Err(ResolveError::global(ResolveErrorKind::RecursiveConst(name), ""));
+        }
+    }
+
     // find entry module (empty path) and main function within
     let entry_module = program.modules()
         .find(|&m| m.path == "").ice()?;
@@ -1295,6 +1308,29 @@ impl<'ctx> Resolver<'ctx> {
         } else {
             self.make_path(&[&item.ident.name])
         };
+
+        // Defer value computation if the expression cannot be evaluated in this pass yet. This
+        // happens when a const reference inside it could not be resolved here (it may become
+        // resolvable on a later pass: the referenced const may be defined in an ancestor module,
+        // which is resolved after this one, or in a later sibling module, or simply later in
+        // this module), or when every reference resolves but references a const whose value is
+        // itself still Unresolved (a mutual recursion cycle, reported by the post-resolution
+        // check in `resolve`). The unresolved references keep this statement's resolution
+        // progress incomplete, so the resolution loop is guaranteed to revisit the definition.
+        if !self.is_const_expr_evaluable(expr) {
+            if item.constant_id.is_none() {
+                item.constant_id = Some(self.scopes.insert_constant(
+                    &name, owning_type_id, type_id,
+                    ConstantValue::UserConst(UserConstValue::Unresolved),
+                ));
+            } else if let Some(type_id) = type_id {
+                // Update the type on later passes; the value stays Unresolved until the
+                // expression becomes evaluable.
+                let constant = self.scopes.constant_mut(item.constant_id.ice()?);
+                constant.type_id = Some(type_id);
+            }
+            return self.resolved(item);
+        }
 
         // Build the user const value
         let user_const_value = if let Some(type_id) = type_id {

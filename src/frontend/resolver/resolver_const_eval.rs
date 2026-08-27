@@ -10,6 +10,7 @@ use crate::shared::typed_ids::{ConstantId, TypeId};
 use crate::shared::MetaContainer;
 
 use super::Resolver;
+use super::scopes::Scopes;
 
 /// Visitor that checks if any target constant_ids are referenced in the AST.
 struct ConstUsageChecker {
@@ -52,10 +53,44 @@ impl<'a, 'ast> AstVisitorMut<'ast> for ConstRefPatcher<'a> {
     }
 }
 
+/// Visitor that checks if a const expression is ready for value evaluation: every `Constant`
+/// reference is resolved and references a const whose value is no longer `Unresolved`.
+struct ConstEvalReadyChecker<'scopes> {
+    scopes: &'scopes Scopes,
+    ready: bool,
+}
 
+impl<'ast, 'scopes> AstVisitor<'ast> for ConstEvalReadyChecker<'scopes> {
+    fn visit_expression(&mut self, expr: &'ast ast::Expression) -> bool {
+        if !self.ready {
+            return false; // short-circuit
+        }
+        if let ast::Expression::Constant(c) = expr {
+            self.ready = match c.constant_id {
+                Some(constant_id) => !matches!(self.scopes.constant_ref(constant_id).value,
+                    ConstantValue::UserConst(UserConstValue::Unresolved)),
+                None => false, // reference deferred to a later resolution pass
+            };
+            return false; // leaf node
+        }
+        true // keep walking
+    }
+}
 
 /// Const-related resolver methods.
 impl<'ctx> Resolver<'ctx> {
+    /// Returns whether a (static) const expression can be evaluated to a value in this resolution
+    /// pass: every const reference in it is resolved and references a const whose value is no
+    /// longer `Unresolved`. A false return means the const definition must be retried on a later
+    /// pass — either because a reference only becomes resolvable later (e.g. it is defined in an
+    /// ancestor module, which is resolved after this one) or because the referenced consts form a
+    /// (mutual) recursion cycle whose values never settle.
+    pub(crate) fn is_const_expr_evaluable(self: &Self, expr: &ast::Expression) -> bool {
+        let mut checker = ConstEvalReadyChecker { scopes: &*self.scopes, ready: true };
+        checker.walk_expression(expr);
+        checker.ready
+    }
+
     /// Returns whether a const expression is valid: every sub-expression is a literal, const reference, supported binary op, or cast.
     pub(crate) fn is_const_expr(self: &Self, expr: &ast::Expression) -> bool {
         match expr {
@@ -139,6 +174,12 @@ impl<'ctx> Resolver<'ctx> {
         let constant_id = c.constant_id.ice()?;
         let constant = self.scopes.constant_ref(constant_id);
         match &constant.value {
+            ConstantValue::UserConst(UserConstValue::Unresolved) => {
+                // Unreachable as long as the caller validated via is_const_expr_evaluable:
+                // an Unresolved value means a recursion cycle that the post-resolution check
+                // in `resolve` is supposed to report.
+                Self::ice("Unresolved const value in const expression (recursion cycle not caught)")
+            },
             ConstantValue::UserConst(uv) => Ok(uv.clone()),
             ConstantValue::Discriminant(n) => Ok(UserConstValue::Numeric(*n)),
             _ => Self::ice("Unexpected constant value in const expression"),

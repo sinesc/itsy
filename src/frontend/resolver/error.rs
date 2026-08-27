@@ -53,6 +53,8 @@ pub enum ResolveErrorKind {
     NotCallable(String),
     /// A struct or enum contains itself by value (directly or transitively), which would result in an infinitely-sized type.
     RecursiveType(String),
+    /// A const's initializer references itself directly or via other consts, so its value can never be computed.
+    RecursiveConst(String),
     /// Compound assignment through `[]` on a custom `Index` type requires `get` and `set` to share
     /// the same value type, but they differ.
     IndexCompoundAssignMismatch(String, String, String),
@@ -164,6 +166,7 @@ impl Display for ResolveError {
             ResolveErrorKind::NotKeyValueIterable(t) => write!(f, "Cannot iterate keys/indices of `{t}`: key/index iteration (`for key, _ in ..` / `for key, value in ..`) requires a map or array"),
             ResolveErrorKind::NotCallable(t) => write!(f, "Type `{t}` is not callable"),
             ResolveErrorKind::RecursiveType(name) => write!(f, "Recursive type `{name}` has infinite size. Recursive types are not supported"),
+            ResolveErrorKind::RecursiveConst(name) => write!(f, "Const `{name}` is (mutually) recursive. A const initializer cannot reference itself, directly or via other consts"),
             ResolveErrorKind::IndexCompoundAssignMismatch(ty, get_ret, set_val) => write!(f, "compound assignment through `[]` on `{ty}` requires `Index::get` to return the same type `Index::set` accepts (got `{get_ret}` vs `{set_val}`)"),
             ResolveErrorKind::TraitConstNotDeclared(name, trait_name) => write!(f, "Const `{name}` is not declared by trait `{trait_name}`"),
             ResolveErrorKind::RequiredTraitConstMissing(name, trait_name) => write!(f, "Required const `{name}` is not defined by impl of trait `{trait_name}`"),

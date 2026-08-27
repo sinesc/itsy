@@ -225,6 +225,26 @@ impl Scopes {
     pub fn constant_ref(self: &Self, constant_id: ConstantId) -> &Constant {
         self.constants.value_by_id(constant_id)
     }
+
+    /// Iterates over all constants as (constant id, constant).
+    pub fn constant_items(&self) -> impl Iterator<Item = (ConstantId, &Constant)> {
+        self.constants.iter_items()
+    }
+
+    /// Returns the storage name of the given constant.
+    pub fn constant_name(&self, constant_id: ConstantId) -> Option<&str> {
+        self.constants.name_by_id(constant_id).map(|(name, _)| name.as_str())
+    }
+
+    /// Collects the ids of all trait required consts (declared in a trait without a default
+    /// value). Their values are supplied by impls, so they legitimately stay Unresolved.
+    pub fn trait_required_const_ids(&self) -> Vec<ConstantId> {
+        self.types.iter_items().flat_map(|(_, ty)| {
+            ty.as_trait()
+                .map(|trt| trt.required_consts.values().flatten().copied().collect::<Vec<ConstantId>>())
+                .unwrap_or_default()
+        }).collect()
+    }
 }
 
 /// Type handling

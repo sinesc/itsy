@@ -24,6 +24,8 @@ mod refs;
 mod strings;
 #[path="vm/traits.rs"]
 mod traits;
+#[path="vm/const_modules.rs"]
+mod const_modules;
 #[path="vm/controlflow.rs"]
 mod controlflow;
 #[path="vm/enums.rs"]

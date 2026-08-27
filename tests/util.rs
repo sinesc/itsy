@@ -76,6 +76,8 @@ pub fn assert_all_sa(result: &Context, expected: &[ u64 ]) {
 // Implement some VM methods to write values of specific types to the VM context.
 itsy_api! {
     pub TestFns<Context> {
+        // Test constant used by the const module tests (tests/vm/const_modules.rs).
+        const KEY_A: u16 = 10;
         fn ret_u8(&mut context, value: u8) {
             context.push(Box::new(value));
         }

@@ -35,6 +35,10 @@ impl<K, I, V> Repository<K, I, V> where I: Copy + Into<usize> + From<usize>, K: 
     pub fn id_by_name(self: &Self, name: &K) -> Option<I> {
         self.map.get(name).map(|i| *i)
     }
+    /// Iterates over all items as (id, value).
+    pub fn iter_items(&self) -> impl Iterator<Item = (I, &V)> {
+        self.data.iter().enumerate().map(|(index, value)| (I::from(index), value))
+    }
     /// Returns the name of the given id.
     pub fn name_by_id(self: &Self, index: I) -> Option<&K> where I: PartialEq  {
         self.map.iter().find(|&item| *item.1 == index).map(|item| item.0)
