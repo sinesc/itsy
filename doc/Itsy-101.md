@@ -1,4 +1,4 @@
-# Itsy 101 — Language Cheat Sheet
+# Itsy 101 - Language Cheat Sheet
 
 Rusty syntax, statically-typed scripting language. Embedded into Rust apps via the `itsy_api!` macro.
 
@@ -35,7 +35,7 @@ let y: i32 = 0;           // ERROR: parser error
 
 `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`
 
-No `usize`/`isize` — use `u64` for indexing (View, arrays, maps).
+No `usize`/`isize` - use `u64` for indexing (View, arrays, maps).
 
 Opaque `HeapRef` type obtained by casting a reference (e.g. `arr as HeapRef`) can be passed to Rust code for direct heap access.
 
@@ -44,19 +44,20 @@ Opaque `HeapRef` type obtained by casting a reference (e.g. `arr as HeapRef`) ca
 Integer literals default to `i32` when unannotated, but are inferred from context:
 
 ```itsy
-let x: u32 = 5;      // 5 inferred as u32
-let y = 2u8 * 10;   // 10 inferred as u8, result is u8
+let x = 5;          // x inferred as u8 via usage in let y = ...
+let y = 2u8 * x;    // y inferred as u8
 ```
 
 #### Reference types
 
 All non-primitive types are reference types (heap-allocated, refcounted):
-- `String` — immutable, use `+=` for concatenation
-- `[T]` — dynamic arrays (`.push`, `.pop`, `.len`)
-- `[K: V]` — maps
-- `struct` / `enum` — user-defined types
-- `View<T>` — zero-copy buffer view
-- `Option<T>`, `Result<T>` — optional result/error wrappers
+- `String` - immutable, use `+=` for concatenation
+- `[T]` - dynamic arrays (`.push`, `.pop`, `.len`)
+- `[K => V]` - maps
+- `struct` - user-defined structs
+- data-carrying `enum` (plain enums with no data-carrying variants are not referenced)
+- `View<T>` - zero-copy buffer view
+- `Option<T>`, `Result<T>` - optional result/error wrappers
 
 No explicit `&`/`mut` references. Reference types pass by reference automatically.
 
@@ -109,7 +110,7 @@ let area = match shape {
 };
 ```
 
-Field order is part of the value layout — positional construction and heap offsets follow declaration order.
+Field order is part of the value layout - positional construction and heap offsets follow declaration order.
 
 ### Arrays
 
@@ -142,7 +143,7 @@ Can be passed `as HeapRef` to Rust code.
 
 ### Result<T> and Option<T>
 
-`Result<T>` is a built-in. `Ok(x)` and `Err(e)` construct the variants; match to inspect. `?` unwraps `Ok` or returns `Err` from the current function — it may only be used inside functions returning `Result`.
+`Result<T>` is a built-in. `Ok(x)` and `Err(e)` construct the variants; match to inspect. `?` unwraps `Ok` or returns `Err` from the current function - it may only be used inside functions returning `Result`.
 
 Any type implementing the built-in `Error` trait can be used as an error value. Different concrete error types flow through a single `Result<T>` without conversion:
 
@@ -175,7 +176,7 @@ fn main() {
 
 ## Traits
 
-Traits define interfaces; `impl Trait for Type` provides implementations. No `dyn` or `impl` keywords needed — trait implementors are accepted wherever the trait is expected:
+Traits define interfaces; `impl Trait for Type` provides implementations. No `dyn` or `impl` keywords needed - trait implementors are accepted wherever the trait is expected:
 
 ```itsy
 trait Math {
@@ -199,16 +200,14 @@ fn main() {
 }
 ```
 
-## Functions
+## Control flow
 
-### Signature rules
-
-- No tuple return types — use a struct instead
-- `Self` usable inside `impl` blocks
+### `while` loops
 
 ```itsy
-fn foo(x: i32, y: i32, z: i32) -> i32 {
-    return x + y + z;
+let i: i32 = 0;
+while (i < 10) {
+    i = i + 1;
 }
 ```
 
@@ -222,17 +221,6 @@ fn loop_forever() -> i32 {
         return 42;
     }
     return -1;  // needed to satisfy type checker
-}
-```
-
-## Control flow
-
-### `while` loops
-
-```itsy
-let i: i32 = 0;
-while (i < 10) {
-    i = i + 1;
 }
 ```
 
@@ -279,7 +267,7 @@ Early return from functions. Implicit return on last expression (no semicolon).
 
 ### Arithmetic
 
-`+`, `-`, `*`, `/`, `%` — standard. Compound `+=`, `-=`, `*=`, `/=`, `%=`.
+`+`, `-`, `*`, `/`, `%` - standard. Compound `+=`, `-=`, `*=`, `/=`, `%=`.
 
 ### Comparison
 
@@ -302,19 +290,20 @@ Host-exposed functions are namespaced under the API type name:
 ```itsy
 use MyApi::{print, get_value, set_flag};
 ```
-The namespace must match the Rust `itsy_api!` type name exactly (`MyApi`, not `Api`).
 
-`itsy_api!` primitive constants are namespaced the same way (e.g. `MyApi::CURSOR_LEFT`) and can be
-imported, used in match patterns and const expressions like any other constant.
+The namespace must match the Rust `itsy_api!` type name (here `MyApi`).
+`itsy_api!` primitive constants are namespaced the same way (e.g. `MyApi::CURSOR_LEFT`).
 
 ### suspend
 
-Yields control back to the host, preserving VM state (stack + heap). Only inside functions:
+Yields control back to the host, preserving VM state:
 
 ```itsy
 fn main() {
-    // ... per-frame logic ...
-    suspend;
+    while true {
+        // ... per-frame logic ...
+        suspend;
+    }
 }
 ```
 

@@ -20,7 +20,7 @@ opt-in git hook:
 bash scripts/install-bench-hook.sh
 ```
 
-(The hook runs a full benchmark, which takes a while — it is opt-in for that reason.)
+(The hook runs a full benchmark, which takes a while - it is opt-in for that reason.)
 
 ## File format
 

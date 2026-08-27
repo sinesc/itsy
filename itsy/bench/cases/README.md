@@ -10,7 +10,7 @@ Each `.itsy` file in this tree is a benchmark case run by the `bench` harness
 
 ## Shape of a case file
 
-A case defines `bench` (required) and optionally `setup`. It must **not** define `main` —
+A case defines `bench` (required) and optionally `setup`. It must **not** define `main` -
 the harness generates `main` for you.
 
 Stateless case:
@@ -37,8 +37,8 @@ fn bench(state: State) {
 
 ## How state sharing works (no globals needed)
 
-Itsy has no global variables, but `setup` can still hand arbitrary data — arrays, strings,
-structs, any custom type — to `bench`. The harness generates a `main` like:
+Itsy has no global variables, but `setup` can still hand arbitrary data - arrays, strings,
+structs, any custom type - to `bench`. The harness generates a `main` like:
 
 ```ignore
 fn main() {
@@ -59,7 +59,7 @@ so it is not limited to the primitive/string types that host calls support.
 ## Important: keep `bench` independent of past iterations
 
 The same `state` value is reused for every repetition (and during warm-up). If `bench`
-**mutates** `state`, iterations are no longer independent — e.g. an array that `bench` keeps
+**mutates** `state`, iterations are no longer independent - e.g. an array that `bench` keeps
 pushing to will grow without bound and skew timings. Treat `state` as read-mostly, or have
 `bench` undo whatever it changes. The `structs/sum_points` case is an example of read-only use.
 
