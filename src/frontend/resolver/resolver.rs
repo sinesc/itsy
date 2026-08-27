@@ -1224,7 +1224,7 @@ impl<'ctx> Resolver<'ctx> {
                         Self::patch_const_refs(&mut patched_block, &const_replacements);
                         new_func_shared.block = Some(patched_block);
 
-                        // Reuse the original scope — all names are already resolved (constants
+                        // Reuse the original scope - all names are already resolved (constants
                         // have constant_id set, types have type_id set), so no new scope is needed.
 
                         // Create the new Function AST node
@@ -1246,11 +1246,11 @@ impl<'ctx> Resolver<'ctx> {
 
     /// Resolves a const declaration.
     ///
-    /// `type_name_prefix` — when `Some`, the const is stored with a qualified name
+    /// `type_name_prefix` - when `Some`, the const is stored with a qualified name
     /// (`TypeName::CONST`) in the root scope, making it accessible via `Self::CONST`
     /// or `TypeName::CONST` rather than a bare name. Used for impl block and trait consts.
     ///
-    /// `owning_type_id` — the type that owns this constant. For module-level consts this is
+    /// `owning_type_id` - the type that owns this constant. For module-level consts this is
     /// `TypeId::VOID`; for impl block consts this is the impl target type; for trait consts
     /// this is the trait type id.
     fn resolve_const_def(self: &mut Self, item: &mut ast::ConstDef, type_name_prefix: Option<&str>, owning_type_id: TypeId) -> ResolveResult {
@@ -1346,7 +1346,7 @@ impl<'ctx> Resolver<'ctx> {
                 self.evaluate_const_expr(expr, item_position, &self.module_path, Some(type_id))?
             }
         } else {
-            // Type not yet resolved — use a placeholder that will be set once the type is known
+            // Type not yet resolved - use a placeholder that will be set once the type is known
             UserConstValue::Unresolved
         };
 
@@ -1759,7 +1759,7 @@ impl<'ctx> Resolver<'ctx> {
                     .or(item.type_parameter.as_ref().and_then(|ty| ty.type_id(self)))
                 {
                     // Synthesize the View type from the element type.
-                    // Errors here (e.g. invalid backing type) are propagated — they are real semantic errors.
+                    // Errors here (e.g. invalid backing type) are propagated - they are real semantic errors.
                     Some(self.synthesize_view_type(element_id)?)
                 } else {
                     expected_result.filter(|t| self.type_by_id(*t).as_view().is_some())

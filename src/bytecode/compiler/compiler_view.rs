@@ -39,7 +39,7 @@ impl<'ast, T> Compiler<'ast, T> where T: VMFunc<T> {
         if let Some(view_ty) = compare_type.as_view()
             && item.op == Index
         {
-            // Struct and data enum elements cannot be loaded as a whole — users must use field access
+            // Struct and data enum elements cannot be loaded as a whole - users must use field access
             let elem = self.type_by_id(view_ty.element_type_id);
             let is_complex = elem.as_struct().is_some()
                 || elem.as_enum().map(|e| e.primitive.is_none()).unwrap_or(false);

@@ -2,7 +2,7 @@
 //!
 //! Detects adjacent pairs of non-consuming refcount operations on the same
 //! heap slot where one is `Inc` and the other is `DecNoFree`.  The net effect
-//! is zero — the refcount is bumped then brought back — so both instructions
+//! is zero - the refcount is bumped then brought back - so both instructions
 //! are removed.
 //!
 //! Handles all orderings (`Inc`→`DecNoFree` and `DecNoFree`→`Inc`) and all

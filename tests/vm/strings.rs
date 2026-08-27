@@ -201,11 +201,11 @@ fn string_pad_start() {
         ret_string("hi".pad_start("ab", 7));
         // padding truncated
         ret_string("hi".pad_start("abc", 5));
-        // length shorter than string — unchanged
+        // length shorter than string - unchanged
         ret_string("hello".pad_start(" ", 3));
-        // length equal to string — unchanged
+        // length equal to string - unchanged
         ret_string("hello".pad_start(" ", 5));
-        // zero-length padding — should not panic (empty padding edge case)
+        // zero-length padding - should not panic (empty padding edge case)
         // skip this; empty padding would loop forever. We just test normal cases.
         // unicode padding
         ret_string("hi".pad_start("→", 4));
@@ -232,9 +232,9 @@ fn string_pad_end() {
         ret_string("hi".pad_end("ab", 7));
         // padding truncated
         ret_string("hi".pad_end("abc", 5));
-        // length shorter than string — unchanged
+        // length shorter than string - unchanged
         ret_string("hello".pad_end(" ", 3));
-        // length equal to string — unchanged
+        // length equal to string - unchanged
         ret_string("hello".pad_end(" ", 5));
         // unicode padding
         ret_string("hi".pad_end("→", 4));

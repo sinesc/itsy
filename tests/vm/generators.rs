@@ -817,7 +817,7 @@ fn drop_not_started_ref_value_with_ref_arg() {
 #[test]
 fn full_consumption_ref_value_no_double_free() {
     // running a ref-yielding generator to completion: gen_return releases the last value slot, and the
-    // body's scope destructors release the locals — neither may double-free.
+    // body's scope destructors release the locals - neither may double-free.
     let result = run(stringify!(
         fn gen() -> Generator<[i32]> {
             let local = [9];

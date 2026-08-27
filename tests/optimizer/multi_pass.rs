@@ -1,8 +1,8 @@
-//! Multi-pass interaction — ensure passes compose correctly
+//! Multi-pass interaction - ensure passes compose correctly
 
 use super::*;
 
-/// Long chain of additions — the compiler should use xc variants throughout,
+/// Long chain of additions - the compiler should use xc variants throughout,
 /// producing a compact instruction stream with only one separate immediate32
 /// (the leftmost operand). No redundant stack-based adds should appear.
 #[test]
@@ -12,11 +12,11 @@ fn fixpoint_loop() {
     let instrs = iter_instructions(&prog);
     // Only one immediate32 (the leftmost operand); rest embedded in addxcu32
     let imm32_count = instrs.iter().filter(|(_, d)| matches!(d, OpCodeData::immediate32(_))).count();
-    assert_eq!(imm32_count, 1, "expected 1 immediate32, got {} — bytecode not compact", imm32_count);
+    assert_eq!(imm32_count, 1, "expected 1 immediate32, got {} - bytecode not compact", imm32_count);
     // No stack-based addu32 should appear
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::addu32(..))),
-        "addu32 present — should use addxcu32"
+        "addu32 present - should use addxcu32"
     );
 }
 
@@ -32,7 +32,7 @@ fn mixed() {
     assert_eq!(imm32_count, 1, "expected 1 immediate32, got {}", imm32_count);
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::addu32(..))),
-        "addu32 present — should use addxcu32"
+        "addu32 present - should use addxcu32"
     );
     // Refcount ops for the string should cancel
     let cnt = count_cnt_ops(&prog);

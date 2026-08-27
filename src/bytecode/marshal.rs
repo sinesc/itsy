@@ -249,7 +249,7 @@ impl<T: VMType> VMType for Vec<T> {
 // --- runtime-side built-in marshalling ---
 
 /// `HeapRef` marshals as itself: an 8-byte heap reference on the VM stack.
-/// No refcount change occurs — the HeapRef is a non-owning observation.
+/// No refcount change occurs - the HeapRef is a non-owning observation.
 #[cfg(feature = "runtime")]
 impl VMValue for crate::bytecode::HeapRef {
     type Stack = Self;

@@ -2,11 +2,11 @@
 //!
 //! Detects two patterns:
 //!
-//! **Basic:** `load*(loc)` immediately followed by `store*(loc)` — the value
+//! **Basic:** `load*(loc)` immediately followed by `store*(loc)` - the value
 //! is loaded onto the stack and immediately stored back to the same location.
 //! Net effect: nothing changed. Both instructions are removed.
 //!
-//! **Clone variant:** `load*(loc)` → `clone` → `store*(loc)` — the value is
+//! **Clone variant:** `load*(loc)` → `clone` → `store*(loc)` - the value is
 //! loaded, cloned (duplicated on stack), then one copy is stored back to the
 //! same location. Net effect: one copy on stack, location unchanged.
 //! Replacing with just `load*(loc)` gives the identical result.
@@ -21,12 +21,12 @@ use std::collections::HashSet;
 
 /// Remove redundant load-then-store sequences.
 ///
-/// **Basic pattern:** `load(loc) → store(loc)` — remove both.
+/// **Basic pattern:** `load(loc) → store(loc)` - remove both.
 /// The load pushes the value onto the stack; the store pops it back into
 /// the same location. Net effect: the frame location is unchanged and the
 /// stack is balanced.
 ///
-/// **Clone variant:** `load(loc) → clone → store(loc)` — remove clone + store.
+/// **Clone variant:** `load(loc) → clone → store(loc)` - remove clone + store.
 /// The load pushes the value, the clone duplicates it, and the store pops one
 /// copy back to the same location. Net effect: one copy on stack, location
 /// unchanged. Keeping just `load(loc)` gives the identical result.

@@ -50,7 +50,7 @@ impl<'ctx> Resolver<'ctx> {
         }
     }
 
-    /// Resolve `&&` / `||` — both operands must be `bool`, result is `bool`.
+    /// Resolve `&&` / `||` - both operands must be `bool`, result is `bool`.
     pub(super) fn resolve_logical_op(self: &mut Self, item: &mut ast::BinaryOp, _expected_result: Option<TypeId>) -> ResolveResult {
         let bool_type = self.primitive_type_id(Type::bool)?;
         self.resolve_expression(item.left.as_expression_mut().ice()?, Some(bool_type))?;
@@ -536,7 +536,7 @@ impl<'ctx> Resolver<'ctx> {
             let function_name = format!("{}", item.left.as_expression().ice()?);
             return Err(ResolveError::new(item, ResolveErrorKind::NumberOfArguments(function_name, func.arg_type_ids.len() as crate::ItemIndex, num_args as crate::ItemIndex), self.module_path));
         }
-        // Check if this is a View::wrap call — these accept any integer array as backing,
+        // Check if this is a View::wrap call - these accept any integer array as backing,
         // not just the registered [u8] type.
         let is_view_wrap = self.is_view_wrap_builtin(callee_constant_id);
         let arguments = item.right.as_argument_list_mut().ice()?;

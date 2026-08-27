@@ -344,6 +344,6 @@ fn parse_comment_line_with_pos(line: &str) -> Option<(usize, &str)> {
             return Some((pos, &after_semicolon[first_space + 1..]));
         }
     }
-    // No position number (e.g. a bare ";comment") — return position 0 as a fallback.
+    // No position number (e.g. a bare ";comment") - return position 0 as a fallback.
     Some((0, after_semicolon))
 }

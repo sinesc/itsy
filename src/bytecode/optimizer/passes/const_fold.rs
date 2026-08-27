@@ -256,7 +256,7 @@ fn try_fold_binary(a: &OpCodeData, b: &OpCodeData, op: &OpCodeData) -> Option<Op
             } else { None }
         }
 
-        // --- Comparisons — always produce u8 (0 or 1) ---
+        // --- Comparisons - always produce u8 (0 or 1) ---
         OpCodeData::ceq8(..) => fold_imm_compare::<u8, _>(a, b, |x, y| x == y),
         OpCodeData::ceq16(..) => fold_imm_compare::<u16, _>(a, b, |x, y| x == y),
         OpCodeData::ceq32(..) => fold_imm_compare::<u32, _>(a, b, |x, y| x == y),
@@ -374,7 +374,7 @@ fn try_fold_unary(a: &OpCodeData, op: &OpCodeData) -> Option<OpCodeData> {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers — trait-based generic fold functions
+// Helpers - trait-based generic fold functions
 // ---------------------------------------------------------------------------
 
 /// Type-specific immediate extraction and wrapping for constant folding.

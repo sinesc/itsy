@@ -1,8 +1,8 @@
-//! cnt_cancel — refcount cancellation
+//! cnt_cancel - refcount cancellation
 
 use super::*;
 
-/// Create a string and return it — refcount ops should cancel.
+/// Create a string and return it - refcount ops should cancel.
 #[test]
 fn string() {
     let (ok, prog) = compile_and_run("ret_string(\"hello\")");
@@ -11,7 +11,7 @@ fn string() {
     assert_eq!(cnt, 0, "expected 0 cnt ops after cancellation, got {}", cnt);
 }
 
-/// Create a struct instance and return it — refcount ops should cancel.
+/// Create a struct instance and return it - refcount ops should cancel.
 #[test]
 fn struct_return() {
     let code = format!(

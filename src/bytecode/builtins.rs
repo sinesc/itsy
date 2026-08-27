@@ -2330,7 +2330,7 @@ impl_builtins! {
     ///
     /// A view's underlying bytes are allocated contiguously. `View::new(n)` allocates
     /// `n * sizeof(T)` zero-initialized bytes. `View::wrap(bytes)` uses the provided
-    /// buffer directly — the view's length is `bytes.len() / sizeof(T)`, truncated
+    /// buffer directly - the view's length is `bytes.len() / sizeof(T)`, truncated
     /// to a whole number of elements.
     View {
         /// Returns the number of elements in the view.

@@ -82,7 +82,7 @@ impl<'ctx> Resolver<'ctx> {
     /// Returns whether a (static) const expression can be evaluated to a value in this resolution
     /// pass: every const reference in it is resolved and references a const whose value is no
     /// longer `Unresolved`. A false return means the const definition must be retried on a later
-    /// pass — either because a reference only becomes resolvable later (e.g. it is defined in an
+    /// pass - either because a reference only becomes resolvable later (e.g. it is defined in an
     /// ancestor module, which is resolved after this one) or because the referenced consts form a
     /// (mutual) recursion cycle whose values never settle.
     pub(crate) fn is_const_expr_evaluable(self: &Self, expr: &ast::Expression) -> bool {
@@ -95,7 +95,7 @@ impl<'ctx> Resolver<'ctx> {
     pub(crate) fn is_const_expr(self: &Self, expr: &ast::Expression) -> bool {
         match expr {
             ast::Expression::Literal(l) => l.value.is_const(),
-            ast::Expression::Constant(_) => true,  // resolved const reference — always static
+            ast::Expression::Constant(_) => true,  // resolved const reference - always static
             ast::Expression::BinaryOp(bo) => {
                 matches!(bo.op, ast::BinaryOperator::Add | ast::BinaryOperator::Sub | ast::BinaryOperator::Mul | ast::BinaryOperator::Div | ast::BinaryOperator::Rem)
                     && bo.left.as_expression().map(|e| self.is_const_expr(e)).unwrap_or(false)
@@ -431,7 +431,7 @@ impl<'ctx> Resolver<'ctx> {
     /// through a const is allowed: `const S = Struct { x: 1 }; S.x = 2` is OK.
     ///
     /// Only walks through unary ops and casts (which don't change the identity of the target).
-    /// Field/index accesses are NOT recursed into — they represent mutation of inner data,
+    /// Field/index accesses are NOT recursed into - they represent mutation of inner data,
     /// not reassignment of the binding.
     pub(crate) fn find_const_in_receiver_chain(self: &Self, expr: &ast::Expression) -> Option<String> {
         use ast::Expression;

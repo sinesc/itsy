@@ -148,7 +148,7 @@ pub type OptionSomeType = ();
 /// }
 /// ```
 ///
-/// `HeapRef` has no operations of its own — you cannot index into it, match on it, or
+/// `HeapRef` has no operations of its own - you cannot index into it, match on it, or
 /// convert it back to its original type. Its sole purpose is to pass heap references across
 /// the Rust API boundary. On the Rust side, a `HeapRef` parameter or return value maps to
 /// `itsy::HeapRef`, which carries the heap object's index and offset.

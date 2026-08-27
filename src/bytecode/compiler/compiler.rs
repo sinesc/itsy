@@ -2815,13 +2815,13 @@ impl<T> Compiler<'_, T> where T: VMFunc<T> {
             // Get the constructor for the const's type
             let type_id = const_def.type_id(self).expect("Const type not resolved");
             let constructor = self.constructor(self.ty(&type_id))?;
-            // Compile the const expression — stack: heap_addr
+            // Compile the const expression - stack: heap_addr
             self.compile_expression(const_def.expr.as_ref().ice()?)?;
-            // Clone it — stack: heap_addr heap_addr
+            // Clone it - stack: heap_addr heap_addr
             self.writer.clone(size_of::<HeapAddress>() as FrameAddress);
-            // Store one copy in the const pool slot — stack: heap_addr
+            // Store one copy in the const pool slot - stack: heap_addr
             self.writer.store_pool(offset);
-            // Increment refcount (pops the heap address) — stack: --
+            // Increment refcount (pops the heap address) - stack: --
             self.writer.cnt_sa(constructor, HeapRefOp::Inc);
         }
         Ok(())

@@ -1736,7 +1736,7 @@ fn let_binding(i: Input) -> Output<LetBinding> {
         preceded(
             check_flags(keyword("let"), |s| if s.in_function { None } else { Some(ParseErrorKind::IllegalLetStatement) }),
             tuple((
-                // Reject `let mut` — all bindings are mutable
+                // Reject `let mut` - all bindings are mutable
                 opt(keyword("mut")),
                 var_decl,
                 opt(preceded(punct(":"), inline_type)),

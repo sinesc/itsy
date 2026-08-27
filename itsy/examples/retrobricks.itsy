@@ -1,5 +1,5 @@
 /*
- * Retro bricks — terminal demo
+ * Retro bricks - terminal demo
  *
  * Paddle: ← → arrows (use kitty-compatible terminal to avoid keyboard repeat delay)
  * Launch ball: SPACE
@@ -261,7 +261,7 @@ impl Game {
         }
         hud = hud.pad_end(" ", self.term_w as u64);
 
-        // game area — row by row
+        // game area - row by row
         let frame = hud + "\r\n";
         for row in 0..self.area_rows {
             let need_reset = false;

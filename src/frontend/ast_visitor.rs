@@ -81,7 +81,7 @@ pub trait AstVisitor<'ast> {
                     self.walk_expression(e);
                 }
             },
-            // Leaf nodes — no child expressions to walk:
+            // Leaf nodes - no child expressions to walk:
             // LetBinding, LetPattern, Break, Continue, Suspend, Module, UseDecl, EnumDef, StructDef
             _ => {},
         }
@@ -126,7 +126,7 @@ pub trait AstVisitor<'ast> {
                 self.walk_expression(&a.left);
                 self.walk_expression(&a.right);
             },
-            // Leaf nodes — no child expressions to walk:
+            // Leaf nodes - no child expressions to walk:
             // Literal, Constant, Variable
             _ => {},
         }

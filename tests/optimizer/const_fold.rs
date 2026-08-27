@@ -1,4 +1,4 @@
-//! const_fold — constant arithmetic folding
+//! const_fold - constant arithmetic folding
 //!
 //! The compiler already emits compact `addxc*` / `mulxc*` etc. opcodes for
 //! simple constant arithmetic, so the const_fold pass (which folds
@@ -9,7 +9,7 @@
 
 use super::*;
 
-/// `100 + 200` — compiler emits `immediate32(100) + addxcu32(200)`.
+/// `100 + 200` - compiler emits `immediate32(100) + addxcu32(200)`.
 /// No separate `immediate32(200) + addu32` pattern should appear.
 #[test]
 fn add() {
@@ -19,15 +19,15 @@ fn add() {
     // Should have exactly one immediate32 (the left operand);
     // the right operand is embedded in addxcu32.
     let imm32_count = instrs.iter().filter(|(_, d)| matches!(d, OpCodeData::immediate32(_))).count();
-    assert_eq!(imm32_count, 1, "expected 1 immediate32, got {} — bytecode not compact", imm32_count);
+    assert_eq!(imm32_count, 1, "expected 1 immediate32, got {} - bytecode not compact", imm32_count);
     // No stack-based addu32 should appear (compiler uses addxcu32 instead)
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::addu32(..))),
-        "addu32 present — compiler/optimizer should use addxcu32"
+        "addu32 present - compiler/optimizer should use addxcu32"
     );
 }
 
-/// Chained arithmetic: `(10 + 20) * (30 - 5)` — sub-expression constants
+/// Chained arithmetic: `(10 + 20) * (30 - 5)` - sub-expression constants
 /// should be embedded in xc opcodes. The final multiply is stack-based
 /// (both operands are expression results), which is correct.
 #[test]
@@ -38,14 +38,14 @@ fn chain() {
     // Sub-expressions should use xc variants (no addu32 or subu32)
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::addu32(..) | OpCodeData::subu32(..))),
-        "addu32/subu32 present — sub-expressions should use xc variants"
+        "addu32/subu32 present - sub-expressions should use xc variants"
     );
     // The mulu32 is expected (both operands are expression results on the stack)
     let mul_count = instrs.iter().filter(|(_, d)| matches!(d, OpCodeData::mulu32(..))).count();
     assert_eq!(mul_count, 1, "expected exactly 1 mulu32 for the final multiply");
 }
 
-/// `42 == 42` — comparison should fold/compile to a single immediate8(1).
+/// `42 == 42` - comparison should fold/compile to a single immediate8(1).
 #[test]
 fn compare() {
     let (ok, prog) = compile_and_run("ret_bool(42 == 42)");
@@ -54,7 +54,7 @@ fn compare() {
     assert!(imms.contains(&1), "expected folded constant 1, got immediates: {:?}", imms);
 }
 
-/// `0xFF & 0x0F` — bitwise should use compact xc form.
+/// `0xFF & 0x0F` - bitwise should use compact xc form.
 #[test]
 fn bitwise() {
     let (ok, prog) = compile_and_run("ret_u32(0xFF & 0x0F)");
@@ -63,11 +63,11 @@ fn bitwise() {
     // No stack-based bitwise op should appear
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::bitandu32(..))),
-        "bitandu32 present — should use bitandxcu32"
+        "bitandu32 present - should use bitandxcu32"
     );
 }
 
-/// `1 << 8` — shift should use compact xc form.
+/// `1 << 8` - shift should use compact xc form.
 #[test]
 fn shift() {
     let (ok, prog) = compile_and_run("ret_u32(1 << 8)");
@@ -75,11 +75,11 @@ fn shift() {
     let instrs = iter_instructions(&prog);
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::shlu32(..))),
-        "shlu32 present — should use shlxcu32"
+        "shlu32 present - should use shlxcu32"
     );
 }
 
-/// `true && false` — logical and should produce a single immediate8(0).
+/// `true && false` - logical and should produce a single immediate8(0).
 #[test]
 fn logical() {
     let (ok, prog) = compile_and_run("ret_bool(true && false)");
@@ -88,7 +88,7 @@ fn logical() {
     assert!(imms.contains(&0), "expected folded constant 0, got immediates: {:?}", imms);
 }
 
-/// `-42` — negation. The bytecode should not contain a stack-based negs32
+/// `-42` - negation. The bytecode should not contain a stack-based negs32
 /// followed by a separate immediate; the compiler embeds the constant.
 #[test]
 fn negate() {
@@ -97,11 +97,11 @@ fn negate() {
     let instrs = iter_instructions(&prog);
     assert!(
         !instrs.iter().any(|(_, d)| matches!(d, OpCodeData::negs32(..))),
-        "negs32 present — compiler should embed negated constant"
+        "negs32 present - compiler should embed negated constant"
     );
 }
 
-/// `!true` — logical not should fold to immediate8(0).
+/// `!true` - logical not should fold to immediate8(0).
 #[test]
 fn not() {
     let (ok, prog) = compile_and_run("ret_bool(!true)");
