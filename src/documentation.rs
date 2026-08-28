@@ -409,6 +409,8 @@ pub mod structs { }
 /// # }
 /// ```
 ///
+/// If none of the numeric literals specifies a type (e.g. `Pending = 1i64`) the default `i32` is assumed.
+///
 /// # Matching enums
 ///
 /// The `match` expression is the primary way to inspect an enum. Every variant must be covered,
